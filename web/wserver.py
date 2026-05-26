@@ -381,7 +381,11 @@ async def get_message(client, chat_id: int, message_id: int) -> any:
 
 @app.api_route("/stream/{chat_id}/{message_id}", methods=["GET", "HEAD"])
 @app.api_route("/stream/{chat_id}/{message_id}/{filename}", methods=["GET", "HEAD"])
-async def stream_media(chat_id: int, message_id: int, request: Request, filename: str = None):
+async def stream_media(chat_id: str, message_id: int, request: Request, filename: str = None):
+    try:
+        chat_id = int(chat_id)
+    except ValueError:
+        pass
     from bot.core.tg_client import TgClient
     from fastapi.responses import StreamingResponse, Response
 

@@ -319,13 +319,15 @@ class TelegramUploader:
             disable_notification=True,
         )
         for msg in msgs:
-            if msg.link in self._msgs_dict:
-                del self._msgs_dict[msg.link]
+            link = f"https://t.me/pm/{msg.chat.id}/{msg.id}" if self._is_private else msg.link
+            if link in self._msgs_dict:
+                del self._msgs_dict[link]
             await delete_message(msg)
         del self._media_dict[key][subkey]
-        if self._listener.is_super_chat or self._listener.up_dest:
+        if self._listener.is_super_chat or self._listener.up_dest or self._is_private:
             for m in msgs_list:
-                self._msgs_dict[m.link] = m.caption
+                link = f"https://t.me/pm/{m.chat.id}/{m.id}" if self._is_private else m.link
+                self._msgs_dict[link] = m.caption
         self._sent_msg = msgs_list[-1]
 
     async def _copy_media(self):
@@ -404,12 +406,12 @@ class TelegramUploader:
                         is_log_del = True
                     if self._listener.is_cancelled:
                         return
-                    if (
-                        not self._is_corrupted
-                        and (self._listener.is_super_chat or self._listener.up_dest)
-                        and not self._is_private
-                    ):
-                        self._msgs_dict[self._sent_msg.link] = file_
+                    if not self._is_corrupted:
+                        if self._is_private:
+                            pm_link = f"https://t.me/pm/{self._sent_msg.chat.id}/{self._sent_msg.id}"
+                            self._msgs_dict[pm_link] = file_
+                        elif self._listener.is_super_chat or self._listener.up_dest:
+                            self._msgs_dict[self._sent_msg.link] = file_
                     await sleep(1)
                 except Exception as err:
                     if isinstance(err, RetryError):

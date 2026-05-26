@@ -460,14 +460,23 @@ class TaskListener(TaskConfig):
                 msg += "〶 <b><u>Files List :</u></b>\n"
                 fmsg = ""
                 for index, (link, name) in enumerate(files.items(), start=1):
+                    is_pm = "pm" in link
                     chat_id, msg_id = link.split("/")[-2:]
                     fmsg += f"{index}. <a href='{link}'>{name}</a>"
+                    
+                    c_id = chat_id if is_pm else (f"-100{chat_id}" if chat_id.isdigit() else chat_id)
+                    
+                    if Config.BASE_URL:
+                        from urllib.parse import quote
+                        encoded_name = quote(name)
+                        stream_link = f"{Config.BASE_URL}/stream/{c_id}/{msg_id}/{encoded_name}"
+                        download_link = f"{Config.BASE_URL}/stream/{c_id}/{msg_id}/{encoded_name}?disposition=attachment"
+                        fmsg += f"\n┠ <b>Stream</b> → <a href='{stream_link}'>Online</a> | <a href='{download_link}'>Download</a>"
+                        
                     if Config.MEDIA_STORE and (
                         self.is_super_chat or Config.LEECH_DUMP_CHAT
                     ):
-                        if chat_id.isdigit():
-                            chat_id = f"-100{chat_id}"
-                        flink = f"https://t.me/{TgClient.BNAME}?start={encode_slink('file' + chat_id + '&&' + msg_id)}"
+                        flink = f"https://t.me/{TgClient.BNAME}?start={encode_slink('file' + c_id + '&&' + msg_id)}"
                         fmsg += f"\n┖ <b>Get Media</b> → <a href='{flink}'>Store Link</a> | <a href='https://t.me/share/url?url={flink}'>Share Link</a>"
                     fmsg += "\n"
                     if len(fmsg.encode() + msg.encode()) > 4000:
