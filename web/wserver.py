@@ -373,6 +373,8 @@ async def get_message(client, chat_id: int, message_id: int) -> any:
         except FloodWait as e:
             await asyncio.sleep(e.value)
         except Exception as e:
+            from bot import LOGGER
+            LOGGER.error(f"Failed to fetch message {message_id} from {chat_id}: {e}")
             raise HTTPException(status_code=404, detail="Media message not found") from e
     if not message or not get_media(message):
         raise HTTPException(status_code=404, detail="Message does not contain media")
