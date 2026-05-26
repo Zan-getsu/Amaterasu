@@ -3,7 +3,8 @@ from pyrogram.handlers import MessageHandler
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from urllib.parse import quote
 
-from bot import LOGGER, TgClient
+from bot import LOGGER
+from bot.core.tg_client import TgClient
 from bot.core.config_manager import Config
 from bot.helper.ext_utils.bot_utils import get_readable_file_size
 from bot.helper.telegram_helper.bot_commands import BotCommands
