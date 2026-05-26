@@ -4,12 +4,13 @@ from pyrogram.filters import command, reply, private
 from pyrogram.handlers import MessageHandler, CallbackQueryHandler
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, Message
 
-from bot import LOGGER, TgClient, bot_loop
+from bot import LOGGER, bot_loop
+from bot.core.tg_client import TgClient
 from bot.core.config_manager import Config
 from bot.helper.telegram_helper.bot_commands import BotCommands
 from bot.helper.telegram_helper.filters import CustomFilters
 from bot.helper.telegram_helper.message_utils import send_message, edit_message, delete_message
-from bot.helper.ext_utils.bot_utils import get_readable_file_size
+from bot.helper.ext_utils.status_utils import get_readable_file_size
 
 # Set to keep track of users who enabled Rename Mode
 RENAME_MODE_USERS = set()
