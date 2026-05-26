@@ -85,4 +85,4 @@ async def autorename_command(client, message):
         "Files will be automatically renamed before upload according to this format. You can also reply to Telegram files with `/autorename` to instantly rename them."
     )
 
-TgClient.bot.add_handler(MessageHandler(autorename_command, filters=command("autorename")))
+TgClient.bot.add_handler(MessageHandler(autorename_command, filters=command(BotCommands.AutoRenameCommand)))

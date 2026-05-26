@@ -55,6 +55,7 @@ class BotCommands:
         "Telegraph": ["tg", "telegraph"],
         "FileToLink": ["link", "stream", "f2l"],
         "Rename": ["rename", "renamemode"],
+        "AutoRename": ["autorename", "ar"],
     }
 
     @classmethod

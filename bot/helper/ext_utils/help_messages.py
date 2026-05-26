@@ -414,6 +414,7 @@ def get_bot_commands():
         "Telegraph": "[reply] Upload Image/Video (under 5MB) to Telegraph",
         "FileToLink": "[reply/batch] Generate direct stream and download links for media files",
         "Rename": "[reply/PM] Toggle Rename Mode or rename a replied file",
+        "AutoRename": "[reply] Auto-Rename a file based on your template",
     }
 
     commands = static_commands.copy()
@@ -554,6 +555,8 @@ def get_help_string():
             help_lines.append(f"{cmd_str}: Generate direct stream and download links for a media file or batch of files.")
         elif key == "Rename":
             help_lines.append(f"{cmd_str}: Toggle Rename Mode (automatically prompts you to rename files during PM sends or leech tasks).")
+        elif key == "AutoRename":
+            help_lines.append(f"{cmd_str}: Auto-Rename a file based on your template, or set a new template.")
 
     return "\n".join(help_lines)
 
