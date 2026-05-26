@@ -1,7 +1,8 @@
 from pyrogram.handlers import MessageHandler
 from pyrogram.filters import command, regex
 
-from bot import bot, user_data
+from bot import user_data
+from bot.core.tg_client import TgClient
 from bot.helper.ext_utils.db_handler import database
 from bot.helper.telegram_helper.message_utils import send_message, edit_message
 from bot.helper.telegram_helper.bot_commands import BotCommands
@@ -42,4 +43,4 @@ async def autorename_command(client, message):
         "Files will be automatically renamed before upload according to this format."
     )
 
-bot.add_handler(MessageHandler(autorename_command, filters=command("autorename")))
+TgClient.bot.add_handler(MessageHandler(autorename_command, filters=command("autorename")))
