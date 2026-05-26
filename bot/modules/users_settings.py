@@ -62,6 +62,7 @@ ffset_options = [
 advanced_options = [
     "EXCLUDED_EXTENSIONS",
     "NAME_SWAP",
+    "AUTORENAME_TEMPLATE",
     "YT_DLP_OPTIONS",
     "UPLOAD_PATHS",
     "USER_COOKIE_FILE",
@@ -154,6 +155,15 @@ user_settings_text = {
         "",
         """<i>Send your Name Swap. You can add pattern instead of normal text according to the format.</i>
 <b>Full Documentation Guide</b> <a href="https://t.me/its_niloy">Click Here</a>
+┖ <b>Time Left :</b> <code>60 sec</code>
+""",
+    ),
+    "AUTORENAME_TEMPLATE": (
+        "String",
+        "Template for auto-renaming files. Extracts Season, Episode, and Quality automatically.",
+        """<i>Send your Auto-Rename Template.</i>
+<b>Format variables:</b> <code>{title}</code>, <code>{season}</code>, <code>{episode}</code>, <code>{quality}</code>
+<b>Example:</b> <code>[MyChannel] {title} S{season}E{episode} - {quality}</code>
 ┖ <b>Time Left :</b> <code>60 sec</code>
 """,
     ),
@@ -836,6 +846,13 @@ async def get_user_settings(from_user, stype="main"):
         )
         buttons.data_button("Name Swap", f"userset {user_id} menu NAME_SWAP")
 
+        ar_msg = (
+            f"<code>{ar}</code>"
+            if (ar := user_dict.get("AUTORENAME_TEMPLATE", False))
+            else "<b>Not Exists</b>"
+        )
+        buttons.data_button("Auto-Rename", f"userset {user_id} menu AUTORENAME_TEMPLATE")
+
         buttons.data_button("YT-DLP Options", f"userset {user_id} menu YT_DLP_OPTIONS")
         if user_dict.get("YT_DLP_OPTIONS", False):
             ytopt = user_dict["YT_DLP_OPTIONS"]
@@ -867,6 +884,7 @@ async def get_user_settings(from_user, stype="main"):
 ┟ <b>Name</b> → {user_name}
 ┃
 ┠ <b>Name Swaps</b> → {ns_msg}
+┠ <b>Auto-Rename Template</b> → {ar_msg}
 ┠ <b>Excluded Extensions</b> → <code>{ex_ex}</code>
 ┠ <b>Upload Paths</b> → <b>{upload_paths}</b>
 ┠ <b>YT-DLP Options</b> → <code>{ytopt}</code>

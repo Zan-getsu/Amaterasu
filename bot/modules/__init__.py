@@ -63,6 +63,7 @@ from .speedtest import speedtest
 from .telegraph_upload import telegraph_upload
 from .filetolink import link_command_handler, private_media_handler
 from .rename import rename_command_handler, rename_private_media_handler, rename_callback_handler, reply_listener, rename_force_reply_handler
+from .autorename import autorename_command
 
 __all__ = [
     "send_bot_settings",
@@ -168,4 +169,5 @@ __all__ = [
     "rename_force_reply_handler",
     "rename_callback_handler",
     "reply_listener",
+    "autorename_command",
 ]

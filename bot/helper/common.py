@@ -49,6 +49,7 @@ from .ext_utils.media_utils import (
     get_document_type,
     take_ss,
 )
+from .ext_utils.autorename_utils import apply_autorename_template
 from .ext_utils.metadata_utils import MetadataProcessor
 from .mirror_leech_utils.gdrive_utils.list import GoogleDriveList
 from .mirror_leech_utils.rclone_utils.list import RcloneList
@@ -91,6 +92,7 @@ class TaskConfig:
         self.name = ""
         self.subname = ""
         self.name_swap = ""
+        self.autorename_template = ""
         self.thumbnail_layout = ""
         self.folder_name = ""
         self.split_size = 0
@@ -219,6 +221,9 @@ class TaskConfig:
         )
         if self.name_swap:
             self.name_swap = [x.split(":") for x in self.name_swap.split("|")]
+            
+        self.autorename_template = self.user_dict.get("AUTORENAME_TEMPLATE", "")
+        
         self.excluded_extensions = self.user_dict.get("EXCLUDED_EXTENSIONS") or (
             excluded_extensions
             if "EXCLUDED_EXTENSIONS" not in self.user_dict
@@ -873,31 +878,37 @@ class TaskConfig:
         return dl_path
 
     async def substitute(self, dl_path):
-        def perform_swap(name, swaps):
+        def perform_swap(name, swaps, template=""):
             name, ext = ospath.splitext(name)
             name = sub(r"www\S+", "", name)
-            for swap in swaps:
-                pattern, res, cnt, sen = (
-                    swap + ["", "0", "NOFLAG"][min(len(swap) - 1, 2) :]
-                )[0:4]
-                cnt = 0 if len(cnt) == 0 else int(cnt)
-                try:
-                    name = sub(
-                        rf"{pattern}", res, name, cnt, flags=getattr(re, sen.upper(), 0)
-                    )
-                except Exception as e:
-                    LOGGER.error(
-                        f"Swap Error: pattern: {pattern} res: {res}. Error: {e}"
-                    )
-                    return False
-                if len(name.encode()) > 255:
-                    LOGGER.error(f"Substitute: {name} is too long")
-                    return False
+            
+            if template:
+                name_ext = apply_autorename_template(name + ext, template)
+                name, ext = ospath.splitext(name_ext)
+                
+            if swaps:
+                for swap in swaps:
+                    pattern, res, cnt, sen = (
+                        swap + ["", "0", "NOFLAG"][min(len(swap) - 1, 2) :]
+                    )[0:4]
+                    cnt = 0 if len(cnt) == 0 else int(cnt)
+                    try:
+                        name = sub(
+                            rf"{pattern}", res, name, cnt, flags=getattr(re, sen.upper(), 0)
+                        )
+                    except Exception as e:
+                        LOGGER.error(
+                            f"Swap Error: pattern: {pattern} res: {res}. Error: {e}"
+                        )
+                        return False
+                    if len(name.encode()) > 255:
+                        LOGGER.error(f"Substitute: {name} is too long")
+                        return False
             return name + ext
 
         if self.is_file:
             up_dir, name = dl_path.rsplit("/", 1)
-            new_name = perform_swap(name, self.name_swap)
+            new_name = perform_swap(name, self.name_swap, self.autorename_template)
             if not new_name:
                 return dl_path
             new_path = ospath.join(up_dir, new_name)
@@ -907,7 +918,7 @@ class TaskConfig:
             for dirpath, _, files in await sync_to_async(walk, dl_path, topdown=False):
                 for file_ in files:
                     f_path = ospath.join(dirpath, file_)
-                    new_name = perform_swap(file_, self.name_swap)
+                    new_name = perform_swap(file_, self.name_swap, self.autorename_template)
                     if not new_name:
                         continue
                     await move(f_path, ospath.join(dirpath, new_name))
