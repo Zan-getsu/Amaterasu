@@ -37,7 +37,7 @@ RUN apt-get update && apt-get upgrade -y && \
         rclone \
         sabnzbdplus \
         procps \
-        openjdk-17-jre-headless \
+        default-jre-headless \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
