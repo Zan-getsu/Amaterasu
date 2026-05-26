@@ -337,9 +337,14 @@ async def load_configurations():
 
     PORT = getenv("PORT", "") or Config.BASE_URL_PORT
     if PORT:
-        await create_subprocess_shell(
-            f"gunicorn -k uvicorn.workers.UvicornWorker -w 1 web.wserver:app --bind 0.0.0.0:{PORT}"
-        )
+        import uvicorn
+        from web.wserver import app
+        import asyncio
+        
+        # Run uvicorn inside the same event loop to share TgClient
+        server_config = uvicorn.Config(app, host="0.0.0.0", port=int(PORT), loop="asyncio")
+        server = uvicorn.Server(server_config)
+        asyncio.create_task(server.serve())
         await create_subprocess_shell("python3 cron_boot.py")
 
     if await aiopath.exists("cfg.zip"):
