@@ -86,9 +86,10 @@ async def prompt_rename_choice(client, message, media_msg):
     buttons = [
         [
             InlineKeyboardButton("✏️ Rename", callback_data=f"ren_choice_ren_{user_id}"),
-            InlineKeyboardButton("ℹ️ File Info", callback_data=f"ren_choice_info_{user_id}")
+            InlineKeyboardButton("🤖 Auto-Rename", callback_data=f"ren_choice_auto_{user_id}")
         ],
         [
+            InlineKeyboardButton("ℹ️ File Info", callback_data=f"ren_choice_info_{user_id}"),
             InlineKeyboardButton("✖️ Cancel", callback_data=f"ren_choice_cancel_{user_id}")
         ]
     ]
@@ -241,6 +242,47 @@ async def rename_callback_handler(client, query):
             text="✏️ **Please enter the new filename:**\n\n_Reply to this message with the new name._",
             reply_to_message_id=media_msg.id,
             reply_markup=ForceReply(True)
+        )
+        
+    elif action == "auto":
+        media_msg = user_media_to_rename.get(user_id)
+        if not media_msg:
+            await query.answer("Expired. Send the file again.", show_alert=True)
+            return
+            
+        from bot import user_data
+        current_template = user_data.get(user_id, {}).get("AUTORENAME_TEMPLATE", "")
+        if not current_template or current_template == "None":
+            await query.answer("You have not set an Auto-Rename Template!", show_alert=True)
+            return
+            
+        await query.answer()
+        await delete_message(query.message)
+        
+        media = get_media(media_msg)
+        file_name = getattr(media, "file_name", None)
+        if not file_name:
+            ext_map = {"photo": "jpg", "audio": "mp3", "voice": "ogg", "video": "mp4", "animation": "mp4", "video_note": "mp4", "sticker": "webp"}
+            media_type = type(media).__name__.lower()
+            ext = ext_map.get(media_type, "bin")
+            file_name = f"Stream_{media_msg.id}.{ext}"
+
+        from bot.helper.ext_utils.autorename_utils import apply_autorename_template
+        new_name = apply_autorename_template(file_name, current_template)
+        user_rename_preferences[user_id] = new_name
+        
+        buttons = [[InlineKeyboardButton("📁 Document", callback_data=f"ren_up_document_{user_id}")]]
+        media_type = type(media).__name__.lower()
+        if media_type in ["video", "document"]:
+            buttons.append([InlineKeyboardButton("🎥 Video", callback_data=f"ren_up_video_{user_id}")])
+        elif media_type == "audio":
+            buttons.append([InlineKeyboardButton("🎵 Audio", callback_data=f"ren_up_audio_{user_id}")])
+            
+        await client.send_message(
+            chat_id=query.message.chat.id,
+            text=f"**Auto-Rename Applied!**\n\n**New File Name:** `{new_name}`\n\n**Select the output file type:**",
+            reply_markup=InlineKeyboardMarkup(buttons),
+            reply_to_message_id=media_msg.id
         )
         
 
