@@ -153,11 +153,12 @@ async def link_command_handler(client, message):
         await process_media_message(client, message, message.reply_to_message)
 
 async def private_media_handler(client, message):
+    from pyrogram import ContinuePropagation
     if not Config.BASE_URL:
-        return
+        raise ContinuePropagation
     if not get_media(message):
-        return
+        raise ContinuePropagation
     from bot.modules.rename import is_rename_mode
     if message.from_user and is_rename_mode(message.from_user.id):
-        return
+        raise ContinuePropagation
     await process_media_message(client, message, message)

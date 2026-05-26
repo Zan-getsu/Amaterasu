@@ -394,22 +394,25 @@ def add_handlers():
     )
     TgClient.bot.add_handler(
         MessageHandler(
-            private_media_handler,
-            filters=private & CustomFilters.authorized,
-        )
-    )
-    TgClient.bot.add_handler(
-        MessageHandler(
             rename_command_handler,
             filters=command(BotCommands.RenameCommand, case_sensitive=True)
             & CustomFilters.authorized,
         )
     )
+    # Catch-all handlers go in group 1 so they don't swallow commands
+    TgClient.bot.add_handler(
+        MessageHandler(
+            private_media_handler,
+            filters=private & CustomFilters.authorized,
+        ),
+        group=1,
+    )
     TgClient.bot.add_handler(
         MessageHandler(
             rename_private_media_handler,
             filters=private & CustomFilters.authorized,
-        )
+        ),
+        group=1,
     )
     TgClient.bot.add_handler(
         CallbackQueryHandler(
@@ -419,15 +422,17 @@ def add_handlers():
     )
     TgClient.bot.add_handler(
         MessageHandler(
-            reply_listener,
+            rename_force_reply_handler,
             filters=reply,
-        )
+        ),
+        group=1,
     )
     TgClient.bot.add_handler(
         MessageHandler(
-            rename_force_reply_handler,
+            reply_listener,
             filters=reply,
-        )
+        ),
+        group=2,
     )
     if Config.SET_COMMANDS:
         global BOT_COMMANDS
