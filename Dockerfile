@@ -18,6 +18,7 @@ RUN apt-get update && apt-get upgrade -y && \
         git \
         curl \
         wget \
+        gnupg \
         build-essential \
         libssl-dev \
         libffi-dev \
@@ -38,6 +39,12 @@ RUN apt-get update && apt-get upgrade -y && \
         sabnzbdplus \
         procps \
         default-jre-headless \
+    # Install MEGAcmd
+    && mkdir -p /etc/apt/keyrings \
+    && curl -fsSL https://mega.nz/linux/repo/Debian_12/Release.key | gpg --dearmor -o /etc/apt/keyrings/mega.nz.gpg \
+    && echo "deb [arch=amd64,arm64 signed-by=/etc/apt/keyrings/mega.nz.gpg] https://mega.nz/linux/repo/Debian_12/ ./" > /etc/apt/sources.list.d/mega.nz.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends megacmd \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
