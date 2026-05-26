@@ -117,7 +117,7 @@ class TgClient:
         await cls.bot.start()
         cls.BNAME = cls.bot.me.username
         cls.ID = Config.BOT_TOKEN.split(":", 1)[0]
-        LOGGER.info(f"WZ Bot : [@{cls.BNAME}] Started!")
+        LOGGER.info(f"Amaterasu Bot : [@{cls.BNAME}] Started!")
 
     @classmethod
     async def start_user(cls):

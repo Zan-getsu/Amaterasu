@@ -42,7 +42,7 @@ class MegaAppListener:
         self.mega_status = None
         self.name = ""
         self.size = 0
-        self.temp_path = f"/wzml_{self.gid}"
+        self.temp_path = f"/amaterasu_{self.gid}"
         self.mega_tags = set()
         self._is_cleaned = False
         self._last_time = time()

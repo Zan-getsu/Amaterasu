@@ -405,7 +405,7 @@ def get_bot_commands():
         "Rss": "User RSS Management Settings",
         "IMDB": "[query] or ttxxxxxx Get IMDB info",
         "CancelAll": "Cancel all Tasks on the Bot",
-        "Help": "Detailed help usage of the WZ Bot",
+        "Help": "Detailed help usage of the Amaterasu Bot",
         "BotSet": "[SUDO] Bot Management Settings",
         "Log": "[SUDO] Get Bot Logs for Internal Working",
         "Restart": "[SUDO] Reboot bot",

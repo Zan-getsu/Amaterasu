@@ -36,7 +36,7 @@ sabnzbd_client = SabnzbdClient(
 )
 SERVICES = {
     "nzb": {"url": "http://localhost:8070/"},
-    "qbit": {"url": "http://localhost:8090", "password": "wzmlx"},
+    "qbit": {"url": "http://localhost:8090", "password": "admin"},
 }
 
 
