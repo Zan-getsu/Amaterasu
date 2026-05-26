@@ -287,8 +287,8 @@ async def rename_callback_handler(client, query):
         
 
 async def _handle_upload(client, query, user_id, upload_type):
-    new_name = user_rename_preferences.get(user_id)
-    media_msg = user_media_to_rename.get(user_id)
+    new_name = user_rename_preferences.pop(user_id, None)
+    media_msg = user_media_to_rename.pop(user_id, None)
     
     if not new_name or not media_msg:
         await query.answer("Session expired. Please try again.", show_alert=True)
@@ -407,9 +407,6 @@ async def _handle_upload(client, query, user_id, upload_type):
         if os.path.exists(local_path):
             os.remove(local_path)
             
-        user_media_to_rename.pop(user_id, None)
-        user_rename_preferences.pop(user_id, None)
-        
     except Exception as e:
         LOGGER.error(f"Error renaming file: {e}")
         await edit_message(progress_msg, f"✖️ <b>Failed to rename file. Error:</b> <code>{str(e)}</code>")
