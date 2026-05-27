@@ -94,15 +94,16 @@ async def process_media_message(client, message, reply_to_msg):
         markup, stream_link, download_link = await generate_link_markup(chat_id, message_id, filename, secure_hash)
         
         caption = (
-            f"<b>🔗 FILE TO LINK</b>\n"
-            f"<blockquote>"
-            f"<b>Name:</b> <code>{filename}</code>\n"
-            f"<b>Size:</b> <code>{readable_size}</code>\n"
-            f"<b>Link:</b> <a href=\"{download_link}\">Download</a>"
+            f"<b>❖ 𝗬𝗼𝘂𝗿 𝗟𝗶𝗻𝗸 𝗚𝗲𝗻𝗲𝗿𝗮𝘁𝗲𝗱 !</b>\n"
+            f"┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄\n"
+            f"├ 📂 <b>Name :</b> <code>{filename}</code>\n"
+            f"├ 📦 <b>Size :</b> <code>{readable_size}</code>\n"
         )
         if stream_link:
-            caption += f"\n<b>Play:</b> <a href=\"{stream_link}\">Watch</a>"
-        caption += f"</blockquote>"
+            caption += f"├ 📥 <b>DL   :</b> <a href=\"{download_link}\">Download Link</a>\n"
+            caption += f"└ 🖥 <b>Play :</b> <a href=\"{stream_link}\">Stream Link</a>"
+        else:
+            caption += f"└ 📥 <b>DL   :</b> <a href=\"{download_link}\">Download Link</a>"
         
         await edit_message(status_msg, caption, markup)
     except Exception as e:
@@ -157,15 +158,16 @@ async def link_command_handler(client, message):
                 
                 readable_size = get_readable_file_size(getattr(media, "file_size", 0) or 0)
                 caption = (
-                    f"<b>🔗 BATCH FILE {processed + 1}</b>\n"
-                    f"<blockquote>"
-                    f"<b>Name:</b> <code>{filename}</code>\n"
-                    f"<b>Size:</b> <code>{readable_size}</code>\n"
-                    f"<b>Link:</b> <a href=\"{download_link}\">Download</a>"
+                    f"<b>❖ 𝗕𝗮𝘁𝗰𝗵 𝗙𝗶𝗹𝗲 {processed + 1}</b>\n"
+                    f"┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄\n"
+                    f"├ 📂 <b>Name :</b> <code>{filename}</code>\n"
+                    f"├ 📦 <b>Size :</b> <code>{readable_size}</code>\n"
                 )
                 if stream_link:
-                    caption += f"\n<b>Play:</b> <a href=\"{stream_link}\">Watch</a>"
-                caption += f"</blockquote>"
+                    caption += f"├ 📥 <b>DL   :</b> <a href=\"{download_link}\">Download Link</a>\n"
+                    caption += f"└ 🖥 <b>Play :</b> <a href=\"{stream_link}\">Stream Link</a>"
+                else:
+                    caption += f"└ 📥 <b>DL   :</b> <a href=\"{download_link}\">Download Link</a>"
                 await send_message(message, caption, markup)
                 processed += 1
             except Exception as e:
