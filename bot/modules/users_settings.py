@@ -371,7 +371,8 @@ async def get_user_settings(from_user, stype="main"):
 
         def_cookies = user_dict.get("USE_DEFAULT_COOKIE", False)
         cookie_mode = "Owner's Cookie" if def_cookies else "User's Cookie"
-        buttons.data_button(f"◈ Swap to {\'OWNER\' if not def_cookies else \'USER\'}\'s Cookie File",
+        buttons.data_button(
+            f"◈ Swap to {'OWNER' if not def_cookies else 'USER'}'s Cookie File",
             f"userset {user_id} tog USE_DEFAULT_COOKIE {'f' if def_cookies else 't'}",
         )
         btns = buttons.build_menu(1)
