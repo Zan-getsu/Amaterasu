@@ -36,8 +36,8 @@ class Config:
     BUZZHEAVIER_API = ""
     GDRIVE_ID = ""
     GD_DESP = "Uploaded with Amaterasu"
-    AUTHOR_NAME = "Amaterasu"
-    AUTHOR_URL = "https://t.me/Amaterasu"
+    AUTHOR_NAME = "Ńiłøÿ Bhowmick"
+    AUTHOR_URL = "https://t.me/itsniloybhowmick"
     INSTADL_API = ""
     IMDB_TEMPLATE = ""
     INCOMPLETE_TASK_NOTIFIER = False

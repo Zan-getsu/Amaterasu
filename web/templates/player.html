@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -11,18 +12,26 @@
     <!-- Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <!-- FontAwesome 6 -->
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" rel="stylesheet">
     
     <style>
         :root {
-            --bg-dark: #050505;
-            --glass-bg: rgba(15, 15, 15, 0.6);
-            --glass-border: rgba(255, 255, 255, 0.05);
-            --primary: #dc2626; /* Red-600 */
-            --primary-hover: #b91c1c; /* Red-700 */
-            --primary-glow: rgba(220, 38, 38, 0.35);
-            --text-main: #f8fafc;
-            --text-muted: #94a3b8;
+            --color-bg: #050505;
+            --color-bg-rgb: 5, 5, 5;
+            --color-fg: #f3f4f6;
+            --color-glass: rgba(255, 255, 255, 0.03);
+            --color-glass-hover: rgba(255, 255, 255, 0.08);
+            --color-glass-border: rgba(255, 255, 255, 0.08);
+            --color-primary: #ff3e3e;      /* Premium Red */
+            --color-primary-rgb: 255, 62, 62;
+            --color-secondary: #ff7a00;    /* Premium Orange */
+            --color-secondary-rgb: 255, 122, 0;
+            --color-muted: #9ca3af;
+            --color-card-bg: rgba(10, 10, 10, 0.6);
+            --color-text-main: #f8fafc;
+            --color-text-muted: #94a3b8;
         }
 
         * {
@@ -32,176 +41,288 @@
         }
 
         body {
-            font-family: 'Outfit', sans-serif;
-            background-color: var(--bg-dark);
-            color: var(--text-main);
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            background-color: var(--color-bg);
+            color: var(--color-fg);
             min-height: 100vh;
             display: flex;
             flex-direction: column;
-            background-image: 
-                radial-gradient(circle at 15% 50%, rgba(220, 38, 38, 0.08), transparent 25%),
-                radial-gradient(circle at 85% 30%, rgba(220, 38, 38, 0.05), transparent 25%);
+            position: relative;
+            overflow-x: hidden;
+            background-image:
+                radial-gradient(circle at 50% 0%, rgba(var(--color-primary-rgb), 0.04) 0%, transparent 50%),
+                radial-gradient(circle at 80% 10%, rgba(var(--color-secondary-rgb), 0.04) 0%, transparent 40%);
             background-attachment: fixed;
-            background-size: cover;
+            touch-action: manipulation;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        /* Ambient background glows */
+        .grid-background {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-image:
+                linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+            background-size: 30px 30px;
+            mask-image: radial-gradient(circle at center, black 40%, transparent 100%);
+            -webkit-mask-image: radial-gradient(circle at center, black 40%, transparent 100%);
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        .radial-glow {
+            position: fixed;
+            width: 600px;
+            height: 600px;
+            border-radius: 50%;
+            filter: blur(140px);
+            opacity: 0.16;
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        .glow-1 {
+            top: -250px;
+            left: 15%;
+            background: radial-gradient(circle, var(--color-primary) 0%, transparent 70%);
+        }
+
+        .glow-2 {
+            bottom: -250px;
+            right: 15%;
+            background: radial-gradient(circle, var(--color-secondary) 0%, transparent 70%);
         }
 
         /* Navbar */
         nav {
-            padding: 1.5rem 5%;
+            background: rgba(var(--color-bg-rgb), 0.7);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border-bottom: 1px solid var(--color-glass-border);
+            padding: 1.25rem 5%;
             display: flex;
             justify-content: center;
             align-items: center;
-            border-bottom: 1px solid var(--glass-border);
-            background: rgba(5, 5, 5, 0.7);
-            backdrop-filter: blur(12px);
-            -webkit-backdrop-filter: blur(12px);
             position: sticky;
             top: 0;
             z-index: 50;
         }
 
         .brand {
-            font-size: 1.7rem;
-            font-weight: 700;
-            color: var(--text-main);
+            font-size: 1.5rem;
+            font-weight: 900;
+            color: var(--color-text-main);
             text-decoration: none;
-            letter-spacing: 2px;
+            letter-spacing: 3px;
             text-transform: uppercase;
-            text-shadow: 0 0 15px rgba(255, 255, 255, 0.2);
+            background: linear-gradient(135deg, var(--color-primary), var(--color-secondary));
+            -webkit-background-clip: text;
+            background-clip: text;
+            color: transparent;
+            text-shadow: 0 0 30px rgba(var(--color-primary-rgb), 0.2);
         }
 
         .container {
             max-width: 1100px;
             margin: 0 auto;
-            padding: 2.5rem 5%;
+            padding: 3rem 1.5rem;
             flex: 1;
             display: flex;
             flex-direction: column;
-            gap: 2rem;
+            gap: 2.5rem;
             width: 100%;
+            position: relative;
+            z-index: 10;
         }
 
         /* Player Section */
         .player-wrapper {
-            border-radius: 1.25rem;
+            border-radius: 1.5rem;
             overflow: hidden;
-            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.8), 0 0 30px var(--primary-glow);
-            background: #000;
-            border: 1px solid rgba(220, 38, 38, 0.15);
+            background: #000000;
+            border: 1px solid rgba(var(--color-primary-rgb), 0.25);
+            box-shadow: 0 30px 70px rgba(0, 0, 0, 0.9), 
+                        0 0 50px rgba(var(--color-primary-rgb), 0.12),
+                        0 0 100px rgba(var(--color-secondary-rgb), 0.05);
+            transition: all 0.3s ease;
+            position: relative;
             width: 100%;
         }
 
-        /* File Info */
+        /* File Info Card */
         .info-card {
-            background: var(--glass-bg);
-            border: 1px solid var(--glass-border);
-            backdrop-filter: blur(20px);
-            -webkit-backdrop-filter: blur(20px);
-            border-radius: 1.25rem;
-            padding: 2rem;
+            background: var(--color-card-bg);
+            border: 1px solid var(--color-glass-border);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border-radius: 1rem;
+            padding: 2.5rem;
             display: flex;
             flex-direction: column;
-            gap: 0.75rem;
-            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+            gap: 1rem;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            transform: translateZ(0);
+            will-change: backdrop-filter, transform;
+        }
+
+        .info-card:hover {
+            background-color: var(--color-glass-hover);
+            border-color: rgba(255, 255, 255, 0.15);
+            box-shadow: 0 0 30px -10px rgba(var(--color-primary-rgb), 0.15);
+            transform: translateY(-2px) translateZ(0);
         }
 
         .file-title {
-            font-size: 1.4rem;
-            font-weight: 600;
+            font-size: 1.5rem;
+            font-weight: 800;
             line-height: 1.4;
             word-break: break-all;
-            color: #fff;
+            color: #ffffff;
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            letter-spacing: -0.02em;
         }
 
         .file-meta {
-            color: var(--text-muted);
+            color: var(--color-text-muted);
             font-size: 0.95rem;
             display: flex;
             align-items: center;
-            gap: 0.5rem;
+            gap: 0.75rem;
+            margin-bottom: 0.5rem;
         }
 
         .badge {
-            background: rgba(220, 38, 38, 0.1);
-            color: #f87171;
-            padding: 0.25rem 0.75rem;
+            background: rgba(var(--color-primary-rgb), 0.08);
+            color: #fca5a5;
+            padding: 0.35rem 0.95rem;
             border-radius: 9999px;
             font-size: 0.85rem;
-            font-weight: 500;
-            border: 1px solid rgba(220, 38, 38, 0.2);
+            font-weight: 700;
+            border: 1px solid rgba(var(--color-primary-rgb), 0.2);
+            font-family: 'Outfit', sans-serif;
+            letter-spacing: 0.5px;
         }
 
-        /* Action Buttons */
+        /* Action Cards Grid */
         .action-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-            gap: 1rem;
+            grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+            gap: 1.25rem;
             margin-top: 1.5rem;
         }
 
-        .btn {
-            background: rgba(25, 25, 25, 0.6);
-            border: 1px solid rgba(255, 255, 255, 0.08);
-            color: #d1d5db;
-            padding: 0.9rem 1rem;
-            border-radius: 0.85rem;
-            font-family: 'Outfit', sans-serif;
-            font-size: 0.95rem;
-            font-weight: 500;
-            cursor: pointer;
+        /* Action Cards style */
+        .action-card {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            padding: 1.25rem;
+            border-radius: 1.25rem;
+            text-decoration: none;
             transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            border: 1px solid var(--color-glass-border);
+            text-align: left;
+            cursor: pointer;
+            outline: none;
+            user-select: none;
+        }
+
+        .action-card:active {
+            transform: scale(0.97);
+        }
+
+        .action-card.primary-card {
+            background: linear-gradient(135deg, var(--color-primary), var(--color-secondary));
+            border-color: transparent;
+        }
+
+        .action-card.primary-card:hover {
+            filter: brightness(1.1);
+            box-shadow: 0 0 20px rgba(var(--color-primary-rgb), 0.3);
+            transform: translateY(-2px);
+        }
+        
+        .action-card.primary-card .card-title,
+        .action-card.primary-card .card-desc,
+        .action-card.primary-card .card-icon i {
+            color: #ffffff !important;
+        }
+        
+        .action-card.primary-card .card-desc {
+            opacity: 0.8;
+        }
+
+        .action-card.glass-card {
+            background: var(--color-glass);
+        }
+
+        .action-card.glass-card:hover {
+            background: var(--color-glass-hover);
+            border-color: rgba(255, 255, 255, 0.2);
+            transform: translateY(-2px);
+            box-shadow: 0 0 15px rgba(255, 255, 255, 0.05);
+        }
+
+        .card-icon {
             display: flex;
             align-items: center;
             justify-content: center;
-            gap: 0.6rem;
-            text-decoration: none;
+            width: 46px;
+            height: 46px;
+            border-radius: 0.85rem;
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid var(--color-glass-border);
+            flex-shrink: 0;
+            transition: all 0.3s ease;
+            font-size: 1.25rem;
         }
 
-        .btn:hover {
-            background: rgba(40, 40, 40, 0.8);
-            color: #fff;
-            border-color: rgba(255, 255, 255, 0.15);
-            transform: translateY(-2px);
-            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.4);
-        }
-
-        .btn.primary {
-            background: var(--primary);
-            border-color: var(--primary);
-            color: white;
-            box-shadow: 0 4px 15px var(--primary-glow);
-        }
-
-        .btn.primary:hover {
-            background: var(--primary-hover);
-            border-color: var(--primary-hover);
-            box-shadow: 0 8px 25px var(--primary-glow);
-            transform: translateY(-2px);
-        }
-
-        .btn svg {
-            width: 20px;
-            height: 20px;
-            fill: currentColor;
-            transition: transform 0.3s ease;
-        }
-        
-        .btn:hover svg {
+        .action-card:hover .card-icon {
             transform: scale(1.1);
+            background: rgba(255, 255, 255, 0.08);
+            border-color: rgba(var(--color-primary-rgb), 0.3);
+        }
+
+        .card-content {
+            display: flex;
+            flex-direction: column;
+            min-width: 0;
+        }
+
+        .card-title {
+            font-size: 0.95rem;
+            font-weight: 750;
+            color: #ffffff;
+            font-family: 'Outfit', sans-serif;
+            letter-spacing: 0.2px;
+        }
+
+        .card-desc {
+            font-size: 0.75rem;
+            color: var(--color-text-muted);
+            margin-top: 0.15rem;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }
 
         @media (max-width: 768px) {
             .container {
-                padding: 1.5rem 5%;
+                padding: 1.5rem 1rem;
+                gap: 2rem;
             }
             .action-grid {
                 grid-template-columns: 1fr 1fr;
             }
             .brand {
-                font-size: 1.4rem;
+                font-size: 1.3rem;
             }
         }
-        @media (max-width: 480px) {
+        @media (max-width: 520px) {
             .action-grid {
                 grid-template-columns: 1fr;
             }
@@ -209,27 +330,28 @@
 
         /* Custom scrollbar */
         ::-webkit-scrollbar {
-            width: 8px;
+            width: 6px;
         }
         ::-webkit-scrollbar-track {
-            background: var(--bg-dark);
+            background: var(--color-bg);
         }
         ::-webkit-scrollbar-thumb {
-            background: #262626;
-            border-radius: 4px;
+            background: rgba(255, 255, 255, 0.15);
+            border-radius: 99px;
+            transition: background 0.2s;
         }
         ::-webkit-scrollbar-thumb:hover {
-            background: #404040;
+            background: rgba(255, 255, 255, 0.3);
         }
         
-        /* Plyr Customizations for Red Theme */
+        /* Plyr Customizations for Premium Red Theme */
         .plyr--video .plyr__control.plyr__tab-focus,
         .plyr--video .plyr__control:hover,
         .plyr--video .plyr__control[aria-expanded=true] {
-            background: var(--primary) !important;
+            background: var(--color-primary) !important;
         }
         .plyr--full-ui input[type=range] {
-            color: var(--primary) !important;
+            color: var(--color-primary) !important;
         }
         
         .toast {
@@ -237,16 +359,18 @@
             bottom: 2rem;
             left: 50%;
             transform: translateX(-50%) translateY(100px);
-            background: var(--primary);
+            background: linear-gradient(135deg, var(--color-primary), var(--color-secondary));
             color: white;
             padding: 0.8rem 1.8rem;
             border-radius: 9999px;
-            font-weight: 500;
+            font-weight: 600;
+            font-family: 'Outfit', sans-serif;
             opacity: 0;
             transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
             z-index: 100;
-            box-shadow: 0 10px 25px var(--primary-glow);
+            box-shadow: 0 10px 25px rgba(var(--color-primary-rgb), 0.35);
             letter-spacing: 0.5px;
+            font-size: 0.9rem;
         }
         
         .toast.show {
@@ -256,6 +380,11 @@
     </style>
 </head>
 <body>
+
+    <!-- Ambient background glows -->
+    <div class="grid-background"></div>
+    <div class="radial-glow glow-1"></div>
+    <div class="radial-glow glow-2"></div>
 
     <nav>
         <a href="/" class="brand">AMATERASU STREAM</a>
@@ -316,14 +445,16 @@
             const actions = [
                 {
                     text: 'Download',
+                    desc: 'Save to local device',
                     url: absoluteDownloadUrl,
-                    icon: '<path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/>',
+                    icon: '<i class="fa-solid fa-cloud-arrow-down text-red-500"></i>',
                     primary: true
                 },
                 {
                     text: 'Copy Link',
+                    desc: 'Copy stream address',
                     onclick: 'copyLink()',
-                    icon: '<path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/>',
+                    icon: '<i class="fa-solid fa-copy text-orange-500"></i>',
                     primary: false
                 }
             ];
@@ -332,26 +463,30 @@
             actions.push(
                 {
                     text: 'VLC Player',
+                    desc: 'Stream to VLC (Android)',
                     url: `intent:${absoluteStreamUrl}#Intent;action=android.intent.action.VIEW;type={{file_type}}/*;package=org.videolan.vlc;end`,
-                    icon: '<path d="M12 2L8 12h8l-4-10zM5 14l-2 6h18l-2-6H5z"/>',
+                    icon: '<i class="fa-brands fa-vlc text-orange-500"></i>',
                     primary: false
                 },
                 {
                     text: 'MX Player',
+                    desc: 'Stream to MX (Android)',
                     url: `intent:${absoluteStreamUrl}#Intent;action=android.intent.action.VIEW;type={{file_type}}/*;package=com.mxtech.videoplayer.ad;end`,
-                    icon: '<path d="M3 4h18v16H3zM5 6v12h14V6H5zm3 3l6 3-6 3V9z"/>',
+                    icon: '<i class="fa-solid fa-circle-play text-red-500"></i>',
                     primary: false
                 },
                 {
                     text: 'iOS VLC',
+                    desc: 'Stream to VLC (iOS)',
                     url: `vlc-x-callback://x-callback-url/stream?url=${absoluteStreamUrl}`,
-                    icon: '<path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 14.5v-9l6 4.5-6 4.5z"/>',
+                    icon: '<i class="fa-brands fa-vlc text-orange-400"></i>',
                     primary: false
                 },
                 {
                     text: 'nPlayer',
+                    desc: 'Stream to nPlayer',
                     url: `nplayer-${absoluteStreamUrl}`,
-                    icon: '<path d="M8 5v14l11-7z"/>',
+                    icon: '<i class="fa-solid fa-play text-red-400"></i>',
                     primary: false
                 }
             );
@@ -362,7 +497,12 @@
                 const isBtn = !!act.onclick;
                 const tag = isBtn ? 'button' : 'a';
                 const el = document.createElement(tag);
-                el.className = `btn ${act.primary ? 'primary' : ''}`;
+                
+                if (act.primary) {
+                    el.className = 'action-card primary-card';
+                } else {
+                    el.className = 'action-card glass-card';
+                }
                 
                 if(isBtn) {
                     el.setAttribute('onclick', act.onclick);
@@ -370,7 +510,13 @@
                     el.href = act.url;
                 }
                 
-                el.innerHTML = `<svg viewBox="0 0 24 24">${act.icon}</svg> ${act.text}`;
+                el.innerHTML = `
+                    <div class="card-icon">${act.icon}</div>
+                    <div class="card-content">
+                        <span class="card-title">${act.text}</span>
+                        <span class="card-desc">${act.desc}</span>
+                    </div>
+                `;
                 btnContainer.appendChild(el);
             });
         });

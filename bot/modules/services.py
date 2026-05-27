@@ -35,7 +35,7 @@ async def start(_, message):
     buttons.url_button(
         lang.START_BUTTON1, "https://github.com/its-niloy/Amaterasu"
     )
-    buttons.url_button(lang.START_BUTTON2, "https://t.me/Amaterasu")
+    buttons.url_button(lang.START_BUTTON2, "https://t.me/itsniloybhowmick")
     reply_markup = buttons.build_menu(2)
 
     if len(message.command) > 1 and message.command[1] == "amaterasu":
