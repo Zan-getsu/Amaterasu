@@ -405,7 +405,7 @@ async def watch_media(chat_id: str, message_id: int, request: Request, filename:
             filename = getattr(media, "file_name", None) or f"Stream_{message_id}.bin"
             
         file_size = getattr(media, "file_size", 0) or 0
-        from bot.helper.ext_utils.bot_utils import get_readable_file_size
+        from bot.helper.ext_utils.status_utils import get_readable_file_size
         readable_size = get_readable_file_size(file_size)
             
         from urllib.parse import quote
