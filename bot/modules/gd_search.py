@@ -11,23 +11,23 @@ from ..helper.telegram_helper.message_utils import send_message, edit_message
 
 async def list_buttons(user_id, is_recursive=True, user_token=False):
     buttons = ButtonMaker()
-    buttons.data_button()
+    buttons.data_button(
         f"{'✅️' if user_token else '❌️'} User Token",
         f"list_types {user_id} ut {is_recursive} {user_token}",
         "header",
     )
-    buttons.data_button()
+    buttons.data_button(
         f"{'✅️' if is_recursive else '❌️'} Recursive",
         f"list_types {user_id} rec {is_recursive} {user_token}",
         "header",
     )
-    buttons.data_button()
+    buttons.data_button(
         "Folders", f"list_types {user_id} folders {is_recursive} {user_token}"
     )
-    buttons.data_button()
+    buttons.data_button(
         "Files", f"list_types {user_id} files {is_recursive} {user_token}"
     )
-    buttons.data_button()
+    buttons.data_button(
         "Both", f"list_types {user_id} both {is_recursive} {user_token}"
     )
 

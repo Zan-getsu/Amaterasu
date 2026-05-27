@@ -140,7 +140,7 @@ async def prompt_leech_rename(client, message) -> str:
         "┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄\n"
         "└ Info : Reply with the new filename (with extension) or click the button below.",
         InlineKeyboardMarkup([
-            [InlineKeyboardButton("❖ USE ORIGINAL NAME", callback_data=f"leech_orig_{prompt.id}"])
+            [InlineKeyboardButton("❖ USE ORIGINAL NAME", callback_data=f"leech_orig_{prompt.id}")]
         ])
     )
     
@@ -223,8 +223,8 @@ async def rename_callback_handler(client, query):
         )
         
         buttons = [
-            [InlineKeyboardButton("❖ RENAME", callback_data=f"ren_choice_ren_{user_id}"]),
-            [InlineKeyboardButton("✕ CANCEL", callback_data=f"ren_choice_cancel_{user_id}"])
+            [InlineKeyboardButton("❖ RENAME", callback_data=f"ren_choice_ren_{user_id}")],
+            [InlineKeyboardButton("✕ CANCEL", callback_data=f"ren_choice_cancel_{user_id}")]
         ]
         
         await edit_message(query.message, info_text, InlineKeyboardMarkup(buttons))
@@ -273,12 +273,12 @@ async def rename_callback_handler(client, query):
         new_name = apply_autorename_template(file_name, current_template)
         user_rename_preferences[user_id] = new_name
         
-        buttons = [[InlineKeyboardButton("❖ DOCUMENT", callback_data=f"ren_up_document_{user_id}"]])
+        buttons = [[InlineKeyboardButton("❖ DOCUMENT", callback_data=f"ren_up_document_{user_id}")]]
         media_type = type(media).__name__.lower()
         if media_type in ["video", "document"]:
-            buttons.append([InlineKeyboardButton("❖ VIDEO", callback_data=f"ren_up_video_{user_id}"]))
+            buttons.append([InlineKeyboardButton("❖ VIDEO", callback_data=f"ren_up_video_{user_id}")])
         elif media_type == "audio":
-            buttons.append([InlineKeyboardButton("❖ AUDIO", callback_data=f"ren_up_audio_{user_id}"]))
+            buttons.append([InlineKeyboardButton("❖ AUDIO", callback_data=f"ren_up_audio_{user_id}")])
             
         await client.send_message(
             chat_id=query.message.chat.id,
@@ -469,13 +469,13 @@ async def rename_force_reply_handler(client, message):
     await delete_message(reply_message)
     await delete_message(message)
     
-    buttons = [[InlineKeyboardButton("❖ DOCUMENT", callback_data=f"ren_up_document_{user_id}"]])
+    buttons = [[InlineKeyboardButton("❖ DOCUMENT", callback_data=f"ren_up_document_{user_id}")]]
     
     media_type = type(media).__name__.lower()
     if media_type in ["video", "document"]:
-        buttons.append([InlineKeyboardButton("❖ VIDEO", callback_data=f"ren_up_video_{user_id}"]))
+        buttons.append([InlineKeyboardButton("❖ VIDEO", callback_data=f"ren_up_video_{user_id}")])
     elif media_type == "audio":
-        buttons.append([InlineKeyboardButton("❖ AUDIO", callback_data=f"ren_up_audio_{user_id}"]))
+        buttons.append([InlineKeyboardButton("❖ AUDIO", callback_data=f"ren_up_audio_{user_id}")])
         
     await client.send_message(
         chat_id=message.chat.id,

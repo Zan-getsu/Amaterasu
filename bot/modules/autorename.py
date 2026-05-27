@@ -38,12 +38,12 @@ async def autorename_command(client, message):
         user_media_to_rename[user_id] = media_msg
         user_rename_preferences[user_id] = new_name
         
-        buttons = [[InlineKeyboardButton("❖ DOCUMENT", callback_data=f"ren_up_document_{user_id}"]])
+        buttons = [[InlineKeyboardButton("❖ DOCUMENT", callback_data=f"ren_up_document_{user_id}")]]
         media_type = type(media).__name__.lower()
         if media_type in ["video", "document"]:
-            buttons.append([InlineKeyboardButton("❖ VIDEO", callback_data=f"ren_up_video_{user_id}"]))
+            buttons.append([InlineKeyboardButton("❖ VIDEO", callback_data=f"ren_up_video_{user_id}")])
         elif media_type == "audio":
-            buttons.append([InlineKeyboardButton("❖ AUDIO", callback_data=f"ren_up_audio_{user_id}"]))
+            buttons.append([InlineKeyboardButton("❖ AUDIO", callback_data=f"ren_up_audio_{user_id}")])
             
         await client.send_message(
             chat_id=message.chat.id,

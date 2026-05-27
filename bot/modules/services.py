@@ -32,7 +32,7 @@ async def start(_, message):
     userid = message.from_user.id
     lang = Language()
     buttons = ButtonMaker()
-    buttons.url_button()
+    buttons.url_button(
         lang.START_BUTTON1, "https://github.com/its-niloy/Amaterasu"
     )
     buttons.url_button(lang.START_BUTTON2, "https://t.me/itsniloybhowmick")
@@ -73,7 +73,7 @@ async def start(_, message):
                     message,
                     "<b>Bot Already Logged In via Password</b>\n\n<i>No Need to Accept Temp Tokens.</i>",
                 )
-            buttons.data_button()
+            buttons.data_button(
                 "Activate Access Token", f"start pass {input_token}", "header"
             )
             reply_markup = buttons.build_menu(2)
@@ -125,7 +125,7 @@ async def start_cb(_, query):
     kb = query.message.reply_markup.inline_keyboard[1:]
     kb.insert(
         0,
-        [InlineKeyboardButton("✅️ Activated ✅", callback_data="start pass activated"]),
+        [InlineKeyboardButton("✅️ Activated ✅", callback_data="start pass activated")],
     )
     await edit_reply_markup(query.message, InlineKeyboardMarkup(kb))
 

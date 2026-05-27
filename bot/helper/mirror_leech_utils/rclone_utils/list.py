@@ -210,17 +210,17 @@ class RcloneList:
             buttons.data_button("NEXT ❯", "rcq nex", position="footer")
         if self.list_status == "rcd":
             if self.item_type == "--dirs-only":
-                buttons.data_button()
+                buttons.data_button(
                     "Files", "rcq itype --files-only", position="footer"
                 )
             else:
-                buttons.data_button()
+                buttons.data_button(
                     "Folders", "rcq itype --dirs-only", position="footer"
                 )
         if self.list_status == "rcu" or len(self.path_list) > 0:
             buttons.data_button("Choose Current Path", "rcq cur", position="footer")
         if self.list_status == "rcd":
-            buttons.data_button()
+            buttons.data_button(
                 f"Select: {'Enabled' if self.select else 'Disabled'}",
                 "rcq select",
                 position="footer",

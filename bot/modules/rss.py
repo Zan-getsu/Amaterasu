@@ -316,7 +316,7 @@ async def rss_list(query, start, all_users=False):
     buttons.data_button("✕ CLOSE", f"rss close {user_id}")
     if keysCount > 5:
         for x in range(0, keysCount, 5):
-            buttons.data_button()
+            buttons.data_button(
                 f"{int(x / 5)}", f"rss list {user_id} {x}", position="footer"
             )
     button = buttons.build_menu(2)

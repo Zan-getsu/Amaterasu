@@ -59,7 +59,7 @@ async def imdb_search(_, message):
         if result := search(r"tt(\d+)", title, IGNORECASE):
             movieid = result.group(1)
             if movie := await sync_to_async(get_movie, movieid):
-                buttons.data_button()
+                buttons.data_button(
                     f"🎬 {movie.title} ({getattr(movie , 'year' , 'N/A')})",
                     f"imdb {user_id} movie {movieid}",
                 )
@@ -72,7 +72,7 @@ async def imdb_search(_, message):
                     "<i>No Results Found</i>, Try Again or Use <b>Title ID</b>", k
                 )
             for movie in movies:
-                buttons.data_button()
+                buttons.data_button(
                     f"🎬 {movie.title} ({getattr(movie , 'year' , 'N/A')})",
                     f"imdb {user_id} movie {movie.id}",
                 )
@@ -272,7 +272,6 @@ async def imdb_callback(_, query):
         if imdb["trailer"]:
             if isinstance(imdb["trailer"], list):
                 buttons.url_button("▶️ IMDb Trailer", imdb["trailer"][-1])
-                imdb["trailer"] = list_to_str(imdb["trailer"])
             else:
                 buttons.url_button("▶️ IMDb Trailer", imdb["trailer"])
         buttons.data_button("🚫 Close 🚫", f"imdb {user_id} close")

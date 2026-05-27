@@ -23,7 +23,7 @@ async def get_plugins_menu(user_id: int, stype: str = "main"):
         loaded_plugins = plugin_manager.list_plugins()
         available_plugins = plugin_manager.discover_plugins()
 
-        buttons.data_button()
+        buttons.data_button(
             "Loaded Plugins", f"plugins {user_id} loaded", position="header"
         )
         buttons.data_button("Available Plugins", f"plugins {user_id} available")
@@ -43,7 +43,7 @@ async def get_plugins_menu(user_id: int, stype: str = "main"):
 
         for plugin in loaded_plugins:
             status = "✅" if plugin.enabled else "❌"
-            buttons.data_button()
+            buttons.data_button(
                 f"{status} {plugin.name}", f"plugins {user_id} plugin {plugin.name}"
             )
 
@@ -96,7 +96,7 @@ async def get_plugins_menu(user_id: int, stype: str = "main"):
 
         if plugin_info:
             status = "✅ Enabled" if plugin_info.enabled else "❌ Disabled"
-            buttons.data_button()
+            buttons.data_button(
                 "Disable" if plugin_info.enabled else "Enable",
                 f"plugins {user_id} toggle {plugin_name}",
             )

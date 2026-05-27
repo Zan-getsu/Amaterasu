@@ -214,7 +214,7 @@ async def plugin_buttons(user_id):
         for i in pl:
             PLUGINS.append(i.name)
     for siteName in PLUGINS:
-        buttons.data_button()
+        buttons.data_button(
             siteName.capitalize(), f"torser {user_id} {siteName} plugin"
         )
     buttons.data_button("All", f"torser {user_id} all plugin")

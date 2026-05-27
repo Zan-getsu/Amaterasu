@@ -147,7 +147,7 @@ async def get_buttons(key=None, edit_type=None, edit_mode=False):
         buttons.data_button("↩ BACK", "botset back")
         buttons.data_button("✕ CLOSE", "botset close")
         for x in range(0, len(conf_dict), 10):
-            buttons.data_button()
+            buttons.data_button(
                 f"{int(x / 10)}", f"botset start var {x}", position="footer"
             )
         msg = f"Config Variables | Page: {int(start / 10)} | State: {state}"
@@ -196,7 +196,7 @@ async def get_buttons(key=None, edit_type=None, edit_mode=False):
         buttons.data_button("↩ BACK", "botset back")
         buttons.data_button("✕ CLOSE", "botset close")
         for x in range(0, len(aria2_options), 10):
-            buttons.data_button()
+            buttons.data_button(
                 f"{int(x / 10)}", f"botset start aria {x}", position="footer"
             )
         msg = f"Aria2c Options | Page: {int(start / 10)} | State: {state}"
@@ -211,7 +211,7 @@ async def get_buttons(key=None, edit_type=None, edit_mode=False):
         buttons.data_button("↩ BACK", "botset back")
         buttons.data_button("✕ CLOSE", "botset close")
         for x in range(0, len(qbit_options), 10):
-            buttons.data_button()
+            buttons.data_button(
                 f"{int(x / 10)}", f"botset start qbit {x}", position="footer"
             )
         msg = f"Qbittorrent Options | Page: {int(start / 10)} | State: {state}"
@@ -227,7 +227,7 @@ async def get_buttons(key=None, edit_type=None, edit_mode=False):
         buttons.data_button("↩ BACK", "botset back")
         buttons.data_button("✕ CLOSE", "botset close")
         for x in range(0, len(nzb_options), 10):
-            buttons.data_button()
+            buttons.data_button(
                 f"{int(x / 10)}", f"botset start nzb {x}", position="footer"
             )
         msg = f"Sabnzbd Options | Page: {int(start / 10)} | State: {state}"
@@ -240,7 +240,7 @@ async def get_buttons(key=None, edit_type=None, edit_mode=False):
         buttons.data_button("✕ CLOSE", "botset close")
         if len(Config.USENET_SERVERS) > 10:
             for x in range(0, len(Config.USENET_SERVERS), 10):
-                buttons.data_button()
+                buttons.data_button(
                     f"{int(x / 10)}", f"botset start nzbser {x}", position="footer"
                 )
         msg = f"Usenet Servers | Page: {int(start / 10)} | State: {state}"
@@ -260,7 +260,7 @@ async def get_buttons(key=None, edit_type=None, edit_mode=False):
         buttons.data_button("✕ CLOSE", "botset close")
         if len(Config.USENET_SERVERS[index].keys()) > 10:
             for x in range(0, len(Config.USENET_SERVERS[index]), 10):
-                buttons.data_button()
+                buttons.data_button(
                     f"{int(x / 10)}", f"botset start {key} {x}", position="footer"
                 )
         msg = f"Server Keys | Page: {int(start / 10)} | State: {state}"
