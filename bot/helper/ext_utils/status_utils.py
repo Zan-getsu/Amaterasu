@@ -231,7 +231,7 @@ async def get_readable_message(sid, is_user, page_no=1, status="All", page_step=
             tstatus = task.status()
             
         task_name = escape(task.name())
-        msg += f"<code>┌─ [ {task_name} ]"
+        msg += f"<code>┌─ {index:02d}. [ {task_name} ]"
         
         if getattr(task.listener, "subname", False):
             sub_name = escape(task.listener.subname)
