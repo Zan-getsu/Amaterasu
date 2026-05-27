@@ -51,10 +51,10 @@ def _build_command_usage(help_dict, command_key):
             buttons.data_button(name, f"help {command_key} {name} {i}")
         if len(cmd_pages) > 1:
             if i > 0:
-                buttons.data_button("⫷", f"help pre {command_key} {i - 1}")
+                buttons.data_button("⫷", f"help pre {command_key} {i - 1}"
             if i < len(cmd_pages) - 1:
-                buttons.data_button("⫸", f"help nex {command_key} {i + 1}")
-        buttons.data_button("Close", "help close", "footer")
+                buttons.data_button("⫸", f"help nex {command_key} {i + 1}"
+        buttons.data_button("✕ CLOSE", "help close", "footer"
         temp_store.append(buttons.build_menu(2))
         buttons.reset()
 
@@ -85,14 +85,14 @@ def bt_selection_buttons(id_):
     pin = "".join([n for n in id_ if n.isdigit()][:4])
     buttons = ButtonMaker()
     if Config.WEB_PINCODE:
-        buttons.url_button("Select Files", f"{Config.BASE_URL}/app/files?gid={id_}")
-        buttons.data_button("Pincode", f"sel pin {gid} {pin}")
+        buttons.url_button("Select Files", f"{Config.BASE_URL}/app/files?gid={id_}"
+        buttons.data_button("Pincode", f"sel pin {gid} {pin}"
     else:
         buttons.url_button(
             "Select Files", f"{Config.BASE_URL}/app/files?gid={id_}&pin={pin}"
         )
-    buttons.data_button("Done Selecting", f"sel done {gid} {id_}")
-    buttons.data_button("Cancel", f"sel cancel {gid}")
+    buttons.data_button("Done Selecting", f"sel done {gid} {id_}"
+    buttons.data_button("✕ CANCEL", f"sel cancel {gid}"
     return buttons.build_menu(2)
 
 
@@ -108,7 +108,7 @@ async def get_telegraph_list(telegraph_content):
     if len(path) > 1:
         await telegraph.edit_telegraph(path, telegraph_content)
     buttons = ButtonMaker()
-    buttons.url_button("🔎 VIEW", f"https://telegra.ph/{path[0]}")
+    buttons.url_button("🔎 VIEW", f"https://telegra.ph/{path[0]}"
     return buttons.build_menu(1)
 
 

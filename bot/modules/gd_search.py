@@ -31,7 +31,7 @@ async def list_buttons(user_id, is_recursive=True, user_token=False):
         "Both", f"list_types {user_id} both {is_recursive} {user_token}"
     )
 
-    buttons.data_button("Cancel", f"list_types {user_id} cancel", "footer")
+    buttons.data_button("✕ CANCEL", f"list_types {user_id} cancel", "footer"
     return buttons.build_menu(2)
 
 

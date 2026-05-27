@@ -40,13 +40,13 @@ async def generate_link_markup(chat_id, message_id, filename, secure_hash=""):
     buttons = []
     if is_streamable(filename):
         buttons.append([
-            InlineKeyboardButton("❖ Stream Online", url=stream_link),
-            InlineKeyboardButton("❖ Direct Download", url=download_link)
+            InlineKeyboardButton("❖ STREAM ONLINE", url=stream_link,
+            InlineKeyboardButton("❖ DIRECT DOWNLOAD", url=download_link
         ])
     else:
         stream_link = None
         buttons.append([
-            InlineKeyboardButton("❖ Direct Download", url=download_link)
+            InlineKeyboardButton("❖ DIRECT DOWNLOAD", url=download_link
         ])
         
     return InlineKeyboardMarkup(buttons), stream_link, download_link

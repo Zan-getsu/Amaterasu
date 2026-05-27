@@ -74,9 +74,9 @@ class JDownloaderHelper:
 
     async def wait_for_configurations(self):
         buttons = ButtonMaker()
-        buttons.url_button("Select", "https://my.jdownloader.org")
-        buttons.data_button("Done Selecting", "jdq sdone")
-        buttons.data_button("Cancel", "jdq cancel")
+        buttons.url_button("Select", "https://my.jdownloader.org"
+        buttons.data_button("Done Selecting", "jdq sdone"
+        buttons.data_button("✕ CANCEL", "jdq cancel"
         button = buttons.build_menu(2)
         msg = f"Remove the unwanted files or change variants or edit files names from myJdownloader site for <b>{self.listener.name}</b>.\nDon't start it manually!\n\nAfter finish press Done Selecting!\nTimeout: 10 min"
         self._reply_to = await send_message(self.listener.message, msg, button)

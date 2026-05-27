@@ -65,12 +65,12 @@ async def get_stats(event, key="home"):
     btns = ButtonMaker()
     if key == "home":
         btns = ButtonMaker()
-        btns.data_button("❖  Bot", f"stats {user_id} stbot")
-        btns.data_button("❖  OS", f"stats {user_id} stsys")
-        btns.data_button("❖  Repo", f"stats {user_id} strepo")
-        btns.data_button("❖  Pkgs", f"stats {user_id} stpkgs")
-        btns.data_button("❖  Limits", f"stats {user_id} tlimits")
-        btns.data_button("❖  Sys", f"stats {user_id} systasks")
+        btns.data_button("⚙ BOT", f"stats {user_id} stbot"
+        btns.data_button("⚙ OS", f"stats {user_id} stsys"
+        btns.data_button("⚙ REPO", f"stats {user_id} strepo"
+        btns.data_button("⚙ PKGS", f"stats {user_id} stpkgs"
+        btns.data_button("⚙ LIMITS", f"stats {user_id} tlimits"
+        btns.data_button("⚙ SYS", f"stats {user_id} systasks"
         msg = "<b>❖ SYSTEM DASHBOARD</b>"
     elif key == "stbot":
         total, used, free, disk = disk_usage("/")
@@ -78,45 +78,40 @@ async def get_stats(event, key="home"):
         memory = virtual_memory()
         disk_io = disk_io_counters()
         msg = f"""<b>❖ SYSTEM METRICS</b>
-┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
-└ Uptime     : <i>◷ {get_readable_time(time() - bot_start_time)}</i>
-┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
-<b>❖ MEMORY</b>
-├ Usage      : {get_progress_bar_string(memory.percent)} <code>{memory.percent}%</code>
-└              <code>{get_readable_file_size(memory.used)} used / {get_readable_file_size(memory.total)} total</code>
-┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
-<b>❖ SWAP</b>
-├ Usage      : {get_progress_bar_string(swap.percent)} <code>{swap.percent}%</code>
-└              <code>{get_readable_file_size(swap.used)} used / {get_readable_file_size(swap.total)} total</code>
-┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
-<b>❖ DISK</b>
-├ Usage      : {get_progress_bar_string(disk)} <code>{disk}%</code>
-├ Read       : <code>{f"{get_readable_file_size(disk_io.read_bytes)} ({get_readable_time(disk_io.read_time / 1000)})" if disk_io else "Access Denied"}</code>
-├ Write      : <code>{f"{get_readable_file_size(disk_io.write_bytes)} ({get_readable_time(disk_io.write_time / 1000)})" if disk_io else "Access Denied"}</code>
-└              <code>{get_readable_file_size(used)} used / {get_readable_file_size(total)} total</code>
-"""
+<pre>
+├─ {'Uptime':<11}: ⏳ {get_readable_time(time() - bot_start_time)}
+├─ ─── MEMORY ────────────────────
+├─ {'Usage':<11}: {get_progress_bar_string(memory.percent)} {memory.percent}%
+├─ {'Allocation':<11}: {get_readable_file_size(memory.used)} / {get_readable_file_size(memory.total)}
+├─ ─── SWAP ──────────────────────
+├─ {'Usage':<11}: {get_progress_bar_string(swap.percent)} {swap.percent}%
+├─ {'Allocation':<11}: {get_readable_file_size(swap.used)} / {get_readable_file_size(swap.total)}
+├─ ─── STORAGE ───────────────────
+├─ {'Usage':<11}: {get_progress_bar_string(disk)} {disk}%
+├─ {'Read':<11}: ▼ {f"{get_readable_file_size(disk_io.read_bytes)} ({get_readable_time(disk_io.read_time / 1000)})" if disk_io else "Access Denied"}
+├─ {'Write':<11}: ▲ {f"{get_readable_file_size(disk_io.write_bytes)} ({get_readable_time(disk_io.write_time / 1000)})" if disk_io else "Access Denied"}
+└─ {'Allocation':<11}: {get_readable_file_size(used)} / {get_readable_file_size(total)}
+</pre>"""
     elif key == "stsys":
         cpu_usage = cpu_percent(interval=0.5)
         msg = f"""<b>❖ OS SYSTEM</b>
-┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
-├ Uptime     : <i>◷ {get_readable_time(time() - boot_time())}</i>
-├ Version    : <code>{version()}</code>
-└ Arch       : <code>{platform()}</code>
-┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
-<b>❖ NETWORK</b>
-├ Upload     : <code>⇅ {get_readable_file_size(net_io_counters().bytes_sent)}</code>
-├ Download   : <code>⇅ {get_readable_file_size(net_io_counters().bytes_recv)}</code>
-├ Pkts Sent  : <code>{str(net_io_counters().packets_sent)[:-3]}k</code>
-├ Pkts Recv  : <code>{str(net_io_counters().packets_recv)[:-3]}k</code>
-└ Total I/O  : <code>{get_readable_file_size(net_io_counters().bytes_recv + net_io_counters().bytes_sent)}</code>
-┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
-<b>❖ CPU</b>
-├ Usage      : {get_progress_bar_string(cpu_usage)} <code>{cpu_usage}%</code>
-├ Freq       : <code>{f"{cpu_freq().current / 1000:.2f} GHz" if cpu_freq() else "Access Denied"}</code>
-├ Avg Load   : <code>{"%, ".join(str(round((x / cpu_count() * 100), 2)) for x in getloadavg())}%</code>
-├ Cores      : <code>{cpu_count(logical=False)}P / {cpu_count(logical=True) - cpu_count(logical=False)}V / {cpu_count(logical=True)}T</code>
-└ Usable     : <code>{len(Process().cpu_affinity())}</code>
-"""
+<pre>
+├─ {'Uptime':<11}: ⏳ {get_readable_time(time() - boot_time())}
+├─ {'Version':<11}: {version()}
+├─ {'Arch':<11}: {platform()}
+├─ ─── NETWORK ───────────────────
+├─ {'Upload':<11}: ▲ {get_readable_file_size(net_io_counters().bytes_sent)}
+├─ {'Download':<11}: ▼ {get_readable_file_size(net_io_counters().bytes_recv)}
+├─ {'Pkts Sent':<11}: {str(net_io_counters().packets_sent)[:-3]}k
+├─ {'Pkts Recv':<11}: {str(net_io_counters().packets_recv)[:-3]}k
+├─ {'Total I/O':<11}: ⇅ {get_readable_file_size(net_io_counters().bytes_recv + net_io_counters().bytes_sent)}
+├─ ─── CPU ───────────────────────
+├─ {'Usage':<11}: {get_progress_bar_string(cpu_usage)} {cpu_usage}%
+├─ {'Freq':<11}: {f"{cpu_freq().current / 1000:.2f} GHz" if cpu_freq() else "Access Denied"}
+├─ {'Avg Load':<11}: {"%, ".join(str(round((x / cpu_count() * 100), 2)) for x in getloadavg())}%
+├─ {'Cores':<11}: {cpu_count(logical=False)}P / {cpu_count(logical=True) - cpu_count(logical=False)}V / {cpu_count(logical=True)}T
+└─ {'Usable':<11}: {len(Process().cpu_affinity())}
+</pre>"""
     elif key == "strepo":
         last_commit, changelog = "No Data", "N/A"
         if await aiopath.exists(".git"):
@@ -138,54 +133,53 @@ async def get_stats(event, key="home"):
             )
         )[0]
         msg = f"""<b>❖ REPO METRICS</b>
-┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
-├ Updated    : <code>{last_commit}</code>
-├ Current    : <code>{get_version()}</code>
-├ Latest     : <code>{official_v}</code>
-├ ChangeLog  : {changelog}
-└ Remarks    : <code>{compare_versions(get_version(), official_v)}</code>
-"""
+<pre>
+├─ {'Updated':<10}: {last_commit}
+├─ {'Current':<10}: {get_version()}
+├─ {'Latest':<10}: {official_v}
+├─ {'ChangeLog':<10}: {changelog}
+└─ {'Remarks':<10}: {compare_versions(get_version(), official_v)}
+</pre>"""
     elif key == "stpkgs":
         ver = bot_cache.get("eng_versions", {})
         msg = f"""<b>❖ PACKAGES</b>
-┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
-├ Python     : <code>{ver.get("python", "N/A")}</code>
-├ Aria2      : <code>{ver.get("aria2", "N/A")}</code>
-├ qBittorrent: <code>{ver.get("qBittorrent", "N/A")}</code>
-├ SABnzbd+   : <code>{ver.get("SABnzbd+", "N/A")}</code>
-├ Rclone     : <code>{ver.get("rclone", "N/A")}</code>
-├ yt-dlp     : <code>{ver.get("yt-dlp", "N/A")}</code>
-├ FFmpeg     : <code>{ver.get("ffmpeg", "N/A")}</code>
-├ 7z         : <code>{ver.get("7z", "N/A")}</code>
-├ Aiohttp    : <code>{ver.get("aiohttp", "N/A")}</code>
-├ PyroTgFork : <code>{ver.get("pyrotgfork", "N/A")}</code>
-├ Google API : <code>{ver.get("gapi", "N/A")}</code>
-└ Mega CMD   : <code>{ver.get("mega", "N/A")}</code>
-"""
+<pre>
+├─ {'Python':<11}: {ver.get("python", "N/A")}
+├─ {'Aria2':<11}: {ver.get("aria2", "N/A")}
+├─ {'qBittorrent':<11}: {ver.get("qBittorrent", "N/A")}
+├─ {'SABnzbd+':<11}: {ver.get("SABnzbd+", "N/A")}
+├─ {'Rclone':<11}: {ver.get("rclone", "N/A")}
+├─ {'yt-dlp':<11}: {ver.get("yt-dlp", "N/A")}
+├─ {'FFmpeg':<11}: {ver.get("ffmpeg", "N/A")}
+├─ {'7z':<11}: {ver.get("7z", "N/A")}
+├─ {'Aiohttp':<11}: {ver.get("aiohttp", "N/A")}
+├─ {'PyroTgFork':<11}: {ver.get("pyrotgfork", "N/A")}
+├─ {'Google API':<11}: {ver.get("gapi", "N/A")}
+└─ {'Mega CMD':<11}: {ver.get("mega", "N/A")}
+</pre>"""
     elif key == "tlimits":
         msg = f"""<b>❖ TASK LIMITS</b>
-┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
-├ Direct     : <code>{Config.DIRECT_LIMIT or "∞"} GB</code>
-├ Torrent    : <code>{Config.TORRENT_LIMIT or "∞"} GB</code>
-├ GDrive     : <code>{Config.GD_DL_LIMIT or "∞"} GB</code>
-├ RClone     : <code>{Config.RC_DL_LIMIT or "∞"} GB</code>
-├ Clone      : <code>{Config.CLONE_LIMIT or "∞"} GB</code>
-├ JDown      : <code>{Config.JD_LIMIT or "∞"} GB</code>
-├ NZB        : <code>{Config.NZB_LIMIT or "∞"} GB</code>
-├ YT-DLP     : <code>{Config.YTDLP_LIMIT or "∞"} GB</code>
-├ Playlist   : <code>{Config.PLAYLIST_LIMIT or "∞"}</code>
-├ Mega       : <code>{Config.MEGA_LIMIT or "∞"} GB</code>
-├ Leech      : <code>{Config.LEECH_LIMIT or "∞"} GB</code>
-├ Archive    : <code>{Config.ARCHIVE_LIMIT or "∞"} GB</code>
-├ Extract    : <code>{Config.EXTRACT_LIMIT or "∞"} GB</code>
-└ Threshold  : <code>{Config.STORAGE_LIMIT or "∞"} GB</code>
-┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
-<b>❖ GLOBAL LIMITS</b>
-├ Token Val  : <code>{get_readable_time(Config.VERIFY_TIMEOUT) if Config.VERIFY_TIMEOUT else "Disabled"}</code>
-├ User Time  : <code>{Config.USER_TIME_INTERVAL or "0"}s</code>
-├ User Tasks : <code>{Config.USER_MAX_TASKS or "∞"}</code>
-└ Bot Tasks  : <code>{Config.BOT_MAX_TASKS or "∞"}</code>
-"""
+<pre>
+├─ {'Direct':<11}: {Config.DIRECT_LIMIT or "∞"} GB
+├─ {'Torrent':<11}: {Config.TORRENT_LIMIT or "∞"} GB
+├─ {'GDrive':<11}: {Config.GD_DL_LIMIT or "∞"} GB
+├─ {'RClone':<11}: {Config.RC_DL_LIMIT or "∞"} GB
+├─ {'Clone':<11}: {Config.CLONE_LIMIT or "∞"} GB
+├─ {'JDown':<11}: {Config.JD_LIMIT or "∞"} GB
+├─ {'NZB':<11}: {Config.NZB_LIMIT or "∞"} GB
+├─ {'YT-DLP':<11}: {Config.YTDLP_LIMIT or "∞"} GB
+├─ {'Playlist':<11}: {Config.PLAYLIST_LIMIT or "∞"}
+├─ {'Mega':<11}: {Config.MEGA_LIMIT or "∞"} GB
+├─ {'Leech':<11}: {Config.LEECH_LIMIT or "∞"} GB
+├─ {'Archive':<11}: {Config.ARCHIVE_LIMIT or "∞"} GB
+├─ {'Extract':<11}: {Config.EXTRACT_LIMIT or "∞"} GB
+├─ {'Threshold':<11}: {Config.STORAGE_LIMIT or "∞"} GB
+├─ ─── GLOBAL LIMITS ─────────────
+├─ {'Token Val':<11}: {get_readable_time(Config.VERIFY_TIMEOUT) if Config.VERIFY_TIMEOUT else "Disabled"}
+├─ {'User Time':<11}: {Config.USER_TIME_INTERVAL or "0"}s
+├─ {'User Tasks':<11}: {Config.USER_MAX_TASKS or "∞"}
+└─ {'Bot Tasks':<11}: {Config.BOT_MAX_TASKS or "∞"}
+</pre>"""
 
     elif key == "systasks":
         from html import escape
@@ -211,7 +205,7 @@ async def get_stats(event, key="home"):
         except Exception:
             processes = []
 
-        msg = "<b>❖ SYSTEM TASKS</b>\n┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄\n"
+        msg = "<b>❖ SYSTEM TASKS</b>\n<pre>\n"
 
         if processes:
             for i, proc in enumerate(processes, 1):
@@ -219,19 +213,21 @@ async def get_stats(event, key="home"):
                 cpu = proc.get("cpu_percent", 0)
                 mem = proc.get("memory_percent", 0)
                 user = escape(proc.get("username", "Unknown")[:8])
-                prefix_top = "├"
-                prefix_bot = "├" if i < len(processes) else "└"
-                msg += f"{prefix_top} <b>{i:02d}</b> <code>{name}</code> (<code>{proc['pid']}</code>)\n"
-                msg += f"{prefix_bot}   CPU:<code>{cpu:4.1f}%</code> MEM:<code>{mem:4.1f}%</code> <code>{user}</code>\n"
+                prefix_top = "├─"
+                prefix_bot = "├─" if i < len(processes) else "└─"
+                msg += f"{prefix_top} {i:02d} {name} (PID:{proc['pid']})\n"
+                msg += f"{prefix_bot}    CPU:{cpu:4.1f}% MEM:{mem:4.1f}% {user}\n"
                 btns.data_button(f"✕ {i:02d}", f"stats {user_id} killproc {proc['pid']}")
-            msg += "\n<i>⚑ Click number to terminate process</i>\n"
+            msg += "\n⚑ Click number to terminate process\n"
         else:
-            msg += "└ <i>No high usage processes found</i>\n"
+            msg += "└─ No high usage processes found\n"
+            
+        msg += "</pre>"
 
-        btns.data_button("↻  Refresh", f"stats {user_id} systasks", "header")
+        btns.data_button("↻ REFRESH", f"stats {user_id} systasks", "header"
 
-    btns.data_button("↩  Back", f"stats {user_id} home", "footer")
-    btns.data_button("✕  Close", f"stats {user_id} close", "footer")
+    btns.data_button("↩ BACK", f"stats {user_id} home", "footer"
+    btns.data_button("✕ CLOSE", f"stats {user_id} close", "footer"
     return msg, btns.build_menu(8 if key == "systasks" else 2)
 
 

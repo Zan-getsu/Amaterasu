@@ -97,9 +97,9 @@ def create_cancel_buttons(is_sudo, user_id=""):
     buttons.data_button(
         "Uploading", f"canall ms {MirrorStatus.STATUS_UPLOAD} {user_id}"
     )
-    buttons.data_button("Seeding", f"canall ms {MirrorStatus.STATUS_SEED} {user_id}")
-    buttons.data_button("Spltting", f"canall ms {MirrorStatus.STATUS_SPLIT} {user_id}")
-    buttons.data_button("Cloning", f"canall ms {MirrorStatus.STATUS_CLONE} {user_id}")
+    buttons.data_button("Seeding", f"canall ms {MirrorStatus.STATUS_SEED} {user_id}"
+    buttons.data_button("Spltting", f"canall ms {MirrorStatus.STATUS_SPLIT} {user_id}"
+    buttons.data_button("Cloning", f"canall ms {MirrorStatus.STATUS_CLONE} {user_id}"
     buttons.data_button(
         "Extracting", f"canall ms {MirrorStatus.STATUS_EXTRACT} {user_id}"
     )
@@ -118,15 +118,15 @@ def create_cancel_buttons(is_sudo, user_id=""):
     buttons.data_button(
         "ConvertMedia", f"canall ms {MirrorStatus.STATUS_CONVERT} {user_id}"
     )
-    buttons.data_button("FFmpeg", f"canall ms {MirrorStatus.STATUS_FFMPEG} {user_id}")
-    buttons.data_button("Paused", f"canall ms {MirrorStatus.STATUS_PAUSED} {user_id}")
-    buttons.data_button("All", f"canall ms All {user_id}")
+    buttons.data_button("FFmpeg", f"canall ms {MirrorStatus.STATUS_FFMPEG} {user_id}"
+    buttons.data_button("Paused", f"canall ms {MirrorStatus.STATUS_PAUSED} {user_id}"
+    buttons.data_button("All", f"canall ms All {user_id}"
     if is_sudo:
         if user_id:
-            buttons.data_button("All Added Tasks", f"canall bot ms {user_id}")
+            buttons.data_button("All Added Tasks", f"canall bot ms {user_id}"
         else:
-            buttons.data_button("My Tasks", f"canall user ms {user_id}")
-    buttons.data_button("Close", f"canall close ms {user_id}")
+            buttons.data_button("My Tasks", f"canall user ms {user_id}"
+    buttons.data_button("✕ CLOSE", f"canall close ms {user_id}"
     return buttons.build_menu(2)
 
 
@@ -167,9 +167,9 @@ async def cancel_all_update(_, query):
         await edit_message(message, "Choose tasks to cancel!", button)
     elif data[1] == "ms":
         buttons = button_build.ButtonMaker()
-        buttons.data_button("Yes!", f"canall {data[2]} confirm {user_id}")
-        buttons.data_button("Back", f"canall back confirm {user_id}")
-        buttons.data_button("Close", f"canall close confirm {user_id}")
+        buttons.data_button("Yes!", f"canall {data[2]} confirm {user_id}"
+        buttons.data_button("↩ BACK", f"canall back confirm {user_id}"
+        buttons.data_button("✕ CLOSE", f"canall close confirm {user_id}"
         button = buttons.build_menu(2)
         await edit_message(
             message, f"Are you sure you want to cancel all {data[2]} tasks", button

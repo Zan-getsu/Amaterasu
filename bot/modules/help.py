@@ -62,17 +62,17 @@ async def arg_usage(_, query):
             )
     elif data[1] == "mirror":
         buttons = ButtonMaker()
-        buttons.data_button("Back", f"help back m {pg_no}")
+        buttons.data_button("↩ BACK", f"help back m {pg_no}"
         button = buttons.build_menu()
         await edit_message(message, MIRROR_HELP_DICT[data[2]], button)
     elif data[1] == "yt":
         buttons = ButtonMaker()
-        buttons.data_button("Back", f"help back y {pg_no}")
+        buttons.data_button("↩ BACK", f"help back y {pg_no}"
         button = buttons.build_menu()
         await edit_message(message, YT_HELP_DICT[data[2]], button)
     elif data[1] == "clone":
         buttons = ButtonMaker()
-        buttons.data_button("Back", f"help back c {pg_no}")
+        buttons.data_button("↩ BACK", f"help back c {pg_no}"
         button = buttons.build_menu()
         await edit_message(message, CLONE_HELP_DICT[data[2]], button)
 

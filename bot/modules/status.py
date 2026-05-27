@@ -210,7 +210,7 @@ async def status_pages(_, query):
 ┖ <b>Total Seeding Speed:</b> {get_readable_file_size(seed_speed)}/s
 """
         button = ButtonMaker()
-        button.data_button("Back", f"status {data[1]} ref")
+        button.data_button("↩ BACK", f"status {data[1]} ref"
         await edit_message(message, msg, button.build_menu())
 
     try:
