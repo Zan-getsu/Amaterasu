@@ -411,10 +411,19 @@ async def watch_media(chat_id: str, message_id: int, request: Request, filename:
         from urllib.parse import quote
         stream_url = f"/stream/{chat_id}/{message_id}/{quote(filename)}?hash={secure_hash}"
         
+        ext = filename.split('.')[-1].lower() if '.' in filename else ''
+        if ext in ['mp4', 'mkv', 'webm', 'avi', 'mov', 'flv', 'wmv', 'm4v']: file_type = 'video'
+        elif ext in ['mp3', 'ogg', 'wav', 'flac', 'm4a', 'aac']: file_type = 'audio'
+        elif ext in ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg']: file_type = 'image'
+        elif ext in ['pdf']: file_type = 'pdf'
+        elif ext in ['doc', 'docx', 'txt']: file_type = 'doc'
+        else: file_type = 'unknown'
+        
         return templates.TemplateResponse(request, "player.html", {
             "file_name": filename,
             "file_url": stream_url,
-            "file_size": readable_size
+            "file_size": readable_size,
+            "file_type": file_type
         })
     finally:
         TgClient.stream_loads[client_id] -= 1

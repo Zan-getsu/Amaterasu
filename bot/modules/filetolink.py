@@ -19,6 +19,16 @@ def get_media(message):
             return media
     return None
 
+def is_streamable(filename):
+    ext = filename.split('.')[-1].lower() if '.' in filename else ''
+    streamable_exts = [
+        'mp4', 'mkv', 'webm', 'avi', 'mov', 'flv', 'wmv', 'm4v', # Video
+        'mp3', 'ogg', 'wav', 'flac', 'm4a', 'aac', # Audio
+        'jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg', # Image
+        'pdf', 'doc', 'docx', 'txt' # Docs
+    ]
+    return ext in streamable_exts
+
 async def generate_link_markup(chat_id, message_id, filename, secure_hash=""):
     encoded_filename = quote(filename)
     hash_query = f"?hash={secure_hash}" if secure_hash else ""
@@ -27,12 +37,18 @@ async def generate_link_markup(chat_id, message_id, filename, secure_hash=""):
     stream_link = f"{Config.BASE_URL}/watch/{chat_id}/{message_id}/{encoded_filename}{hash_query}"
     download_link = f"{Config.BASE_URL}/stream/{chat_id}/{message_id}/{encoded_filename}?disposition=attachment{hash_query_amp}"
     
-    buttons = [
-        [
+    buttons = []
+    if is_streamable(filename):
+        buttons.append([
             InlineKeyboardButton("Stream Online", url=stream_link),
             InlineKeyboardButton("Direct Download", url=download_link)
-        ]
-    ]
+        ])
+    else:
+        stream_link = None
+        buttons.append([
+            InlineKeyboardButton("Direct Download", url=download_link)
+        ])
+        
     return InlineKeyboardMarkup(buttons), stream_link, download_link
 
 async def process_media_message(client, message, reply_to_msg):
@@ -80,9 +96,10 @@ async def process_media_message(client, message, reply_to_msg):
         caption = (
             f"<b>File Name:</b> <code>{filename}</code>\n"
             f"<b>File Size:</b> {readable_size}\n\n"
-            f"<b>Direct Download Link:</b>\n<code>{download_link}</code>\n\n"
-            f"<b>Stream Link:</b>\n<code>{stream_link}</code>"
+            f"<b>Direct Download Link:</b>\n<code>{download_link}</code>"
         )
+        if stream_link:
+            caption += f"\n\n<b>Stream Link:</b>\n<code>{stream_link}</code>"
         
         await edit_message(status_msg, caption, markup)
     except Exception as e:
@@ -139,9 +156,10 @@ async def link_command_handler(client, message):
                 caption = (
                     f"<b>Batch File {processed + 1}:</b> <code>{filename}</code>\n"
                     f"<b>Size:</b> {readable_size}\n\n"
-                    f"<b>Stream:</b> {stream_link}\n"
                     f"<b>Download:</b> {download_link}"
                 )
+                if stream_link:
+                    caption += f"\n<b>Stream:</b> {stream_link}"
                 await send_message(message, caption, markup)
                 processed += 1
             except Exception as e:
