@@ -299,13 +299,13 @@ async def get_readable_message(sid, is_user, page_no=1, status="All", page_step=
     
     buttons = ButtonMaker()
     if not is_user:
-        buttons.data_button("📜 TSTATS", f"status {sid} ov", position="header"
+        buttons.data_button("📜 TSTATS", f"status {sid} ov", position="header")
     if len(tasks) > STATUS_LIMIT:
         msg += f"├─ {'Tasks':<9}: {tasks_no}\n"
         msg += f"├─ {'Page':<9}: {page_no} / {pages}\n"
         msg += f"├─ {'Step':<9}: {page_step}\n"
-        buttons.data_button("❮ PREV", f"status {sid} pre", position="header"
-        buttons.data_button("NEXT ❯", f"status {sid} nex", position="header"
+        buttons.data_button("❮ PREV", f"status {sid} pre", position="header")
+        buttons.data_button("NEXT ❯", f"status {sid} nex", position="header")
         if tasks_no > 30:
             for i in [1, 2, 4, 6, 8, 10, 15]:
                 buttons.data_button(str(i), f"status {sid} ps {i}", position="footer")
@@ -313,7 +313,7 @@ async def get_readable_message(sid, is_user, page_no=1, status="All", page_step=
         for label, status_value in list(STATUSES.items()):
             if status_value != status:
                 buttons.data_button(f"▸ {label.upper()}", f"status {sid} st {status_value}")
-    buttons.data_button("↻ REFRESH", f"status {sid} ref", position="header"
+    buttons.data_button("↻ REFRESH", f"status {sid} ref", position="header")
     button = buttons.build_menu(8)
     msg += f"├─ {'CPU':<9}: {cpu_percent()}%\n"
     msg += f"├─ {'RAM':<9}: {virtual_memory().percent}%\n"

@@ -417,12 +417,12 @@ class TaskListener(TaskConfig):
                 msg += "\n┠ <b>Type</b> → Playlist"
                 msg += f"\n┖ <b>Total Videos</b> → {files}"
                 if link:
-                    buttons.url_button("🔗 View Playlist", link
+                    buttons.url_button("🔗 View Playlist", link)
                 user_message = f"{self.tag}\nYour playlist ({files} videos) has been uploaded to YouTube successfully!"
             else:
                 msg += "\n┖ <b>Type</b> → Video"
                 if link:
-                    buttons.url_button("🔗 View Video", link
+                    buttons.url_button("🔗 View Video", link)
                 user_message = (
                     f"{self.tag}\nYour video has been uploaded to YouTube successfully!"
                 )
@@ -516,7 +516,7 @@ class TaskListener(TaskConfig):
             ):
                 buttons = ButtonMaker()
                 if link and Config.SHOW_CLOUD_LINK:
-                    buttons.url_button("☁️ Cloud Link", link
+                    buttons.url_button("☁️ Cloud Link", link)
                 elif multi_links:
                     for name, url in multi_links:
                         buttons.url_button(name, url)
@@ -528,7 +528,7 @@ class TaskListener(TaskConfig):
                     share_url = f"{Config.RCLONE_SERVE_URL}/{remote}/{url_path}"
                     if mime_type == "Folder":
                         share_url += "/"
-                    buttons.url_button("🔗 Rclone Link", share_url
+                    buttons.url_button("🔗 Rclone Link", share_url)
                 if not rclone_path and dir_id:
                     INDEX_URL = ""
                     if self.private_link:
@@ -538,10 +538,10 @@ class TaskListener(TaskConfig):
                     if INDEX_URL and self.name:
                         safe_name = rutils.quote(self.name.strip("/"))
                         share_url = f"{INDEX_URL}/{safe_name}"
-                        buttons.url_button("⚡ Index Link", share_url
+                        buttons.url_button("⚡ Index Link", share_url)
                         if mime_type.startswith(("image", "video", "audio")):
                             share_urls = f"{share_url}?a=view"
-                            buttons.url_button("🌐 View Link", share_urls
+                            buttons.url_button("🌐 View Link", share_urls)
                 button = buttons.build_menu(2)
             else:
                 if not multi_link_msg:

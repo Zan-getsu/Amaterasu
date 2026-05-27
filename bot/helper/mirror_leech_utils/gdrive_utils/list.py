@@ -182,27 +182,27 @@ class GoogleDriveList(GoogleDriveHelper):
         if items_no > LIST_LIMIT:
             for i in [1, 2, 4, 6, 10, 30, 50, 100]:
                 buttons.data_button(i, f"gdq ps {i}", position="header")
-            buttons.data_button("Previous", "gdq pre", position="footer"
-            buttons.data_button("NEXT ❯", "gdq nex", position="footer"
+            buttons.data_button("Previous", "gdq pre", position="footer")
+            buttons.data_button("NEXT ❯", "gdq nex", position="footer")
         if self.list_status == "gdd":
             if self.item_type == "folders":
-                buttons.data_button("Files", "gdq itype files", position="footer"
+                buttons.data_button("Files", "gdq itype files", position="footer")
             else:
-                buttons.data_button("Folders", "gdq itype folders", position="footer"
+                buttons.data_button("Folders", "gdq itype folders", position="footer")
         if self.list_status == "gdu" or len(self.items_list) > 0:
-            buttons.data_button("Choose Current Path", "gdq cur", position="footer"
+            buttons.data_button("Choose Current Path", "gdq cur", position="footer")
         if self.list_status == "gdu":
-            buttons.data_button("Set as Default Path", "gdq def", position="footer"
+            buttons.data_button("Set as Default Path", "gdq def", position="footer")
         if (
             len(self.parents) > 1
             and len(self.drives) > 1
             or self._token_user
             and self._token_owner
         ):
-            buttons.data_button("↩ BACK", "gdq back pa", position="footer"
+            buttons.data_button("↩ BACK", "gdq back pa", position="footer")
         if len(self.parents) > 1:
-            buttons.data_button("Back To Root", "gdq root", position="footer"
-        buttons.data_button("✕ CANCEL", "gdq cancel", position="footer"
+            buttons.data_button("Back To Root", "gdq root", position="footer")
+        buttons.data_button("✕ CANCEL", "gdq cancel", position="footer")
         button = buttons.build_menu(f_cols=2)
         msg = "Choose Path:" + (
             "\nTransfer Type: <i>Download</i>"
@@ -264,8 +264,8 @@ class GoogleDriveList(GoogleDriveHelper):
             msg = "Service accounts Doesn't have access to any drive!"
             buttons = ButtonMaker()
             if self._token_user and self._token_owner:
-                buttons.data_button("↩ BACK", "gdq back dr", position="footer"
-            buttons.data_button("✕ CANCEL", "gdq cancel", position="footer"
+                buttons.data_button("↩ BACK", "gdq back dr", position="footer")
+            buttons.data_button("✕ CANCEL", "gdq cancel", position="footer")
             button = buttons.build_menu(2)
             await self._send_list_message(msg, button)
         elif self.use_sa and len(drives) == 1:
@@ -287,14 +287,14 @@ class GoogleDriveList(GoogleDriveHelper):
             self.drives.clear()
             self.parents.clear()
             if not self.use_sa:
-                buttons.data_button("root", "gdq dr 0"
+                buttons.data_button("root", "gdq dr 0")
                 self.drives = [{"id": "root", "name": "root"}]
             for index, item in enumerate(drives, start=1):
                 self.drives.append({"id": item["id"], "name": item["name"]})
                 buttons.data_button(item["name"], f"gdq dr {index}")
             if self._token_user and self._token_owner:
-                buttons.data_button("↩ BACK", "gdq back dr", position="footer"
-            buttons.data_button("✕ CANCEL", "gdq cancel", position="footer"
+                buttons.data_button("↩ BACK", "gdq back dr", position="footer")
+            buttons.data_button("✕ CANCEL", "gdq cancel", position="footer")
             button = buttons.build_menu(2)
             await self._send_list_message(msg, button)
 
@@ -317,12 +317,12 @@ class GoogleDriveList(GoogleDriveHelper):
             )
             buttons = ButtonMaker()
             if self._token_owner:
-                buttons.data_button("Owner Token", "gdq owner"
+                buttons.data_button("Owner Token", "gdq owner")
             if self._sa_owner:
-                buttons.data_button("Service Accounts", "gdq sa"
+                buttons.data_button("Service Accounts", "gdq sa")
             if self._token_user:
-                buttons.data_button("My Token", "gdq user"
-            buttons.data_button("✕ CANCEL", "gdq cancel"
+                buttons.data_button("My Token", "gdq user")
+            buttons.data_button("✕ CANCEL", "gdq cancel")
             button = buttons.build_menu(2)
             await self._send_list_message(msg, button)
         else:

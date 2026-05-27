@@ -31,7 +31,7 @@ async def hydra_search(_, message):
 
         page_url = await create_telegraph_page(query, items)
         buttons = ButtonMaker()
-        buttons.url_button("Results", page_url
+        buttons.url_button("Results", page_url)
         button = buttons.build_menu()
         await edit_message(
             message,

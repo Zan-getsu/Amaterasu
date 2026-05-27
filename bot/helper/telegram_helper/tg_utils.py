@@ -74,7 +74,7 @@ async def check_botpm(message, button=None):
         if button is None:
             button = ButtonMaker()
         _msg = "┠ <i>Bot isn't Started in PM or Inbox (Private)</i>"
-        button.url_button(
+        button.url_button()
             "Start Bot Now", f"https://t.me/{TgClient.BNAME}?start=start", "header"
         )
         return _msg, button
@@ -110,7 +110,7 @@ async def verify_token(user_id, button=None):
         if button is None:
             button = ButtonMaker()
         encrypt_url = encode_slink(f"{token}&&{user_id}")
-        button.url_button(
+        button.url_button()
             "Verify Access Token",
             await short_url(f"https://t.me/{TgClient.BNAME}?start={encrypt_url}"),
         )

@@ -65,12 +65,12 @@ async def get_stats(event, key="home"):
     btns = ButtonMaker()
     if key == "home":
         btns = ButtonMaker()
-        btns.data_button("⚙ BOT", f"stats {user_id} stbot"
-        btns.data_button("⚙ OS", f"stats {user_id} stsys"
-        btns.data_button("⚙ REPO", f"stats {user_id} strepo"
-        btns.data_button("⚙ PKGS", f"stats {user_id} stpkgs"
-        btns.data_button("⚙ LIMITS", f"stats {user_id} tlimits"
-        btns.data_button("⚙ SYS", f"stats {user_id} systasks"
+        btns.data_button("⚙ BOT", f"stats {user_id} stbot")
+        btns.data_button("⚙ OS", f"stats {user_id} stsys")
+        btns.data_button("⚙ REPO", f"stats {user_id} strepo")
+        btns.data_button("⚙ PKGS", f"stats {user_id} stpkgs")
+        btns.data_button("⚙ LIMITS", f"stats {user_id} tlimits")
+        btns.data_button("⚙ SYS", f"stats {user_id} systasks")
         msg = "<b>❖ SYSTEM DASHBOARD</b>"
     elif key == "stbot":
         total, used, free, disk = disk_usage("/")
@@ -224,10 +224,10 @@ async def get_stats(event, key="home"):
             
         msg += "</pre>"
 
-        btns.data_button("↻ REFRESH", f"stats {user_id} systasks", "header"
+        btns.data_button("↻ REFRESH", f"stats {user_id} systasks", "header")
 
-    btns.data_button("↩ BACK", f"stats {user_id} home", "footer"
-    btns.data_button("✕ CLOSE", f"stats {user_id} close", "footer"
+    btns.data_button("↩ BACK", f"stats {user_id} home", "footer")
+    btns.data_button("✕ CLOSE", f"stats {user_id} close", "footer")
     return msg, btns.build_menu(8 if key == "systasks" else 2)
 
 

@@ -32,7 +32,7 @@ async def start(_, message):
     userid = message.from_user.id
     lang = Language()
     buttons = ButtonMaker()
-    buttons.url_button(
+    buttons.url_button()
         lang.START_BUTTON1, "https://github.com/its-niloy/Amaterasu"
     )
     buttons.url_button(lang.START_BUTTON2, "https://t.me/itsniloybhowmick")
@@ -73,7 +73,7 @@ async def start(_, message):
                     message,
                     "<b>Bot Already Logged In via Password</b>\n\n<i>No Need to Accept Temp Tokens.</i>",
                 )
-            buttons.data_button(
+            buttons.data_button()
                 "Activate Access Token", f"start pass {input_token}", "header"
             )
             reply_markup = buttons.build_menu(2)
@@ -125,7 +125,7 @@ async def start_cb(_, query):
     kb = query.message.reply_markup.inline_keyboard[1:]
     kb.insert(
         0,
-        [InlineKeyboardButton("✅️ Activated ✅", callback_data="start pass activated"],
+        [InlineKeyboardButton("✅️ Activated ✅", callback_data="start pass activated"]),
     )
     await edit_reply_markup(query.message, InlineKeyboardMarkup(kb))
 
@@ -174,9 +174,9 @@ async def ping(_, message):
 async def log(_, message):
     uid = message.from_user.id
     buttons = ButtonMaker()
-    buttons.data_button("Log Disp", f"log {uid} disp"
-    buttons.data_button("Web Log", f"log {uid} web"
-    buttons.data_button("✕ CLOSE", f"log {uid} close"
+    buttons.data_button("Log Disp", f"log {uid} disp")
+    buttons.data_button("Web Log", f"log {uid} web")
+    buttons.data_button("✕ CLOSE", f"log {uid} close")
     await send_file(message, "log.txt", buttons=buttons.build_menu(2))
 
 
@@ -212,7 +212,7 @@ async def log_cb(_, query):
             text = f"<b>Showing Last {len(res)} Lines from log.txt:</b> \n\n----------<b>START LOG</b>----------\n\n<blockquote expandable>{escape(joined_res)}</blockquote>\n----------<b>END LOG</b>----------"
 
             btn = ButtonMaker()
-            btn.data_button("✕ CLOSE", f"log {user_id} close"
+            btn.data_button("✕ CLOSE", f"log {user_id} close")
             await send_message(message, text, btn.build_menu(1))
             await edit_reply_markup(message, None)
         except Exception as err:
@@ -249,7 +249,7 @@ async def log_cb(_, query):
         if resp.status_code == 200:
             await query.answer("Generating..")
             btn = ButtonMaker()
-            btn.url_button("📨 Web Paste (SB)", resp.url
+            btn.url_button("📨 Web Paste (SB)", resp.url)
             await edit_reply_markup(message, btn.build_menu(1))
         else:
             await query.answer("Web Paste Failed ! Check Logs", show_alert=True)

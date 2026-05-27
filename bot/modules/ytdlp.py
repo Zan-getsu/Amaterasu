@@ -110,11 +110,11 @@ class YtSelection:
                 b_data = f"{i}|webm"
                 self.formats[b_data] = video_format
                 buttons.data_button(f"❖ {i}p WEBM", f"ytq {b_data}")
-            buttons.data_button("❖ MP3", "ytq mp3"
-            buttons.data_button("❖ AUDIO FORMATS", "ytq audio"
-            buttons.data_button("❖ BEST VIDEOS", "ytq bv*+ba/b"
-            buttons.data_button("❖ BEST AUDIOS", "ytq ba/b"
-            buttons.data_button("✕ CANCEL", "ytq cancel", "footer"
+            buttons.data_button("❖ MP3", "ytq mp3")
+            buttons.data_button("❖ AUDIO FORMATS", "ytq audio")
+            buttons.data_button("❖ BEST VIDEOS", "ytq bv*+ba/b")
+            buttons.data_button("❖ BEST AUDIOS", "ytq ba/b")
+            buttons.data_button("✕ CANCEL", "ytq cancel", "footer")
             self._main_buttons = buttons.build_menu(3)
             msg = f"<b>❖ PLAYLIST QUALITY</b>\n┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄\n└ Timeout: <i>◷ {get_readable_time(self._timeout - (time() - self._time))}</i>"
         else:
@@ -163,11 +163,11 @@ class YtSelection:
                         buttons.data_button(buttonName, f"ytq sub {b_name} {tbr}")
                     else:
                         buttons.data_button(f"❖ {b_name}", f"ytq dict {b_name}")
-            buttons.data_button("❖ MP3", "ytq mp3"
-            buttons.data_button("❖ AUDIO FORMATS", "ytq audio"
-            buttons.data_button("❖ BEST VIDEO", "ytq bv*+ba/b"
-            buttons.data_button("❖ BEST AUDIO", "ytq ba/b"
-            buttons.data_button("✕ CANCEL", "ytq cancel", "footer"
+            buttons.data_button("❖ MP3", "ytq mp3")
+            buttons.data_button("❖ AUDIO FORMATS", "ytq audio")
+            buttons.data_button("❖ BEST VIDEO", "ytq bv*+ba/b")
+            buttons.data_button("❖ BEST AUDIO", "ytq ba/b")
+            buttons.data_button("✕ CANCEL", "ytq cancel", "footer")
             self._main_buttons = buttons.build_menu(2)
             msg = f"<b>❖ VIDEO QUALITY</b>\n┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄\n└ Timeout: <i>◷ {get_readable_time(self._timeout - (time() - self._time))}</i>"
         self._reply_to = await send_message(
@@ -191,8 +191,8 @@ class YtSelection:
         for tbr, d_data in tbr_dict.items():
             button_name = f"❖ {tbr}K ({get_readable_file_size(d_data[0])})"
             buttons.data_button(button_name, f"ytq sub {b_name} {tbr}")
-        buttons.data_button("↩ BACK", "ytq back", "footer"
-        buttons.data_button("✕ CANCEL", "ytq cancel", "footer"
+        buttons.data_button("↩ BACK", "ytq back", "footer")
+        buttons.data_button("✕ CANCEL", "ytq cancel", "footer")
         subbuttons = buttons.build_menu(2)
         msg = f"<b>❖ BITRATE : {b_name}</b>\n┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄\n└ Timeout: <i>◷ {get_readable_time(self._timeout - (time() - self._time))}</i>"
         await edit_message(self._reply_to, msg, subbuttons)
@@ -204,8 +204,8 @@ class YtSelection:
         for q in audio_qualities:
             audio_format = f"ba/b-mp3-{q}"
             buttons.data_button(f"❖ {q}K MP3", f"ytq {audio_format}")
-        buttons.data_button("↩ BACK", "ytq back"
-        buttons.data_button("✕ CANCEL", "ytq cancel"
+        buttons.data_button("↩ BACK", "ytq back")
+        buttons.data_button("✕ CANCEL", "ytq cancel")
         subbuttons = buttons.build_menu(3)
         msg = f"<b>❖ MP3 BITRATE</b>\n┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄\n└ Timeout: <i>◷ {get_readable_time(self._timeout - (time() - self._time))}</i>"
         await edit_message(self._reply_to, msg, subbuttons)
@@ -216,8 +216,8 @@ class YtSelection:
         for frmt in ["aac", "alac", "flac", "m4a", "opus", "vorbis", "wav"]:
             audio_format = f"ba/b-{frmt}-"
             buttons.data_button(f"❖ {frmt.upper()}", f"ytq aq {audio_format}")
-        buttons.data_button("↩ BACK", "ytq back", "footer"
-        buttons.data_button("✕ CANCEL", "ytq cancel", "footer"
+        buttons.data_button("↩ BACK", "ytq back", "footer")
+        buttons.data_button("✕ CANCEL", "ytq cancel", "footer")
         subbuttons = buttons.build_menu(3)
         msg = f"<b>❖ AUDIO FORMAT</b>\n┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄\n└ Timeout: <i>◷ {get_readable_time(self._timeout - (time() - self._time))}</i>"
         await edit_message(self._reply_to, msg, subbuttons)
@@ -228,8 +228,8 @@ class YtSelection:
         for qual in range(11):
             audio_format = f"{format}{qual}"
             buttons.data_button(f"❖ {qual}", f"ytq {audio_format}")
-        buttons.data_button("↩ BACK", "ytq aq back"
-        buttons.data_button("✕ CANCEL", "ytq aq cancel"
+        buttons.data_button("↩ BACK", "ytq aq back")
+        buttons.data_button("✕ CANCEL", "ytq aq cancel")
         subbuttons = buttons.build_menu(5)
         msg = f"<b>❖ AUDIO QUALITY</b>\n┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄\n├ Info   : <code>0 (Best) - 10 (Worst)</code>\n└ Timeout: <i>◷ {get_readable_time(self._timeout - (time() - self._time))}</i>"
         await edit_message(self._reply_to, msg, subbuttons)
