@@ -223,6 +223,12 @@ async def get_document_type(path):
     return is_video, is_audio, is_image
 
 
+def get_encode_output_path(input_path, codec):
+    base, ext = ospath.splitext(input_path)
+    suffix = "_encoded"
+    return f"{base}{suffix}{ext}"
+
+
 async def get_streams(file):
     """
     Gets media stream information using ffprobe.
@@ -602,6 +608,89 @@ class FFMpeg:
             for op in outputs:
                 if await aiopath.exists(op):
                     await remove(op)
+            return False
+
+    async def encode_video(self, input_file, profile, metadata=None):
+        self.clear()
+        self._total_time = (await get_media_info(input_file))[0]
+        v_codec = profile.get("video_codec", "libsvtav1")
+        a_codec = profile.get("audio_codec", "libopus")
+        v_params = profile.get("video_params", {})
+        a_params = profile.get("audio_params", {})
+        sub_mode = profile.get("subtitle_mode", "copy")
+
+        output_file = get_encode_output_path(input_file, v_codec)
+
+        cmd = [
+            "taskset", "-c", f"{cores}",
+            BinConfig.FFMPEG_NAME,
+            "-hide_banner", "-loglevel", "error", "-progress", "pipe:1",
+            "-i", input_file,
+            "-map", "0:v:0?",
+            "-map", "0:a?",
+            "-c:v", v_codec,
+        ]
+
+        if sub_mode == "copy":
+            cmd.extend(["-map", "0:s?", "-c:s", "copy"])
+
+        crf = v_params.get("crf", 34)
+        preset = v_params.get("preset", 7)
+        pix_fmt = v_params.get("pix_fmt", "yuv420p10le")
+
+        if v_codec == "libsvtav1":
+            svt_params = f"preset={preset}:crf={crf}"
+            if v_params.get("profile"):
+                svt_params += f":profile={v_params['profile']}"
+            if v_params.get("level"):
+                svt_params += f":level={v_params['level']}"
+            if v_params.get("extra_params"):
+                svt_params += f":{v_params['extra_params']}"
+            cmd.extend(["-pix_fmt", pix_fmt, "-svtav1-params", svt_params])
+        elif v_codec == "libx265":
+            x265_params = f"crf={crf}:preset={preset}"
+            cmd.extend(["-pix_fmt", pix_fmt, "-x265-params", x265_params])
+        elif v_codec == "libx264":
+            cmd.extend(["-pix_fmt", pix_fmt, "-crf", str(crf), "-preset", str(preset)])
+
+        cmd.extend(["-c:a", a_codec])
+        if a_codec != "copy":
+            if a_params.get("bitrate"):
+                cmd.extend(["-b:a", a_params["bitrate"]])
+            if a_params.get("channels"):
+                cmd.extend(["-ac", str(a_params["channels"])])
+            if a_params.get("vbr"):
+                cmd.extend(["-vbr", "on"])
+
+        if metadata:
+            for k, v in metadata.items():
+                cmd.extend(["-metadata", f"{k}={v}"])
+
+        cmd.extend(["-threads", f"{threads}", output_file])
+
+        if self._listener.is_cancelled:
+            return False
+
+        self._listener.subproc = await create_subprocess_exec(*cmd, stdout=PIPE, stderr=PIPE)
+        await self._ffmpeg_progress()
+        _, stderr = await self._listener.subproc.communicate()
+        code = self._listener.subproc.returncode
+
+        if self._listener.is_cancelled:
+            return False
+        if code == 0:
+            return output_file
+        elif code == -9:
+            self._listener.is_cancelled = True
+            return False
+        else:
+            try:
+                stderr = stderr.decode().strip()
+            except Exception:
+                stderr = "Unable to decode the error!"
+            LOGGER.error(f"{stderr}. Error encoding video. Path: {input_file}")
+            if await aiopath.exists(output_file):
+                await remove(output_file)
             return False
 
     async def convert_video(self, video_file, ext, retry=False):

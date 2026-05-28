@@ -123,6 +123,8 @@ class Config:
     YT_TAGS = ["telegram", "bot", "youtube"]
     YT_CATEGORY_ID = 22
     YT_PRIVACY_STATUS = "unlisted"
+    DEFAULT_ENCODE_PRESET = {}
+    DISABLE_ENCODE = False
 
     MULTI_TOKENS = {}
 

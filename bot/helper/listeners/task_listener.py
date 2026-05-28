@@ -1,4 +1,4 @@
-from asyncio import gather, sleep
+from asyncio import gather, sleep, Event, wait_for
 from html import escape
 from time import time
 from mimetypes import guess_type
@@ -7,6 +7,8 @@ from os import path as ospath
 
 from aiofiles.os import listdir, remove, path as aiopath
 from requests import utils as rutils
+from pyrogram.handlers import MessageHandler, CallbackQueryHandler
+from pyrogram.filters import text, regex, user
 
 from ... import (
     intervals,
@@ -128,6 +130,94 @@ class TaskListener(TaskConfig):
                 self.message.chat.id, self.message.link, self.tag
             )
 
+    async def _metadata_handler_cb(self, _, message):
+        text_msg = message.text.strip()
+        if text_msg.lower() != "skip":
+            try:
+                from ...modules.metadata import MetadataProcessor
+                processor = MetadataProcessor()
+                self.encode_metadata = processor.parse_string(text_msg)
+            except Exception as e:
+                LOGGER.error(f"Error parsing metadata: {e}")
+        self.encode_event.set()
+
+    async def _profile_callback_cb(self, _, query):
+        data = query.data.split()
+        await query.answer()
+        if data[2] == "cancel":
+            self.encode_profile = None
+            self.is_cancelled = True
+            self.encode_event.set()
+        elif data[2] == "sel":
+            pid = data[3]
+            if pid == "default":
+                self.encode_profile = Config.DEFAULT_ENCODE_PRESET
+            else:
+                self.encode_profile = self._temp_profiles.get(pid)
+            self.encode_event.set()
+
+    async def _prompt_encode_metadata(self):
+        msg_text = "<b>Send metadata</b> as <code>key=value|key2=value2</code> or send <code>skip</code> to skip.\nTimeout: 60s"
+        reply_to = await send_message(self.message, msg_text)
+        self.encode_event = Event()
+        self.encode_metadata = {}
+        
+        handler = self.client.add_handler(
+            MessageHandler(self._metadata_handler_cb, filters=text & user(self.user_id)),
+            group=-1,
+        )
+        try:
+            await wait_for(self.encode_event.wait(), timeout=60)
+        except Exception:
+            pass
+        finally:
+            self.client.remove_handler(*handler)
+            await delete_message(reply_to)
+
+    async def _prompt_encode_profile(self):
+        profiles = await database.get_encode_profiles(self.user_id)
+        self._temp_profiles = profiles
+        
+        buttons = ButtonMaker()
+        buttons.data_button("Default (SVT-AV1)", f"enc {self.user_id} sel default")
+        
+        for pid, pdata in profiles.items():
+            if pid == "_id":
+                continue
+            name = pdata.get("name", pid)
+            if pdata.get("is_default"):
+                name = f"⭐ {name}"
+            buttons.data_button(name, f"enc {self.user_id} sel {pid}")
+            
+        buttons.data_button("✕ Cancel", f"enc {self.user_id} cancel")
+        reply_to = await send_message(self.message, "<b>Select Encoding Profile</b>\nTimeout: 60s", buttons.build_menu(2))
+        
+        self.encode_event = Event()
+        self.encode_profile = None
+        
+        handler = self.client.add_handler(
+            CallbackQueryHandler(self._profile_callback_cb, filters=regex(f"^enc {self.user_id}")),
+            group=-1,
+        )
+        try:
+            await wait_for(self.encode_event.wait(), timeout=60)
+        except Exception:
+            self.encode_profile = Config.DEFAULT_ENCODE_PRESET
+        finally:
+            self.client.remove_handler(*handler)
+            await delete_message(reply_to)
+
+    async def _handle_encode_pipeline(self, up_path, gid):
+        await self._prompt_encode_metadata()
+        if self.is_cancelled:
+            return None
+            
+        await self._prompt_encode_profile()
+        if self.is_cancelled or not self.encode_profile:
+            return None
+            
+        return await self.proceed_encode(up_path, gid)
+
     async def on_download_complete(self):
         await sleep(2)
         if self.is_cancelled:
@@ -242,6 +332,17 @@ class TaskListener(TaskConfig):
             self.name = up_path.replace(f"{up_dir}/", "").split("/", 1)[0]
             self.size = await get_path_size(up_dir)
             self.clear()
+
+        if self.is_encode:
+            encode_result = await self._handle_encode_pipeline(up_path, gid)
+            if self.is_cancelled:
+                return
+            if encode_result:
+                up_path = encode_result
+                self.is_file = await aiopath.isfile(up_path)
+                self.name = up_path.replace(f"{up_dir}/", "").split("/", 1)[0]
+                self.size = await get_path_size(up_dir)
+                self.clear()
 
         if (
             (hasattr(self, "metadata_dict") and self.metadata_dict)

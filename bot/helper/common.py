@@ -138,6 +138,9 @@ class TaskConfig:
         self.user_trans = False
         self.progress = True
         self.ffmpeg_cmds = None
+        self.is_encode = False
+        self.encode_profile = None
+        self.encode_metadata = {}
         self.metadata_title = None
         self.chat_thread_id = None
         self.subproc = None
@@ -1047,6 +1050,45 @@ class TaskConfig:
                         res = await ffmpeg.convert_video(f_path, vext)
                     else:
                         res = await ffmpeg.convert_audio(f_path, aext)
+                    if res:
+                        try:
+                            await remove(f_path)
+                        except Exception:
+                            self.is_cancelled = True
+                            return False
+                        if self.is_file:
+                            return res
+        return dl_path
+
+    async def proceed_encode(self, dl_path, gid):
+        self.files_to_proceed = {}
+        if self.is_file and (await get_document_type(dl_path))[0]:
+            self.files_to_proceed[dl_path] = ospath.basename(dl_path)
+        else:
+            for dirpath, _, files in await sync_to_async(walk, dl_path, topdown=False):
+                for file_ in files:
+                    f_path = ospath.join(dirpath, file_)
+                    if (await get_document_type(f_path))[0]:
+                        self.files_to_proceed[f_path] = file_
+
+        if self.files_to_proceed:
+            ffmpeg = FFMpeg(self)
+            async with task_dict_lock:
+                task_dict[self.mid] = FFmpegStatus(self, ffmpeg, gid, "Encode")
+            self.progress = False
+            async with cpu_eater_lock:
+                self.progress = True
+                for f_path, file_ in self.files_to_proceed.items():
+                    self.proceed_count += 1
+                    LOGGER.info(f"Encoding: {f_path}")
+                    if self.is_file:
+                        self.subsize = self.size
+                    else:
+                        self.subsize = await get_path_size(f_path)
+                        self.subname = file_
+                        
+                    res = await ffmpeg.encode_video(f_path, self.encode_profile, self.encode_metadata)
+                    
                     if res:
                         try:
                             await remove(f_path)

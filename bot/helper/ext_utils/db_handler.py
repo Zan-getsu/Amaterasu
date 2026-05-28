@@ -306,5 +306,51 @@ class DbManager:
             return
         await self.db[name][TgClient.ID].drop()
 
+    async def get_encode_profiles(self, user_id):
+        if self._return:
+            return {}
+        profiles = await self.db.encode_profiles.find_one({"_id": f"{TgClient.ID}_{user_id}"})
+        return profiles or {}
+
+    async def save_encode_profile(self, user_id, profile_id, profile_data):
+        if self._return:
+            return
+        await self.db.encode_profiles.update_one(
+            {"_id": f"{TgClient.ID}_{user_id}"},
+            {"$set": {profile_id: profile_data}},
+            upsert=True,
+        )
+
+    async def delete_encode_profile(self, user_id, profile_id):
+        if self._return:
+            return
+        await self.db.encode_profiles.update_one(
+            {"_id": f"{TgClient.ID}_{user_id}"},
+            {"$unset": {profile_id: ""}},
+        )
+
+    async def set_default_encode_profile(self, user_id, profile_id):
+        if self._return:
+            return
+        profiles = await self.get_encode_profiles(user_id)
+        if not profiles:
+            return
+        update_dict = {}
+        for pid, pdata in profiles.items():
+            if pid == "_id":
+                continue
+            if pdata.get("is_default"):
+                update_dict[f"{pid}.is_default"] = False
+        if update_dict:
+            await self.db.encode_profiles.update_one(
+                {"_id": f"{TgClient.ID}_{user_id}"},
+                {"$set": update_dict}
+            )
+        await self.db.encode_profiles.update_one(
+            {"_id": f"{TgClient.ID}_{user_id}"},
+            {"$set": {f"{profile_id}.is_default": True}},
+            upsert=True
+        )
+
 
 database = DbManager()

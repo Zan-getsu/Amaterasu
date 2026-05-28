@@ -123,6 +123,7 @@ async def status_pages(_, query):
             "SamVid": 0,
             "ConvertMedia": 0,
             "FFmpeg": 0,
+            "Encode": 0,
         }
         dl_speed = 0
         up_speed = 0
@@ -192,6 +193,8 @@ async def status_pages(_, query):
                     tasks["ConvertMedia"] += 1
                 case MirrorStatus.STATUS_FFMPEG:
                     tasks["FFmpeg"] += 1
+                case MirrorStatus.STATUS_ENCODE:
+                    tasks["Encode"] += 1
                 case _:
                     tasks["Download"] += 1
 
@@ -203,7 +206,8 @@ async def status_pages(_, query):
 ┠ <b>QueueDL:</b> {tasks["QueueDl"]} | <b>QueueUP:</b> {tasks["QueueUp"]}
 ┠ <b>Clone:</b> {tasks["Clone"]} | <b>CheckUp:</b> {tasks["CheckUp"]}
 ┠ <b>Paused:</b> {tasks["Pause"]} | <b>SamVideo:</b> {tasks["SamVid"]}
-┞ <b>Convert:</b> {tasks["ConvertMedia"]} | <b>FFmpeg:</b> {tasks["FFmpeg"]}
+┠ <b>Convert:</b> {tasks["ConvertMedia"]} | <b>FFmpeg:</b> {tasks["FFmpeg"]}
+┞ <b>Encode:</b> {tasks["Encode"]}
 │
 ┟ <b>Total Download Speed:</b> {get_readable_file_size(dl_speed)}/s
 ┠ <b>Total Upload Speed:</b> {get_readable_file_size(up_speed)}/s

@@ -43,6 +43,8 @@ class FFmpegStatus:
             return MirrorStatus.STATUS_SPLIT
         elif self._cstatus == "Sample Video":
             return MirrorStatus.STATUS_SAMVID
+        elif self._cstatus == "Encode":
+            return MirrorStatus.STATUS_ENCODE
         else:
             return MirrorStatus.STATUS_FFMPEG
 

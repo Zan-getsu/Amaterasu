@@ -132,6 +132,7 @@ class Mirror(TaskListener):
             "-cv": "",
             "-ns": "",
             "-tl": "",
+            "-en": False,
             "-ff": set(),
         }
 
@@ -157,6 +158,10 @@ class Mirror(TaskListener):
 
         if Config.DISABLE_FF_MODE and args.get("-ff"):
             await send_message(self.message, "FFmpeg commands are currently disabled.")
+            return
+
+        if Config.DISABLE_ENCODE and args.get("-en"):
+            await send_message(self.message, "Encoding is currently disabled.")
             return
 
         self.select = args["-s"]
@@ -186,6 +191,7 @@ class Mirror(TaskListener):
         self.bot_trans = args["-bt"]
         self.user_trans = args["-ut"]
         self.is_yt = args["-yt"]
+        self.is_encode = args["-en"]
         self.metadata_dict = self.default_metadata_dict.copy()
         self.audio_metadata_dict = self.audio_metadata_dict.copy()
         self.video_metadata_dict = self.video_metadata_dict.copy()

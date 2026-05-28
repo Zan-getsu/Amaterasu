@@ -181,6 +181,18 @@ qual = """<b>Quality Buttons</b>: -s
 In case default quality added from yt-dlp options using format option and you need to select quality for specific link or links with multi links feature.
 /cmd link -s"""
 
+ymetadata = """<b>Metadata</b>: -meta
+/cmd link -meta {"title": "Title", "author": "Author", "video": {"title": "Title", "language": "eng"}, "audio": {"title": "Title", "language": "eng"}, "subtitle": {"title": "Title", "language": "eng"}}
+You can also set it using string. Timeout: 60 sec
+/cmd link -meta title=Title|author=Author|video:title=Title|video:language=eng|audio:title=Title|audio:language=eng|subtitle:title=Title|subtitle:language=eng
+To remove specific meta data from default settings pass key=None
+If title=None, all meta data will be removed
+"""
+
+encode_msg = """<b>Encode Video</b>: -en
+/cmd link -en
+This will prompt you to provide metadata (optional) and select an encoding profile before the video is uploaded."""
+
 yt_opt = """<b>Options</b>: -opt
 
 /cmd link -opt {"format": "bv*+mergeall[vcodec=none]", "nocheckcertificate": True, "playliststart": 10, "fragment_retries": float("inf"), "matchtitle": "S13", "writesubtitles": True, "live_from_start": True, "postprocessor_args": {"ffmpeg": ["-threads", "4"]}, "wait_for_video": (5, 100), "download_ranges": [{"start_time": 0, "end_time": 10}]}
@@ -307,6 +319,7 @@ YT_HELP_DICT = {
     "Leech-Type": leech_as,
     "FFmpeg-Cmds": ffmpeg_cmds,
     "Metadata": metadata,
+    "Encode": encode_msg,
 }
 
 MIRROR_HELP_DICT = {
@@ -338,6 +351,7 @@ MIRROR_HELP_DICT = {
     "Leech-Type": leech_as,
     "FFmpeg-Cmds": ffmpeg_cmds,
     "Metadata": metadata,
+    "Encode": encode_msg,
 }
 
 CLONE_HELP_DICT = {

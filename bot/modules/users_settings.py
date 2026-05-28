@@ -316,6 +316,7 @@ async def get_user_settings(from_user, stype="main"):
         buttons.data_button("⚙ Leech Settings", f"userset {user_id} leech")
         buttons.data_button("⚙ Uphoster Settings", f"userset {user_id} uphoster")
         buttons.data_button("⚙ FF Media Settings", f"userset {user_id} ffset")
+        buttons.data_button("🎬 Encode Profiles", f"userset {user_id} encode")
         buttons.data_button(
             "Mics Settings", f"userset {user_id} advanced", position="l_body"
         )
@@ -928,6 +929,28 @@ async def get_user_settings(from_user, stype="main"):
 ├ Category ID: <code>{escape(str(yt_cat_id_val))}</code>
 └ Privacy    : <code>{escape(str(yt_privacy_val))}</code>"""
 
+    elif stype == "encode":
+        profiles = await database.get_encode_profiles(user_id)
+        
+        buttons.data_button("➕ Create Profile", f"userset {user_id} enc_create", position="header")
+        
+        text = "<b>❖ ENCODE PROFILES</b>\n┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄\n"
+        if not profiles or len(profiles) <= 1:
+            text += "<i>No custom profiles found.</i>\n"
+        else:
+            text += "Select a profile to edit/delete/set default.\n"
+            for pid, pdata in profiles.items():
+                if pid == "_id":
+                    continue
+                name = pdata.get("name", pid)
+                if pdata.get("is_default"):
+                    name = f"⭐ {name}"
+                buttons.data_button(name, f"userset {user_id} enc_view {pid}")
+                
+        buttons.data_button("↩ BACK", f"userset {user_id} back main", "footer")
+        buttons.data_button("✕ CLOSE", f"userset {user_id} close", "footer")
+        btns = buttons.build_menu(2)
+
     return text, btns
 
 
@@ -1239,6 +1262,24 @@ async def event_handler(client, query, pfunc, rfunc, photo=False, document=False
     client.remove_handler(*handler)
 
 
+async def _handle_enc_create(client, message, rfunc):
+    user_id = message.from_user.id
+    handler_dict[user_id] = False
+    try:
+        import json
+        import uuid
+        pdata = json.loads(message.text.strip())
+        if "name" not in pdata:
+            raise Exception("Profile must have a 'name' field")
+        pid = uuid.uuid4().hex[:8]
+        await database.save_encode_profile(user_id, pid, pdata)
+        await send_message(message, f"Profile '{pdata['name']}' saved!")
+    except Exception as e:
+        await send_message(message, f"Error: {str(e)}")
+    await delete_message(message)
+    await rfunc()
+
+
 @new_task
 async def edit_user_settings(client, query):
     from_user = query.from_user
@@ -1270,12 +1311,50 @@ async def edit_user_settings(client, query):
         "advanced",
         "gdrive",
         "rclone",
+        "encode",
     ]:
         await query.answer()
         await update_user_settings(query, data[2])
     elif data[2] == "yttools":
         await query.answer()
         await update_user_settings(query, data[2])
+    elif data[2] == "enc_view":
+        await query.answer()
+        pid = data[3]
+        profiles = await database.get_encode_profiles(user_id)
+        pdata = profiles.get(pid)
+        if not pdata:
+            return await update_user_settings(query, "encode")
+            
+        buttons = ButtonMaker()
+        buttons.data_button("⭐ Set Default", f"userset {user_id} enc_def {pid}")
+        buttons.data_button("✕ Delete", f"userset {user_id} enc_del {pid}")
+        buttons.data_button("↩ BACK", f"userset {user_id} back encode", "footer")
+        buttons.data_button("✕ CLOSE", f"userset {user_id} close", "footer")
+        
+        text = f"<b>❖ ENCODE PROFILE: {pdata.get('name', pid)}</b>\n┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄\n"
+        text += f"<b>Video Codec:</b> {pdata.get('video_codec', 'libsvtav1')}\n"
+        text += f"<b>Audio Codec:</b> {pdata.get('audio_codec', 'libopus')}\n"
+        text += f"<b>Video Params:</b> {pdata.get('video_params', {})}\n"
+        text += f"<b>Audio Params:</b> {pdata.get('audio_params', {})}\n"
+        
+        await edit_message(message, text, buttons.build_menu(2))
+    elif data[2] == "enc_def":
+        await query.answer("Profile set as default!", show_alert=True)
+        await database.set_default_encode_profile(user_id, data[3])
+        await update_user_settings(query, "encode")
+    elif data[2] == "enc_del":
+        await query.answer("Profile deleted!", show_alert=True)
+        await database.delete_encode_profile(user_id, data[3])
+        await update_user_settings(query, "encode")
+    elif data[2] == "enc_create":
+        await query.answer()
+        buttons = ButtonMaker()
+        buttons.data_button("✕ Stop", f"userset {user_id} back encode")
+        await edit_message(message, "Send a JSON string for the new profile.\nExample:\n<code>{\"name\": \"x265 1080p\", \"video_codec\": \"libx265\", \"video_params\": {\"crf\": 24, \"preset\": 5}}</code>\nTimeout: 60s", buttons.build_menu(1))
+        rfunc = partial(update_user_settings, query, "encode")
+        pfunc = partial(_handle_enc_create, rfunc=rfunc)
+        await event_handler(client, query, pfunc, rfunc)
     elif data[2] == "uphoster_destinations":
         await query.answer()
         user_dict = user_data.get(user_id, {})

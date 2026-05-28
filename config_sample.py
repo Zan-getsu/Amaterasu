@@ -209,3 +209,26 @@ RSS_SIZE_LIMIT = 0
 SEARCH_API_LINK = ""
 SEARCH_LIMIT = 0
 SEARCH_PLUGINS = []
+
+# ==========================================
+# 17. ENCODE SETTINGS
+# ==========================================
+DEFAULT_ENCODE_PRESET = {
+    "video_codec": "libsvtav1",
+    "audio_codec": "libopus",
+    "subtitle_mode": "copy",
+    "video_params": {
+        "crf": 34,
+        "preset": 7,
+        "pix_fmt": "yuv420p10le",
+        "profile": 1,
+        "level": "5.1",
+        "bf": 5,
+        "extra_params": "tune=0:film-grain=0",
+        "color_primaries": "bt709",
+        "color_trc": "bt709",
+        "colorspace": "bt709",
+    },
+    "audio_params": {"bitrate": "128k", "channels": 2, "vbr": True},
+}
+DISABLE_ENCODE = False
