@@ -190,7 +190,5 @@ async def private_media_handler(client, message):
         raise ContinuePropagation
     if not get_media(message):
         raise ContinuePropagation
-    from bot.modules.rename import is_rename_mode
-    if message.from_user and is_rename_mode(message.from_user.id):
-        raise ContinuePropagation
+
     await process_media_message(client, message, message)

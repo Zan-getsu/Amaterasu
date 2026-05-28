@@ -84,39 +84,7 @@ async def prompt_rename_choice(client, message, media_msg):
 
 
 
-async def prompt_leech_rename(client, message) -> str:
-    prompt = await send_message(
-        message,
-        "<b>❖ LEECH RENAME ACTIVE</b>\n"
-        "┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄\n"
-        "└ Info : Reply with the new filename (with extension) or click the button below.",
-        reply_to_message_id=message.id
-    )
-    
-    await edit_message(
-        prompt,
-        "<b>❖ LEECH RENAME ACTIVE</b>\n"
-        "┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄\n"
-        "└ Info : Reply with the new filename (with extension) or click the button below.",
-        InlineKeyboardMarkup([
-            [InlineKeyboardButton("❖ USE ORIGINAL NAME", callback_data=f"leech_orig_{prompt.id}")]
-        ])
-    )
-    
-    reply_msg = await wait_for_reply(prompt.id, timeout=60)
-    
-    if not reply_msg or not getattr(reply_msg, "text", None):
-        await delete_message(prompt)
-        return "skip"
-        
-    if isinstance(reply_msg, str) and reply_msg == "skip":
-        await delete_message(prompt)
-        return "skip"
-        
-    new_name = reply_msg.text.strip()
-    await delete_message(reply_msg)
-    await delete_message(prompt)
-    return new_name
+
 
 async def rename_callback_handler(client, query):
     data = query.data

@@ -85,15 +85,7 @@ class Mirror(TaskListener):
         self.is_uphoster = is_uphoster
 
     async def new_event(self):
-        if self.is_leech and self.message.from_user:
-            from .rename import is_rename_mode, prompt_leech_rename
-            user_id = self.message.from_user.id
-            if is_rename_mode(user_id):
-                new_name = await prompt_leech_rename(self.client, self.message)
-                if new_name and new_name != "skip" and self.message.text:
-                    lines = self.message.text.split("\n")
-                    lines[0] = f"{lines[0]} -n {new_name}"
-                    self.message.text = "\n".join(lines)
+
 
         text = self.message.text.split("\n")
         input_list = text[0].split(" ")
