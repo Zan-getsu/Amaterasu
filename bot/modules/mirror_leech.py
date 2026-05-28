@@ -133,6 +133,7 @@ class Mirror(TaskListener):
             "-ns": "",
             "-tl": "",
             "-en": False,
+            "-vs": False,
             "-ff": set(),
         }
 
@@ -198,6 +199,7 @@ class Mirror(TaskListener):
         self.user_trans = args["-ut"]
         self.is_yt = args["-yt"]
         self.is_encode = args["-en"]
+        self.is_vs = args["-vs"]
         self.metadata_dict = self.default_metadata_dict.copy()
         self.audio_metadata_dict = self.audio_metadata_dict.copy()
         self.video_metadata_dict = self.video_metadata_dict.copy()

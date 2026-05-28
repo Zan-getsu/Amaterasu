@@ -139,6 +139,7 @@ class TaskConfig:
         self.progress = True
         self.ffmpeg_cmds = None
         self.is_encode = False
+        self.is_vs = False
         self.encode_profile = None
         self.encode_metadata = {}
         self.metadata_title = None

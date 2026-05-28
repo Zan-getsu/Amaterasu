@@ -39,6 +39,8 @@ RUN apt-get update && apt-get upgrade -y && \
         sabnzbdplus \
         procps \
         mediainfo \
+        vapoursynth \
+        python3-vapoursynth \
         default-jre-headless \
     # Install MEGAcmd
     && mkdir -p /etc/apt/keyrings \
