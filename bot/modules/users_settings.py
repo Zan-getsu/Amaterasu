@@ -316,7 +316,11 @@ async def get_user_settings(from_user, stype="main"):
         buttons.data_button("⚙ Leech Settings", f"userset {user_id} leech")
         buttons.data_button("⚙ Uphoster Settings", f"userset {user_id} uphoster")
         buttons.data_button("⚙ FF Media Settings", f"userset {user_id} ffset")
-        buttons.data_button("🎬 Encode Profiles", f"userset {user_id} encode")
+        
+        is_sudo = user_id == Config.OWNER_ID or user_id in sudo_users or user_dict.get("is_sudo")
+        if is_sudo:
+            buttons.data_button("🎬 Encode Profiles", f"userset {user_id} encode")
+            
         buttons.data_button(
             "Mics Settings", f"userset {user_id} advanced", position="l_body"
         )
