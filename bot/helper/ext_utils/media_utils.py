@@ -634,8 +634,8 @@ class FFMpeg:
         if sub_mode == "copy":
             cmd.extend(["-map", "0:s?", "-c:s", "copy"])
 
-        crf = v_params.get("crf", 34)
-        preset = v_params.get("preset", 7)
+        crf = v_params.get("crf", 32)
+        preset = v_params.get("preset", 6)
         pix_fmt = v_params.get("pix_fmt", "yuv420p10le")
 
         if v_codec == "libsvtav1":
