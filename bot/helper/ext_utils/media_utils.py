@@ -688,19 +688,23 @@ class FFMpeg:
             return False
 
         if getattr(self, "is_vs", False) or is_vs:
-            from bot.helper.ext_utils.vapoursynth_utils import run_vspipe_ffmpeg
-            success, err = await run_vspipe_ffmpeg(input_file, cmd)
-            if success:
-                return output_file
-            else:
-                from aiofiles.os import remove
-                from aiofiles.os import path as aiopath
-                LOGGER.error(f"VapourSynth Error: {err}")
-                if await aiopath.exists(output_file):
-                    await remove(output_file)
-                return False
-
-        self._listener.subproc = await create_subprocess_exec(*cmd, stdout=PIPE, stderr=PIPE)
+            from bot.helper.ext_utils.vapoursynth_utils import generate_vpy_script
+            vpy_script = f"{input_file}.vpy"
+            generate_vpy_script(input_file, vpy_script)
+            
+            vspipe_cmd = ["vspipe", "--y4m", vpy_script, "-"]
+            LOGGER.info(f"VSPipe Command: {' '.join(vspipe_cmd)}")
+            
+            self.vspipe_proc = await create_subprocess_exec(
+                *vspipe_cmd, stdout=PIPE, stderr=PIPE
+            )
+            self._listener.subproc = await create_subprocess_exec(
+                *cmd, stdin=self.vspipe_proc.stdout, stdout=PIPE, stderr=PIPE
+            )
+            if self.vspipe_proc.stdout:
+                self.vspipe_proc.stdout.close()
+        else:
+            self._listener.subproc = await create_subprocess_exec(*cmd, stdout=PIPE, stderr=PIPE)
         await self._ffmpeg_progress()
         _, stderr = await self._listener.subproc.communicate()
         code = self._listener.subproc.returncode
@@ -715,9 +719,12 @@ class FFMpeg:
         else:
             try:
                 stderr = stderr.decode().strip()
+                if getattr(self, "vspipe_proc", None) and self.vspipe_proc.returncode != 0:
+                    vs_err = (await self.vspipe_proc.stderr.read()).decode().strip()
+                    stderr += f"\n[VSPipe Error]: {vs_err}"
             except Exception:
                 stderr = "Unable to decode the error!"
-            LOGGER.error(f"{stderr}. Error encoding video. Path: {input_file}")
+            LOGGER.error(f"{stderr}\nError encoding video. Path: {input_file}")
             if await aiopath.exists(output_file):
                 await remove(output_file)
             return False

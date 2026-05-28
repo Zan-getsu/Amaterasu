@@ -62,4 +62,9 @@ class FFmpegStatus:
                 self.listener.subproc.kill()
             except Exception:
                 pass
+        if hasattr(self._obj, "vspipe_proc") and self._obj.vspipe_proc.returncode is None:
+            try:
+                self._obj.vspipe_proc.kill()
+            except Exception:
+                pass
         await self.listener.on_upload_error(f"{self._cstatus} stopped by user!")
