@@ -621,46 +621,48 @@ class FFMpeg:
 
         output_file = get_encode_output_path(input_file, v_codec)
 
-        cmd = [
-            "taskset", "-c", f"{cores}",
-            BinConfig.FFMPEG_NAME,
-            "-hide_banner", "-loglevel", "error", "-progress", "pipe:1",
-            "-i", input_file,
-            "-map", "0:v:0?",
-            "-map", "0:a?",
-            "-c:v", v_codec,
-        ]
-
-        if sub_mode == "copy":
-            cmd.extend(["-map", "0:s?", "-c:s", "copy"])
+        is_vs = (v_codec == "libsvtav1")
+        
+        if is_vs:
+            cmd = [
+                "taskset", "-c", f"{cores}",
+                BinConfig.FFMPEG_NAME,
+                "-y", "-hide_banner", "-loglevel", "error", "-progress", "pipe:1",
+                "-i", "-",               # Input 0: Video from pipe
+                "-i", input_file,        # Input 1: Audio/Subtitles from original file
+                "-map", "0:v:0?",
+                "-map", "1:a?",
+                "-c:v", v_codec,
+            ]
+            if sub_mode == "copy":
+                cmd.extend(["-map", "1:s?", "-c:s", "copy"])
+        else:
+            cmd = [
+                "taskset", "-c", f"{cores}",
+                BinConfig.FFMPEG_NAME,
+                "-hide_banner", "-loglevel", "error", "-progress", "pipe:1",
+                "-i", input_file,
+                "-map", "0:v:0?",
+                "-map", "0:a?",
+                "-c:v", v_codec,
+            ]
+            if sub_mode == "copy":
+                cmd.extend(["-map", "0:s?", "-c:s", "copy"])
 
         crf = v_params.get("crf", 32)
         preset = v_params.get("preset", 6)
         pix_fmt = v_params.get("pix_fmt", "yuv420p10le")
 
-        svt_params = f"preset={preset}:crf={crf}"
-        if v_params.get("profile") is not None:
-            svt_params += f":profile={v_params['profile']}"
-        if v_params.get("level"):
-            lvl = str(v_params['level']).replace(".", "")
-            svt_params += f":level={lvl}"
-        if v_params.get("extra_params"):
-            svt_params += f":{v_params['extra_params']}"
-
         if v_codec == "libsvtav1":
-            from bot.helper.ext_utils.vapoursynth_utils import run_vspipe_ffmpeg
-            audio_bitrate = a_params.get("bitrate", "128k")
-            success, err = await run_vspipe_ffmpeg(input_file, output_file, svt_params, audio_bitrate)
-            if success:
-                return output_file
-            else:
-                from aiofiles.os import remove
-                from aiofiles.os import path as aiopath
-                LOGGER.error(f"VapourSynth Error: {err}")
-                if await aiopath.exists(output_file):
-                    await remove(output_file)
-                return False
-
+            svt_params = f"preset={preset}:crf={crf}"
+            if v_params.get("profile") is not None:
+                svt_params += f":profile={v_params['profile']}"
+            if v_params.get("level"):
+                lvl = str(v_params['level']).replace(".", "")
+                svt_params += f":level={lvl}"
+            if v_params.get("extra_params"):
+                svt_params += f":{v_params['extra_params']}"
+            cmd.extend(["-pix_fmt", pix_fmt, "-svtav1-params", svt_params])
         elif v_codec == "libx265":
             x265_params = f"crf={crf}:preset={preset}"
             cmd.extend(["-pix_fmt", pix_fmt, "-x265-params", x265_params])
@@ -684,6 +686,19 @@ class FFMpeg:
 
         if self._listener.is_cancelled:
             return False
+
+        if getattr(self, "is_vs", False) or is_vs:
+            from bot.helper.ext_utils.vapoursynth_utils import run_vspipe_ffmpeg
+            success, err = await run_vspipe_ffmpeg(input_file, cmd)
+            if success:
+                return output_file
+            else:
+                from aiofiles.os import remove
+                from aiofiles.os import path as aiopath
+                LOGGER.error(f"VapourSynth Error: {err}")
+                if await aiopath.exists(output_file):
+                    await remove(output_file)
+                return False
 
         self._listener.subproc = await create_subprocess_exec(*cmd, stdout=PIPE, stderr=PIPE)
         await self._ffmpeg_progress()

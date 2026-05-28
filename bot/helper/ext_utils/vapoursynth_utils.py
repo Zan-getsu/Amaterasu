@@ -48,7 +48,7 @@ clip.set_output()
     
     return output_vpy
 
-async def run_vspipe_ffmpeg(input_file: str, output_file: str, svt_params: str, audio_bitrate: str = "128k") -> tuple[bool, str]:
+async def run_vspipe_ffmpeg(input_file: str, ffmpeg_cmd: list) -> tuple[bool, str]:
     """
     Executes vspipe and pipes stdout to ffmpeg stdin asynchronously.
     """
@@ -56,22 +56,6 @@ async def run_vspipe_ffmpeg(input_file: str, output_file: str, svt_params: str, 
     generate_vpy_script(input_file, vpy_script)
     
     vspipe_cmd = ["vspipe", "--y4m", vpy_script, "-"]
-    
-    ffmpeg_cmd = [
-        "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
-        "-i", "-",               # Input 0: Video from pipe
-        "-i", str(input_file),   # Input 1: Audio/Subtitles from original file
-        "-map", "0:v:0",         # Map video from vspipe
-        "-map", "1:a?",          # Map audio from original
-        "-map", "1:s?",          # Map subtitles from original
-        "-c:v", "libsvtav1",
-        "-svtav1-params", svt_params, # Contains photon-noise etc.
-        "-c:a", "libopus",       # Audio encoding
-        "-b:a", audio_bitrate,
-        "-vbr", "on",
-        "-c:s", "copy",          # Subtitle copy
-        str(output_file)
-    ]
     
     LOGGER.info(f"Running VapourSynth Pipeline for: {input_file}")
     LOGGER.info(f"VSPipe Command: {' '.join(vspipe_cmd)}")
