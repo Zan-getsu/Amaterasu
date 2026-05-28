@@ -219,12 +219,12 @@ DEFAULT_ENCODE_PRESET = {
     "subtitle_mode": "copy",
     "video_params": {
         "crf": 30,  # Optimal CRF for standard anime encode
-        "preset": 4,  # Standard preset sweet-spot for quality/speed
+        "preset": 6,  # Standard preset sweet-spot for quality/speed
         "pix_fmt": "yuv420p10le",
         "profile": 0,
         "level": "5.1",
         # Standard Mainline SVT-AV1 Optimized Parameters:
-        "extra_params": "tune=0:film-grain=8:film-grain-denoise=0:enable-overlays=1:scm=2:keyint=240:irefresh-type=2",
+        "extra_params": "tune=0:film-grain=4:film-grain-denoise=0:enable-overlays=1:scm=2:keyint=240:irefresh-type=2",
         "color_primaries": "bt709",
         "color_trc": "bt709",
         "colorspace": "bt709",
