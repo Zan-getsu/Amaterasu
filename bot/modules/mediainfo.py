@@ -50,8 +50,11 @@ async def gen_mediainfo(message, link=None, media=None, mmsg=None):
     except Exception as e:
         LOGGER.error(e)
         await edit_message(temp_send, f"MediaInfo Stopped due to {str(e)}")
+        return
     finally:
-        await aioremove(des_path)
+        from contextlib import suppress
+        with suppress(Exception):
+            await aioremove(des_path)
     link_id = (await telegraph.create_page(title="MediaInfo X", content=tc))["path"]
     await temp_send.edit(
         f"<b>MediaInfo:</b>\n\n➲ <b>Link :</b> https://graph.org/{link_id}",

@@ -38,6 +38,7 @@ RUN apt-get update && apt-get upgrade -y && \
         rclone \
         sabnzbdplus \
         procps \
+        mediainfo \
         default-jre-headless \
     # Install MEGAcmd
     && mkdir -p /etc/apt/keyrings \
