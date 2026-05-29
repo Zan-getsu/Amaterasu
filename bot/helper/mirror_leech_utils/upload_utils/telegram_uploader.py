@@ -336,7 +336,7 @@ class TelegramUploader:
             if self._bot_pm and self._sent_msg.chat.id != self._listener.user_id:
                 buttons = ButtonMaker()
                 if getattr(self, '_telegraph_url', None):
-                    buttons.ubutton("ℹ️ MediaInfo", self._telegraph_url)
+                    buttons.url_button("ℹ️ MediaInfo", self._telegraph_url)
                 else:
                     buttons.data_button("ℹ️ MediaInfo", "minfo")
                 await TgClient.bot.copy_message(
@@ -526,7 +526,7 @@ class TelegramUploader:
                     thumb = None
                 buttons = ButtonMaker()
                 if self._telegraph_url:
-                    buttons.ubutton("ℹ️ MediaInfo", self._telegraph_url)
+                    buttons.url_button("ℹ️ MediaInfo", self._telegraph_url)
                 else:
                     buttons.data_button("ℹ️ MediaInfo", "minfo")
                 self._sent_msg = await self._sent_msg.reply_document(
@@ -562,7 +562,7 @@ class TelegramUploader:
                     thumb = None
                 buttons = ButtonMaker()
                 if self._telegraph_url:
-                    buttons.ubutton("ℹ️ MediaInfo", self._telegraph_url)
+                    buttons.url_button("ℹ️ MediaInfo", self._telegraph_url)
                 else:
                     buttons.data_button("ℹ️ MediaInfo", "minfo")
                 self._sent_msg = await self._sent_msg.reply_video(
@@ -587,7 +587,7 @@ class TelegramUploader:
                     thumb = None
                 buttons = ButtonMaker()
                 if self._telegraph_url:
-                    buttons.ubutton("ℹ️ MediaInfo", self._telegraph_url)
+                    buttons.url_button("ℹ️ MediaInfo", self._telegraph_url)
                 else:
                     buttons.data_button("ℹ️ MediaInfo", "minfo")
                 self._sent_msg = await self._sent_msg.reply_audio(
@@ -649,7 +649,7 @@ class TelegramUploader:
                         if self._sent_msg.chat.id != leech_dest:
                             buttons = ButtonMaker()
                             if getattr(self, '_telegraph_url', None):
-                                buttons.ubutton("ℹ️ MediaInfo", self._telegraph_url)
+                                buttons.url_button("ℹ️ MediaInfo", self._telegraph_url)
                             else:
                                 buttons.data_button("ℹ️ MediaInfo", "minfo")
                             await TgClient.bot.copy_message(
