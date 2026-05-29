@@ -51,9 +51,8 @@ RUN apt-get update && apt-get upgrade -y && \
 
 # Copy and install python requirements
 COPY requirements.txt .
-RUN pip3 install --no-cache-dir --upgrade pip && \
-    pip3 install --no-cache-dir uv && \
-    pip3 install --no-cache-dir -r requirements.txt
+RUN pip3 install --no-cache-dir --upgrade pip uv && \
+    uv pip install --system --no-cache -r requirements.txt
 
 # Copy all the project files
 COPY . .
