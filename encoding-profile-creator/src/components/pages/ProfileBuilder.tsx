@@ -7,7 +7,20 @@ import { TextField } from '../shared/TextField';
 import { ToggleField } from '../shared/ToggleField';
 import { SliderField } from '../shared/SliderField';
 import { SectionCard } from '../shared/SectionCard';
-import { DynamicList } from '../shared/DynamicList';
+import { TrackSelector } from '../shared/TrackSelector';
+import { StreamTagBuilder } from '../shared/StreamTagBuilder';
+
+const DISPOSITION_OPTIONS = [
+  { label: "0 (Remove all flags)", value: "0" },
+  { label: "default (Mark as default)", value: "default" },
+  { label: "forced (Mark as forced)", value: "forced" },
+  { label: "default+forced (Default & Forced)", value: "default+forced" },
+  { label: "dub (Dub track)", value: "dub" },
+  { label: "comment (Commentary)", value: "comment" },
+  { label: "hearing_impaired", value: "hearing_impaired" },
+  { label: "visual_impaired", value: "visual_impaired" },
+  { label: "captions", value: "captions" }
+];
 
 interface ProfileBuilderProps {
   initialData?: EncodingProfile | null;
@@ -301,6 +314,34 @@ export const ProfileBuilder: React.FC<ProfileBuilderProps> = ({ initialData, onN
               placeholder="e.g. tune=animation:film-grain=4 (Colon-separated)"
             />
           </div>
+          
+          <div className="md:col-span-2 border-t border-white/10 pt-6 mt-2">
+            <h4 className="text-sm font-bold text-slate-300 mb-4">Video Track Selection & Tags</h4>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <TrackSelector
+                label="Video Tracks to Keep"
+                value={profile.metadata?.v_track || ''}
+                onChange={(val) => updateMetadata('v_track', val)}
+              />
+            </div>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-6">
+              <StreamTagBuilder
+                label="Video Metadata Tags"
+                prefix="s:v:"
+                items={customMetaList}
+                onChange={applyCustomMetadata}
+              />
+              <StreamTagBuilder
+                label="Video Disposition Flags"
+                prefix="v:"
+                items={dispositionList}
+                onChange={applyDisposition}
+                valueOptions={DISPOSITION_OPTIONS}
+                valuePlaceholder="Select disposition..."
+              />
+            </div>
+          </div>
         </div>
       </SectionCard>
 
@@ -342,6 +383,34 @@ export const ProfileBuilder: React.FC<ProfileBuilderProps> = ({ initialData, onN
               />
             </div>
           )}
+
+          <div className="md:col-span-2 border-t border-white/10 pt-6 mt-2">
+            <h4 className="text-sm font-bold text-slate-300 mb-4">Audio Track Selection & Tags</h4>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <TrackSelector
+                label="Audio Tracks to Keep"
+                value={profile.metadata?.a_track || ''}
+                onChange={(val) => updateMetadata('a_track', val)}
+              />
+            </div>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-6">
+              <StreamTagBuilder
+                label="Audio Metadata Tags"
+                prefix="s:a:"
+                items={customMetaList}
+                onChange={applyCustomMetadata}
+              />
+              <StreamTagBuilder
+                label="Audio Disposition Flags"
+                prefix="a:"
+                items={dispositionList}
+                onChange={applyDisposition}
+                valueOptions={DISPOSITION_OPTIONS}
+                valuePlaceholder="Select disposition..."
+              />
+            </div>
+          </div>
         </div>
       </SectionCard>
 
@@ -354,13 +423,40 @@ export const ProfileBuilder: React.FC<ProfileBuilderProps> = ({ initialData, onN
             onChange={(e) => updateProfile({ subtitle_mode: e.target.value })}
             options={OPTIONS.subtitleModes}
           />
+          
+          <div className="md:col-span-2 border-t border-white/10 pt-6 mt-2">
+            <h4 className="text-sm font-bold text-slate-300 mb-4">Subtitle Track Selection & Tags</h4>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <TrackSelector
+                label="Subtitle Tracks to Keep"
+                value={profile.metadata?.s_track || ''}
+                onChange={(val) => updateMetadata('s_track', val)}
+              />
+            </div>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-6">
+              <StreamTagBuilder
+                label="Subtitle Metadata Tags"
+                prefix="s:s:"
+                items={customMetaList}
+                onChange={applyCustomMetadata}
+              />
+              <StreamTagBuilder
+                label="Subtitle Disposition Flags"
+                prefix="s:"
+                items={dispositionList}
+                onChange={applyDisposition}
+                valueOptions={DISPOSITION_OPTIONS}
+                valuePlaceholder="Select disposition..."
+              />
+            </div>
+          </div>
         </div>
       </SectionCard>
 
-      {/* Metadata & Stream Tags */}
-      <SectionCard title="Metadata & Stream Tags" icon={<Tag size={20} />} defaultOpen={false}>
-        <div className="flex flex-col gap-8">
-          
+      {/* Global Metadata */}
+      <SectionCard title="Global Metadata" icon={<Tag size={20} />} defaultOpen={false}>
+        <div className="flex flex-col gap-6">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <TextField
               label="Rename File To"
@@ -382,83 +478,6 @@ export const ProfileBuilder: React.FC<ProfileBuilderProps> = ({ initialData, onN
             onChange={(e) => updateProfile({ cover_image: e.target.value })}
             placeholder="e.g. https://t.me/channel/123 or https://example.com/poster.jpg"
           />
-
-          <div className="border-t border-white/10 pt-6">
-            <h4 className="text-sm font-bold text-slate-300 mb-4">Track Selection</h4>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              <TextField
-                label="Video Track"
-                value={profile.metadata?.v_track || ''}
-                onChange={(e) => updateMetadata('v_track', e.target.value)}
-                placeholder="e.g. 0 or ?"
-              />
-              <TextField
-                label="Audio Track"
-                value={profile.metadata?.a_track || ''}
-                onChange={(e) => updateMetadata('a_track', e.target.value)}
-                placeholder="e.g. 0 or ?"
-              />
-              <TextField
-                label="Subtitle Track"
-                value={profile.metadata?.s_track || ''}
-                onChange={(e) => updateMetadata('s_track', e.target.value)}
-                placeholder="e.g. 0 or ?"
-              />
-            </div>
-            <p className="text-xs text-slate-500 mt-2">Use index numbers (0, 1, 2) or "?" for all tracks.</p>
-          </div>
-
-          <div className="border-t border-white/10 pt-6">
-            <DynamicList
-              label="Custom Stream Metadata Tags"
-              items={customMetaList}
-              onChange={applyCustomMetadata}
-              addButtonText="Add Stream Tag"
-              keyPlaceholder="s:a:0"
-              valuePlaceholder="title=English Dub"
-            />
-            <div className="bg-black/20 p-3 rounded-lg border border-white/5 mt-4">
-              <p className="text-xs text-slate-400 font-mono mb-1">Common Keys:</p>
-              <ul className="text-xs text-slate-500 list-disc list-inside">
-                <li>s:v:0 (First video stream)</li>
-                <li>s:a:0 (First audio stream)</li>
-                <li>s:s:0 (First subtitle stream)</li>
-              </ul>
-            </div>
-          </div>
-
-          <div className="border-t border-white/10 pt-6">
-            <DynamicList
-              label="Stream Disposition Flags"
-              items={dispositionList}
-              onChange={applyDisposition}
-              addButtonText="Add Disposition"
-              keyPlaceholder="v:0"
-              valuePlaceholder="Select disposition..."
-              valueOptions={[
-                { label: "0 (Remove all flags)", value: "0" },
-                { label: "default (Mark as default)", value: "default" },
-                { label: "forced (Mark as forced)", value: "forced" },
-                { label: "default+forced (Default & Forced)", value: "default+forced" },
-                { label: "dub (Dub track)", value: "dub" },
-                { label: "comment (Commentary)", value: "comment" },
-                { label: "hearing_impaired", value: "hearing_impaired" },
-                { label: "visual_impaired", value: "visual_impaired" },
-                { label: "captions", value: "captions" }
-              ]}
-            />
-            <div className="bg-black/20 p-3 rounded-lg border border-white/5 mt-4">
-              <p className="text-xs text-slate-400 font-mono mb-1">Disposition Values:</p>
-              <ul className="text-xs text-slate-500 list-disc list-inside">
-                <li>Select from the dropdown to assign flags correctly.</li>
-              </ul>
-              <p className="text-xs text-slate-400 font-mono mt-2 mb-1">Common Keys:</p>
-              <ul className="text-xs text-slate-500 list-disc list-inside">
-                <li>v:0 (First video) · a:0, a:1 (Audio streams)</li>
-                <li>s:0, s:1 (Subtitle streams)</li>
-              </ul>
-            </div>
-          </div>
         </div>
       </SectionCard>
 
