@@ -310,6 +310,12 @@ export const ProfileBuilder: React.FC<ProfileBuilderProps> = ({ initialData, onN
           
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <TextField
+              label="Rename File To"
+              value={profile.rename || ''}
+              onChange={(e) => updateProfile({ rename: e.target.value })}
+              placeholder="e.g. {title} - {episode}.mkv"
+            />
+            <TextField
               label="Global Title"
               value={profile.metadata?.title || ''}
               onChange={(e) => updateMetadata('title', e.target.value)}

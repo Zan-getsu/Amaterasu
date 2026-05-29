@@ -625,10 +625,25 @@ class FFMpeg:
         prof_meta = profile.get("metadata", {})
         enc_meta = {**prof_meta, **(metadata or {})}
 
+        rename_pattern = profile.get("rename", "")
+        if rename_pattern:
+            enc_meta["__internal_rename__"] = rename_pattern
+
         if enc_meta:
             from ..ext_utils.metadata_utils import MetadataProcessor
             processor = MetadataProcessor()
             enc_meta = await processor.process(enc_meta, input_file)
+            
+        if "__internal_rename__" in enc_meta:
+            new_name = enc_meta.pop("__internal_rename__")
+            if new_name:
+                import os
+                ext = os.path.splitext(output_file)[1]
+                if not os.path.splitext(new_name)[1]:
+                    new_name += ext
+                dirpath = os.path.dirname(output_file)
+                output_file = f"{dirpath}/{new_name}"
+
         v_track = enc_meta.pop("v_track", "0")
         a_track = enc_meta.pop("a_track", "?")
         s_track = enc_meta.pop("s_track", "?")

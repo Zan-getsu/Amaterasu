@@ -59,9 +59,26 @@ class MetadataProcessor:
                         self.vars["sublang"] = full_lang
         except Exception:
             pass
+
+        # Extract year
         m = self._year_pattern.findall(bname)
         if m:
             self.vars["year"] = m[-1]
+            
+        # Extract episode / season_episode
+        import re
+        ep_pattern = re.compile(r'(?i)[SseE](\d{1,2})[EexX](\d{1,4})|(?i)(?:Season|Series)\s*(\d{1,2})\s*(?:Episode|Ep)\s*(\d{1,4})|(?i)[EexX](\d{1,4})')
+        ep_match = ep_pattern.search(bname)
+        if ep_match:
+            self.vars["episode"] = ep_match.group(0).upper()
+            
+        # Extract parsed title (everything before episode, year, or resolution)
+        title_pattern = re.compile(r'^(.*?)(?:[._-](?:[SseE]\d{1,2}[EexX]\d{1,4}|\d{3,4}p|19\d{2}|20\d{2}))', re.IGNORECASE)
+        title_match = title_pattern.search(bname)
+        if title_match:
+            self.vars["title"] = title_match.group(1).replace('_', ' ').replace('.', ' ').strip()
+        else:
+            self.vars["title"] = bname.replace('_', ' ').replace('.', ' ').strip()
 
     @staticmethod
     def parse_string(metadata_str):
