@@ -100,7 +100,7 @@ async def get_buttons(key=None, edit_type=None, edit_mode=False):
         buttons.data_button("Aria2c Settings", "botset aria")
         buttons.data_button("Sabnzbd Settings", "botset nzb")
         buttons.data_button("JDownloader Sync", "botset syncjd")
-        buttons.data_button("Encode Preset", "botset botvar DEFAULT_ENCODE_PRESET")
+        buttons.data_button("Encode Preset", "botset botvar_edit DEFAULT_ENCODE_PRESET")
         buttons.data_button("✕ CLOSE", "botset close")
         msg = "Bot Settings:"
     elif edit_type is not None:
@@ -805,6 +805,12 @@ async def edit_bot_settings(client, query):
             )
             rfunc = partial(update_buttons, message, data[1])
             await event_handler(client, query, pfunc, rfunc, True)
+    elif data[1] == "botvar_edit":
+        await query.answer()
+        await update_buttons(message, data[2], "botvar")
+        pfunc = partial(edit_variable, pre_message=message, key=data[2])
+        rfunc = partial(update_buttons, message, None)
+        await event_handler(client, query, pfunc, rfunc)
     elif data[1] == "botvar" and state == "edit":
         await query.answer()
         await update_buttons(message, data[2], data[1])
