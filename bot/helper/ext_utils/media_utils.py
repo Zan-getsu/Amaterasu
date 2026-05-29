@@ -629,7 +629,6 @@ class FFMpeg:
             from ..ext_utils.metadata_utils import MetadataProcessor
             processor = MetadataProcessor()
             enc_meta = await processor.process(enc_meta, input_file)
-
         v_track = enc_meta.pop("v_track", "0")
         a_track = enc_meta.pop("a_track", "?")
         s_track = enc_meta.pop("s_track", "?")
@@ -644,14 +643,24 @@ class FFMpeg:
         if hasattr(self._listener, "thumb") and self._listener.thumb:
             cmd.extend(["-i", self._listener.thumb])
 
-        cmd.extend([
-            "-map", f"0:v:{v_track}?",
-            "-map", f"0:a:{a_track}?",
-            "-c:v", v_codec,
-        ])
+        def add_map_flags(cmd_list, track_type, track_str):
+            for t in str(track_str).split(","):
+                t = t.strip()
+                if not t:
+                    continue
+                if t in ["?", "*", "all"]:
+                    cmd_list.extend(["-map", f"0:{track_type}?"])
+                else:
+                    opt = "" if t.endswith("?") else "?"
+                    cmd_list.extend(["-map", f"0:{track_type}:{t}{opt}"])
+
+        add_map_flags(cmd, "v", v_track)
+        add_map_flags(cmd, "a", a_track)
+        cmd.extend(["-c:v", v_codec])
 
         if sub_mode == "copy":
-            cmd.extend(["-map", f"0:s:{s_track}?", "-c:s", "copy"])
+            add_map_flags(cmd, "s", s_track)
+            cmd.extend(["-c:s", "copy"])
 
         if hasattr(self._listener, "thumb") and self._listener.thumb:
             cmd.extend(["-map", "1", "-c:v:1", "copy", "-disposition:v:1", "attached_pic"])
