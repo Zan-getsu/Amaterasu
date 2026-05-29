@@ -986,26 +986,26 @@ Here's what a typical anime encoding profile looks like when built through the W
 
 ```json
 {
-    "name": "Anime1",
+    "name": "My Custom Anime Preset",
     "video_codec": "libsvtav1",
     "audio_codec": "copy",
     "subtitle_mode": "copy",
     "metadata": {
-        "title": "[Zangetsu] {title} - {episode}",
+        "title": "[MyGroup] {title} - {episode}",
         "v_track": "0",
         "a_track": "1,0",
         "s_track": "1,2",
-        "s:v:0": "title=Zangetsu",
+        "s:v:0": "title=Encoded by MyGroup",
         "s:a:0": "title=English",
         "s:a:1": "title=Japanese",
         "s:s:1": "title=English",
-        "s:s:2": "title=Dubtitle"
+        "s:s:2": "title=English (Signs/Songs)"
     },
     "video_params": {
-        "crf": 5,
-        "preset": 5,
+        "crf": 24,
+        "preset": 4,
         "pix_fmt": "yuv420p10le",
-        "extra_params": "tune=0:film-grain=0:enable-overlays=1:scm=2:keyint=240:irefresh-type=2",
+        "extra_params": "tune=0:film-grain=4",
         "profile": "0",
         "level": "5.1",
         "color_primaries": "bt709",
@@ -1016,8 +1016,8 @@ Here's what a typical anime encoding profile looks like when built through the W
         "bitrate": "128k",
         "vbr": true
     },
-    "rename": "{title} - {episode}.mkv",
-    "cover_image": "https://example.com/cover.jpg",
+    "rename": "{title} - {episode} [{resolution}].mkv",
+    "cover_image": "https://example.com/poster.jpg",
     "disposition": {
         "a:0": "default",
         "s:1": "default"
