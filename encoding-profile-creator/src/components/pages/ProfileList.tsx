@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
 import { ArrowLeft, Copy, Star, Trash2, Edit, Check, Settings, Film, Music, CheckCircle } from 'lucide-react';
-import type { StoredProfile } from '../../types';
+import type { EncodingProfile } from '../../types';
 
 interface ProfileListProps {
-  profiles: Record<string, StoredProfile>;
+  profiles: Record<string, EncodingProfile>;
   onNavigate: (page: 'landing' | 'builder') => void;
   onEdit: (profileId: string) => void;
   onDelete: (profileId: string) => void;
@@ -82,8 +82,8 @@ export const ProfileList: React.FC<ProfileListProps> = ({
                 >
                   <div className="flex-1">
                     <div className="flex items-center gap-3 mb-2">
-                      <h3 className="text-lg font-bold text-white">{data.profile.name || 'Unnamed Profile'}</h3>
-                      {data.profile.is_default && (
+                      <h3 className="text-lg font-bold text-white">{data.name || 'Unnamed Profile'}</h3>
+                      {data.is_default && (
                         <span className="bg-[#ff3e3e]/20 text-[#ff3e3e] text-xs px-2 py-0.5 rounded flex items-center gap-1 border border-[#ff3e3e]/30">
                           <Star size={12} fill="currentColor" />
                           Default
@@ -94,14 +94,14 @@ export const ProfileList: React.FC<ProfileListProps> = ({
                     <div className="flex items-center gap-6 text-sm text-slate-400">
                       <div className="flex items-center gap-1.5">
                         <Film size={14} className="text-slate-500" />
-                        <span className="text-slate-300 font-medium">{data.profile.video_codec}</span>
-                        {data.profile.video_params?.preset && (
-                          <span className="bg-black/30 px-1.5 rounded text-xs">{data.profile.video_params.preset}</span>
+                        <span className="text-slate-300 font-medium">{data.video_codec}</span>
+                        {data.video_params?.preset && (
+                          <span className="bg-black/30 px-1.5 rounded text-xs">{data.video_params.preset}</span>
                         )}
                       </div>
                       <div className="flex items-center gap-1.5">
                         <Music size={14} className="text-slate-500" />
-                        <span className="text-slate-300 font-medium">{data.profile.audio_codec}</span>
+                        <span className="text-slate-300 font-medium">{data.audio_codec}</span>
                       </div>
                     </div>
                   </div>
@@ -111,13 +111,13 @@ export const ProfileList: React.FC<ProfileListProps> = ({
                     <button
                       onClick={(e) => { e.stopPropagation(); onSetDefault(id); }}
                       className={`p-2.5 rounded-xl border transition-all ${
-                        data.profile.is_default 
+                        data.is_default 
                           ? 'bg-[#ff3e3e]/10 border-[#ff3e3e]/30 text-[#ff3e3e]' 
                           : 'bg-white/5 border-white/10 text-slate-400 hover:bg-white/10 hover:text-white'
                       }`}
                       title="Set as Default"
                     >
-                      <Star size={18} className={data.profile.is_default ? 'fill-current' : ''} />
+                      <Star size={18} className={data.is_default ? 'fill-current' : ''} />
                     </button>
                     <button
                       onClick={(e) => { e.stopPropagation(); onEdit(id); }}
@@ -127,7 +127,7 @@ export const ProfileList: React.FC<ProfileListProps> = ({
                       <Edit size={18} />
                     </button>
                     <button
-                      onClick={(e) => { e.stopPropagation(); handleCopyJSON(id, data.profile); }}
+                      onClick={(e) => { e.stopPropagation(); handleCopyJSON(id, data); }}
                       className={`p-2.5 rounded-xl border transition-all ${
                         copiedId === id 
                           ? 'bg-emerald-500/20 border-emerald-500/30 text-emerald-500' 
@@ -164,7 +164,7 @@ export const ProfileList: React.FC<ProfileListProps> = ({
                     <pre className="text-xs sm:text-sm text-slate-300 font-mono overflow-x-auto p-4 rounded-xl bg-[#0a0a0a] border border-white/5 shadow-inner">
                       <code>{
                         JSON.stringify(
-                          Object.fromEntries(Object.entries(data.profile).filter(([k]) => k !== 'is_default')), 
+                          Object.fromEntries(Object.entries(data).filter(([k]) => k !== 'is_default')), 
                           null, 
                           4
                         )

@@ -27,9 +27,4 @@ export interface EncodingProfile {
   is_default?: boolean;
 }
 
-export interface StoredProfile {
-  id: string;
-  profile: EncodingProfile;
-  createdAt: string;
-  updatedAt: string;
-}
+// No longer needed, backend returns Record<string, EncodingProfile>

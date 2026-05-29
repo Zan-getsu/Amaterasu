@@ -3,11 +3,11 @@ import { LandingPage } from './components/pages/LandingPage';
 import { ProfileBuilder } from './components/pages/ProfileBuilder';
 import { ProfileList } from './components/pages/ProfileList';
 import { profileApi } from './utils/api';
-import type { StoredProfile, EncodingProfile } from './types';
+import type { EncodingProfile } from './types';
 
 function App() {
   const [currentPage, setCurrentPage] = useState<'landing' | 'builder' | 'list'>('landing');
-  const [profiles, setProfiles] = useState<Record<string, StoredProfile>>({});
+  const [profiles, setProfiles] = useState<Record<string, EncodingProfile>>({});
   const [editingProfileId, setEditingProfileId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -85,7 +85,7 @@ function App() {
       
       {currentPage === 'builder' && (
         <ProfileBuilder 
-          initialData={editingProfileId ? profiles[editingProfileId]?.profile : null}
+          initialData={editingProfileId ? profiles[editingProfileId] : null}
           onNavigate={setCurrentPage} 
           onSave={handleSaveProfile} 
           onDelete={editingProfileId ? () => {

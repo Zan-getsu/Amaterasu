@@ -1,4 +1,4 @@
-import type { EncodingProfile, StoredProfile } from '../types';
+import type { EncodingProfile } from '../types';
 
 // Detect user_id from URL params
 const urlParams = new URLSearchParams(window.location.search);
@@ -11,7 +11,7 @@ const generateId = () => Math.random().toString(36).substring(2, 10);
 export const isOfflineMode = () => !userId;
 
 export const profileApi = {
-  list: async (): Promise<Record<string, StoredProfile | any>> => {
+  list: async (): Promise<Record<string, EncodingProfile | any>> => {
     if (userId) {
       try {
         const response = await fetch(`/api/profiles?user_id=${userId}`);
