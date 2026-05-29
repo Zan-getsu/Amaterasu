@@ -434,14 +434,23 @@ export const ProfileBuilder: React.FC<ProfileBuilderProps> = ({ initialData, onN
               onChange={applyDisposition}
               addButtonText="Add Disposition"
               keyPlaceholder="v:0"
-              valuePlaceholder="0"
+              valuePlaceholder="Select disposition..."
+              valueOptions={[
+                { label: "0 (Remove all flags)", value: "0" },
+                { label: "default (Mark as default)", value: "default" },
+                { label: "forced (Mark as forced)", value: "forced" },
+                { label: "default+forced (Default & Forced)", value: "default+forced" },
+                { label: "dub (Dub track)", value: "dub" },
+                { label: "comment (Commentary)", value: "comment" },
+                { label: "hearing_impaired", value: "hearing_impaired" },
+                { label: "visual_impaired", value: "visual_impaired" },
+                { label: "captions", value: "captions" }
+              ]}
             />
             <div className="bg-black/20 p-3 rounded-lg border border-white/5 mt-4">
               <p className="text-xs text-slate-400 font-mono mb-1">Disposition Values:</p>
               <ul className="text-xs text-slate-500 list-disc list-inside">
-                <li><code className="text-slate-400">default</code> — mark stream as default</li>
-                <li><code className="text-slate-400">0</code> — remove default/forced flags</li>
-                <li><code className="text-slate-400">default+forced</code> — combine multiple</li>
+                <li>Select from the dropdown to assign flags correctly.</li>
               </ul>
               <p className="text-xs text-slate-400 font-mono mt-2 mb-1">Common Keys:</p>
               <ul className="text-xs text-slate-500 list-disc list-inside">

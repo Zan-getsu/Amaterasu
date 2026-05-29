@@ -13,6 +13,7 @@ interface DynamicListProps {
   addButtonText?: string;
   keyPlaceholder?: string;
   valuePlaceholder?: string;
+  valueOptions?: { label: string, value: string }[];
 }
 
 export const DynamicList: React.FC<DynamicListProps> = ({ 
@@ -21,7 +22,8 @@ export const DynamicList: React.FC<DynamicListProps> = ({
   onChange,
   addButtonText = "Add Entry",
   keyPlaceholder = "Key (e.g. s:v:0)",
-  valuePlaceholder = "Value (e.g. title=English)"
+  valuePlaceholder = "Value (e.g. title=English)",
+  valueOptions
 }) => {
   const handleAdd = () => {
     onChange([...items, { key: '', value: '' }]);
@@ -71,13 +73,26 @@ export const DynamicList: React.FC<DynamicListProps> = ({
                 />
               </div>
               <div className="flex-1 flex gap-2">
-                <input
-                  type="text"
-                  placeholder={valuePlaceholder}
-                  value={item.value}
-                  onChange={(e) => handleChange(index, 'value', e.target.value)}
-                  className="w-full bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-sm text-slate-100 placeholder:text-slate-600 focus:outline-none focus:border-[#ff3e3e]/50 focus:ring-1 focus:ring-[#ff3e3e]/50"
-                />
+                {valueOptions ? (
+                  <select
+                    value={item.value}
+                    onChange={(e) => handleChange(index, 'value', e.target.value)}
+                    className="w-full bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-[#ff3e3e]/50 focus:ring-1 focus:ring-[#ff3e3e]/50 appearance-none"
+                  >
+                    <option value="" disabled className="text-slate-500">{valuePlaceholder}</option>
+                    {valueOptions.map(opt => (
+                      <option key={opt.value} value={opt.value}>{opt.label}</option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    type="text"
+                    placeholder={valuePlaceholder}
+                    value={item.value}
+                    onChange={(e) => handleChange(index, 'value', e.target.value)}
+                    className="w-full bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-sm text-slate-100 placeholder:text-slate-600 focus:outline-none focus:border-[#ff3e3e]/50 focus:ring-1 focus:ring-[#ff3e3e]/50"
+                  />
+                )}
                 <button
                   type="button"
                   onClick={() => handleRemove(index)}
