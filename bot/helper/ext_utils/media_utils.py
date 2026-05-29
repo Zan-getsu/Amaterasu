@@ -136,12 +136,24 @@ async def get_media_info(path, extra_info=False):
         LOGGER.error(f"Get Media Info: {e}. Mostly File not found! - File: {path}")
         return (0, "", "", "") if extra_info else (0, None, None)
     if result[0] and result[2] == 0:
-        ffresult = eval(result[0])
+        try:
+            ffresult = json.loads(result[0])
+        except Exception:
+            ffresult = eval(result[0])
+            
         fields = ffresult.get("format")
         if fields is None:
             LOGGER.error(f"get_media_info: {result}")
             return (0, "", "", "") if extra_info else (0, None, None)
-        duration = round(float(fields.get("duration", 0)))
+            
+        duration = float(fields.get("duration", 0))
+        if duration == 0 and "streams" in ffresult:
+            for stream in ffresult["streams"]:
+                if "duration" in stream:
+                    duration = float(stream["duration"])
+                    if duration > 0:
+                        break
+        duration = round(duration)
         if extra_info:
             lang, qual, stitles = "", "", ""
             if (streams := ffresult.get("streams")) and streams[0].get(
