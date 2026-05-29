@@ -1,4 +1,4 @@
-FROM python:3.11-slim-bookworm
+FROM python:3.11-slim
 
 ENV LANG=C.UTF-8 \
     DEBIAN_FRONTEND=noninteractive \
@@ -12,10 +12,6 @@ RUN apt-get update && apt-get upgrade -y && \
     # Add non-free repo for unrar (if using debian bullseye/bookworm)
     sed -i 's/main$/main contrib non-free/g' /etc/apt/sources.list.d/debian.sources 2>/dev/null || true && \
     sed -i 's/main$/main contrib non-free/g' /etc/apt/sources.list 2>/dev/null || true && \
-    # Add deb-multimedia for VapourSynth
-    echo "deb https://www.deb-multimedia.org bookworm main non-free" > /etc/apt/sources.list.d/deb-multimedia.list && \
-    apt-get update -oAcquire::AllowInsecureRepositories=true && \
-    apt-get install -y --allow-unauthenticated deb-multimedia-keyring && \
     apt-get update && \
     apt-get install -y --no-install-recommends \
         bash \
@@ -43,8 +39,6 @@ RUN apt-get update && apt-get upgrade -y && \
         sabnzbdplus \
         procps \
         mediainfo \
-        vapoursynth \
-        vapoursynth-ffms2 \
         default-jre-headless \
     # Install MEGAcmd
     && mkdir -p /etc/apt/keyrings \
