@@ -682,7 +682,10 @@ class FFMpeg:
 
         if enc_meta:
             for k, v in enc_meta.items():
-                cmd.extend(["-metadata", f"{k}={v}"])
+                if ":" in k:
+                    cmd.extend([f"-metadata:{k}", v])
+                else:
+                    cmd.extend(["-metadata", f"{k}={v}"])
 
         cmd.extend(["-threads", f"{threads}", output_file])
 
