@@ -804,7 +804,8 @@ class FFMpeg:
             temp_cover_path = ospath.join(temp_cover_dir, "cover.jpg")
             await aioshutil.copy(self._listener.thumb, temp_cover_path)
             cmd.extend([
-                "-attach", temp_cover_path
+                "-attach", temp_cover_path,
+                "-metadata:s:m:filename:cover.jpg", "mimetype=image/jpeg"
             ])
         cmd.extend([output_file])
 
