@@ -1031,3 +1031,43 @@ class FFMpeg:
             start_time += lpd - 3
             i += 1
         return True
+
+
+section_dict = {"General": "🗒", "Video": "🎞", "Audio": "🔊", "Text": "🔠", "Menu": "🗃"}
+
+def parseinfo(out, size):
+    tc, trigger = "", False
+    size_line = (
+        f"File size                                 : {size / (1024 * 1024):.2f} MiB"
+    )
+    for line in out.split("\n"):
+        for section, emoji in section_dict.items():
+            if line.startswith(section):
+                trigger = True
+                if not line.startswith("General"):
+                    tc += "</pre><br>"
+                tc += f"<h4>{emoji} {line.replace('Text', 'Subtitle')}</h4>"
+                break
+        if line.startswith("File size"):
+            line = size_line
+        if trigger:
+            tc += "<br><pre>"
+            trigger = False
+        else:
+            tc += line + "\n"
+    tc += "</pre><br>"
+    return tc
+
+async def generate_telegraph_mediainfo(des_path, file_size):
+    from shlex import split
+    from .telegraph_helper import telegraph
+    try:
+        stdout, _, _ = await cmd_exec(split(f'mediainfo "{des_path}"'))
+        tc = f"<h4>📌 {ospath.basename(des_path)}</h4><br><br>"
+        if len(stdout) != 0:
+            tc += parseinfo(stdout, file_size)
+            link_id = (await telegraph.create_page(title="MediaInfo X", content=tc))["path"]
+            return f"https://graph.org/{link_id}"
+    except Exception as e:
+        LOGGER.error(f"Failed to generate telegraph mediainfo: {e}")
+    return None

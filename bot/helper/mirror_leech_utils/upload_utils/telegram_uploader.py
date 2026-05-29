@@ -44,6 +44,7 @@ from ...ext_utils.media_utils import (
     get_multiple_frames_thumbnail,
     get_video_thumbnail,
     get_md5_hash,
+    generate_telegraph_mediainfo,
 )
 from ...telegram_helper.message_utils import delete_message
 
@@ -334,7 +335,10 @@ class TelegramUploader:
         try:
             if self._bot_pm and self._sent_msg.chat.id != self._listener.user_id:
                 buttons = ButtonMaker()
-                buttons.data_button("ℹ️ MediaInfo", "minfo")
+                if getattr(self, '_telegraph_url', None):
+                    buttons.ubutton("ℹ️ MediaInfo", self._telegraph_url)
+                else:
+                    buttons.data_button("ℹ️ MediaInfo", "minfo")
                 await TgClient.bot.copy_message(
                     chat_id=self._listener.user_id,
                     from_chat_id=self._sent_msg.chat.id,
@@ -489,6 +493,14 @@ class TelegramUploader:
         try:
             is_video, is_audio, is_image = await get_document_type(self._up_path)
 
+            self._telegraph_url = None
+            if not is_image:
+                try:
+                    f_size = await aiopath.getsize(self._up_path)
+                    self._telegraph_url = await generate_telegraph_mediainfo(self._up_path, f_size)
+                except Exception as e:
+                    LOGGER.error(f"Failed to generate telegraph URL: {e}")
+
             if not is_image and thumb is None:
                 file_name = ospath.splitext(file)[0]
                 thumb_path = f"{self._path}/yt-dlp-thumb/{file_name}.jpg"
@@ -513,7 +525,10 @@ class TelegramUploader:
                 if thumb == "none":
                     thumb = None
                 buttons = ButtonMaker()
-                buttons.data_button("ℹ️ MediaInfo", "minfo")
+                if self._telegraph_url:
+                    buttons.ubutton("ℹ️ MediaInfo", self._telegraph_url)
+                else:
+                    buttons.data_button("ℹ️ MediaInfo", "minfo")
                 self._sent_msg = await self._sent_msg.reply_document(
                     document=self._up_path,
                     quote=True,
@@ -546,7 +561,10 @@ class TelegramUploader:
                 if thumb == "none":
                     thumb = None
                 buttons = ButtonMaker()
-                buttons.data_button("ℹ️ MediaInfo", "minfo")
+                if self._telegraph_url:
+                    buttons.ubutton("ℹ️ MediaInfo", self._telegraph_url)
+                else:
+                    buttons.data_button("ℹ️ MediaInfo", "minfo")
                 self._sent_msg = await self._sent_msg.reply_video(
                     video=self._up_path,
                     quote=True,
@@ -568,7 +586,10 @@ class TelegramUploader:
                 if thumb == "none":
                     thumb = None
                 buttons = ButtonMaker()
-                buttons.data_button("ℹ️ MediaInfo", "minfo")
+                if self._telegraph_url:
+                    buttons.ubutton("ℹ️ MediaInfo", self._telegraph_url)
+                else:
+                    buttons.data_button("ℹ️ MediaInfo", "minfo")
                 self._sent_msg = await self._sent_msg.reply_audio(
                     audio=self._up_path,
                     quote=True,
@@ -627,7 +648,10 @@ class TelegramUploader:
                                 leech_dest = int(leech_dest)
                         if self._sent_msg.chat.id != leech_dest:
                             buttons = ButtonMaker()
-                            buttons.data_button("ℹ️ MediaInfo", "minfo")
+                            if getattr(self, '_telegraph_url', None):
+                                buttons.ubutton("ℹ️ MediaInfo", self._telegraph_url)
+                            else:
+                                buttons.data_button("ℹ️ MediaInfo", "minfo")
                             await TgClient.bot.copy_message(
                                 chat_id=leech_dest,
                                 from_chat_id=self._sent_msg.chat.id,
