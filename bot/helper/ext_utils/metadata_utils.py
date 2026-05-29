@@ -67,7 +67,7 @@ class MetadataProcessor:
             
         # Extract episode / season_episode
         import re
-        ep_pattern = re.compile(r'(?i)[SseE](\d{1,2})[EexX](\d{1,4})|(?i)(?:Season|Series)\s*(\d{1,2})\s*(?:Episode|Ep)\s*(\d{1,4})|(?i)[EexX](\d{1,4})')
+        ep_pattern = re.compile(r'[SseE](\d{1,2})[EexX](\d{1,4})|(?:Season|Series)\s*(\d{1,2})\s*(?:Episode|Ep)\s*(\d{1,4})|[EexX](\d{1,4})', re.IGNORECASE)
         ep_match = ep_pattern.search(bname)
         if ep_match:
             self.vars["episode"] = ep_match.group(0).upper()
