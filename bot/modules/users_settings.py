@@ -1355,7 +1355,26 @@ async def edit_user_settings(client, query):
         await query.answer()
         buttons = ButtonMaker()
         buttons.data_button("✕ Stop", f"userset {user_id} back encode")
-        await edit_message(message, "Send a JSON string for the new profile.\nExample:\n<code>{\"name\": \"x265 1080p\", \"video_codec\": \"libx265\", \"video_params\": {\"crf\": 24, \"preset\": 5}}</code>\nTimeout: 60s", buttons.build_menu(1))
+        example_json = '''{
+    "name": "High Quality 1080p",
+    "video_codec": "libsvtav1",
+    "audio_codec": "libopus",
+    "subtitle_mode": "copy",
+    "video_params": {
+        "crf": 26,
+        "preset": 4,
+        "pix_fmt": "yuv420p10le",
+        "profile": 0,
+        "level": "5.1",
+        "extra_params": "tune=0:film-grain=4:film-grain-denoise=0:enable-overlays=1:scm=2:keyint=240:irefresh-type=2"
+    },
+    "audio_params": {
+        "bitrate": "192k",
+        "channels": 2,
+        "vbr": true
+    }
+}'''
+        await edit_message(message, f"Send a JSON string for the new profile.\nExample:\n<pre><code class='language-json'>{example_json}</code></pre>\nTimeout: 60s", buttons.build_menu(1))
         rfunc = partial(update_user_settings, query, "encode")
         pfunc = partial(_handle_enc_create, rfunc=rfunc)
         await event_handler(client, query, pfunc, rfunc)
