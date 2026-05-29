@@ -31,6 +31,18 @@ const LANGUAGES = [
   { value: 'por', label: 'Portuguese (por)' },
 ];
 
+// Build a regex that matches EXACTLY this prefix at the start of a trimmed key.
+// This prevents "s:" from matching "s:a:0" or "s:v:0" — it will only match "s:0", "s:1", etc.
+function matchesPrefix(key: string, prefix: string): boolean {
+  const trimmed = key.trim();
+  if (!trimmed.startsWith(prefix)) return false;
+  // After removing the prefix, the remainder should be a track index (digit(s) or '?'),
+  // not another colon-delimited segment.
+  const remainder = trimmed.slice(prefix.length);
+  // Valid: "0", "1", "?", "0 " etc.  Invalid: "s:0", "a:0"
+  return /^[\d?]+$/.test(remainder);
+}
+
 export const StreamTagBuilder: React.FC<StreamTagBuilderProps> = ({ 
   label, 
   prefix,
@@ -40,30 +52,32 @@ export const StreamTagBuilder: React.FC<StreamTagBuilderProps> = ({
   valuePlaceholder = "Value",
   valueOptions
 }) => {
-  // Filter items that belong to this prefix. We ignore trailing spaces when matching the prefix.
-  const localItems = items.filter(item => item.key.trim().startsWith(prefix));
-  const otherItems = items.filter(item => !item.key.trim().startsWith(prefix));
+  // Filter items using strict prefix matching (prevents s: from grabbing s:a: items)
+  const localItems = items.filter(item => matchesPrefix(item.key, prefix));
+  const otherItems = items.filter(item => !matchesPrefix(item.key, prefix));
 
   const handleAdd = () => {
     onChange([...items, { key: `${prefix}0`, value: valueOptions ? '' : 'title=' }]);
   };
 
   const handleRemove = (localIndex: number) => {
-    const newLocalItems = [...localItems];
-    newLocalItems.splice(localIndex, 1);
+    const newLocalItems = localItems.filter((_, i) => i !== localIndex);
     onChange([...otherItems, ...newLocalItems]);
   };
 
   const handleKeyChange = (localIndex: number, newTrackVal: string) => {
-    const newLocalItems = [...localItems];
-    // Preserve trailing spaces if there were any, though applyCustomMetadata handles it.
-    newLocalItems[localIndex].key = `${prefix}${newTrackVal}`;
+    // Deep clone to avoid mutating parent state
+    const newLocalItems = localItems.map((item, i) => 
+      i === localIndex ? { ...item, key: `${prefix}${newTrackVal}` } : { ...item }
+    );
     onChange([...otherItems, ...newLocalItems]);
   };
 
   const handleValueChange = (localIndex: number, newValue: string) => {
-    const newLocalItems = [...localItems];
-    newLocalItems[localIndex].value = newValue;
+    // Deep clone to avoid mutating parent state
+    const newLocalItems = localItems.map((item, i) =>
+      i === localIndex ? { ...item, value: newValue } : { ...item }
+    );
     onChange([...otherItems, ...newLocalItems]);
   };
 

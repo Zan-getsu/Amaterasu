@@ -790,6 +790,7 @@ class FFMpeg:
 
         if enc_meta:
             for k, v in enc_meta.items():
+                k = k.strip()
                 if ":" in k:
                     cmd.extend([f"-metadata:{k}", v])
                 else:
@@ -799,7 +800,7 @@ class FFMpeg:
         disposition = profile.get("disposition", {})
         if disposition:
             for stream_spec, disp_value in disposition.items():
-                cmd.extend([f"-disposition:{stream_spec}", disp_value])
+                cmd.extend([f"-disposition:{stream_spec.strip()}", disp_value.strip()])
 
         temp_cover_dir = None
         temp_cover_path = None

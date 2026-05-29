@@ -22,7 +22,7 @@ const DISPOSITION_OPTIONS = [
   { label: "captions", value: "captions" }
 ];
 
-const DYNAMIC_VARS = ['{title}', '{episode}', '{quality}', '{resolution}', '{source}', '{audio}'];
+const DYNAMIC_VARS = ['{title}', '{episode}', '{quality}', '{resolution}', '{source}', '{audio}', '{basename}', '{filename}', '{year}', '{audiolang}', '{sublang}'];
 
 interface ProfileBuilderProps {
   initialData?: EncodingProfile | null;
@@ -138,9 +138,10 @@ export const ProfileBuilder: React.FC<ProfileBuilderProps> = ({ initialData, onN
     });
   };
 
-  const handleCopyJSON = () => {
+  const handleCopy = () => {
     const { is_default, ...exportData } = profile;
-    navigator.clipboard.writeText(JSON.stringify(exportData, null, 4));
+    const text = previewMode === 'ffmpeg' ? generateFFmpegCommand() : JSON.stringify(exportData, null, 4);
+    navigator.clipboard.writeText(text);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
@@ -272,6 +273,7 @@ export const ProfileBuilder: React.FC<ProfileBuilderProps> = ({ initialData, onN
               if (confirm('Reset all settings?')) {
                 setProfile(DEFAULT_PROFILE);
                 setCustomMetaList([]);
+                setDispositionList([]);
               }
             }}
             className="p-2.5 text-slate-400 hover:text-white bg-white/5 hover:bg-white/10 rounded-xl transition-colors"
@@ -603,9 +605,9 @@ export const ProfileBuilder: React.FC<ProfileBuilderProps> = ({ initialData, onN
         </div>
         <div className="glass-card rounded-2xl p-6 bg-black/60 relative group">
           <button 
-            onClick={handleCopyJSON}
+            onClick={handleCopy}
             className="absolute top-4 right-4 p-2 bg-white/10 hover:bg-[#ff3e3e]/20 text-slate-300 hover:text-[#ff3e3e] rounded-lg border border-white/10 transition-all opacity-0 group-hover:opacity-100"
-            title="Copy JSON"
+            title="Copy to Clipboard"
           >
             {copied ? <CheckCircle size={16} /> : <Copy size={16} />}
           </button>
