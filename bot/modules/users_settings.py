@@ -1360,6 +1360,15 @@ async def edit_user_settings(client, query):
     "video_codec": "libsvtav1",
     "audio_codec": "libopus",
     "subtitle_mode": "copy",
+    "metadata": {
+        "title": "My Video",
+        "v_track": "0",
+        "a_track": "1",
+        "s_track": "0",
+        "s:v:0": "title=High Quality SVT-AV1",
+        "s:a:0": "title=English Dubbed",
+        "s:s:0": "title=English Subs"
+    },
     "video_params": {
         "crf": 26,
         "preset": 4,
