@@ -125,7 +125,7 @@ class MetadataProcessor:
         safe_vars = SafeDict(vars_with_stream)
 
         return {
-            self.sanitize(k): (
+            k: (
                 str(v).format_map(safe_vars) if isinstance(v, str) else str(v)
             )
             for k, v in metadata_dict.items()
