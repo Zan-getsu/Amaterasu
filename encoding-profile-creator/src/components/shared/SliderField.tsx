@@ -1,4 +1,5 @@
 import React from 'react';
+import { Tooltip } from './Tooltip';
 
 interface SliderFieldProps extends Omit<React.InputHTMLAttributes<HTMLInputElement>, 'type'> {
   label: string;
@@ -9,6 +10,7 @@ interface SliderFieldProps extends Omit<React.InputHTMLAttributes<HTMLInputEleme
   step?: number;
   onChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
   formatValue?: (val: number) => string;
+  tooltip?: string;
 }
 
 export const SliderField: React.FC<SliderFieldProps> = ({ 
@@ -21,6 +23,7 @@ export const SliderField: React.FC<SliderFieldProps> = ({
   onChange,
   formatValue = (v) => v.toString(),
   className = '', 
+  tooltip,
   ...props 
 }) => {
   const percentage = ((value - min) / (max - min)) * 100;
@@ -31,6 +34,7 @@ export const SliderField: React.FC<SliderFieldProps> = ({
         <label className="text-sm font-medium text-slate-300 flex items-center gap-2">
           {icon && <span className="text-slate-400">{icon}</span>}
           {label}
+          {tooltip && <Tooltip content={tooltip} />}
         </label>
         <span className="bg-white/10 px-2 py-0.5 rounded text-xs font-mono text-[#ff3e3e] font-semibold border border-[#ff3e3e]/20">
           {formatValue(value)}

@@ -1,17 +1,20 @@
 import React from 'react';
+import { Tooltip } from './Tooltip';
 
 interface SelectFieldProps extends React.SelectHTMLAttributes<HTMLSelectElement> {
   label: string;
   icon?: React.ReactNode;
+  tooltip?: string;
   options: { value: string | number; label: string }[];
 }
 
-export const SelectField: React.FC<SelectFieldProps> = ({ label, icon, options, className = '', ...props }) => {
+export const SelectField: React.FC<SelectFieldProps> = ({ label, icon, tooltip, options, className = '', ...props }) => {
   return (
     <div className={`flex flex-col gap-1.5 ${className}`}>
-      <label className="text-sm font-medium text-slate-300 flex items-center gap-2">
-        {icon && <span className="text-slate-400">{icon}</span>}
+      <label className="text-sm font-medium text-slate-300 flex items-center">
+        {icon && <span className="text-slate-400 mr-2">{icon}</span>}
         {label}
+        {tooltip && <Tooltip content={tooltip} />}
       </label>
       <div className="relative">
         <select

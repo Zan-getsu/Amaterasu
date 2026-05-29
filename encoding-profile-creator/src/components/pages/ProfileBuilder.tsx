@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { ArrowLeft, Save, Copy, RotateCcw, Film, Music, Type, Tag, CheckCircle, Trash2 } from 'lucide-react';
+import { ArrowLeft, Save, Copy, RotateCcw, Film, Music, Type, Tag, CheckCircle, Trash2, Download, Terminal, Code } from 'lucide-react';
 import type { EncodingProfile } from '../../types';
 import { QUICK_PRESETS, OPTIONS } from '../../data/presets';
 import { SelectField } from '../shared/SelectField';
@@ -21,6 +21,8 @@ const DISPOSITION_OPTIONS = [
   { label: "visual_impaired", value: "visual_impaired" },
   { label: "captions", value: "captions" }
 ];
+
+const DYNAMIC_VARS = ['{title}', '{episode}', '{quality}', '{resolution}', '{source}', '{audio}'];
 
 interface ProfileBuilderProps {
   initialData?: EncodingProfile | null;
@@ -50,13 +52,14 @@ export const ProfileBuilder: React.FC<ProfileBuilderProps> = ({ initialData, onN
   const [customMetaList, setCustomMetaList] = useState<{key: string, value: string}[]>([]);
   const [dispositionList, setDispositionList] = useState<{key: string, value: string}[]>([]);
   const [copied, setCopied] = useState(false);
+  const [previewMode, setPreviewMode] = useState<'json' | 'ffmpeg'>('json');
 
   // Sync custom metadata list and disposition list with profile object
   useEffect(() => {
     if (initialData) {
       const standardKeys = ['title', 'v_track', 'a_track', 's_track'];
       const custom = Object.entries(initialData.metadata || {})
-        .filter(([key]) => !standardKeys.includes(key))
+        .filter(([key]) => !standardKeys.includes(key.trim()))
         .map(([key, value]) => ({ key, value: String(value) }));
       setCustomMetaList(custom);
 
@@ -107,10 +110,14 @@ export const ProfileBuilder: React.FC<ProfileBuilderProps> = ({ initialData, onN
         if (prev.metadata?.[k] !== undefined) newMeta[k] = prev.metadata[k]!;
       });
       
-      // Add valid custom keys
+      // Add valid custom keys, appending trailing spaces for duplicate keys
       items.forEach(item => {
         if (item.key && item.value) {
-          newMeta[item.key] = item.value;
+          let uniqueKey = item.key.trim();
+          while (newMeta[uniqueKey] !== undefined) {
+             uniqueKey += ' ';
+          }
+          newMeta[uniqueKey] = item.value;
         }
       });
       
@@ -138,10 +145,84 @@ export const ProfileBuilder: React.FC<ProfileBuilderProps> = ({ initialData, onN
     setTimeout(() => setCopied(false), 2000);
   };
 
+  const handleImportJSON = () => {
+    const input = prompt("Paste your profile JSON here:");
+    if (!input) return;
+    try {
+      const parsed = JSON.parse(input);
+      setProfile({ ...DEFAULT_PROFILE, ...parsed, name: parsed.name || "Imported Profile" });
+      
+      const standardKeys = ['title', 'v_track', 'a_track', 's_track'];
+      const custom = Object.entries(parsed.metadata || {})
+        .filter(([key]) => !standardKeys.includes(key.trim()))
+        .map(([key, value]) => ({ key, value: String(value) }));
+      setCustomMetaList(custom);
+
+      const disps = Object.entries(parsed.disposition || {})
+        .map(([key, value]) => ({ key, value: String(value) }));
+      setDispositionList(disps);
+    } catch (e) {
+      alert("Invalid JSON format!");
+    }
+  };
+
+  const insertVar = (field: 'rename' | 'title', variable: string) => {
+    if (field === 'rename') {
+      updateProfile({ rename: (profile.rename || '') + variable });
+    } else {
+      updateMetadata('title', (profile.metadata?.title || '') + variable);
+    }
+  };
+
   const getPresetOptions = () => {
     if (profile.video_codec === 'libsvtav1') return OPTIONS.svtAv1Presets;
     if (profile.video_codec === 'libx264' || profile.video_codec === 'libx265') return OPTIONS.x264x265Presets;
     return [];
+  };
+
+  const generateFFmpegCommand = () => {
+    let cmd = `ffmpeg -i input.mkv \\\n`;
+    
+    if (profile.metadata?.v_track) cmd += `  -map 0:v:${profile.metadata.v_track === '?' ? '' : profile.metadata.v_track} \\\n`;
+    if (profile.metadata?.a_track) cmd += `  -map 0:a:${profile.metadata.a_track === '?' ? '' : profile.metadata.a_track} \\\n`;
+    if (profile.metadata?.s_track) cmd += `  -map 0:s:${profile.metadata.s_track === '?' ? '' : profile.metadata.s_track} \\\n`;
+
+    cmd += `  -c:v ${profile.video_codec} `;
+    if (profile.video_codec !== 'copy') {
+      if (profile.video_params?.crf !== undefined) cmd += `-crf ${profile.video_params.crf} `;
+      if (profile.video_params?.preset !== undefined) cmd += `-preset ${profile.video_params.preset} `;
+      if (profile.video_params?.pix_fmt) cmd += `-pix_fmt ${profile.video_params.pix_fmt} `;
+    }
+    cmd += `\\\n`;
+
+    cmd += `  -c:a ${profile.audio_codec} `;
+    if (profile.audio_codec !== 'copy' && profile.audio_codec !== 'flac') {
+      if (profile.audio_params?.bitrate) cmd += `-b:a ${profile.audio_params.bitrate} `;
+    }
+    cmd += `\\\n`;
+
+    cmd += `  -c:s ${profile.subtitle_mode} \\\n`;
+
+    if (profile.metadata) {
+      Object.entries(profile.metadata).forEach(([k, v]) => {
+        if (!['v_track', 'a_track', 's_track', 'title'].includes(k.trim())) {
+          if (k.includes(':')) {
+             cmd += `  -metadata:${k.trim()} "${v}" \\\n`;
+          } else {
+             cmd += `  -metadata "${k}=${v}" \\\n`;
+          }
+        }
+      });
+    }
+
+    if (profile.disposition) {
+      Object.entries(profile.disposition).forEach(([k, v]) => {
+        cmd += `  -disposition:${k.trim()} ${v} \\\n`;
+      });
+    }
+
+    cmd += `  output.mkv`;
+    return cmd;
   };
 
   return (
@@ -166,6 +247,13 @@ export const ProfileBuilder: React.FC<ProfileBuilderProps> = ({ initialData, onN
         </div>
         
         <div className="flex items-center gap-2 w-full md:w-auto justify-end">
+          <button 
+            onClick={handleImportJSON}
+            className="p-2.5 text-slate-400 hover:text-white bg-white/5 hover:bg-white/10 rounded-xl transition-colors hidden sm:block"
+            title="Import Profile"
+          >
+            <Download size={18} />
+          </button>
           {initialData && (
             <button 
               onClick={() => {
@@ -192,13 +280,6 @@ export const ProfileBuilder: React.FC<ProfileBuilderProps> = ({ initialData, onN
             <RotateCcw size={18} />
           </button>
           <button 
-            onClick={handleCopyJSON}
-            className={`btn-glass !py-2.5 !px-4 ${copied ? '!border-emerald-500/50 text-emerald-500' : ''}`}
-          >
-            {copied ? <CheckCircle size={18} /> : <Copy size={18} />}
-            <span className="hidden sm:inline">{copied ? 'Copied' : 'Copy JSON'}</span>
-          </button>
-          <button 
             onClick={() => onSave(profile)}
             className="btn-primary !py-2.5 !px-6"
           >
@@ -219,7 +300,7 @@ export const ProfileBuilder: React.FC<ProfileBuilderProps> = ({ initialData, onN
                 setProfile({ ...preset, name: profile.name });
                 const standardKeys = ['title', 'v_track', 'a_track', 's_track'];
                 const custom = Object.entries(preset.metadata || {})
-                  .filter(([key]) => !standardKeys.includes(key))
+                  .filter(([key]) => !standardKeys.includes(key.trim()))
                   .map(([key, value]) => ({ key, value: String(value) }));
                 setCustomMetaList(custom);
               }}
@@ -244,6 +325,7 @@ export const ProfileBuilder: React.FC<ProfileBuilderProps> = ({ initialData, onN
           
           <SelectField
             label="Pixel Format"
+            tooltip="Bit depth and chroma subsampling. yuv420p10le is recommended for 10-bit AV1/HEVC."
             value={profile.video_params?.pix_fmt || 'yuv420p10le'}
             onChange={(e) => updateVideoParams({ pix_fmt: e.target.value })}
             options={OPTIONS.pixelFormats}
@@ -253,6 +335,7 @@ export const ProfileBuilder: React.FC<ProfileBuilderProps> = ({ initialData, onN
             <div className="md:col-span-2">
               <SliderField
                 label="CRF (Quality)"
+                tooltip="Constant Rate Factor. Lower value = Higher quality and larger file size. 18 is near lossless, 24-28 is standard for AV1/HEVC."
                 value={profile.video_params?.crf ?? 28}
                 min={0}
                 max={63}
@@ -265,6 +348,7 @@ export const ProfileBuilder: React.FC<ProfileBuilderProps> = ({ initialData, onN
           {getPresetOptions().length > 0 && (
             <SelectField
               label="Preset / Speed"
+              tooltip="Slower presets provide better compression efficiency at the cost of encoding time."
               value={profile.video_params?.preset || (profile.video_codec === 'libsvtav1' ? 4 : 'medium')}
               onChange={(e) => updateVideoParams({ preset: profile.video_codec === 'libsvtav1' ? parseInt(e.target.value) : e.target.value })}
               options={getPresetOptions()}
@@ -458,18 +542,36 @@ export const ProfileBuilder: React.FC<ProfileBuilderProps> = ({ initialData, onN
       <SectionCard title="Global Metadata" icon={<Tag size={20} />} defaultOpen={false}>
         <div className="flex flex-col gap-6">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <TextField
-              label="Rename File To"
-              value={profile.rename || ''}
-              onChange={(e) => updateProfile({ rename: e.target.value })}
-              placeholder="e.g. {title} - {episode}.mkv"
-            />
-            <TextField
-              label="Global Title"
-              value={profile.metadata?.title || ''}
-              onChange={(e) => updateMetadata('title', e.target.value)}
-              placeholder="e.g. {basename} (Supports dynamic variables)"
-            />
+            <div>
+              <TextField
+                label="Rename File To"
+                value={profile.rename || ''}
+                onChange={(e) => updateProfile({ rename: e.target.value })}
+                placeholder="e.g. {title} - {episode}.mkv"
+              />
+              <div className="flex flex-wrap gap-1.5 mt-2">
+                {DYNAMIC_VARS.map(v => (
+                  <button key={v} onClick={() => insertVar('rename', v)} className="text-[10px] bg-white/5 hover:bg-[#ff3e3e]/20 text-slate-400 hover:text-white px-1.5 py-0.5 rounded border border-white/5 transition-colors">
+                    {v}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div>
+              <TextField
+                label="Global Title"
+                value={profile.metadata?.title || ''}
+                onChange={(e) => updateMetadata('title', e.target.value)}
+                placeholder="e.g. {basename}"
+              />
+              <div className="flex flex-wrap gap-1.5 mt-2">
+                {DYNAMIC_VARS.map(v => (
+                  <button key={v} onClick={() => insertVar('title', v)} className="text-[10px] bg-white/5 hover:bg-[#ff3e3e]/20 text-slate-400 hover:text-white px-1.5 py-0.5 rounded border border-white/5 transition-colors">
+                    {v}
+                  </button>
+                ))}
+              </div>
+            </div>
           </div>
 
           <TextField
@@ -481,10 +583,23 @@ export const ProfileBuilder: React.FC<ProfileBuilderProps> = ({ initialData, onN
         </div>
       </SectionCard>
 
-      {/* Live JSON Preview */}
+      {/* Live Preview Section */}
       <div className="mt-8">
         <div className="flex justify-between items-center mb-4 px-2">
-          <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider">Live Output</h3>
+          <div className="flex bg-black/40 p-1 rounded-lg border border-white/5">
+            <button 
+              onClick={() => setPreviewMode('json')}
+              className={`px-3 py-1.5 text-xs font-bold rounded flex items-center gap-2 transition-all ${previewMode === 'json' ? 'bg-[#ff3e3e] text-white' : 'text-slate-400 hover:text-white'}`}
+            >
+              <Code size={14} /> JSON Layout
+            </button>
+            <button 
+              onClick={() => setPreviewMode('ffmpeg')}
+              className={`px-3 py-1.5 text-xs font-bold rounded flex items-center gap-2 transition-all ${previewMode === 'ffmpeg' ? 'bg-[#ff3e3e] text-white' : 'text-slate-400 hover:text-white'}`}
+            >
+              <Terminal size={14} /> FFmpeg Command
+            </button>
+          </div>
         </div>
         <div className="glass-card rounded-2xl p-6 bg-black/60 relative group">
           <button 
@@ -495,13 +610,17 @@ export const ProfileBuilder: React.FC<ProfileBuilderProps> = ({ initialData, onN
             {copied ? <CheckCircle size={16} /> : <Copy size={16} />}
           </button>
           <pre className="text-xs sm:text-sm text-slate-300 font-mono overflow-x-auto selection:bg-[#ff3e3e]/30 selection:text-white">
-            <code>{
-              JSON.stringify(
-                Object.fromEntries(Object.entries(profile).filter(([k]) => k !== 'is_default')), 
-                null, 
-                4
-              )
-            }</code>
+            {previewMode === 'json' ? (
+              <code>{
+                JSON.stringify(
+                  Object.fromEntries(Object.entries(profile).filter(([k]) => k !== 'is_default')), 
+                  null, 
+                  4
+                )
+              }</code>
+            ) : (
+              <code>{generateFFmpegCommand()}</code>
+            )}
           </pre>
         </div>
       </div>
