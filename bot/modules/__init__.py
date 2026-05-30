@@ -163,9 +163,6 @@ __all__ = [
     "telegraph_upload",
     "link_command_handler",
     "private_media_handler",
-
-    "rename_callback_handler",
-    "reply_listener",
     "autorename_command",
     "auto_rename_handler",
 ]
