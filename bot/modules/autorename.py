@@ -16,7 +16,7 @@ from bot.helper.telegram_helper.message_utils import (
     delete_message,
 )
 from bot.helper.telegram_helper.bot_commands import BotCommands
-from bot.helper.ext_utils.bot_utils import update_user_ldata, new_task
+from bot.helper.ext_utils.bot_utils import update_user_ldata
 from bot.helper.ext_utils.status_utils import get_readable_file_size
 from bot.core.config_manager import Config
 
@@ -58,12 +58,7 @@ async def autorename_command(client, message):
     # ── Toggle ──────────────────────────────────────────────────
     new_state = not is_enabled
     update_user_ldata(user_id, "AUTORENAME_ENABLED", new_state)
-
-    @new_task
-    async def _persist():
-        await database.update_user_data(user_id)
-
-    _persist()
+    await database.update_user_data(user_id)
 
     status_icon = "✅" if new_state else "❌"
     status_text = "ENABLED" if new_state else "DISABLED"
