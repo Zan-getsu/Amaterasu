@@ -49,6 +49,19 @@ function App() {
     await loadProfiles();
   };
 
+  const handleDuplicateProfile = async (id: string) => {
+    const profileToDuplicate = profiles[id];
+    if (profileToDuplicate) {
+      const duplicatedProfile = {
+        ...profileToDuplicate,
+        name: `${profileToDuplicate.name} (Copy)`,
+        is_default: false
+      };
+      await profileApi.create(duplicatedProfile);
+      await loadProfiles();
+    }
+  };
+
   const handleSetDefault = async (id: string) => {
     await profileApi.setDefault(id);
     await loadProfiles();
@@ -101,6 +114,7 @@ function App() {
           onNavigate={(page) => page === 'builder' ? navigateToBuilder() : setCurrentPage('landing')} 
           onEdit={handleEditProfile}
           onDelete={handleDeleteProfile}
+          onDuplicate={handleDuplicateProfile}
           onSetDefault={handleSetDefault}
         />
       )}

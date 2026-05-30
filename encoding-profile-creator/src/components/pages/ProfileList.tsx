@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ArrowLeft, Copy, Star, Trash2, Edit, Check, Settings, Film, Music, CheckCircle } from 'lucide-react';
+import { ArrowLeft, Copy, Star, Trash2, Edit, Check, Settings, Film, Music, CheckCircle, Files } from 'lucide-react';
 import type { EncodingProfile } from '../../types';
 
 interface ProfileListProps {
@@ -7,6 +7,7 @@ interface ProfileListProps {
   onNavigate: (page: 'landing' | 'builder') => void;
   onEdit: (profileId: string) => void;
   onDelete: (profileId: string) => void;
+  onDuplicate: (profileId: string) => void;
   onSetDefault: (profileId: string) => void;
 }
 
@@ -15,6 +16,7 @@ export const ProfileList: React.FC<ProfileListProps> = ({
   onNavigate, 
   onEdit, 
   onDelete,
+  onDuplicate,
   onSetDefault
 }) => {
   const [copiedId, setCopiedId] = useState<string | null>(null);
@@ -125,6 +127,13 @@ export const ProfileList: React.FC<ProfileListProps> = ({
                       title="Edit"
                     >
                       <Edit size={18} />
+                    </button>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); onDuplicate(id); }}
+                      className="p-2.5 rounded-xl bg-white/5 border border-white/10 text-slate-400 hover:bg-white/10 hover:text-white transition-all"
+                      title="Duplicate"
+                    >
+                      <Files size={18} />
                     </button>
                     <button
                       onClick={(e) => { e.stopPropagation(); handleCopyJSON(id, data); }}

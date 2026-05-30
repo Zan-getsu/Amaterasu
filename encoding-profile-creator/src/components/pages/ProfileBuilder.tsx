@@ -250,7 +250,7 @@ export const ProfileBuilder: React.FC<ProfileBuilderProps> = ({ initialData, onN
         <div className="flex items-center gap-2 w-full md:w-auto justify-end">
           <button 
             onClick={handleImportJSON}
-            className="p-2.5 text-slate-400 hover:text-white bg-white/5 hover:bg-white/10 rounded-xl transition-colors hidden sm:block"
+            className="p-2.5 text-slate-400 hover:text-white bg-white/5 hover:bg-white/10 rounded-xl transition-colors"
             title="Import Profile"
           >
             <Download size={18} />
