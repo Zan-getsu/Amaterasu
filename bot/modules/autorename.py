@@ -223,30 +223,47 @@ async def auto_rename_handler(client, message):
                 pass
 
         common_kwargs = dict(
-            chat_id=message.chat.id,
             caption=custom_caption,
             thumb=thumb_path if has_thumb else None,
-            reply_to_message_id=message.id,
             progress=_up_progress,
         )
+        if upload_type in ["video", "audio"]:
+            common_kwargs["duration"] = duration
+        if upload_type == "video":
+            common_kwargs["supports_streaming"] = True
+
+        total_size = os.path.getsize(local_path)
+        is_large = total_size > 52428800  # 50 MB
+        
+        from bot.core.tg_client import TgClient
+        from bot.core.config_manager import Config
+        
+        upload_client = client
+        use_dump = False
+        dump_chat = getattr(Config, "LEECH_DUMP_CHAT", "") or getattr(Config, "BIN_CHANNEL", "")
+        
+        if is_large and TgClient.user:
+            upload_client = TgClient.user
+            if dump_chat:
+                use_dump = True
+
+        common_kwargs["chat_id"] = dump_chat if use_dump else message.chat.id
+        if not use_dump:
+            common_kwargs["reply_to_message_id"] = message.id
 
         if upload_type == "video":
-            await client.send_video(
-                video=local_path,
-                supports_streaming=True,
-                duration=duration,
-                **common_kwargs,
-            )
+            up_msg = await upload_client.send_video(video=local_path, **common_kwargs)
         elif upload_type == "audio":
-            await client.send_audio(
-                audio=local_path,
-                duration=duration,
-                **common_kwargs,
-            )
+            up_msg = await upload_client.send_audio(audio=local_path, **common_kwargs)
         else:
-            await client.send_document(
-                document=local_path,
-                **common_kwargs,
+            up_msg = await upload_client.send_document(document=local_path, **common_kwargs)
+
+        if use_dump and up_msg:
+            await client.copy_message(
+                chat_id=message.chat.id,
+                from_chat_id=up_msg.chat.id,
+                message_id=up_msg.id,
+                reply_to_message_id=message.id
             )
 
         await delete_message(progress_msg)
