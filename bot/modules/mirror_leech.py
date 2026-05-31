@@ -166,7 +166,8 @@ class Mirror(TaskListener):
             return
 
         from .. import sudo_users, user_data
-        is_sudo = self.message.from_user.id == Config.OWNER_ID or self.message.from_user.id in sudo_users or user_data.get(self.message.from_user.id, {}).get("SUDO")
+        user_id = (self.message.from_user or self.message.sender_chat).id
+        is_sudo = user_id == Config.OWNER_ID or user_id in sudo_users or user_data.get(user_id, {}).get("SUDO")
         if args.get("-en") and not is_sudo:
             await send_message(self.message, "Encoding is restricted to sudo users only.")
             return
