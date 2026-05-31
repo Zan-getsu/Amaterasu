@@ -27,7 +27,7 @@ pillow
 psutil
 pycountry
 pymongo
-pyrotgfork==2.2.19
+pyrotgfork
 python-magic
 pytz
 qbittorrent-api
@@ -38,6 +38,6 @@ tenacity
 tgcrypto
 urllib3
 uvicorn
-uvloop==0.21.0
+uvloop
 xattr
 yt-dlp[default,curl-cffi]

@@ -4,9 +4,14 @@ from uvloop import install
 
 install()
 
+from asyncio import new_event_loop, set_event_loop
+
+bot_loop = new_event_loop()
+set_event_loop(bot_loop)
+
 from subprocess import run as srun
 from os import getcwd
-from asyncio import Lock, new_event_loop, set_event_loop
+from asyncio import Lock
 from logging import (
     ERROR,
     INFO,
@@ -36,8 +41,6 @@ getLogger("aiohttp").setLevel(WARNING)
 
 bot_start_time = time()
 
-bot_loop = new_event_loop()
-set_event_loop(bot_loop)
 
 basicConfig(
     format="[%(asctime)s] [%(levelname)s] - %(message)s",  #  [%(filename)s:%(lineno)d]
