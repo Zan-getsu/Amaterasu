@@ -146,22 +146,32 @@ It converges five industrial download engines (Aria2c, qBittorrent, JDownloader,
 ```mermaid
 graph TD
     A[Telegram User] -->|Commands / Files| B((Amaterasu Core))
+    B --> L[(MongoDB)]
+    
     B --> C{Download Engines}
     C -->|Torrents| D[qBittorrent & Aria2c]
     C -->|Usenet| E[Sabnzbd]
     C -->|Direct/Links| F[JDownloader & yt-dlp]
     C -->|Cloud| M[Mega CMD]
-    B --> G{Storage & Distribution}
+    
+    B -.->|Telegram Files| N
+    C -->|Downloaded Files| N{Media Processing}
+    N -->|SVT-AV1 / HEVC| O[FFmpeg Encoding]
+    N -->|Regex| P[Auto-Rename & Meta]
+    N -->|Archives| Q[Extract / Split / Join]
+
+    N --> G{Storage & Distribution}
+    
     G -->|Cloud Drives| H[Google Drive & Rclone]
     G -->|Direct Download| I[FileToLink Server]
     G -->|Telegram| J[Leech Uploader]
     G -->|DDL Hosters| K[GoFile / BuzzHeavier / PixelDrain]
-    B --> L[(MongoDB)]
     
     style B fill:#FF4500,stroke:#333,stroke-width:2px,color:#fff
     style A fill:#2496ED,color:#fff
     style I fill:#28a745,color:#fff
     style L fill:#4DB33D,color:#fff
+    style N fill:#9370DB,color:#fff
 ```
 
 ### Technology Stack
