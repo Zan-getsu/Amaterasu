@@ -9,8 +9,11 @@ async def authorize(_, message):
     msg = message.text.split()
     thread_id = None
     if len(msg) > 1:
-        if "|" in msg:
+        if "|" in msg[1]:
             chat_id, thread_id = list(map(int, msg[1].split("|")))
+        elif len(msg) > 2:
+            chat_id = int(msg[1].strip())
+            thread_id = int(msg[2].strip())
         else:
             chat_id = int(msg[1].strip())
     elif reply_to := message.reply_to_message:
@@ -46,8 +49,11 @@ async def unauthorize(_, message):
     msg = message.text.split()
     thread_id = None
     if len(msg) > 1:
-        if "|" in msg:
+        if "|" in msg[1]:
             chat_id, thread_id = list(map(int, msg[1].split("|")))
+        elif len(msg) > 2:
+            chat_id = int(msg[1].strip())
+            thread_id = int(msg[2].strip())
         else:
             chat_id = int(msg[1].strip())
     elif reply_to := message.reply_to_message:
