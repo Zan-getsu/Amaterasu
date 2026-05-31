@@ -192,6 +192,7 @@ class DbManager:
                 "$replaceRoot": {
                     "newRoot": {
                         "$mergeObjects": [
+                            {"_id": user_id},
                             data,
                             {
                                 "$arrayToObject": {
