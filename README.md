@@ -1265,6 +1265,24 @@ This auto-leeches new anime releases in 1080p (mkv or mp4), excluding batch pack
 
 ---
 
+<a id="acknowledgments"></a>
+
+## 🙏 Acknowledgments & Credits
+
+Amaterasu stands on the shoulders of giants. We want to express our deepest gratitude to the following legendary projects that paved the way and served as the foundational inspiration for this bot:
+
+> [!IMPORTANT]  
+> 🌟 **[WZML-X](https://github.com/SilentDemonSD/WZML-X)**  
+> The undisputed core architecture and pioneering codebase that heavily influenced Amaterasu's powerful mirroring and leeching ecosystem.
+
+> [!IMPORTANT]  
+> 🌟 **[Auto-Rename-Bot](https://github.com/Codeflix-Bots/Auto-Rename-Bot)**  
+> An incredible source of inspiration for our advanced auto-renaming and file manipulation algorithms. 
+
+Please check out their repositories and drop them a star!
+
+---
+
 <div align="center">
 
 ### 🌟 Star History
