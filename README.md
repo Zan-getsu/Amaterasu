@@ -69,6 +69,7 @@
   - [Media & File Tools](#media--file-tools)
   - [Admin / Sudo Commands](#admin--sudo-commands)
 - [🎞️ Encoding & Metadata](#encoding--metadata)
+- [🎭 Auto-Rename Engine](#auto-rename)
 - [🎨 Encoding Profile Creator (Web UI)](#encoding-profile-creator-web-ui)
 - [🧰 Advanced Usage & Arguments](#advanced-usage--arguments)
   - [Argument Quick Reference](#argument-quick-reference)
