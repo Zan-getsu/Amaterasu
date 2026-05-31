@@ -846,6 +846,42 @@ When you set a custom thumbnail (via `/setthumb` or the `-t` argument), the bot 
 
 ---
 
+<a id="auto-rename"></a>
+
+## 🎭 Auto-Rename Engine
+
+Amaterasu includes a powerful, regex-driven **Auto-Rename Engine** inspired by dedicated renaming bots. It can intelligently extract information from messy filenames and restructure them into clean, standardized formats.
+
+### 1. Setting Up Your Template
+Instead of manually typing a new name for every file, you define a **Template**.
+1. Send `/usetting` in the bot's private chat.
+2. Navigate to **Misc Settings** → **Auto-Rename**.
+3. Enter your template using dynamic placeholders.
+
+**Supported Placeholders:**
+- `{title}` - The extracted base name of the media, stripped of tags and quality info.
+- `{season}` - The extracted season number (e.g., `01`).
+- `{episode}` - The extracted episode number (e.g., `04`).
+- `{quality}` - The extracted resolution/quality (e.g., `1080p`, `4k`, `WEBRip`).
+
+**Example Template:** 
+`[MyGroup] {title} - S{season}E{episode} [{quality}]`
+*If the bot receives `messy.show.s1.e4.1080p.mkv`, it will become `[MyGroup] Messy Show - S01E04 [1080p].mkv`.*
+
+### 2. How to Use Auto-Rename
+
+There are two primary ways the Auto-Rename Engine works:
+
+**Mode 1: Live Telegram Renaming**
+- Send `/autorename` in the bot's private chat to toggle Auto-Rename Mode **ON**.
+- Simply forward or upload any media/document to the bot.
+- The bot will instantly download it, apply your template to the filename, and upload it back to you.
+
+**Mode 2: Download Tasks**
+- When you start a mirror/leech task (e.g., downloading a torrent or a yt-dlp link), the bot will automatically apply your Auto-Rename template to all files inside the task *before* they are uploaded to your cloud drive or Telegram.
+
+---
+
 <a id="encoding-profile-creator-web-ui"></a>
 
 ## 🎨 Encoding Profile Creator (Web UI)
