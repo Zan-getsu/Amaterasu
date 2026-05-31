@@ -202,10 +202,25 @@ class TaskListener(TaskConfig):
             processor = MetadataProcessor()
             self.encode_metadata = processor.parse_string(self.encode_metadata)
         else:
-            # Metadata is now built into the encoding profiles, no need to prompt manually
             self.encode_metadata = {}
-            
-        await self._prompt_encode_profile()
+
+        self.encode_profile = None
+        if isinstance(self.is_encode, str) and self.is_encode.strip() and self.is_encode != "True":
+            pid_search = self.is_encode.strip().lower()
+            if pid_search == "default":
+                self.encode_profile = Config.DEFAULT_ENCODE_PRESET
+            else:
+                profiles = await database.get_encode_profiles(self.user_id)
+                for db_pid, pdata in profiles.items():
+                    if db_pid == "_id":
+                        continue
+                    if db_pid.lower() == pid_search or pdata.get("name", "").lower() == pid_search:
+                        self.encode_profile = pdata
+                        break
+        
+        if not self.encode_profile:
+            await self._prompt_encode_profile()
+
         if self.is_cancelled or not self.encode_profile:
             return None
             

@@ -190,8 +190,11 @@ If title=None, all meta data will be removed
 """
 
 encode_msg = """<b>Encode Video</b>: -en
-/cmd link -en
-This will prompt you to provide metadata (optional) and select an encoding profile before the video is uploaded."""
+<b>Options</b>:
+/cmd link -en (shows preset menu after downloading)
+/cmd link -en preset_name (uses the specified preset directly without prompting)
+/cmd link -en default (uses the default SVT-AV1 preset)
+Note: Only for SUDO users!"""
 
 yt_opt = """<b>Options</b>: -opt
 
