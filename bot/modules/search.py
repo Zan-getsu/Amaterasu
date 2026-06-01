@@ -1,6 +1,7 @@
 from httpx import AsyncClient
 from html import escape
 from urllib.parse import quote
+from pyrogram.enums import ButtonStyle
 
 from .. import LOGGER
 from ..core.config_manager import Config
@@ -115,7 +116,7 @@ async def search(key, site, message, method):
         await TorrentManager.qbittorrent.search.delete(search_id)
     link = await get_result(search_results, key, message, method)
     buttons = ButtonMaker()
-    buttons.url_button("🔎 VIEW", link)
+    buttons.url_button("🔎 VIEW", link, style=ButtonStyle.PRIMARY)
     button = buttons.build_menu(1)
     await edit_message(message, msg, button)
 

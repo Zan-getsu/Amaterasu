@@ -1,4 +1,5 @@
 from asyncio import sleep
+from pyrogram.enums import ButtonStyle
 
 from .. import task_dict, task_dict_lock, user_data, multi_tags
 from ..core.tg_client import Config
@@ -127,7 +128,7 @@ def create_cancel_buttons(is_sudo, user_id=""):
             buttons.data_button("All Added Tasks", f"canall bot ms {user_id}")
         else:
             buttons.data_button("My Tasks", f"canall user ms {user_id}")
-    buttons.data_button("✕ CLOSE", f"canall close ms {user_id}")
+    buttons.data_button("✕ CLOSE", f"canall close ms {user_id}", style=ButtonStyle.DANGER)
     return buttons.build_menu(2)
 
 
@@ -170,7 +171,7 @@ async def cancel_all_update(_, query):
         buttons = button_build.ButtonMaker()
         buttons.data_button("Yes!", f"canall {data[2]} confirm {user_id}")
         buttons.data_button("↩ BACK", f"canall back confirm {user_id}")
-        buttons.data_button("✕ CLOSE", f"canall close confirm {user_id}")
+        buttons.data_button("✕ CLOSE", f"canall close confirm {user_id}", style=ButtonStyle.DANGER)
         button = buttons.build_menu(2)
         await edit_message(
             message, f"Are you sure you want to cancel all {data[2]} tasks", button

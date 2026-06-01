@@ -1,4 +1,5 @@
 from httpx import AsyncClient
+from pyrogram.enums import ButtonStyle
 from apscheduler.triggers.interval import IntervalTrigger
 from asyncio import Lock, sleep
 from datetime import datetime, timedelta
@@ -44,7 +45,7 @@ async def rss_menu(event):
     buttons.data_button("Subscribe", f"rss sub {user_id}")
     buttons.data_button("Subscriptions", f"rss list {user_id} 0")
     buttons.data_button("Get Items", f"rss get {user_id}")
-    buttons.data_button("Edit", f"rss edit {user_id}")
+    buttons.data_button("Edit", f"rss edit {user_id}", style=ButtonStyle.PRIMARY)
     buttons.data_button("Pause", f"rss pause {user_id}")
     buttons.data_button("Resume", f"rss resume {user_id}")
     buttons.data_button("Unsubscribe", f"rss unsubscribe {user_id}")
@@ -58,7 +59,7 @@ async def rss_menu(event):
             buttons.data_button("Shutdown Rss", f"rss shutdown {user_id}")
         else:
             buttons.data_button("Start Rss", f"rss start {user_id}")
-    buttons.data_button("✕ CLOSE", f"rss close {user_id}")
+    buttons.data_button("✕ CLOSE", f"rss close {user_id}", style=ButtonStyle.DANGER)
     button = buttons.build_menu(2)
     msg = f"Rss Menu | Users: {len(rss_dict)} | Running: {scheduler.running}"
     return msg, button
@@ -313,7 +314,7 @@ async def rss_list(query, start, all_users=False):
                 )
                 list_feed += f"<b>Paused:</b> <code>{data['paused']}</code>\n"
     buttons.data_button("↩ BACK", f"rss back {user_id}")
-    buttons.data_button("✕ CLOSE", f"rss close {user_id}")
+    buttons.data_button("✕ CLOSE", f"rss close {user_id}", style=ButtonStyle.DANGER)
     if keysCount > 5:
         for x in range(0, keysCount, 5):
             buttons.data_button(
@@ -492,7 +493,7 @@ async def rss_listener(client, query):
         handler_dict[user_id] = False
         buttons = ButtonMaker()
         buttons.data_button("↩ BACK", f"rss back {user_id}")
-        buttons.data_button("✕ CLOSE", f"rss close {user_id}")
+        buttons.data_button("✕ CLOSE", f"rss close {user_id}", style=ButtonStyle.DANGER)
         button = buttons.build_menu(2)
         await edit_message(message, RSS_HELP_MESSAGE, button)
         pfunc = partial(rss_sub, pre_event=query)
@@ -513,7 +514,7 @@ async def rss_listener(client, query):
             await query.answer()
             buttons = ButtonMaker()
             buttons.data_button("↩ BACK", f"rss back {user_id}")
-            buttons.data_button("✕ CLOSE", f"rss close {user_id}")
+            buttons.data_button("✕ CLOSE", f"rss close {user_id}", style=ButtonStyle.DANGER)
             button = buttons.build_menu(2)
             await edit_message(
                 message,
@@ -536,7 +537,7 @@ async def rss_listener(client, query):
                 buttons.data_button("Resume AllMyFeeds", f"rss uallresume {user_id}")
             elif data[1] == "unsubscribe":
                 buttons.data_button("Unsub AllMyFeeds", f"rss uallunsub {user_id}")
-            buttons.data_button("✕ CLOSE", f"rss close {user_id}")
+            buttons.data_button("✕ CLOSE", f"rss close {user_id}", style=ButtonStyle.DANGER)
             button = buttons.build_menu(2)
             await edit_message(
                 message,
@@ -553,7 +554,7 @@ async def rss_listener(client, query):
             await query.answer()
             buttons = ButtonMaker()
             buttons.data_button("↩ BACK", f"rss back {user_id}")
-            buttons.data_button("✕ CLOSE", f"rss close {user_id}")
+            buttons.data_button("✕ CLOSE", f"rss close {user_id}", style=ButtonStyle.DANGER)
             button = buttons.build_menu(2)
             msg = """Send one or more rss titles with new filters or command separated by new line.
 Examples:
@@ -626,7 +627,7 @@ Timeout: 60 sec. Argument -c for command and arguments
             await query.answer()
             buttons = ButtonMaker()
             buttons.data_button("↩ BACK", f"rss back {user_id}")
-            buttons.data_button("✕ CLOSE", f"rss close {user_id}")
+            buttons.data_button("✕ CLOSE", f"rss close {user_id}", style=ButtonStyle.DANGER)
             button = buttons.build_menu(2)
             msg = "Send one or more user_id separated by space to delete their resources.\nTimeout: 60 sec."
             await edit_message(message, msg, button)

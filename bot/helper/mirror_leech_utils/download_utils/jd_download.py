@@ -1,5 +1,6 @@
 from asyncio import wait_for, Event, sleep
 from functools import partial
+from pyrogram.enums import ButtonStyle
 from pyrogram.filters import regex, user
 from pyrogram.handlers import CallbackQueryHandler
 from time import time
@@ -76,7 +77,7 @@ class JDownloaderHelper:
         buttons = ButtonMaker()
         buttons.url_button("Select", "https://my.jdownloader.org")
         buttons.data_button("Done Selecting", "jdq sdone")
-        buttons.data_button("✕ CANCEL", "jdq cancel")
+        buttons.data_button("✕ CANCEL", "jdq cancel", style=ButtonStyle.DANGER)
         button = buttons.build_menu(2)
         msg = f"Remove the unwanted files or change variants or edit files names from myJdownloader site for <b>{self.listener.name}</b>.\nDon't start it manually!\n\nAfter finish press Done Selecting!\nTimeout: 10 min"
         self._reply_to = await send_message(self.listener.message, msg, button)

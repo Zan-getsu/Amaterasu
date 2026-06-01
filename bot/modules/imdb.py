@@ -1,4 +1,5 @@
 from contextlib import suppress
+from pyrogram.enums import ButtonStyle
 from re import IGNORECASE, findall, search
 
 import cloudscraper
@@ -76,7 +77,7 @@ async def imdb_search(_, message):
                     f"🎬 {movie.title} ({getattr(movie , 'year' , 'N/A')})",
                     f"imdb {user_id} movie {movie.id}",
                 )
-        buttons.data_button("🚫 Close 🚫", f"imdb {user_id} close")
+        buttons.data_button("🚫 Close 🚫", f"imdb {user_id} close", style=ButtonStyle.DANGER)
         await edit_message(
             k, "<b><i>Search Results found on IMDb.com</i></b>", buttons.build_menu(1)
         )
@@ -271,10 +272,10 @@ async def imdb_callback(_, query):
         buttons = ButtonMaker()
         if imdb["trailer"]:
             if isinstance(imdb["trailer"], list):
-                buttons.url_button("▶️ IMDb Trailer", imdb["trailer"][-1])
+                buttons.url_button("▶️ IMDb Trailer", imdb["trailer"][-1], style=ButtonStyle.PRIMARY)
             else:
-                buttons.url_button("▶️ IMDb Trailer", imdb["trailer"])
-        buttons.data_button("🚫 Close 🚫", f"imdb {user_id} close")
+                buttons.url_button("▶️ IMDb Trailer", imdb["trailer"], style=ButtonStyle.PRIMARY)
+        buttons.data_button("🚫 Close 🚫", f"imdb {user_id} close", style=ButtonStyle.DANGER)
         buttons = buttons.build_menu(1)
         template = ""
         # if int(data[1]) in user_data and user_data[int(data[1])].get('imdb_temp'):

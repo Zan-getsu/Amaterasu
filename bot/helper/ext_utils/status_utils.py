@@ -1,5 +1,6 @@
 from asyncio import gather, iscoroutinefunction
 from html import escape
+from pyrogram.enums import ButtonStyle
 from re import findall
 from time import time
 
@@ -301,7 +302,7 @@ async def get_readable_message(sid, is_user, page_no=1, status="All", page_step=
     
     buttons = ButtonMaker()
     if not is_user:
-        buttons.data_button("📜 TSTATS", f"status {sid} ov", position="header")
+        buttons.data_button("📜 TSTATS", f"status {sid} ov", position="header", style=ButtonStyle.PRIMARY)
     if len(tasks) > STATUS_LIMIT:
         msg += f"├─ {'Tasks':<9}: {tasks_no}\n"
         msg += f"├─ {'Page':<9}: {page_no} / {pages}\n"
@@ -315,7 +316,7 @@ async def get_readable_message(sid, is_user, page_no=1, status="All", page_step=
         for label, status_value in list(STATUSES.items()):
             if status_value != status:
                 buttons.data_button(f"▸ {label.upper()}", f"status {sid} st {status_value}")
-    buttons.data_button("↻ REFRESH", f"status {sid} ref", position="header")
+    buttons.data_button("↻ REFRESH", f"status {sid} ref", position="header", style=ButtonStyle.PRIMARY)
     button = buttons.build_menu(8)
     msg += f"├─ {'CPU':<9}: {cpu_percent()}%\n"
     msg += f"├─ {'RAM':<9}: {virtual_memory().percent}%\n"

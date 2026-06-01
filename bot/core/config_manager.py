@@ -12,6 +12,7 @@ class Config:
     BOT_MAX_TASKS = 0
     BOT_PM = False
     CMD_SUFFIX = ""
+    COLORED_BTNS = False
     DEFAULT_LANG = "en"
     DATABASE_URL = ""
     DEFAULT_UPLOAD = "rc"

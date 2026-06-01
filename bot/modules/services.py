@@ -1,4 +1,5 @@
 from html import escape
+from pyrogram.enums import ButtonStyle
 from time import monotonic, time
 from uuid import uuid4
 from re import match
@@ -176,7 +177,7 @@ async def log(_, message):
     buttons = ButtonMaker()
     buttons.data_button("Log Disp", f"log {uid} disp")
     buttons.data_button("Web Log", f"log {uid} web")
-    buttons.data_button("✕ CLOSE", f"log {uid} close")
+    buttons.data_button("✕ CLOSE", f"log {uid} close", style=ButtonStyle.DANGER)
     await send_file(message, "log.txt", buttons=buttons.build_menu(2))
 
 
@@ -212,7 +213,7 @@ async def log_cb(_, query):
             text = f"<b>Showing Last {len(res)} Lines from log.txt:</b> \n\n----------<b>START LOG</b>----------\n\n<blockquote expandable>{escape(joined_res)}</blockquote>\n----------<b>END LOG</b>----------"
 
             btn = ButtonMaker()
-            btn.data_button("✕ CLOSE", f"log {user_id} close")
+            btn.data_button("✕ CLOSE", f"log {user_id} close", style=ButtonStyle.DANGER)
             await send_message(message, text, btn.build_menu(1))
             await edit_reply_markup(message, None)
         except Exception as err:
@@ -249,7 +250,7 @@ async def log_cb(_, query):
         if resp.status_code == 200:
             await query.answer("Generating..")
             btn = ButtonMaker()
-            btn.url_button("📨 Web Paste (SB)", resp.url)
+            btn.url_button("📨 Web Paste (SB)", resp.url, style=ButtonStyle.PRIMARY)
             await edit_reply_markup(message, btn.build_menu(1))
         else:
             await query.answer("Web Paste Failed ! Check Logs", show_alert=True)

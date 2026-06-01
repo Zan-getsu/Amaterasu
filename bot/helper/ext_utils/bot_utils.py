@@ -4,6 +4,7 @@ from asyncio import (
     run_coroutine_threadsafe,
     sleep,
 )
+from pyrogram.enums import ButtonStyle
 from asyncio.subprocess import PIPE
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial, wraps
@@ -61,7 +62,7 @@ def _build_command_usage(help_dict, command_key):
                 buttons.data_button("⫷", f"help pre {command_key} {i - 1}")
             if i < len(cmd_pages) - 1:
                 buttons.data_button("⫸", f"help nex {command_key} {i + 1}")
-        buttons.data_button("✕ CLOSE", "help close", "footer")
+        buttons.data_button("✕ CLOSE", "help close", "footer", style=ButtonStyle.DANGER)
         temp_store.append(buttons.build_menu(2))
         buttons.reset()
 
@@ -92,14 +93,15 @@ def bt_selection_buttons(id_):
     pin = make_short_token(Config.BOT_TOKEN, "torrent-select", id_)
     buttons = ButtonMaker()
     if Config.WEB_PINCODE:
-        buttons.url_button("Select Files", f"{Config.BASE_URL}/app/files?gid={id_}")
+        buttons.url_button("Select Files", f"{Config.BASE_URL}/app/files?gid={id_}", style=ButtonStyle.PRIMARY)
         buttons.data_button("Pincode", f"sel pin {gid} {pin}")
     else:
         buttons.url_button(
-            "Select Files", f"{Config.BASE_URL}/app/files?gid={id_}&pin={pin}"
+            "Select Files", f"{Config.BASE_URL}/app/files?gid={id_}&pin={pin}",
+            style=ButtonStyle.PRIMARY,
         )
     buttons.data_button("Done Selecting", f"sel done {gid} {id_}")
-    buttons.data_button("✕ CANCEL", f"sel cancel {gid}")
+    buttons.data_button("✕ CANCEL", f"sel cancel {gid}", style=ButtonStyle.DANGER)
     return buttons.build_menu(2)
 
 

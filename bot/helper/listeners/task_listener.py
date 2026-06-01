@@ -4,6 +4,7 @@ from time import time
 from mimetypes import guess_type
 from contextlib import suppress
 from os import path as ospath
+from pyrogram.enums import ButtonStyle
 
 from aiofiles.os import listdir, remove, path as aiopath
 from requests import utils as rutils
@@ -535,12 +536,12 @@ class TaskListener(TaskConfig):
                 msg += "\n┠ <b>Type</b> → Playlist"
                 msg += f"\n┖ <b>Total Videos</b> → {files}"
                 if link:
-                    buttons.url_button("🔗 View Playlist", link)
+                    buttons.url_button("🔗 View Playlist", link, style=ButtonStyle.PRIMARY)
                 user_message = f"{self.tag}\nYour playlist ({files} videos) has been uploaded to YouTube successfully!"
             else:
                 msg += "\n┖ <b>Type</b> → Video"
                 if link:
-                    buttons.url_button("🔗 View Video", link)
+                    buttons.url_button("🔗 View Video", link, style=ButtonStyle.PRIMARY)
                 user_message = (
                     f"{self.tag}\nYour video has been uploaded to YouTube successfully!"
                 )
@@ -634,7 +635,7 @@ class TaskListener(TaskConfig):
             ):
                 buttons = ButtonMaker()
                 if link and Config.SHOW_CLOUD_LINK:
-                    buttons.url_button("☁️ Cloud Link", link)
+                    buttons.url_button("☁️ Cloud Link", link, style=ButtonStyle.PRIMARY)
                 elif multi_links:
                     for name, url in multi_links:
                         buttons.url_button(name, url)
@@ -646,7 +647,7 @@ class TaskListener(TaskConfig):
                     share_url = f"{Config.RCLONE_SERVE_URL}/{remote}/{url_path}"
                     if mime_type == "Folder":
                         share_url += "/"
-                    buttons.url_button("🔗 Rclone Link", share_url)
+                    buttons.url_button("🔗 Rclone Link", share_url, style=ButtonStyle.PRIMARY)
                 if not rclone_path and dir_id:
                     INDEX_URL = ""
                     if self.private_link:
@@ -658,10 +659,10 @@ class TaskListener(TaskConfig):
                         share_url = f"{INDEX_URL}/{safe_name}"
                         if mime_type == "Folder":
                             share_url += "/"
-                        buttons.url_button("⚡ Index Link", share_url)
+                        buttons.url_button("⚡ Index Link", share_url, style=ButtonStyle.PRIMARY)
                         if mime_type.startswith(("image", "video", "audio")):
                             share_urls = f"{share_url}?a=view"
-                            buttons.url_button("🌐 View Link", share_urls)
+                            buttons.url_button("🌐 View Link", share_urls, style=ButtonStyle.PRIMARY)
                 button = buttons.build_menu(2)
             else:
                 if not multi_link_msg:
