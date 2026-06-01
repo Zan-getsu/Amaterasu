@@ -106,8 +106,6 @@ if UPSTREAM_REPO:
         shell=True,
     )
 
-    repo = UPSTREAM_REPO.split("/")
-    UPSTREAM_REPO = f"https://github.com/{repo[-2]}/{repo[-1]}"
     if update.returncode == 0:
         log_info("Successfully updated with Latest Updates !")
     else:
