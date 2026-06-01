@@ -325,6 +325,7 @@ class YtDlp(TaskListener):
             "-tl": "",
             "-en": False,
             "-enmeta": "",
+            "-ns": "",
             "-ff": set(),
         }
 
