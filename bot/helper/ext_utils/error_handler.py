@@ -55,7 +55,7 @@ class CircuitBreaker:
         elif self.state == CircuitState.OPEN:
             if (
                 datetime.now() - self.last_failure_time
-            ).seconds >= self.recovery_timeout:
+            ).total_seconds() >= self.recovery_timeout:
                 self.state = CircuitState.HALF_OPEN
                 return True
             return False
