@@ -18,7 +18,6 @@ from ..mirror_leech_utils.status_utils.mega_status import MegaDownloadStatus
 from ..mirror_leech_utils.status_utils.queue_status import QueueStatus
 from ..telegram_helper.message_utils import send_status_message
 
-
 mega_tasks = {}
 
 

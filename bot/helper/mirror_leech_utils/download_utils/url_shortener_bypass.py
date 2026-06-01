@@ -14,7 +14,6 @@ from curl_cffi import requests as cffi_requests
 
 from ...ext_utils.exceptions import DirectDownloadLinkException
 
-
 _OUO_DOMAINS = ("ouo.io", "ouo.press")
 
 _CSRF_PATTERN = (

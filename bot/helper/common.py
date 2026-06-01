@@ -548,9 +548,7 @@ class TaskConfig:
                 if is_telegram_link(self.thumb):
                     msg = (await get_tg_link_message(self.thumb))[0]
                     self.thumb = (
-                        await create_thumb(msg)
-                        if msg.photo or msg.document
-                        else ""
+                        await create_thumb(msg) if msg.photo or msg.document else ""
                     )
                 elif self.thumb.startswith("http"):
                     self.thumb = await download_image_thumb(self.thumb)

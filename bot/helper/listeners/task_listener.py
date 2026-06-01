@@ -536,7 +536,9 @@ class TaskListener(TaskConfig):
                 msg += "\n┠ <b>Type</b> → Playlist"
                 msg += f"\n┖ <b>Total Videos</b> → {files}"
                 if link:
-                    buttons.url_button("🔗 View Playlist", link, style=ButtonStyle.PRIMARY)
+                    buttons.url_button(
+                        "🔗 View Playlist", link, style=ButtonStyle.PRIMARY
+                    )
                 user_message = f"{self.tag}\nYour playlist ({files} videos) has been uploaded to YouTube successfully!"
             else:
                 msg += "\n┖ <b>Type</b> → Video"
@@ -647,7 +649,9 @@ class TaskListener(TaskConfig):
                     share_url = f"{Config.RCLONE_SERVE_URL}/{remote}/{url_path}"
                     if mime_type == "Folder":
                         share_url += "/"
-                    buttons.url_button("🔗 Rclone Link", share_url, style=ButtonStyle.PRIMARY)
+                    buttons.url_button(
+                        "🔗 Rclone Link", share_url, style=ButtonStyle.PRIMARY
+                    )
                 if not rclone_path and dir_id:
                     INDEX_URL = ""
                     if self.private_link:
@@ -659,10 +663,14 @@ class TaskListener(TaskConfig):
                         share_url = f"{INDEX_URL}/{safe_name}"
                         if mime_type == "Folder":
                             share_url += "/"
-                        buttons.url_button("⚡ Index Link", share_url, style=ButtonStyle.PRIMARY)
+                        buttons.url_button(
+                            "⚡ Index Link", share_url, style=ButtonStyle.PRIMARY
+                        )
                         if mime_type.startswith(("image", "video", "audio")):
                             share_urls = f"{share_url}?a=view"
-                            buttons.url_button("🌐 View Link", share_urls, style=ButtonStyle.PRIMARY)
+                            buttons.url_button(
+                                "🌐 View Link", share_urls, style=ButtonStyle.PRIMARY
+                            )
                 button = buttons.build_menu(2)
             else:
                 if not multi_link_msg:

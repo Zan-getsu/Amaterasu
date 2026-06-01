@@ -12,7 +12,6 @@ from json import load, JSONDecodeError
 from os import path
 from pickle import load as pickle_load, dump as pickle_dump
 from sys import exit
-from time import time
 
 from googleapiclient.discovery import build
 from google.auth.transport.requests import Request
@@ -199,7 +198,7 @@ Notes:
     print("\n" + "=" * 60)
     print("  SUCCESS!")
     print("=" * 60)
-    print(f"\nAll service accounts now have organizer access to:")
+    print("\nAll service accounts now have organizer access to:")
     print(f"  Team Drive ID: {args.drive_id}")
     print("\nThe bot can now search files in this Team Drive.")
 

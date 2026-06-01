@@ -57,16 +57,21 @@ async def download_image_thumb(url):
 
     # Content types that are definitely NOT images
     NON_IMAGE_TYPES = (
-        "text/", "application/json", "application/xml",
-        "application/javascript", "video/", "audio/",
+        "text/",
+        "application/json",
+        "application/xml",
+        "application/javascript",
+        "video/",
+        "audio/",
     )
     try:
-        async with AsyncClient(verify=False, follow_redirects=True, timeout=30) as client:
+        async with AsyncClient(
+            verify=False, follow_redirects=True, timeout=30
+        ) as client:
             # HEAD request to check content type and size
             try:
                 head_resp = await client.head(url)
                 content_type = head_resp.headers.get("content-type", "")
-                content_length = head_resp.headers.get("content-length", "")
                 if content_type and any(
                     content_type.startswith(t) for t in NON_IMAGE_TYPES
                 ):
@@ -100,9 +105,11 @@ async def download_image_thumb(url):
             with open(tmp_path, "wb") as f:
                 f.write(data)
             output = ospath.join(path, f"{time()}.jpg")
+
             def _process_thumb(src, dst):
                 with Image.open(src) as im:
                     im.convert("RGB").save(dst, "JPEG")
+
             try:
                 await sync_to_async(_process_thumb, tmp_path, output)
             except Exception as e:

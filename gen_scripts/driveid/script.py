@@ -10,7 +10,6 @@ import os
 import sys
 from re import match
 
-
 DRIVES_FILE = "list_drives.txt"
 
 

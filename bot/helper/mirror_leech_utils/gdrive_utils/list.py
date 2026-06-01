@@ -191,9 +191,19 @@ class GoogleDriveList(GoogleDriveHelper):
             else:
                 buttons.data_button("Folders", "gdq itype folders", position="footer")
         if self.list_status == "gdu" or len(self.items_list) > 0:
-            buttons.data_button("Choose Current Path", "gdq cur", position="footer", style=ButtonStyle.SUCCESS)
+            buttons.data_button(
+                "Choose Current Path",
+                "gdq cur",
+                position="footer",
+                style=ButtonStyle.SUCCESS,
+            )
         if self.list_status == "gdu":
-            buttons.data_button("Set as Default Path", "gdq def", position="footer", style=ButtonStyle.SUCCESS)
+            buttons.data_button(
+                "Set as Default Path",
+                "gdq def",
+                position="footer",
+                style=ButtonStyle.SUCCESS,
+            )
         if (
             len(self.parents) > 1
             and len(self.drives) > 1

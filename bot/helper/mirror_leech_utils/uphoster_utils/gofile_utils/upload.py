@@ -344,9 +344,7 @@ class GoFileUpload:
         if await aiopath.isfile(self._path):
             # Single file upload
             folder_id = self.folder_id or account_data["rootFolder"]
-            file_result = await self.upload_file(
-                path=self._path, folderId=folder_id
-            )
+            file_result = await self.upload_file(path=self._path, folderId=folder_id)
             if file_result and file_result.get("downloadPage"):
                 link = file_result["downloadPage"]
                 mime_type = "File"

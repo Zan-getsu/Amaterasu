@@ -219,7 +219,12 @@ class RcloneList:
                     "Folders", "rcq itype --dirs-only", position="footer"
                 )
         if self.list_status == "rcu" or len(self.path_list) > 0:
-            buttons.data_button("Choose Current Path", "rcq cur", position="footer", style=ButtonStyle.SUCCESS)
+            buttons.data_button(
+                "Choose Current Path",
+                "rcq cur",
+                position="footer",
+                style=ButtonStyle.SUCCESS,
+            )
         if self.list_status == "rcd":
             buttons.data_button(
                 f"Select: {'Enabled' if self.select else 'Disabled'}",
@@ -227,10 +232,20 @@ class RcloneList:
                 position="footer",
             )
         if len(self.selected_pathes) > 1:
-            buttons.data_button("Done With Selection", "rcq ds", position="footer", style=ButtonStyle.SUCCESS)
+            buttons.data_button(
+                "Done With Selection",
+                "rcq ds",
+                position="footer",
+                style=ButtonStyle.SUCCESS,
+            )
             buttons.data_button("Clear Selection", "rcq clear", position="footer")
         if self.list_status == "rcu":
-            buttons.data_button("Set as Default Path", "rcq def", position="footer", style=ButtonStyle.SUCCESS)
+            buttons.data_button(
+                "Set as Default Path",
+                "rcq def",
+                position="footer",
+                style=ButtonStyle.SUCCESS,
+            )
         if self.path or len(self._sections) > 1 or self._rc_user and self._rc_owner:
             buttons.data_button("↩ BACK", "rcq back pa", position="footer")
         if self.path:

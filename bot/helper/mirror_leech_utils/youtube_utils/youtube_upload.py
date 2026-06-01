@@ -264,7 +264,6 @@ class YouTubeUpload(YouTubeHelper):
 
         while video_response is None and not self.listener.is_cancelled:
             try:
-                prev_progress_bytes = current_chunk_uploaded_bytes
                 self.status, video_response = insert_request.next_chunk()
 
                 if self.status:

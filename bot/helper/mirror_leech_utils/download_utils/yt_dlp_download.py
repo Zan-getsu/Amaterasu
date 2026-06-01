@@ -7,7 +7,7 @@ from secrets import token_hex
 from zipfile import ZipFile, is_zipfile
 from yt_dlp import YoutubeDL, DownloadError
 
-from .... import task_dict_lock, task_dict, user_data
+from .... import task_dict_lock, task_dict
 from ....core.config_manager import BinConfig
 from ...ext_utils.bot_utils import sync_to_async, async_to_sync, get_content_info
 from ...ext_utils.files_utils import get_mime_type

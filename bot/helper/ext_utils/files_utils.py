@@ -1,7 +1,6 @@
 from aioshutil import rmtree as aiormtree, move
 from asyncio import create_subprocess_exec, sleep, wait_for
 from asyncio.subprocess import PIPE
-from contextlib import suppress
 from psutil import disk_usage
 from os import path as ospath, readlink, walk
 from re import I, escape, search as re_search, split as re_split

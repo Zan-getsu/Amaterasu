@@ -1,14 +1,11 @@
 from speedtest import Speedtest, ConfigRetrievalError
 
 from pyrogram import Client
-from pyrogram.filters import command
-from pyrogram.handlers import MessageHandler
 from pyrogram.types import Message
 
 from bot.core.plugin_manager import PluginBase, PluginInfo
 from bot.helper.ext_utils.bot_utils import new_task, sync_to_async
 from bot.helper.ext_utils.status_utils import get_readable_file_size
-from bot.helper.telegram_helper.filters import CustomFilters
 from bot.helper.telegram_helper.message_utils import (
     send_message,
     edit_message,

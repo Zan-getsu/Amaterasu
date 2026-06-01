@@ -6,7 +6,6 @@ from aiofiles import open as aiopen
 from aiofiles.os import makedirs, remove, path as aiopath
 from aioshutil import rmtree
 
-from sabnzbdapi.exception import APIResponseError
 
 from .. import (
     LOGGER,

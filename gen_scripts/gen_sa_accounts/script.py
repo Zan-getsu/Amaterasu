@@ -551,7 +551,7 @@ Workflow:
         print("=" * 60)
         print(f"\nCredentials saved to: {args.path}/")
         print("\nNext steps:")
-        print(f"1. Run add_to_team_drive to add accounts to your Team Drive")
+        print("1. Run add_to_team_drive to add accounts to your Team Drive")
         print("2. Copy credentials to your bot's accounts folder")
 
 

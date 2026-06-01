@@ -154,7 +154,9 @@ def direct_link_generator(link):
             if str(e).startswith("ERROR: No Direct link function found"):
                 return resolved
             raise
-    elif Config.DEBRID_LINK_API and any(x in domain for x in debrid_link_supported_sites):
+    elif Config.DEBRID_LINK_API and any(
+        x in domain for x in debrid_link_supported_sites
+    ):
         return debrid_link(link)
     elif "yadi.sk" in link or "disk.yandex." in link:
         return yandex_disk(link)
@@ -457,7 +459,7 @@ def buzzheavier(url):
                     details["contents"].append(item)
                     size = speed_string_to_bytes(size)
                     details["total_size"] += size
-                except:
+                except Exception:
                     continue
             details["title"] = tree.xpath("//span/text()")[0].strip()
             return details
@@ -1442,7 +1444,7 @@ def linkBox(url: str):
     parsed_url = urlparse(url)
     try:
         shareToken = parsed_url.path.split("/")[-1]
-    except:
+    except Exception:
         raise DirectDownloadLinkException("ERROR: invalid URL")
 
     details = {"contents": [], "title": "", "total_size": 0}
@@ -1502,7 +1504,7 @@ def linkBox(url: str):
         try:
             if data["shareType"] == "singleItem":
                 return __singleItem(session, data["itemId"])
-        except:
+        except Exception:
             pass
         if not details["title"]:
             details["title"] = data["dirName"]
@@ -1664,7 +1666,7 @@ def mediafireFolder(url):
         raw = url.split("/", 4)[-1]
         folderkey = raw.split("/", 1)[0]
         folderkey = folderkey.split(",")
-    except:
+    except Exception:
         raise DirectDownloadLinkException("ERROR: Could not parse ")
     if len(folderkey) == 1:
         folderkey = folderkey[0]
@@ -1723,7 +1725,7 @@ def mediafireFolder(url):
 
         try:
             html = HTML(session.get(url).text)
-        except:
+        except Exception:
             return None
         if html.xpath("//div[@class='passwordPrompt']"):
             if not _password:
@@ -1732,13 +1734,13 @@ def mediafireFolder(url):
                 )
             try:
                 html = HTML(session.post(url, data={"downloadp": _password}).text)
-            except:
+            except Exception:
                 return None
             if html.xpath("//div[@class='passwordPrompt']"):
                 return None
         try:
             final_link = __decode_url(html)
-        except:
+        except Exception:
             return None
         return final_link
 
@@ -1751,7 +1753,7 @@ def mediafireFolder(url):
                 try:
                     final_link = b64decode(scrambled).decode("utf-8")
                     return final_link
-                except:
+                except Exception:
                     return None
             elif final_link.startswith("http"):
                 return final_link
@@ -1915,7 +1917,7 @@ def send_cm(url):
             )
             if "Location" in _res.headers:
                 return _res.headers["Location"]
-        except:
+        except Exception:
             pass
 
     def __getFiles(html):
@@ -2283,7 +2285,7 @@ def mp4upload(url):
             data["referer"] = url
             direct_link = session.post(url, data=data).url
             return direct_link, header
-        except:
+        except Exception:
             raise DirectDownloadLinkException("ERROR: File Not Found!")
 
 
@@ -2381,7 +2383,7 @@ def swisstransfer(link):
     for file in files:
         file_uuid = file["UUID"]
         file_name = file["fileName"]
-        file_size = file["fileSizeInBytes"]
+        file["fileSizeInBytes"]
 
         token = gettoken(password, container_uuid, file_uuid)
         if not token:

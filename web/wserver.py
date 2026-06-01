@@ -11,9 +11,6 @@ from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from sabnzbdapi import SabnzbdClient
-from aioaria2 import Aria2HttpClient
-from aioqbt.client import create_client
-from aiohttp.client_exceptions import ClientError
 from aioqbt.exc import AQError
 
 from web.nodes import extract_file_ids, make_tree

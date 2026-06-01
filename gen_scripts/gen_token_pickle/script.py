@@ -6,7 +6,6 @@ This script authenticates with Google Drive API and generates a token file
 for use with other Google Drive-related scripts.
 """
 
-import os
 import sys
 import pickle
 import socket
@@ -103,7 +102,7 @@ def run_flow():
     port = find_port()
     if port:
         try:
-            print(f"\n[INFO] Opening browser for authentication...")
+            print("\n[INFO] Opening browser for authentication...")
             auth_url, _ = flow.authorization_url(prompt="consent")
             try:
                 webbrowser.open(auth_url)
