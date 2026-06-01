@@ -55,7 +55,12 @@ async def task_status(_, message):
     else:
         text = message.text.split()
         if len(text) > 1:
-            user_id = message.from_user.id if text[1] == "me" else int(text[1])
+            if text[1] == "me":
+                user_id = message.from_user.id
+            elif text[1].lstrip("-").isdigit():
+                user_id = int(text[1])
+            else:
+                user_id = 0
         else:
             user_id = 0
             sid = message.chat.id

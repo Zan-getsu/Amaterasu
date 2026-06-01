@@ -37,15 +37,15 @@ async def arg_usage(_, query):
     elif data[1] == "pre":
         if data[2] == "mirror":
             await edit_message(
-                message, COMMAND_USAGE["mirror"][0], COMMAND_USAGE["mirror"][pg_no + 1]
+                message, COMMAND_USAGE["mirror"][0], COMMAND_USAGE["mirror"][pg_no - 1]
             )
         elif data[2] == "yt":
             await edit_message(
-                message, COMMAND_USAGE["yt"][0], COMMAND_USAGE["yt"][pg_no + 1]
+                message, COMMAND_USAGE["yt"][0], COMMAND_USAGE["yt"][pg_no - 1]
             )
         elif data[2] == "clone":
             await edit_message(
-                message, COMMAND_USAGE["clone"][0], COMMAND_USAGE["clone"][pg_no + 1]
+                message, COMMAND_USAGE["clone"][0], COMMAND_USAGE["clone"][pg_no - 1]
             )
     elif data[1] == "back":
         if data[2] == "m":

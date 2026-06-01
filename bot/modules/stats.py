@@ -249,7 +249,7 @@ async def stats_pages(_, query):
         await query.answer()
         await delete_message(message, message.reply_to_message)
     elif data[2] == "killproc":
-        if data[2] == "systasks" and not await CustomFilters.owner(_, query):
+        if not await CustomFilters.owner(_, query):
             await query.answer("Sorry! You cannot Kill System Tasks!", show_alert=True)
             return
         pid = int(data[3])
