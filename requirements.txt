@@ -41,3 +41,4 @@ uvicorn
 uvloop
 xattr
 yt-dlp[default,curl-cffi] @ git+https://github.com/yt-dlp/yt-dlp.git@master
+yt-dlp-ejs
