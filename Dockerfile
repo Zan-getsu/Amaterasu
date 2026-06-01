@@ -48,7 +48,9 @@ RUN apt-get update && apt-get upgrade -y && \
     && apt-get update \
     && apt-get install -y --no-install-recommends megacmd \
     && apt-get clean \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    # Install deno (required JS runtime for yt-dlp YouTube extraction)
+    && curl -fsSL https://deno.land/install.sh | DENO_INSTALL=/usr/local sh
 
 # Copy and install python requirements
 COPY requirements.txt .
