@@ -108,10 +108,19 @@ async def create_telegraph_page(query, items):
         )
         size = get_readable_file_size(size_bytes)
 
+        nzb_id = "Unknown"
+        if "getnzb/api/" in download_url:
+            try:
+                nzb_id = download_url.split("getnzb/api/")[1].split("?")[0]
+            except Exception:
+                pass
+
         content += (
             f"{idx}. {title}<br>"
-            f"<b><a href='{download_url}'>Download URL</a> | <a href='http://t.me/share/url?url={download_url}'>Share Download URL</a></b><br>"
+            f"<b>NZB ID:</b> <code>{nzb_id}</code><br>"
             f"<b>Size:</b> {size}<br>"
+            f"<b>Mirror:</b> <code>/nm {nzb_id}</code><br>"
+            f"<b>Leech:</b> <code>/nl {nzb_id}</code><br>"
             f"━━━━━━━━━━━━━━━━━━━━━━<br><br>"
         )
 

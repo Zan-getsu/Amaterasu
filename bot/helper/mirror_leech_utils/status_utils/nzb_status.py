@@ -13,13 +13,24 @@ from ...ext_utils.status_utils import (
 
 async def get_download(nzo_id, old_info=None):
     if old_info is None:
-        old_info = {}
+        old_info = defaultdict(lambda: "")
     try:
         queue = await sabnzbd_client.get_downloads(nzo_ids=nzo_id)
         if res := queue["queue"]["slots"]:
             slot = res[0]
             if msg := slot["labels"]:
-                LOGGER.warning(" | ".join(msg))
+                filtered_msgs = []
+                for m in msg:
+                    if "apikey=" in m or "Trying to fetch NZB from" in m:
+                        if "getnzb/api/" in m:
+                            nzb_id = m.split("getnzb/api/")[1].split("?")[0]
+                            filtered_msgs.append(f"Fetching NZB ID: {nzb_id}")
+                        else:
+                            filtered_msgs.append("Fetching NZB...")
+                    else:
+                        filtered_msgs.append(m)
+                if filtered_msgs:
+                    LOGGER.warning(" | ".join(filtered_msgs))
             return slot
         else:
             history = await sabnzbd_client.get_history(nzo_ids=nzo_id)
@@ -63,8 +74,12 @@ class SabnzbdStatus:
         self.queued = queued
         self.listener = listener
         self._gid = gid
-        self._info = {}
+        self._info = defaultdict(lambda: "")
         self.engine = EngineStatus().STATUS_SABNZBD
+        if hasattr(listener, "nzb_id") and listener.nzb_id:
+            self._display_name = f"NZB ID: {listener.nzb_id}"
+        else:
+            self._display_name = None
 
     async def update(self):
         self._info = await get_download(self._gid, self._info)
@@ -92,7 +107,15 @@ class SabnzbdStatus:
         return f"{get_readable_file_size(self.speed_raw())}/s"
 
     def name(self):
-        return self._info.get("filename", "")
+        filename = self._info.get("filename", "")
+        if self._display_name and (not filename or "Trying to fetch" in filename):
+            return self._display_name
+        if filename and "apikey=" in filename:
+            if "getnzb/api/" in filename:
+                nzb_id = filename.split("getnzb/api/")[1].split("?")[0]
+                return f"NZB ID: {nzb_id}"
+            return "Fetching NZB..."
+        return filename or self._display_name or "Fetching NZB..."
 
     def size(self):
         return self._info.get("size", 0)

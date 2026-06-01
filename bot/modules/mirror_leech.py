@@ -594,7 +594,22 @@ async def jd_mirror(client, message):
 
 
 async def nzb_mirror(client, message):
-    bot_loop.create_task(Mirror(client, message, is_nzb=True).new_event())
+    text_parts = message.text.split()
+    nzb_id = None
+    if len(text_parts) > 1 and not text_parts[1].startswith(("http", "ftp", "/")):
+        potential_id = text_parts[1]
+        if not potential_id.startswith("-") and potential_id.replace("-", "").replace("_", "").isalnum():
+            nzb_id = potential_id
+            nzb_url = f"{Config.HYDRA_IP}/getnzb/api/{nzb_id}?apikey={Config.HYDRA_API_KEY}"
+            extra = " ".join(text_parts[2:])
+            message.text = f"/nzbmirror {nzb_url} -e {extra}".strip()
+    else:
+        if "-e" not in message.text:
+            message.text += " -e"
+    mirror_task = Mirror(client, message, is_nzb=True)
+    if nzb_id:
+        mirror_task.nzb_id = nzb_id
+    bot_loop.create_task(mirror_task.new_event())
 
 
 async def leech(client, message):
@@ -615,6 +630,23 @@ async def jd_leech(client, message):
 
 
 async def nzb_leech(client, message):
-    bot_loop.create_task(
-        Mirror(client, message, is_leech=True, is_nzb=True).new_event()
-    )
+    text_parts = message.text.split()
+    nzb_id = None
+    if len(text_parts) > 1 and not text_parts[1].startswith(("http", "ftp", "/")):
+        potential_id = text_parts[1]
+        if not potential_id.startswith("-") and potential_id.replace("-", "").replace("_", "").isalnum():
+            nzb_id = potential_id
+            nzb_url = f"{Config.HYDRA_IP}/getnzb/api/{nzb_id}?apikey={Config.HYDRA_API_KEY}"
+            extra = " ".join(text_parts[2:])
+            message.text = f"/nzbleech {nzb_url} -e {extra}".strip()
+    else:
+        if "-e" not in message.text:
+            message.text += " -e"
+    mirror_task = Mirror(client, message, is_leech=True, is_nzb=True)
+    if nzb_id:
+        mirror_task.nzb_id = nzb_id
+    bot_loop.create_task(mirror_task.new_event())
+
+
+async def uphoster(client, message):
+    bot_loop.create_task(Mirror(client, message, is_uphoster=True).new_event())
