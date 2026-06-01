@@ -598,9 +598,10 @@ async def nzb_mirror(client, message):
     nzb_id = None
     if len(text_parts) > 1 and not text_parts[1].startswith(("http", "ftp", "/")):
         potential_id = text_parts[1]
-        if not potential_id.startswith("-") and potential_id.replace("-", "").replace("_", "").isalnum():
+        clean = potential_id.lstrip("-").replace("_", "")
+        if clean.isalnum() and not (potential_id.startswith("-") and clean.isalpha()):
             nzb_id = potential_id
-            nzb_url = f"{Config.HYDRA_IP}/getnzb/api/{nzb_id}?apikey={Config.HYDRA_API_KEY}"
+            nzb_url = f"{Config.HYDRA_IP.rstrip('/')}/getnzb/api/{nzb_id}?apikey={Config.HYDRA_API_KEY}"
             extra = " ".join(text_parts[2:])
             message.text = f"/nzbmirror {nzb_url} -e {extra}".strip()
     else:
@@ -634,9 +635,10 @@ async def nzb_leech(client, message):
     nzb_id = None
     if len(text_parts) > 1 and not text_parts[1].startswith(("http", "ftp", "/")):
         potential_id = text_parts[1]
-        if not potential_id.startswith("-") and potential_id.replace("-", "").replace("_", "").isalnum():
+        clean = potential_id.lstrip("-").replace("_", "")
+        if clean.isalnum() and not (potential_id.startswith("-") and clean.isalpha()):
             nzb_id = potential_id
-            nzb_url = f"{Config.HYDRA_IP}/getnzb/api/{nzb_id}?apikey={Config.HYDRA_API_KEY}"
+            nzb_url = f"{Config.HYDRA_IP.rstrip('/')}/getnzb/api/{nzb_id}?apikey={Config.HYDRA_API_KEY}"
             extra = " ".join(text_parts[2:])
             message.text = f"/nzbleech {nzb_url} -e {extra}".strip()
     else:

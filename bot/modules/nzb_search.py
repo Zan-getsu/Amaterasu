@@ -44,7 +44,7 @@ async def hydra_search(_, message):
 
 
 async def search_nzbhydra(query, limit=50):
-    search_url = f"{Config.HYDRA_IP}/api"
+    search_url = f"{Config.HYDRA_IP.rstrip('/')}/api"
     params = {
         "apikey": Config.HYDRA_API_KEY,
         "t": "search",
