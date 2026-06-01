@@ -40,4 +40,4 @@ urllib3
 uvicorn
 uvloop
 xattr
-yt-dlp[default,curl-cffi]
+yt-dlp[default,curl-cffi] @ git+https://github.com/yt-dlp/yt-dlp.git@master
