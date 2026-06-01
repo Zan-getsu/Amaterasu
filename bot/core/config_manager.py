@@ -118,7 +118,7 @@ class Config:
     USER_TRANSMISSION = True
     USE_SERVICE_ACCOUNTS = False
     WEB_PINCODE = True
-    YT_DLP_OPTIONS = {}
+    YT_DLP_OPTIONS = {"extractor_args": {"youtube": {"player_client": ["ios"]}}}
     YT_DESP = "Uploaded with Amaterasu"
     YT_TAGS = ["telegram", "bot", "youtube"]
     YT_CATEGORY_ID = 22
