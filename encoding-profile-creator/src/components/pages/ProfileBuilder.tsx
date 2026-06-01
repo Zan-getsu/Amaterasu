@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { ArrowLeft, Save, Copy, RotateCcw, Film, Music, Type, Tag, CheckCircle, Trash2, Download, Terminal, Code } from 'lucide-react';
 import type { EncodingProfile } from '../../types';
 import { QUICK_PRESETS, OPTIONS } from '../../data/presets';
@@ -47,27 +47,23 @@ const DEFAULT_PROFILE: EncodingProfile = {
   }
 };
 
+const standardMetadataKeys = ['title', 'v_track', 'a_track', 's_track'];
+
+const customMetadataEntries = (profile?: EncodingProfile | null) =>
+  Object.entries(profile?.metadata || {})
+    .filter(([key]) => !standardMetadataKeys.includes(key.trim()))
+    .map(([key, value]) => ({ key, value: String(value) }));
+
+const dispositionEntries = (profile?: EncodingProfile | null) =>
+  Object.entries(profile?.disposition || {})
+    .map(([key, value]) => ({ key, value: String(value) }));
+
 export const ProfileBuilder: React.FC<ProfileBuilderProps> = ({ initialData, onNavigate, onSave, onDelete }) => {
   const [profile, setProfile] = useState<EncodingProfile>(initialData || DEFAULT_PROFILE);
-  const [customMetaList, setCustomMetaList] = useState<{key: string, value: string}[]>([]);
-  const [dispositionList, setDispositionList] = useState<{key: string, value: string}[]>([]);
+  const [customMetaList, setCustomMetaList] = useState<{key: string, value: string}[]>(() => customMetadataEntries(initialData));
+  const [dispositionList, setDispositionList] = useState<{key: string, value: string}[]>(() => dispositionEntries(initialData));
   const [copied, setCopied] = useState(false);
   const [previewMode, setPreviewMode] = useState<'json' | 'ffmpeg'>('json');
-
-  // Sync custom metadata list and disposition list with profile object
-  useEffect(() => {
-    if (initialData) {
-      const standardKeys = ['title', 'v_track', 'a_track', 's_track'];
-      const custom = Object.entries(initialData.metadata || {})
-        .filter(([key]) => !standardKeys.includes(key.trim()))
-        .map(([key, value]) => ({ key, value: String(value) }));
-      setCustomMetaList(custom);
-
-      const disps = Object.entries(initialData.disposition || {})
-        .map(([key, value]) => ({ key, value: String(value) }));
-      setDispositionList(disps);
-    }
-  }, [initialData]);
 
   const updateProfile = (updates: Partial<EncodingProfile>) => {
     setProfile(prev => ({ ...prev, ...updates }));
@@ -102,11 +98,10 @@ export const ProfileBuilder: React.FC<ProfileBuilderProps> = ({ initialData, onN
   const applyCustomMetadata = (items: {key: string, value: string}[]) => {
     setCustomMetaList(items);
     setProfile(prev => {
-      const standardKeys = ['title', 'v_track', 'a_track', 's_track'];
       const newMeta: Record<string, string> = {};
       
       // Keep standard keys
-      standardKeys.forEach(k => {
+      standardMetadataKeys.forEach(k => {
         if (prev.metadata?.[k] !== undefined) newMeta[k] = prev.metadata[k]!;
       });
       
@@ -139,7 +134,8 @@ export const ProfileBuilder: React.FC<ProfileBuilderProps> = ({ initialData, onN
   };
 
   const handleCopy = () => {
-    const { is_default, ...exportData } = profile;
+    const exportData = { ...profile };
+    delete exportData.is_default;
     const text = previewMode === 'ffmpeg' ? generateFFmpegCommand() : JSON.stringify(exportData, null, 4);
     navigator.clipboard.writeText(text);
     setCopied(true);
@@ -153,16 +149,15 @@ export const ProfileBuilder: React.FC<ProfileBuilderProps> = ({ initialData, onN
       const parsed = JSON.parse(input);
       setProfile({ ...DEFAULT_PROFILE, ...parsed, name: parsed.name || "Imported Profile" });
       
-      const standardKeys = ['title', 'v_track', 'a_track', 's_track'];
       const custom = Object.entries(parsed.metadata || {})
-        .filter(([key]) => !standardKeys.includes(key.trim()))
+        .filter(([key]) => !standardMetadataKeys.includes(key.trim()))
         .map(([key, value]) => ({ key, value: String(value) }));
       setCustomMetaList(custom);
 
       const disps = Object.entries(parsed.disposition || {})
         .map(([key, value]) => ({ key, value: String(value) }));
       setDispositionList(disps);
-    } catch (e) {
+    } catch {
       alert("Invalid JSON format!");
     }
   };

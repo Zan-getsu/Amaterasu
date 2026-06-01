@@ -3,23 +3,25 @@ import type { EncodingProfile } from '../types';
 // Detect user_id from URL params
 const urlParams = new URLSearchParams(window.location.search);
 const userId = urlParams.get('user_id');
+const token = urlParams.get('token');
 
 const LOCAL_STORAGE_KEY = 'amaterasu_encoding_profiles';
 
 const generateId = () => Math.random().toString(36).substring(2, 10);
 
-export const isOfflineMode = () => !userId;
+export const isOfflineMode = () => !userId || !token;
+
+const apiPath = (path: string) => {
+  const params = new URLSearchParams({ user_id: userId || '', token: token || '' });
+  return `${path}?${params.toString()}`;
+};
 
 export const profileApi = {
-  list: async (): Promise<Record<string, EncodingProfile | any>> => {
-    if (userId) {
-      try {
-        const response = await fetch(`/api/profiles?user_id=${userId}`);
-        if (!response.ok) throw new Error('Failed to fetch profiles');
-        return await response.json();
-      } catch (error) {
-        console.error('Error fetching profiles from API, falling back to local storage', error);
-      }
+  list: async (): Promise<Record<string, EncodingProfile>> => {
+    if (!isOfflineMode()) {
+      const response = await fetch(apiPath('/api/profiles'));
+      if (!response.ok) throw new Error('Failed to fetch profiles');
+      return await response.json();
     }
     
     // Fallback or offline mode
@@ -28,18 +30,14 @@ export const profileApi = {
   },
 
   create: async (data: EncodingProfile): Promise<{ id: string }> => {
-    if (userId) {
-      try {
-        const response = await fetch(`/api/profiles?user_id=${userId}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(data),
-        });
-        if (!response.ok) throw new Error('Failed to create profile');
-        return await response.json();
-      } catch (error) {
-        console.error('Error creating profile via API', error);
-      }
+    if (!isOfflineMode()) {
+      const response = await fetch(apiPath('/api/profiles'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      });
+      if (!response.ok) throw new Error('Failed to create profile');
+      return await response.json();
     }
     
     // Fallback or offline mode
@@ -52,18 +50,14 @@ export const profileApi = {
   },
 
   update: async (pid: string, data: EncodingProfile): Promise<void> => {
-    if (userId) {
-      try {
-        const response = await fetch(`/api/profiles/${pid}?user_id=${userId}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(data),
-        });
-        if (!response.ok) throw new Error('Failed to update profile');
-        return;
-      } catch (error) {
-        console.error('Error updating profile via API', error);
-      }
+    if (!isOfflineMode()) {
+      const response = await fetch(apiPath(`/api/profiles/${pid}`), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      });
+      if (!response.ok) throw new Error('Failed to update profile');
+      return;
     }
     
     // Fallback or offline mode
@@ -76,16 +70,12 @@ export const profileApi = {
   },
 
   delete: async (pid: string): Promise<void> => {
-    if (userId) {
-      try {
-        const response = await fetch(`/api/profiles/${pid}?user_id=${userId}`, {
-          method: 'DELETE',
-        });
-        if (!response.ok) throw new Error('Failed to delete profile');
-        return;
-      } catch (error) {
-        console.error('Error deleting profile via API', error);
-      }
+    if (!isOfflineMode()) {
+      const response = await fetch(apiPath(`/api/profiles/${pid}`), {
+        method: 'DELETE',
+      });
+      if (!response.ok) throw new Error('Failed to delete profile');
+      return;
     }
     
     // Fallback or offline mode
@@ -98,16 +88,12 @@ export const profileApi = {
   },
 
   setDefault: async (pid: string): Promise<void> => {
-    if (userId) {
-      try {
-        const response = await fetch(`/api/profiles/${pid}/default?user_id=${userId}`, {
-          method: 'POST',
-        });
-        if (!response.ok) throw new Error('Failed to set default profile');
-        return;
-      } catch (error) {
-        console.error('Error setting default profile via API', error);
-      }
+    if (!isOfflineMode()) {
+      const response = await fetch(apiPath(`/api/profiles/${pid}/default`), {
+        method: 'POST',
+      });
+      if (!response.ok) throw new Error('Failed to set default profile');
+      return;
     }
     
     // Fallback or offline mode

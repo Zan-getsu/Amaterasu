@@ -11,11 +11,20 @@ from logging import (
     ERROR,
 )
 from os import path, remove, environ
+from shutil import rmtree
 from pymongo.mongo_client import MongoClient
 from pymongo.server_api import ServerApi
 from subprocess import run as srun, call as scall
 
 getLogger("pymongo").setLevel(ERROR)
+
+
+def as_bool(value):
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in ("true", "1", "yes", "on")
+    return bool(value)
 
 var_list = [
     "BOT_TOKEN",
@@ -90,23 +99,26 @@ UPSTREAM_BRANCH = config_file.get("UPSTREAM_BRANCH", "").strip() or "main"
 
 if UPSTREAM_REPO:
     if path.exists(".git"):
-        srun(["rm", "-rf", ".git"])
+        rmtree(".git", ignore_errors=True)
 
-    update = srun(
-        [
-            f"git init -q \
-                     && git config --global user.email AmaterasuBot@users.noreply.github.com \
-                     && git config --global user.name Amaterasu \
-                     && git add . \
-                     && git commit -sm update -q \
-                     && git remote add origin {UPSTREAM_REPO} \
-                     && git fetch origin -q \
-                     && git reset --hard origin/{UPSTREAM_BRANCH} -q"
-        ],
-        shell=True,
-    )
+    commands = [
+        ["git", "init", "-q"],
+        ["git", "config", "--global", "user.email", "AmaterasuBot@users.noreply.github.com"],
+        ["git", "config", "--global", "user.name", "Amaterasu"],
+        ["git", "add", "."],
+        ["git", "commit", "-sm", "update", "-q"],
+        ["git", "remote", "add", "origin", UPSTREAM_REPO],
+        ["git", "fetch", "origin", "-q"],
+        ["git", "reset", "--hard", f"origin/{UPSTREAM_BRANCH}", "-q"],
+    ]
+    update_code = 0
+    for command in commands:
+        update = srun(command)
+        update_code = update.returncode
+        if update_code != 0:
+            break
 
-    if update.returncode == 0:
+    if update_code == 0:
         log_info("Successfully updated with Latest Updates !")
     else:
         log_error("Something went Wrong ! Recheck your details or Ask Support !")
@@ -114,6 +126,6 @@ if UPSTREAM_REPO:
 
 
 UPDATE_PKGS = config_file.get("UPDATE_PKGS", "True")
-if (isinstance(UPDATE_PKGS, str) and UPDATE_PKGS.lower() == "true") or UPDATE_PKGS:
-    scall("uv pip install --system -U -r requirements.txt", shell=True)
+if as_bool(UPDATE_PKGS):
+    scall(["uv", "pip", "install", "--system", "-U", "-r", "requirements.txt"])
     log_info("Successfully Updated all the Packages !")

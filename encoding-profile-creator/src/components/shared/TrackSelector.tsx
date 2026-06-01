@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { SelectField } from './SelectField';
 import { TextField } from './TextField';
 
@@ -18,23 +18,17 @@ const COMMON_TRACKS = [
 ];
 
 export const TrackSelector: React.FC<TrackSelectorProps> = ({ label, value, onChange, placeholder = "e.g. 0,1 or ?" }) => {
-  const [isCustom, setIsCustom] = useState(false);
-
-  useEffect(() => {
-    if (value && !COMMON_TRACKS.find(t => t.value === value)) {
-      setIsCustom(true);
-    } else {
-      setIsCustom(false);
-    }
-  }, [value]);
+  const valueIsCustom = !!value && !COMMON_TRACKS.find(t => t.value === value);
+  const [customMode, setCustomMode] = useState(valueIsCustom);
+  const isCustom = customMode || valueIsCustom;
 
   const handleSelectChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const val = e.target.value;
     if (val === 'custom') {
-      setIsCustom(true);
+      setCustomMode(true);
       onChange('');
     } else {
-      setIsCustom(false);
+      setCustomMode(false);
       onChange(val);
     }
   };

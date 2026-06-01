@@ -24,9 +24,10 @@ export const ProfileList: React.FC<ProfileListProps> = ({
 
   const entries = Object.entries(profiles);
 
-  const handleCopyJSON = (id: string, profile: any) => {
+  const handleCopyJSON = (id: string, profile: EncodingProfile) => {
     // Remove UI only fields before copying
-    const { is_default, ...exportData } = profile;
+    const exportData = { ...profile };
+    delete exportData.is_default;
     navigator.clipboard.writeText(JSON.stringify(exportData, null, 4));
     setCopiedId(id);
     setTimeout(() => setCopiedId(null), 2000);

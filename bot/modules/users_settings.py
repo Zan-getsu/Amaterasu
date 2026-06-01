@@ -1,4 +1,5 @@
 from asyncio import sleep
+from ast import literal_eval
 from functools import partial
 from html import escape
 from io import BytesIO
@@ -31,8 +32,13 @@ from ..helper.telegram_helper.message_utils import (
     send_file,
     send_message,
 )
+from web.security import make_signed_token
 
 handler_dict = {}
+
+
+def _web_secret():
+    return Config.PROTECTED_API or Config.LOGIN_PASS or Config.BOT_TOKEN
 
 leech_options = [
     "THUMBNAIL",
@@ -1016,7 +1022,7 @@ async def add_one(_, message, option, rfunc):
     value = message.text
     if value.startswith("{") and value.endswith("}"):
         try:
-            value = eval(value)
+            value = literal_eval(value)
             if user_dict[option]:
                 user_dict[option].update(value)
             else:
@@ -1128,7 +1134,7 @@ async def set_option(_, message, option, rfunc):
     elif option in ["UPLOAD_PATHS", "FFMPEG_CMDS", "YT_DLP_OPTIONS"]:
         if value.startswith("{") and value.endswith("}"):
             try:
-                value = eval(sub(r"\s+", " ", value))
+                value = literal_eval(sub(r"\s+", " ", value))
             except Exception as e:
                 await send_message(message, str(e))
                 return
@@ -1364,7 +1370,11 @@ async def edit_user_settings(client, query):
         await query.answer()
         buttons = ButtonMaker()
         if Config.BASE_URL:
-            web_url = f"{Config.BASE_URL}/app/encode-profiles?user_id={user_id}"
+            token = make_signed_token(_web_secret(), "encode-profile", user_id)
+            web_url = (
+                f"{Config.BASE_URL}/app/encode-profiles"
+                f"?user_id={user_id}&token={token}"
+            )
             buttons.url_button("🌐 Open Web Creator", web_url)
             buttons.data_button("↩ BACK", f"userset {user_id} back encode")
             text = "<b>Encoding Profile Creator</b>\n\nClick the button below to open the interactive Web UI and visually build your Encoding Profiles."

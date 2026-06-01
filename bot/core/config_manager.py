@@ -214,7 +214,7 @@ class Config:
             except ValueError:
                 bp_val = 0
                 
-            resolved_port = p_val or bp_val or 80
+            resolved_port = p_val or bp_val
             
         cls.PORT = resolved_port
         cls.BASE_URL_PORT = resolved_port
@@ -235,7 +235,7 @@ class Config:
         for attr in dir(settings):
             if hasattr(cls, attr):
                 value = getattr(settings, attr)
-                if not value:
+                if value is None or (isinstance(value, str) and not value.strip()):
                     continue
                 if isinstance(value, str):
                     value = value.strip()

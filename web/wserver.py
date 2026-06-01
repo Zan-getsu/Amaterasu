@@ -17,6 +17,7 @@ from aiohttp.client_exceptions import ClientError
 from aioqbt.exc import AQError
 
 from web.nodes import extract_file_ids, make_tree
+from web.security import verify_short_token, verify_signed_token
 from aiohttp import ClientSession
 
 getLogger("httpx").setLevel(WARNING)
@@ -31,7 +32,7 @@ sabnzbd_client = SabnzbdClient(
 )
 SERVICES = {
     "nzb": {"url": "http://localhost:8070/"},
-    "qbit": {"url": "http://localhost:8090", "password": "admin"},
+    "qbit": {"url": "http://localhost:8090"},
 }
 
 
@@ -57,6 +58,33 @@ basicConfig(
 )
 
 LOGGER = getLogger(__name__)
+
+
+def _get_config():
+    from bot.core.config_manager import Config
+
+    return Config
+
+
+def _web_secret() -> str:
+    config = _get_config()
+    return config.PROTECTED_API or config.LOGIN_PASS or config.BOT_TOKEN
+
+
+def _service_password() -> str:
+    config = _get_config()
+    return config.LOGIN_PASS or config.PROTECTED_API
+
+
+def _require_profile_user(request: Request) -> int:
+    try:
+        user_id = int(request.query_params.get("user_id", ""))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid user_id") from exc
+    token = request.query_params.get("token")
+    if not verify_signed_token(token, _web_secret(), "encode-profile", user_id):
+        raise HTTPException(status_code=403, detail="Invalid profile token")
+    return user_id
 
 
 async def re_verify(paused, resumed, hash_id):
@@ -106,38 +134,48 @@ async def encode_profiles_page(request: Request):
     return templates.TemplateResponse(request, "encode_profiles.html")
 
 @app.get("/api/profiles")
-async def list_profiles(user_id: int):
+async def list_profiles(request: Request):
     from bot.helper.ext_utils.db_handler import database
+
+    user_id = _require_profile_user(request)
     profiles = await database.get_encode_profiles(user_id)
     if profiles and "_id" in profiles:
         del profiles["_id"]
     return JSONResponse(profiles)
 
 @app.post("/api/profiles")
-async def create_profile(user_id: int, request: Request):
+async def create_profile(request: Request):
     from bot.helper.ext_utils.db_handler import database
     import uuid
+
+    user_id = _require_profile_user(request)
     data = await request.json()
     pid = uuid.uuid4().hex[:8]
     await database.save_encode_profile(user_id, pid, data)
     return JSONResponse({"id": pid, "status": "created"})
 
 @app.put("/api/profiles/{pid}")
-async def update_profile(pid: str, user_id: int, request: Request):
+async def update_profile(pid: str, request: Request):
     from bot.helper.ext_utils.db_handler import database
+
+    user_id = _require_profile_user(request)
     data = await request.json()
     await database.save_encode_profile(user_id, pid, data)
     return JSONResponse({"status": "updated"})
 
 @app.delete("/api/profiles/{pid}")
-async def delete_profile(pid: str, user_id: int):
+async def delete_profile(pid: str, request: Request):
     from bot.helper.ext_utils.db_handler import database
+
+    user_id = _require_profile_user(request)
     await database.delete_encode_profile(user_id, pid)
     return JSONResponse({"status": "deleted"})
 
 @app.post("/api/profiles/{pid}/default")
-async def set_default_profile(pid: str, user_id: int):
+async def set_default_profile(pid: str, request: Request):
     from bot.helper.ext_utils.db_handler import database
+
+    user_id = _require_profile_user(request)
     await database.set_default_encode_profile(user_id, pid)
     return JSONResponse({"status": "default_set"})
 
@@ -168,8 +206,7 @@ async def handle_torrent(request: Request):
             }
         )
 
-    code = "".join([nbr for nbr in gid if nbr.isdigit()][:4])
-    if code != pin:
+    if not verify_short_token(pin, _web_secret(), "torrent-select", gid):
         return JSONResponse(
             {
                 "files": [],
@@ -345,7 +382,10 @@ async def protected_proxy(
     service_info = SERVICES.get(service)
     if not service_info:
         raise HTTPException(status_code=404, detail="Service not found")
-    if "password" in service_info and password != service_info["password"]:
+    expected_password = _service_password()
+    if not expected_password:
+        raise HTTPException(status_code=403, detail="Proxy access is not configured")
+    if password != expected_password:
         raise HTTPException(status_code=403, detail="Unauthorized access")
     base = service_info["url"]
     url = f"{base}/{path}" if path else base
@@ -358,17 +398,23 @@ async def protected_proxy(
 
 @app.api_route("/nzb/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH"])
 async def sabnzbd_proxy(path: str = "", request: Request = None):
-    return await protected_proxy("nzb", path, request)
+    password = request.query_params.get("pass") or request.cookies.get("proxy_pass")
+    if not password:
+        raise HTTPException(status_code=403, detail="Missing password")
+    response = await protected_proxy("nzb", path, request, password)
+    if "pass" in request.query_params:
+        response.set_cookie("proxy_pass", password, httponly=True, samesite="strict")
+    return response
 
 
 @app.api_route("/qbit/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH"])
 async def qbittorrent_proxy(path: str = "", request: Request = None):
-    password = request.query_params.get("pass") or request.cookies.get("qbit_pass")
+    password = request.query_params.get("pass") or request.cookies.get("proxy_pass")
     if not password:
         raise HTTPException(status_code=403, detail="Missing password")
     response = await protected_proxy("qbit", path, request, password)
     if "pass" in request.query_params:
-        response.set_cookie("qbit_pass", password)
+        response.set_cookie("proxy_pass", password, httponly=True, samesite="strict")
     return response
 
 
@@ -434,13 +480,16 @@ async def watch_media(chat_id: str, message_id: int, request: Request, filename:
         message = await get_message(client, chat_id, message_id)
         media = get_media(message)
         
-        provided_hash = request.query_params.get("hash")
-        if not provided_hash:
-            raise HTTPException(status_code=403, detail="Missing secure hash")
         unique_id = getattr(media, "file_unique_id", "")
-        secure_hash = unique_id[:6] if len(unique_id) >= 6 else unique_id
-        if provided_hash != secure_hash:
-            raise HTTPException(status_code=403, detail="Invalid secure hash")
+        secure_hash = request.query_params.get("hash")
+        if not verify_signed_token(
+            secure_hash,
+            _web_secret(),
+            "stream",
+            f"{chat_id}:{message_id}",
+            extra={"uid": unique_id},
+        ):
+            raise HTTPException(status_code=403, detail="Invalid secure token")
             
         if not filename:
             filename = getattr(media, "file_name", None) or f"Stream_{message_id}.bin"
@@ -488,13 +537,16 @@ async def stream_media(chat_id: str, message_id: int, request: Request, filename
         message = await get_message(client, chat_id, message_id)
         media = get_media(message)
         
-        provided_hash = request.query_params.get("hash")
-        if not provided_hash:
-            raise HTTPException(status_code=403, detail="Missing secure hash")
         unique_id = getattr(media, "file_unique_id", "")
-        secure_hash = unique_id[:6] if len(unique_id) >= 6 else unique_id
-        if provided_hash != secure_hash:
-            raise HTTPException(status_code=403, detail="Invalid secure hash")
+        secure_hash = request.query_params.get("hash")
+        if not verify_signed_token(
+            secure_hash,
+            _web_secret(),
+            "stream",
+            f"{chat_id}:{message_id}",
+            extra={"uid": unique_id},
+        ):
+            raise HTTPException(status_code=403, detail="Invalid secure token")
             
         file_size = getattr(media, "file_size", 0) or 0
         mime_type = getattr(media, "mime_type", None)
@@ -612,8 +664,6 @@ async def stream_media(chat_id: str, message_id: int, request: Request, filename
 
 
 @app.exception_handler(Exception)
-async def page_not_found(_, exc):
-    return HTMLResponse(
-        f"<h1>404: Task not found! Mostly wrong input. <br><br>Error: {exc}</h1>",
-        status_code=404,
-    )
+async def unexpected_error(_, exc):
+    LOGGER.error(f"Unhandled web error: {exc}")
+    return JSONResponse({"detail": "Internal server error"}, status_code=500)

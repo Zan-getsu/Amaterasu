@@ -1,4 +1,5 @@
 from base64 import b64encode
+from ast import literal_eval
 from re import match as re_match
 
 from aiofiles.os import path as aiopath
@@ -206,7 +207,7 @@ class Uphoster(TaskListener):
                 if isinstance(args["-ff"], set):
                     self.ffmpeg_cmds = args["-ff"]
                 else:
-                    self.ffmpeg_cmds = eval(args["-ff"])
+                    self.ffmpeg_cmds = literal_eval(args["-ff"])
         except Exception as e:
             self.ffmpeg_cmds = None
             LOGGER.error(e)

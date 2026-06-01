@@ -11,9 +11,8 @@ function App() {
   const [editingProfileId, setEditingProfileId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
-  // Load profiles
-  const loadProfiles = async () => {
-    setIsLoading(true);
+  const loadProfiles = async (showLoading = false) => {
+    if (showLoading) setIsLoading(true);
     try {
       const data = await profileApi.list();
       setProfiles(data);
@@ -25,7 +24,22 @@ function App() {
   };
 
   useEffect(() => {
-    loadProfiles();
+    let active = true;
+
+    profileApi.list()
+      .then((data) => {
+        if (active) setProfiles(data);
+      })
+      .catch((error) => {
+        if (active) console.error('Failed to load profiles:', error);
+      })
+      .finally(() => {
+        if (active) setIsLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
   }, []);
 
   const handleSaveProfile = async (profileData: EncodingProfile) => {
@@ -98,6 +112,7 @@ function App() {
       
       {currentPage === 'builder' && (
         <ProfileBuilder 
+          key={editingProfileId ?? 'new-profile'}
           initialData={editingProfileId ? profiles[editingProfileId] : null}
           onNavigate={setCurrentPage} 
           onSave={handleSaveProfile} 

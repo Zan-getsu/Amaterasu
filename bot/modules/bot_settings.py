@@ -4,6 +4,7 @@ from asyncio import (
     gather,
     sleep,
 )
+from ast import literal_eval
 from functools import partial
 from io import BytesIO
 from os import getcwd
@@ -388,9 +389,9 @@ async def edit_variable(_, message, pre_message, key):
     elif value.isdigit():
         value = int(value)
     elif value.startswith("[") and value.endswith("]"):
-        value = eval(value)
+        value = literal_eval(value)
     elif value.startswith("{") and value.endswith("}"):
-        value = eval(value)
+        value = literal_eval(value)
     Config.set(key, value)
     await update_buttons(pre_message, "var")
     await delete_message(message)
@@ -458,7 +459,7 @@ async def edit_nzb(_, message, pre_message, key):
         value = int(value)
     elif value.startswith("[") and value.endswith("]"):
         try:
-            value = ",".join(eval(value))
+            value = ",".join(literal_eval(value))
         except Exception as e:
             LOGGER.error(e)
             await update_buttons(pre_message, "nzb")
@@ -477,7 +478,7 @@ async def edit_nzb_server(_, message, pre_message, key, index=0):
     if key == "newser":
         if value.startswith("{") and value.endswith("}"):
             try:
-                value = eval(value)
+                value = literal_eval(value)
             except Exception:
                 await send_message(message, "Invalid dict format!")
                 await update_buttons(pre_message, "nzbserver")
@@ -932,21 +933,21 @@ async def edit_bot_settings(client, query):
         await query.answer()
         filename = data[2].rsplit(".zip", 1)[0]
         if await aiopath.exists(filename):
-            await (
-                await create_subprocess_shell(
-                    f"git add -f {filename} \
-                    && git commit -sm botsettings -q \
-                    && git push origin {Config.UPSTREAM_BRANCH} -qf"
-                )
-            ).wait()
+            commands = [
+                ("git", "add", "-f", "--", filename),
+                ("git", "commit", "-sm", "botsettings", "-q"),
+                ("git", "push", "origin", Config.UPSTREAM_BRANCH, "-qf"),
+            ]
         else:
-            await (
-                await create_subprocess_shell(
-                    f"git rm -r --cached {filename} \
-                    && git commit -sm botsettings -q \
-                    && git push origin {Config.UPSTREAM_BRANCH} -qf"
-                )
-            ).wait()
+            commands = [
+                ("git", "rm", "-r", "--cached", "--", filename),
+                ("git", "commit", "-sm", "botsettings", "-q"),
+                ("git", "push", "origin", Config.UPSTREAM_BRANCH, "-qf"),
+            ]
+        for command in commands:
+            proc = await create_subprocess_exec(*command)
+            if await proc.wait() != 0:
+                break
         await delete_message(message.reply_to_message)
         await delete_message(message)
 

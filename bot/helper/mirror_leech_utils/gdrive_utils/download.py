@@ -1,6 +1,7 @@
 from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaIoBaseDownload
 from io import FileIO
+from json import loads
 from logging import getLogger
 from os import makedirs, path as ospath
 from tenacity import (
@@ -16,6 +17,11 @@ from ...ext_utils.bot_utils import SetInterval
 from ...mirror_leech_utils.gdrive_utils.helper import GoogleDriveHelper
 
 LOGGER = getLogger(__name__)
+
+
+def _error_reason(err):
+    content = err.content.decode() if isinstance(err.content, bytes) else err.content
+    return loads(content).get("error", {}).get("errors", [{}])[0].get("reason")
 
 
 class GoogleDriveDownload(GoogleDriveHelper):
@@ -133,9 +139,7 @@ class GoogleDriveDownload(GoogleDriveHelper):
                     retries += 1
                     continue
                 if err.resp.get("content-type", "").startswith("application/json"):
-                    reason = (
-                        eval(err.content).get("error").get("errors")[0].get("reason")
-                    )
+                    reason = _error_reason(err)
                     if "fileNotDownloadable" in reason and "document" in mime_type:
                         return self._download_file(
                             file_id, path, filename, mime_type, True

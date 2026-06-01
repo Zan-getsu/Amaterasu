@@ -10,6 +10,7 @@ from bot.helper.ext_utils.status_utils import get_readable_file_size
 from bot.helper.telegram_helper.bot_commands import BotCommands
 from bot.helper.telegram_helper.filters import CustomFilters
 from bot.helper.telegram_helper.message_utils import send_message, edit_message, delete_message
+from web.security import make_signed_token
 
 def get_media(message):
     if not message:
@@ -51,6 +52,19 @@ async def generate_link_markup(chat_id, message_id, filename, secure_hash=""):
         
     return InlineKeyboardMarkup(buttons), stream_link, download_link
 
+
+def _web_secret():
+    return Config.PROTECTED_API or Config.LOGIN_PASS or Config.BOT_TOKEN
+
+
+def _stream_token(chat_id, message_id, unique_id):
+    return make_signed_token(
+        _web_secret(),
+        "stream",
+        f"{chat_id}:{message_id}",
+        extra={"uid": unique_id},
+    )
+
 async def process_media_message(client, message, reply_to_msg):
     media = get_media(reply_to_msg)
     if not media:
@@ -89,7 +103,7 @@ async def process_media_message(client, message, reply_to_msg):
             message_id = reply_to_msg.id
             unique_id = getattr(media, "file_unique_id", "")
             
-        secure_hash = unique_id[:6] if len(unique_id) >= 6 else unique_id
+        secure_hash = _stream_token(chat_id, message_id, unique_id)
             
         markup, stream_link, download_link = await generate_link_markup(chat_id, message_id, filename, secure_hash)
         
@@ -155,7 +169,7 @@ async def link_command_handler(client, message):
                     t_message_id = msg.id
                     unique_id = getattr(media, "file_unique_id", "")
                     
-                secure_hash = unique_id[:6] if len(unique_id) >= 6 else unique_id
+                secure_hash = _stream_token(t_chat_id, t_message_id, unique_id)
                     
                 markup, stream_link, download_link = await generate_link_markup(t_chat_id, t_message_id, filename, secure_hash)
                 

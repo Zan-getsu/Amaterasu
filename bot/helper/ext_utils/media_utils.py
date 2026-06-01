@@ -170,8 +170,9 @@ async def get_media_info(path, extra_info=False):
     if result[0] and result[2] == 0:
         try:
             ffresult = json.loads(result[0])
-        except Exception:
-            ffresult = eval(result[0])
+        except json.JSONDecodeError as e:
+            LOGGER.error(f"get_media_info: invalid ffprobe JSON: {e}")
+            return (0, "", "", "") if extra_info else (0, None, None)
             
         fields = ffresult.get("format")
         if fields is None:
@@ -260,7 +261,11 @@ async def get_document_type(path):
             is_video = True
         return is_video, is_audio, is_image
     if result[0] and result[2] == 0:
-        fields = eval(result[0]).get("streams")
+        try:
+            fields = json.loads(result[0]).get("streams")
+        except json.JSONDecodeError as e:
+            LOGGER.error(f"get_document_type: invalid ffprobe JSON: {e}")
+            return is_video, is_audio, is_image
         if fields is None:
             LOGGER.error(f"get_document_type: {result}")
             return is_video, is_audio, is_image

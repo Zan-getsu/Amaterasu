@@ -20,7 +20,7 @@ class DbManager:
     async def connect(self):
         try:
             if self._conn is not None:
-                await self._conn.close()
+                self._conn.close()
             self._conn = AsyncIOMotorClient(
                 Config.DATABASE_URL, server_api=ServerApi("1")
             )
@@ -35,7 +35,7 @@ class DbManager:
     async def disconnect(self):
         self._return = True
         if self._conn is not None:
-            await self._conn.close()
+            self._conn.close()
         self._conn = None
 
     async def migrate_from_wzmlx(self):
@@ -334,7 +334,7 @@ class DbManager:
         if self._return:
             return
         profiles = await self.get_encode_profiles(user_id)
-        if not profiles:
+        if not profiles or profile_id not in profiles:
             return
         update_dict = {}
         for pid, pdata in profiles.items():

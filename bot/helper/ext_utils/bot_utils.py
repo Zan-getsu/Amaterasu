@@ -13,6 +13,7 @@ from httpx import AsyncClient
 from ... import bot_loop, user_data
 from ...core.config_manager import Config
 from ..telegram_helper.button_build import ButtonMaker
+from web.security import make_short_token
 from .help_messages import (
     CLONE_HELP_DICT,
     MIRROR_HELP_DICT,
@@ -82,7 +83,7 @@ def compare_versions(v1, v2):
 
 def bt_selection_buttons(id_):
     gid = id_[:12] if len(id_) > 25 else id_
-    pin = "".join([n for n in id_ if n.isdigit()][:4])
+    pin = make_short_token(Config.BOT_TOKEN, "torrent-select", id_)
     buttons = ButtonMaker()
     if Config.WEB_PINCODE:
         buttons.url_button("Select Files", f"{Config.BASE_URL}/app/files?gid={id_}")

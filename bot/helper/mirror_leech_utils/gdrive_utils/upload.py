@@ -1,5 +1,6 @@
 from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaFileUpload
+from json import loads
 from logging import getLogger
 from os import path as ospath, listdir, remove
 from tenacity import (
@@ -16,6 +17,11 @@ from ...ext_utils.files_utils import get_mime_type
 from ...mirror_leech_utils.gdrive_utils.helper import GoogleDriveHelper
 
 LOGGER = getLogger(__name__)
+
+
+def _error_reason(err):
+    content = err.content.decode() if isinstance(err.content, bytes) else err.content
+    return loads(content).get("error", {}).get("errors", [{}])[0].get("reason")
 
 
 class GoogleDriveUpload(GoogleDriveHelper):
@@ -171,9 +177,7 @@ class GoogleDriveUpload(GoogleDriveHelper):
                     retries += 1
                     continue
                 if err.resp.get("content-type", "").startswith("application/json"):
-                    reason = (
-                        eval(err.content).get("error").get("errors")[0].get("reason")
-                    )
+                    reason = _error_reason(err)
                     if reason not in [
                         "userRateLimitExceeded",
                         "dailyLimitExceeded",
