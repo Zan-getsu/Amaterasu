@@ -74,11 +74,14 @@ class YoutubeDLHelper:
             "fragment_retries": 10,
             "retries": 10,
             "retry_sleep_functions": {
-                "http": lambda n: 3,
-                "fragment": lambda n: 3,
+                "http": lambda n: min(2 ** n, 30),
+                "fragment": lambda n: min(2 ** n, 30),
                 "file_access": lambda n: 3,
-                "extractor": lambda n: 3,
+                "extractor": lambda n: min(2 ** n, 30),
             },
+            "sleep_interval": 3,
+            "max_sleep_interval": 8,
+            "sleep_interval_requests": 1,
         }
         cookie_to_use = (
             usr_cookie
