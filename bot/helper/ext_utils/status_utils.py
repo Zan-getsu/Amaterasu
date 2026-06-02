@@ -86,7 +86,7 @@ async def get_task_by_gid(gid: str):
         for tk in task_dict.values():
             if hasattr(tk, "seeding"):
                 await tk.update()
-            if tk.gid() == gid:
+            if tk.gid() == gid or tk.gid().startswith(gid):
                 return tk
         return None
 
@@ -290,7 +290,7 @@ async def get_readable_message(sid, is_user, page_no=1, status="All", page_step=
         
         from ..telegram_helper.bot_commands import BotCommands
         msg += f"<code>\n├─ {'User':<9}: </code>{_user_mention}"
-        msg += f"<code>\n└─ {'Stop':<9}: </code>/{BotCommands.CancelTaskCommand[1]}_{task.gid()}\n\n"
+        msg += f"<code>\n└─ {'Stop':<9}: </code>/{BotCommands.CancelTaskCommand[1]}_{task.gid()[:8]}\n\n"
 
     if tasks_no == 0:
         if status == "All":
