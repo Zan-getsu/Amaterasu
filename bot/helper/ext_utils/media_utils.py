@@ -1,5 +1,6 @@
 import re
 from contextlib import suppress
+from fractions import Fraction
 from PIL import Image
 from hashlib import md5
 from aiofiles.os import remove, path as aiopath, makedirs
@@ -223,6 +224,60 @@ async def get_media_info(path, extra_info=False):
         title = tags.get("title") or tags.get("TITLE") or tags.get("Title")
         return duration, artist, title
     return (0, "", "", "") if extra_info else (0, None, None)
+
+
+def _parse_frame_rate(rate):
+    with suppress(Exception):
+        if not rate or rate == "0/0":
+            return 0
+        return float(Fraction(rate))
+    return 0
+
+
+async def get_video_frame_count(path, duration=0):
+    try:
+        result = await cmd_exec(
+            [
+                "ffprobe",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-select_streams",
+                "v:0",
+                "-print_format",
+                "json",
+                "-show_entries",
+                "stream=nb_frames,avg_frame_rate,r_frame_rate,duration:stream_tags=DURATION",
+                path,
+            ]
+        )
+    except Exception as e:
+        LOGGER.error(f"Get Video Frame Count: {e}. Mostly File not found! - File: {path}")
+        return 0
+    if not result[0] or result[2] != 0:
+        return 0
+    try:
+        fields = json.loads(result[0]).get("streams") or []
+    except json.JSONDecodeError as e:
+        LOGGER.error(f"get_video_frame_count: invalid ffprobe JSON: {e}")
+        return 0
+    if not fields:
+        return 0
+    stream = fields[0]
+    nb_frames = stream.get("nb_frames")
+    if isinstance(nb_frames, str) and nb_frames.isdigit():
+        return int(nb_frames)
+    stream_duration = duration or 0
+    with suppress(Exception):
+        stream_duration = float(stream.get("duration") or stream_duration)
+    if not stream_duration and (tag_duration := stream.get("tags", {}).get("DURATION")):
+        stream_duration = time_to_seconds(tag_duration)
+    frame_rate = _parse_frame_rate(stream.get("avg_frame_rate")) or _parse_frame_rate(
+        stream.get("r_frame_rate")
+    )
+    if stream_duration and frame_rate:
+        return max(1, round(stream_duration * frame_rate))
+    return 0
 
 
 async def get_document_type(path):
@@ -527,6 +582,8 @@ class FFMpeg:
         self._speed_raw = 0
         self._progress_raw = 0
         self._total_time = 0
+        self._total_frames = 0
+        self._processed_frames = 0
         self._eta_raw = 0
         self._time_rate = 0.1
         self._start_time = 0
@@ -555,10 +612,31 @@ class FFMpeg:
             return int(value) / 1_000_000
         return None
 
+    def _set_progress_percent(self, progress, *, eta=None):
+        self._progress_raw = min(100, max(0, progress))
+        if (
+            hasattr(self._listener, "subsize")
+            and self._listener.subsize
+            and self._progress_raw > 0
+        ):
+            self._processed_bytes = int(
+                self._listener.subsize * (self._progress_raw / 100)
+            )
+        elapsed = time() - self._start_time
+        self._speed_raw = self._processed_bytes / elapsed if elapsed > 0 else 0
+        if eta is not None:
+            self._eta_raw = max(0, eta)
+        elif self._progress_raw > 0 and elapsed > 0:
+            self._eta_raw = max(0, elapsed * (100 - self._progress_raw) / self._progress_raw)
+        else:
+            self._eta_raw = 0
+
     def clear(self):
         self._start_time = time()
         self._processed_bytes = 0
         self._processed_time = 0
+        self._processed_frames = 0
+        self._total_frames = 0
         self._speed_raw = 0
         self._progress_raw = 0
         self._eta_raw = 0
@@ -584,13 +662,21 @@ class FFMpeg:
                 if value != "N/A":
                     if key == "total_size":
                         with suppress(ValueError):
-                            self._processed_bytes = (
-                                int(value) + self._last_processed_bytes
-                            )
-                            elapsed = time() - self._start_time
-                            self._speed_raw = (
-                                self._processed_bytes / elapsed if elapsed > 0 else 0
-                            )
+                            if self._progress_raw <= 0:
+                                self._processed_bytes = (
+                                    int(value) + self._last_processed_bytes
+                                )
+                                elapsed = time() - self._start_time
+                                self._speed_raw = (
+                                    self._processed_bytes / elapsed if elapsed > 0 else 0
+                                )
+                    elif key == "frame":
+                        with suppress(ValueError):
+                            self._processed_frames = int(value)
+                            if self._total_frames > 0:
+                                self._set_progress_percent(
+                                    (self._processed_frames * 100) / self._total_frames
+                                )
                     elif key == "speed":
                         with suppress(ValueError):
                             self._time_rate = max(0.1, float(value.strip("x")))
@@ -603,31 +689,17 @@ class FFMpeg:
                                 processed_time + self._last_processed_time
                             )
                         if self._total_time > 0:
-                            self._progress_raw = (
-                                self._processed_time * 100
-                            ) / self._total_time
-                            self._progress_raw = min(100, max(0, self._progress_raw))
-                            if (
-                                hasattr(self._listener, "subsize")
-                                and self._listener.subsize
-                                and self._progress_raw > 0
-                            ):
-                                self._processed_bytes = int(
-                                    self._listener.subsize * (self._progress_raw / 100)
-                                )
-                            elapsed = time() - self._start_time
-                            if elapsed > 0:
-                                self._speed_raw = self._processed_bytes / (
-                                    elapsed
-                                )
-                            else:
-                                self._speed_raw = 0
-                            self._eta_raw = max(0, (
+                            eta = (
                                 self._total_time - self._processed_time
-                            ) / self._time_rate)
+                            ) / self._time_rate
+                            self._set_progress_percent(
+                                (self._processed_time * 100) / self._total_time,
+                                eta=eta,
+                            )
                         else:
-                            self._progress_raw = 0
-                            self._eta_raw = 0
+                            if self._progress_raw <= 0:
+                                self._progress_raw = 0
+                                self._eta_raw = 0
             await sleep(0.05)
 
     async def ffmpeg_cmds(self, ffmpeg, f_path):
@@ -689,6 +761,7 @@ class FFMpeg:
     async def encode_video(self, input_file, profile, metadata=None):
         self.clear()
         self._total_time = (await get_media_info(input_file))[0]
+        self._total_frames = await get_video_frame_count(input_file, self._total_time)
         v_codec = profile.get("video_codec", "libsvtav1")
         a_codec = profile.get("audio_codec", "libopus")
         v_params = profile.get("video_params", {})
