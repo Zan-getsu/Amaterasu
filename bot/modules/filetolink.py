@@ -1,7 +1,6 @@
 from pyrogram.filters import command, reply, private, create
 from pyrogram.handlers import MessageHandler
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-from urllib.parse import quote
 
 from bot import LOGGER
 from bot.core.tg_client import TgClient
@@ -10,7 +9,7 @@ from bot.helper.ext_utils.status_utils import get_readable_file_size
 from bot.helper.telegram_helper.bot_commands import BotCommands
 from bot.helper.telegram_helper.filters import CustomFilters
 from bot.helper.telegram_helper.message_utils import send_message, edit_message, delete_message
-from web.security import make_signed_token
+from web.security import make_route_token
 
 def get_media(message):
     if not message:
@@ -31,12 +30,10 @@ def is_streamable(filename):
     return ext in streamable_exts
 
 async def generate_link_markup(chat_id, message_id, filename, secure_hash=""):
-    encoded_filename = quote(filename)
-    hash_query = f"?hash={secure_hash}" if secure_hash else ""
-    hash_query_amp = f"&hash={secure_hash}" if secure_hash else ""
+    token_path = f"/{secure_hash}" if secure_hash else f"/{chat_id}/{message_id}"
     
-    stream_link = f"{Config.BASE_URL}/watch/{chat_id}/{message_id}/{encoded_filename}{hash_query}"
-    download_link = f"{Config.BASE_URL}/stream/{chat_id}/{message_id}/{encoded_filename}?disposition=attachment{hash_query_amp}"
+    stream_link = f"{Config.BASE_URL}/watch{token_path}"
+    download_link = f"{Config.BASE_URL}/stream{token_path}?disposition=attachment"
     
     buttons = []
     if is_streamable(filename):
@@ -58,11 +55,11 @@ def _web_secret():
 
 
 def _stream_token(chat_id, message_id, unique_id):
-    return make_signed_token(
+    return make_route_token(
         _web_secret(),
         "stream",
-        f"{chat_id}:{message_id}",
-        extra={"uid": unique_id},
+        int(chat_id),
+        int(message_id),
     )
 
 async def process_media_message(client, message, reply_to_msg):

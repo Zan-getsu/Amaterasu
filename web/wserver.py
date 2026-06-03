@@ -1,7 +1,7 @@
 from asyncio import sleep
 import re
 from urllib.parse import urlparse
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from logging import INFO, WARNING, FileHandler, StreamHandler, basicConfig, getLogger
 
 from aioaria2 import Aria2HttpClient
@@ -17,7 +17,7 @@ from aiohttp.client_exceptions import ClientError
 from aioqbt.exc import AQError
 
 from web.nodes import extract_file_ids, make_tree
-from web.security import verify_short_token, verify_signed_token
+from web.security import verify_route_token, verify_short_token, verify_signed_token
 from aiohttp import ClientSession
 
 getLogger("httpx").setLevel(WARNING)
@@ -48,6 +48,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 templates = Jinja2Templates(directory="web/templates")
+STREAM_TOKEN_LENGTH = 24
 
 
 basicConfig(
@@ -74,6 +75,35 @@ def _web_secret() -> str:
 def _service_password() -> str:
     config = _get_config()
     return config.LOGIN_PASS or config.PROTECTED_API
+
+
+def _verify_stream_token(token: str | None, chat_id, message_id: int, unique_id: str) -> bool:
+    subject = f"{chat_id}:{message_id}"
+    if _route_stream_token_matches(token, chat_id, message_id):
+        return True
+    if verify_short_token(
+        token,
+        _web_secret(),
+        "stream",
+        f"{subject}:{unique_id}",
+        length=STREAM_TOKEN_LENGTH,
+    ):
+        return True
+    return verify_signed_token(
+        token,
+        _web_secret(),
+        "stream",
+        subject,
+        extra={"uid": unique_id},
+    )
+
+
+def _route_stream_token_matches(token: str | None, chat_id, message_id: int) -> bool:
+    route_subject = verify_route_token(token, _web_secret(), "stream")
+    with suppress(ValueError, TypeError):
+        if route_subject == (int(chat_id), int(message_id)):
+            return True
+    return False
 
 
 def _require_profile_user(request: Request) -> int:
@@ -462,6 +492,20 @@ async def get_message(client, chat_id: int, message_id: int) -> any:
         raise HTTPException(status_code=404, detail="Message does not contain media")
     return message
 
+
+def _decode_stream_route_token(token: str) -> tuple[int, int]:
+    route_subject = verify_route_token(token, _web_secret(), "stream")
+    if route_subject is None:
+        raise HTTPException(status_code=403, detail="Invalid secure token")
+    return route_subject
+
+
+@app.api_route("/watch/{token}", methods=["GET"])
+async def watch_media_token(token: str, request: Request):
+    chat_id, message_id = _decode_stream_route_token(token)
+    return await watch_media(str(chat_id), message_id, request, filename=token)
+
+
 @app.api_route("/watch/{chat_id}/{message_id}", methods=["GET"])
 @app.api_route("/watch/{chat_id}/{message_id}/{filename}", methods=["GET"])
 async def watch_media(chat_id: str, message_id: int, request: Request, filename: str = None):
@@ -482,13 +526,10 @@ async def watch_media(chat_id: str, message_id: int, request: Request, filename:
         
         unique_id = getattr(media, "file_unique_id", "")
         secure_hash = request.query_params.get("hash")
-        if not verify_signed_token(
-            secure_hash,
-            _web_secret(),
-            "stream",
-            f"{chat_id}:{message_id}",
-            extra={"uid": unique_id},
-        ):
+        if not secure_hash and _verify_stream_token(filename, chat_id, message_id, unique_id):
+            secure_hash = filename
+            filename = None
+        if not _verify_stream_token(secure_hash, chat_id, message_id, unique_id):
             raise HTTPException(status_code=403, detail="Invalid secure token")
             
         if not filename:
@@ -498,8 +539,10 @@ async def watch_media(chat_id: str, message_id: int, request: Request, filename:
         from bot.helper.ext_utils.status_utils import get_readable_file_size
         readable_size = get_readable_file_size(file_size)
             
-        from urllib.parse import quote
-        stream_url = f"/stream/{chat_id}/{message_id}/{quote(filename)}?hash={secure_hash}"
+        if _route_stream_token_matches(secure_hash, chat_id, message_id):
+            stream_url = f"/stream/{secure_hash}"
+        else:
+            stream_url = f"/stream/{chat_id}/{message_id}?hash={secure_hash}"
         
         ext = filename.split('.')[-1].lower() if '.' in filename else ''
         if ext in ['mp4', 'mkv', 'webm', 'avi', 'mov', 'flv', 'wmv', 'm4v']: file_type = 'video'
@@ -517,6 +560,13 @@ async def watch_media(chat_id: str, message_id: int, request: Request, filename:
         })
     finally:
         TgClient.stream_loads[client_id] -= 1
+
+
+@app.api_route("/stream/{token}", methods=["GET", "HEAD"])
+async def stream_media_token(token: str, request: Request):
+    chat_id, message_id = _decode_stream_route_token(token)
+    return await stream_media(str(chat_id), message_id, request, filename=token)
+
 
 @app.api_route("/stream/{chat_id}/{message_id}", methods=["GET", "HEAD"])
 @app.api_route("/stream/{chat_id}/{message_id}/{filename}", methods=["GET", "HEAD"])
@@ -539,13 +589,10 @@ async def stream_media(chat_id: str, message_id: int, request: Request, filename
         
         unique_id = getattr(media, "file_unique_id", "")
         secure_hash = request.query_params.get("hash")
-        if not verify_signed_token(
-            secure_hash,
-            _web_secret(),
-            "stream",
-            f"{chat_id}:{message_id}",
-            extra={"uid": unique_id},
-        ):
+        if not secure_hash and _verify_stream_token(filename, chat_id, message_id, unique_id):
+            secure_hash = filename
+            filename = None
+        if not _verify_stream_token(secure_hash, chat_id, message_id, unique_id):
             raise HTTPException(status_code=403, detail="Invalid secure token")
             
         file_size = getattr(media, "file_size", 0) or 0

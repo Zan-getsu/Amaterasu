@@ -728,7 +728,13 @@ class FFMpeg:
         custom_thumb_path = None
         original_thumb = getattr(self._listener, "thumb", None)
         cover_url = profile.get("cover_image", "").strip()
-        if cover_url:
+        if (
+            cover_url
+            and getattr(self._listener, "_encode_cover_thumb", None)
+            == original_thumb
+        ):
+            custom_thumb_path = None
+        elif cover_url:
             custom_thumb_path = await download_custom_thumb(cover_url)
             if custom_thumb_path:
                 self._listener.thumb = custom_thumb_path

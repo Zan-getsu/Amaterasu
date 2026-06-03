@@ -2,6 +2,7 @@ from base64 import urlsafe_b64decode, urlsafe_b64encode
 from hashlib import sha256
 from hmac import compare_digest, new as hmac_new
 from json import dumps, loads
+from struct import pack, unpack
 from time import time
 
 
@@ -88,3 +89,42 @@ def verify_short_token(
         return False
     expected = make_short_token(secret, purpose, subject, length=length)
     return compare_digest(token, expected)
+
+
+def make_route_token(
+    secret: str,
+    purpose: str,
+    chat_id: int,
+    message_id: int,
+) -> str:
+    payload = pack(">qI", int(chat_id), int(message_id))
+    mac = hmac_new(
+        secret.encode(),
+        purpose.encode() + b":" + payload,
+        sha256,
+    ).digest()[:12]
+    return _b64encode(payload + mac)
+
+
+def verify_route_token(
+    token: str | None,
+    secret: str,
+    purpose: str,
+) -> tuple[int, int] | None:
+    if not token or not secret:
+        return None
+    try:
+        data = _b64decode(token)
+        if len(data) != 24:
+            return None
+        payload, mac = data[:12], data[12:]
+        expected = hmac_new(
+            secret.encode(),
+            purpose.encode() + b":" + payload,
+            sha256,
+        ).digest()[:12]
+        if not compare_digest(mac, expected):
+            return None
+        return unpack(">qI", payload)
+    except Exception:
+        return None

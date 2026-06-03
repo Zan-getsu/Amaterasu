@@ -41,6 +41,7 @@ from ..ext_utils.files_utils import (
     move_and_merge,
 )
 from ..ext_utils.links_utils import is_gdrive_id
+from ..ext_utils.media_utils import download_custom_thumb
 from ..ext_utils.status_utils import get_readable_file_size, get_readable_time
 from ..ext_utils.task_manager import check_running_tasks, start_from_queued
 from ..mirror_leech_utils.uphoster_utils.gofile_utils.upload import GoFileUpload
@@ -223,7 +224,15 @@ class TaskListener(TaskConfig):
 
         if self.is_cancelled or not self.encode_profile:
             return None
-            
+
+        if self.is_leech and not self.thumb:
+            cover_url = self.encode_profile.get("cover_image", "").strip()
+            if cover_url:
+                cover_thumb = await download_custom_thumb(cover_url)
+                if cover_thumb:
+                    self.thumb = cover_thumb
+                    self._encode_cover_thumb = cover_thumb
+
         return await self.proceed_encode(up_path, gid)
 
     async def on_download_complete(self):
