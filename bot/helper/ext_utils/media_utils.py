@@ -547,6 +547,14 @@ class FFMpeg:
     def eta_raw(self):
         return self._eta_raw
 
+    @staticmethod
+    def _parse_progress_time(key, value):
+        if key == "out_time":
+            return time_to_seconds(value)
+        if key in {"out_time_us", "out_time_ms"}:
+            return int(value) / 1_000_000
+        return None
+
     def clear(self):
         self._start_time = time()
         self._processed_bytes = 0
@@ -575,20 +583,30 @@ class FFMpeg:
                 key, value = line.split("=", 1)
                 if value != "N/A":
                     if key == "total_size":
-                        self._processed_bytes = int(value) + self._last_processed_bytes
-                        self._speed_raw = self._processed_bytes / (
-                            time() - self._start_time
-                        )
+                        with suppress(ValueError):
+                            self._processed_bytes = (
+                                int(value) + self._last_processed_bytes
+                            )
+                            elapsed = time() - self._start_time
+                            self._speed_raw = (
+                                self._processed_bytes / elapsed if elapsed > 0 else 0
+                            )
                     elif key == "speed":
-                        self._time_rate = max(0.1, float(value.strip("x")))
-                    elif key == "out_time":
-                        self._processed_time = (
-                            time_to_seconds(value) + self._last_processed_time
-                        )
-                        try:
+                        with suppress(ValueError):
+                            self._time_rate = max(0.1, float(value.strip("x")))
+                    elif key in {"out_time", "out_time_us", "out_time_ms"}:
+                        with suppress(ValueError):
+                            processed_time = self._parse_progress_time(key, value)
+                            if processed_time is None:
+                                continue
+                            self._processed_time = (
+                                processed_time + self._last_processed_time
+                            )
+                        if self._total_time > 0:
                             self._progress_raw = (
                                 self._processed_time * 100
                             ) / self._total_time
+                            self._progress_raw = min(100, max(0, self._progress_raw))
                             if (
                                 hasattr(self._listener, "subsize")
                                 and self._listener.subsize
@@ -597,16 +615,17 @@ class FFMpeg:
                                 self._processed_bytes = int(
                                     self._listener.subsize * (self._progress_raw / 100)
                                 )
-                            if (time() - self._start_time) > 0:
+                            elapsed = time() - self._start_time
+                            if elapsed > 0:
                                 self._speed_raw = self._processed_bytes / (
-                                    time() - self._start_time
+                                    elapsed
                                 )
                             else:
                                 self._speed_raw = 0
-                            self._eta_raw = (
+                            self._eta_raw = max(0, (
                                 self._total_time - self._processed_time
-                            ) / self._time_rate
-                        except ZeroDivisionError:
+                            ) / self._time_rate)
+                        else:
                             self._progress_raw = 0
                             self._eta_raw = 0
             await sleep(0.05)
