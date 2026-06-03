@@ -584,6 +584,8 @@ class FFMpeg:
         self._total_time = 0
         self._total_frames = 0
         self._processed_frames = 0
+        self._progress_keys = set()
+        self._progress_keys_logged = False
         self._eta_raw = 0
         self._time_rate = 0.1
         self._start_time = 0
@@ -637,6 +639,8 @@ class FFMpeg:
         self._processed_time = 0
         self._processed_frames = 0
         self._total_frames = 0
+        self._progress_keys = set()
+        self._progress_keys_logged = False
         self._speed_raw = 0
         self._progress_raw = 0
         self._eta_raw = 0
@@ -656,9 +660,11 @@ class FFMpeg:
                 break
             line = line.decode().strip()
             if not line:
-                break
+                await sleep(0.05)
+                continue
             if "=" in line:
                 key, value = line.split("=", 1)
+                self._progress_keys.add(key)
                 if value != "N/A":
                     if key == "total_size":
                         with suppress(ValueError):
@@ -670,6 +676,15 @@ class FFMpeg:
                                 self._speed_raw = (
                                     self._processed_bytes / elapsed if elapsed > 0 else 0
                                 )
+                                if (
+                                    hasattr(self._listener, "subsize")
+                                    and self._listener.subsize
+                                    and self._processed_bytes > 0
+                                ):
+                                    self._set_progress_percent(
+                                        (self._processed_bytes * 100)
+                                        / self._listener.subsize
+                                    )
                     elif key == "frame":
                         with suppress(ValueError):
                             self._processed_frames = int(value)
@@ -700,6 +715,13 @@ class FFMpeg:
                             if self._progress_raw <= 0:
                                 self._progress_raw = 0
                                 self._eta_raw = 0
+                    elif key == "progress" and not self._progress_keys_logged:
+                        self._progress_keys_logged = True
+                        LOGGER.info(
+                            "FFmpeg progress keys: "
+                            f"{', '.join(sorted(self._progress_keys))}; "
+                            f"duration={self._total_time}; frames={self._total_frames}"
+                        )
             await sleep(0.05)
 
     async def ffmpeg_cmds(self, ffmpeg, f_path):
