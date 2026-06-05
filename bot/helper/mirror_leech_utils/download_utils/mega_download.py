@@ -10,16 +10,16 @@ from mega import MegaApi, MegaCancelToken
 from .... import LOGGER, task_dict, task_dict_lock
 from ....core.config_manager import Config
 from ...telegram_helper.message_utils import send_status_message
-from ..ext_utils.files_utils import check_storage_threshold
-from ..ext_utils.status_utils import get_readable_file_size
-from ..ext_utils.task_manager import (
+from ...ext_utils.files_utils import check_storage_threshold
+from ...ext_utils.status_utils import get_readable_file_size
+from ...ext_utils.task_manager import (
     check_running_tasks,
     limit_checker,
     stop_duplicate_check,
 )
-from ..listeners.mega_listener import AsyncMega, MegaAppListener, _mega_error_format
-from ..mirror_leech_utils.status_utils.mega_status import MegaDownloadStatus
-from ..mirror_leech_utils.status_utils.queue_status import QueueStatus
+from ...listeners.mega_listener import AsyncMega, MegaAppListener, _mega_error_format
+from ...mirror_leech_utils.status_utils.mega_status import MegaDownloadStatus
+from ...mirror_leech_utils.status_utils.queue_status import QueueStatus
 
 
 _ACTIVE_MEGA_LINKS = set()
