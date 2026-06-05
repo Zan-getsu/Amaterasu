@@ -432,6 +432,7 @@ def get_bot_commands():
         "FileToLink": "[reply/batch] Generate direct stream and download links for media files",
         "Rename": "[reply/PM] Toggle Rename Mode or rename a replied file",
         "AutoRename": "[reply] Auto-Rename a file based on your template",
+        "Sort": "Toggle file sorting mode and resend cached files alphabetically",
     }
 
     commands = static_commands.copy()
@@ -574,6 +575,8 @@ def get_help_string():
             help_lines.append(f"{cmd_str}: Toggle Rename Mode (automatically prompts you to rename files during PM sends or leech tasks).")
         elif key == "AutoRename":
             help_lines.append(f"{cmd_str}: Auto-Rename a file based on your template, or set a new template.")
+        elif key == "Sort":
+            help_lines.append(f"{cmd_str}: Toggle sort mode. Send files, then run it again to resend them alphabetically by file name.")
 
     return "\n".join(help_lines)
 

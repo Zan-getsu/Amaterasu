@@ -70,6 +70,7 @@
   - [Admin / Sudo Commands](#admin--sudo-commands)
 - [🎞️ Encoding & Metadata](#encoding--metadata)
 - [🎭 Auto-Rename Engine](#auto-rename)
+- [🗂️ File Sorting Mode](#file-sorting-mode)
 - [🎨 Encoding Profile Creator (Web UI)](#encoding-profile-creator-web-ui)
 - [🧰 Advanced Usage & Arguments](#advanced-usage--arguments)
   - [Argument Quick Reference](#argument-quick-reference)
@@ -758,6 +759,7 @@ All limits are in **GB**. Set `0` to disable the limit.
 |---|---|---|
 | `/link` | `/stream`, `/f2l` | Generate direct stream/download links for Telegram files |
 | `/autorename` | `/ar` | Set up or use an auto-rename template |
+| `/sort` | — | Toggle file sorting mode and resend collected files alphabetically |
 | `/telegraph` | `/tg` | Upload an image or video (under 5 MB) to Telegraph and get a permanent link |
 | `/speedtest` | `/stest` | Run a server speed test via speedtest.net |
 
@@ -880,6 +882,61 @@ There are two primary ways the Auto-Rename Engine works:
 
 **Mode 2: Download Tasks**
 - When you start a mirror/leech task (e.g., downloading a torrent or a yt-dlp link), the bot will automatically apply your Auto-Rename template to all files inside the task *before* they are uploaded to your cloud drive or Telegram.
+
+---
+
+<a id="file-sorting-mode"></a>
+
+## 🗂️ File Sorting Mode
+
+File Sorting Mode lets you send a batch of Telegram files in any order, then have Amaterasu return them alphabetically by file name. It is designed for fast cleanup of messy uploads, episode packs, document batches, and renamed file sets.
+
+### How to Use
+
+1. Send `/sort` in the chat where you want to collect files.
+2. Send or forward the files you want sorted.
+3. Send `/sort` again to turn sorting off and deliver the files back in sorted order.
+
+Example workflow:
+```
+/sort
+03 - Ending.mkv
+01 - Opening.mkv
+02 - Episode.mkv
+/sort
+```
+
+The bot will resend:
+```
+01 - Opening.mkv
+02 - Episode.mkv
+03 - Ending.mkv
+```
+
+### What Gets Stored
+
+While sort mode is active, Amaterasu only caches Telegram metadata:
+
+| Cached Data | Purpose |
+|---|---|
+| `file_id` | Resend the same Telegram file without downloading it |
+| File name | Sort files alphabetically |
+| Media type | Resend as document, video, audio, photo, or other supported media |
+| Message ID | Keep a stable order when file names match |
+
+> [!IMPORTANT]
+> File Sorting Mode does **not** download files to the server. It uses Telegram `file_id`s to resend cached files, so delivery is fast and does not consume hosting bandwidth.
+
+### Supported Media
+
+Sort mode supports common Telegram media messages, including documents, videos, audio files, photos, voice notes, animations, video notes, and stickers. Files without a Telegram file name are assigned a safe fallback name for sorting.
+
+### Notes
+
+- Sending `/sort` a second time always ends the current sort session.
+- If no files were collected, the bot simply disables sort mode.
+- Files are sorted case-insensitively by file name.
+- If your bot uses `CMD_SUFFIX`, use the suffixed command, such as `/sort1`.
 
 ---
 

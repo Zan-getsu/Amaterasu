@@ -63,6 +63,7 @@ from .speedtest import speedtest
 from .telegraph_upload import telegraph_upload
 from .filetolink import link_command_handler, private_media_handler
 from .autorename import autorename_command, auto_rename_handler
+from .file_sorter import sort_command, sort_media_handler
 
 __all__ = [
     "send_bot_settings",
@@ -165,4 +166,6 @@ __all__ = [
     "private_media_handler",
     "autorename_command",
     "auto_rename_handler",
+    "sort_command",
+    "sort_media_handler",
 ]
