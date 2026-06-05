@@ -1,281 +1,467 @@
+from asyncio import Event, TimeoutError as AsyncTimeoutError, wait_for
 from time import time
-from secrets import token_hex
-from aiofiles.os import makedirs
-from asyncio import create_subprocess_exec, subprocess, wait_for
-from re import search as re_search
-from contextlib import suppress
 
-from ... import LOGGER, task_dict, task_dict_lock
-from ...core.config_manager import Config
-from ..ext_utils.status_utils import MirrorStatus
-from ..ext_utils.bot_utils import cmd_exec
-from ..ext_utils.task_manager import (
-    check_running_tasks,
-    stop_duplicate_check,
-    limit_checker,
-)
-from ..mirror_leech_utils.status_utils.mega_status import MegaDownloadStatus
-from ..mirror_leech_utils.status_utils.queue_status import QueueStatus
-from ..telegram_helper.message_utils import send_status_message
+from mega import MegaApi, MegaError, MegaListener, MegaRequest, MegaTransfer
 
-mega_tasks = {}
+from ... import LOGGER, bot_loop
+from ..ext_utils.bot_utils import async_to_sync, sync_to_async
+
+_ACTIVE_LISTENERS = []
 
 
 async def mega_cleanup():
-    if not mega_tasks:
-        return
-    LOGGER.info("Running Mega Cleanup...")
-    for path in list(mega_tasks.values()):
-        try:
-            await cmd_exec(["mega-rm", "-r", "-f", path])
-        except Exception as e:
-            LOGGER.error(f"Mega Restart Cleanup Failed for {path}: {e}")
-    mega_tasks.clear()
+    from ... import task_dict, task_dict_lock
+
+    async with task_dict_lock:
+        for tk in list(task_dict.values()):
+            if hasattr(tk, "_obj") and hasattr(tk._obj, "cancel_task"):
+                await tk._obj.cancel_task()
 
 
-class MegaAppListener:
-    def __init__(self, listener):
-        self.listener = listener
-        self.process = None
-        self.gid = token_hex(5)
-        self.mega_status = None
-        self.name = ""
-        self.size = 0
-        self.temp_path = f"/amaterasu_{self.gid}"
-        self.mega_tags = set()
-        self._is_cleaned = False
-        self._last_time = time()
-        self._val_last = 0
-        mega_tasks[self.gid] = self.temp_path
+_REQUEST_TIMEOUT_SECONDS = 300
 
-    async def login(self):
-        if (MEGA_EMAIL := Config.MEGA_EMAIL) and (
-            MEGA_PASSWORD := Config.MEGA_PASSWORD
-        ):
-            try:
-                await cmd_exec(["mega-login", MEGA_EMAIL, MEGA_PASSWORD])
-            except Exception as e:
-                raise Exception(f"Mega Login Failed: {e}")
-        else:
-            raise Exception("MegaCMD: Credentials Missing! Login required")
+MEGA_FRIENDLY_ERRORS = {
+    "-16": "File(s) Banned",
+    "-9": "File(s) not found or deleted",
+    "-11": "File(s) Access Denied",
+    "-15": "Decryption key error",
+    "-13": "Incomplete transfer",
+    "-6": "Too many requests",
+}
 
-    async def create_temp_path(self):
-        await cmd_exec(["mega-mkdir", self.temp_path])
 
-    async def import_link(self):
-        stdout, stderr, ret = await cmd_exec(
-            ["mega-import", self.listener.link, self.temp_path]
+def friendly_mega_error(raw_error):
+    if not raw_error:
+        return raw_error
+    stripped = str(raw_error).lstrip()
+    for code, friendly in MEGA_FRIENDLY_ERRORS.items():
+        if stripped.startswith(code):
+            return friendly
+    return raw_error
+
+
+class AsyncMega:
+    def __init__(self):
+        self.api = None
+        self.continue_event = Event()
+        self._transfer_event = Event()
+        self._expected_request_type = None
+        self._expected_request_source = None
+        self._download_is_folder = False
+
+    def _request_type_for_name(self, name):
+        request_types = {
+            "login": getattr(MegaRequest, "TYPE_LOGIN", None),
+            "fetchNodes": getattr(MegaRequest, "TYPE_FETCH_NODES", None),
+            "getPublicNode": getattr(MegaRequest, "TYPE_GET_PUBLIC_NODE", None),
+            "logout": getattr(MegaRequest, "TYPE_LOGOUT", None),
+        }
+        return request_types.get(name)
+
+    def _request_type_for(self, function):
+        return self._request_type_for_name(getattr(function, "__name__", ""))
+
+    async def run(self, function, *args, expected_type=None, expected_source="main", **kwargs):
+        self.continue_event.clear()
+        self._expected_request_type = (
+            self._request_type_for(function) if expected_type is None else expected_type
         )
-        if ret != 0:
-            raise Exception(f"Mega Import Failed: {stderr}")
-
-    async def get_metadata_and_target(self):
-        stdout, _, ret = await cmd_exec(["mega-ls", "-l", self.temp_path])
-        if ret != 0 or not stdout:
-            raise Exception("Mega Metadata Failed")
-
-        lines = [line for line in stdout.strip().split("\n") if line.strip()]
-        if not lines:
-            raise Exception("Mega Import: No items found")
-
-        for line in lines:
-            match = re_search(r"\s(\d+|-)\s+\S+\s+\d{2}:\d{2}:\d{2}\s+(.*)$", line)
-            if match:
-                size_str = match.group(1)
-                self.name = match.group(2).strip()
-                self.size = int(size_str) if size_str.isdigit() else 0
-                break
-
-        if not self.name:
-            s_stdout, _, _ = await cmd_exec(["mega-ls", self.temp_path])
-            if s_stdout:
-                self.name = s_stdout.strip().split("\n")[0].strip()
-
-        if not self.name:
-            self.name = self.listener.name or f"MEGA_Download_{self.gid}"
-
-        self.listener.name = self.name
-        self.listener.size = self.size
-
-        return f"{self.temp_path}/{self.name}"
-
-    async def cleanup(self):
-        if self._is_cleaned:
-            return
-        self._is_cleaned = True
+        self._expected_request_source = expected_source
         try:
-            LOGGER.info(f"Cleaning up Mega Task: {self.name}")
-            await cmd_exec(["mega-rm", "-r", "-f", self.temp_path])
-            if self.gid in mega_tasks:
-                del mega_tasks[self.gid]
-        except Exception as e:
-            LOGGER.error(f"Mega Cleanup Failed: {e}")
-
-    async def download(self, path):
-        try:
-            await self.login()
-            await self.create_temp_path()
-            await self.import_link()
-            target_node = await self.get_metadata_and_target()
-
-            msg, button = await stop_duplicate_check(self.listener)
-            if msg:
-                await self.listener.on_download_error(msg, button)
-                return
-
-            if limit_exceeded := await limit_checker(self.listener):
-                await self.listener.on_download_error(limit_exceeded, is_limit=True)
-                return
-
-            added_to_queue, event = await check_running_tasks(self.listener)
-            if added_to_queue:
-                LOGGER.info(f"Added to Queue/Download: {self.name}")
-                async with task_dict_lock:
-                    task_dict[self.listener.mid] = QueueStatus(
-                        self.listener, self.gid, "Dl"
-                    )
-                await self.listener.on_download_start()
-                if self.listener.multi <= 1:
-                    await send_status_message(self.listener.message)
-                await event.wait()
-                if self.listener.is_cancelled:
-                    return
-
-            self.mega_status = MegaDownloadStatus(
-                self.listener, self, self.gid, MirrorStatus.STATUS_DOWNLOAD
-            )
-            async with task_dict_lock:
-                task_dict[self.listener.mid] = self.mega_status
-
-            if added_to_queue:
-                LOGGER.info(f"Start Queued Download from Mega: {self.name}")
-            else:
-                LOGGER.info(f"Download from Mega: {self.name}")
-                await self.listener.on_download_start()
-                if self.listener.multi <= 1:
-                    await send_status_message(self.listener.message)
-
-            await makedirs(path, exist_ok=True)
-
-            command = ["mega-get", target_node, path]
-
-            self.process = await create_subprocess_exec(
-                *command,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-            )
-
-            while True:
-                if self.listener.is_cancelled:
-                    break
-
-                try:
-                    line_bytes = await wait_for(
-                        self.process.stdout.readuntil(b"\r"), timeout=5
-                    )
-                    line = line_bytes.decode().strip()
-                    if not line:
-                        if self.process.returncode is not None:
-                            break
-                        continue
-                    self._parse_progress(line)
-                except TimeoutError:
-                    await self.update_daemon_status()
-                    if self.process.returncode is not None:
-                        break
-                    continue
-                except Exception:
-                    break
-
-                if self.process.returncode is not None:
-                    break
-
-            await self.process.wait()
-
-            if self.process.returncode == 0:
-                await self.cleanup()
-                await self.listener.on_download_complete()
-            else:
-                if self.listener.is_cancelled:
-                    return
-                if self.process.returncode != -9:
-                    await self.listener.on_download_error(
-                        f"MegaCMD exited with {self.process.returncode}"
-                    )
-        except Exception as e:
-            if self.listener.is_cancelled:
-                return
-            LOGGER.error(f"Mega Download Logic Error: {e}")
-            await self.listener.on_download_error(str(e))
-        finally:
-            await self.cleanup()
-
-    def _parse_progress(self, line):
-        multipliers = {"K": 1024, "M": 1024**2, "G": 1024**3, "T": 1024**4, "B": 1}
-        match = re_search(r"\(([\d\.]+)/([\d\.]+)\s([KMGT]?B)", line)
-        if match:
-            dl_val = float(match.group(1))
-            unit_char = (match.group(3))[0].upper()
-            mult = multipliers.get(unit_char, 1)
-            self.mega_status._downloaded_bytes = int(dl_val * mult)
-
-            if not self.listener.size or self.listener.size == 0:
-                total_val = float(match.group(2))
-                self.mega_status._size = int(total_val * mult)
-                self.listener.size = self.mega_status._size
-
-            cur_time = time()
-            if cur_time - self._last_time >= 2:
-                self.mega_status._speed = int(
-                    (self.mega_status._downloaded_bytes - self._val_last)
-                    / (cur_time - self._last_time)
+            await sync_to_async(function, *args, **kwargs)
+            try:
+                await wait_for(self.continue_event.wait(), timeout=_REQUEST_TIMEOUT_SECONDS)
+            except AsyncTimeoutError:
+                msg = (
+                    f"Mega SDK timed out after {_REQUEST_TIMEOUT_SECONDS}s waiting for "
+                    f"{getattr(function, '__name__', 'request')} ({expected_source})"
                 )
-                self._last_time = cur_time
-                self._val_last = self.mega_status._downloaded_bytes
+                LOGGER.error(msg)
+                listener = getattr(self, "_mega_listener", None)
+                if listener is not None and not listener.error:
+                    listener.error = msg
+                self._transfer_event.set()
+        finally:
+            self._expected_request_type = None
+            self._expected_request_source = None
 
-    async def update_daemon_status(self):
+    async def wait_for_transfer(self):
+        await self._transfer_event.wait()
+
+    async def logout(self):
+        if self.api:
+            await self.run(
+                self.api.logout,
+                expected_type=self._request_type_for_name("logout"),
+                expected_source="main",
+            )
+
+    async def fetchNodes(self, api=None, source="main"):
+        api = api or self.api
+        return await self.run(
+            api.fetchNodes,
+            expected_type=self._request_type_for_name("fetchNodes"),
+            expected_source=source,
+        )
+
+    async def login(self, email, password):
+        return await self.run(
+            self.api.login,
+            email,
+            password,
+            expected_type=self._request_type_for_name("login"),
+            expected_source="main",
+        )
+
+    async def getPublicNode(self, link):
+        return await self.run(
+            self.api.getPublicNode,
+            link,
+            expected_type=self._request_type_for_name("getPublicNode"),
+            expected_source="main",
+        )
+
+    async def startDownload(self, node, localPath, name, listener, startFirst, cancelToken, collisionCheck, collisionResolution, undelete):
+        self.continue_event.clear()
+        self._transfer_event.clear()
+        self._expected_request_type = None
+        self._expected_request_source = None
+        self._download_is_folder = False
         try:
-            stdout, _, _ = await cmd_exec(["mega-transfers", "--col-separator=|"])
-            for line in stdout.splitlines():
-                if self.gid in line:
-                    parts = line.split("|")
-                    if len(parts) > 1:
-                        self.mega_tags.add(parts[1].strip())
-                        if len(parts) > 4:
-                            status = parts[5].strip().capitalize()
-                            if self.mega_status._status != "Downloading":
-                                self.mega_status._status = status
+            self._download_is_folder = bool(node.isFolder())
         except Exception:
+            try:
+                self._download_is_folder = node.getType() == 1
+            except Exception:
+                self._download_is_folder = False
+
+        if hasattr(self, "_mega_listener"):
+            self._mega_listener._name = name
+            try:
+                self._mega_listener._target_handle = node.getHandle()
+            except Exception:
+                self._mega_listener._target_handle = None
+
+        await sync_to_async(
+            self.api.startDownload,
+            node,
+            localPath,
+            name,
+            listener,
+            startFirst,
+            cancelToken,
+            collisionCheck,
+            collisionResolution,
+            undelete,
+        )
+        try:
+            await wait_for(self.continue_event.wait(), timeout=_REQUEST_TIMEOUT_SECONDS)
+        except AsyncTimeoutError:
             pass
 
-    async def cancel_task(self):
-        LOGGER.info(f"Cancelling {self.mega_status._status}: {self.name}")
-        self.listener.is_cancelled = True
+    def __getattr__(self, name):
+        attr = getattr(self.api, name)
+        if callable(attr):
 
-        await self.update_daemon_status()
+            async def wrapper(*args, **kwargs):
+                return await self.run(
+                    attr,
+                    *args,
+                    expected_type=self._request_type_for_name(name),
+                    **kwargs,
+                )
 
-        for tag in self.mega_tags:
-            try:
-                LOGGER.info(f"Cancelling Transfer Tag: {tag}")
-                await cmd_exec(["mega-transfers", "-c", tag])
-            except Exception as e:
-                LOGGER.error(f"Mega Transfer Cancel Failed for {tag}: {e}")
+            return wrapper
+        return attr
 
+
+class MegaAppListener(MegaListener):
+    def __init__(self, async_api: AsyncMega, listener):
+        self._async_api = async_api
+        self.continue_event = async_api.continue_event
+        self._transfer_event = async_api._transfer_event
+        self.node = None
+        self.public_node = None
+        self.listener = listener
+        self.is_cancelled = False
+        self.error = None
+        self.retryable_error = None
+        self._bytes_transferred = 0
+        self._total_downloaded_bytes = 0
+        self._speed = 0
+        self._smoothed_speed = 0
+        self._last_speed_time = 0
+        self._name = ""
+        self._target_handle = None
+        self._caller_manages_completion = False
+        self._cancel_token = None
+        super().__init__()
+
+    @property
+    def speed(self):
+        if self._last_speed_time and (time() - self._last_speed_time) > 2:
+            return 0
+        return int(self._smoothed_speed)
+
+    @property
+    def downloaded_bytes(self):
+        return self._total_downloaded_bytes + self._bytes_transferred
+
+    def _set_request_event(self):
         try:
-            stdout, _, _ = await cmd_exec(["mega-transfers"])
-            for line in stdout.splitlines():
-                if self.gid in line:
-                    parts = line.split()
-                    if (
-                        len(parts) > 1
-                        and (tag := parts[1])
-                        and tag not in self.mega_tags
-                    ):
-                        LOGGER.info(f"Cancelling Straggler Tag: {tag}")
-                        await cmd_exec(["mega-transfers", "-c", tag])
+            bot_loop.call_soon_threadsafe(self.continue_event.set)
         except Exception as e:
-            LOGGER.error(f"Mega Final Cancel Check Failed: {e}")
+            LOGGER.error(f"Mega request event signal failed: {e}")
 
-        if self.process is not None:
-            with suppress(Exception):
-                self.process.kill()
+    def _set_transfer_event(self):
+        try:
+            bot_loop.call_soon_threadsafe(self._transfer_event.set)
+        except Exception as e:
+            LOGGER.error(f"Mega transfer event signal failed: {e}")
+
+    def _is_expected_request(self, request_type):
+        expected = self._async_api._expected_request_type
+        return expected is None or request_type == expected
+
+    def _is_expected_source(self, source):
+        expected = self._async_api._expected_request_source
+        return expected is None or source == expected
+
+    def _is_target_transfer(self, transfer):
+        if self._async_api._download_is_folder:
+            try:
+                return transfer.isFolderTransfer()
+            except Exception:
+                return False
+        if self._target_handle is not None:
+            try:
+                return transfer.getNodeHandle() == self._target_handle
+            except Exception:
+                pass
+        try:
+            return transfer.getFileName() == self._name
+        except Exception:
+            return False
+
+    def onRequestStart(self, api, request):
+        pass
+
+    def onRequestUpdate(self, api, request):
+        pass
+
+    def onRequestFinish(self, api, request, error, source="main"):
+        try:
+            request_type = request.getType()
+            err_code = error.getErrorCode() if error else MegaError.API_OK
+            if err_code != MegaError.API_OK:
+                if self.is_cancelled:
+                    self._set_request_event()
+                    self._set_transfer_event()
+                    return
+                if err_code in (MegaError.API_EAGAIN, MegaError.API_ERATELIMIT):
+                    return
+                if not (self._is_expected_request(request_type) and self._is_expected_source(source)):
+                    return
+                self.error = f"{err_code} {error.toString()}"
+                LOGGER.error(f"Mega onRequestFinishError: {self.error}")
+                self._set_request_event()
+                self._set_transfer_event()
+                return
+
+            if request_type == MegaRequest.TYPE_GET_PUBLIC_NODE:
+                try:
+                    self.public_node = request.getPublicMegaNode()
+                except Exception:
+                    self.public_node = None
+                if self.public_node:
+                    try:
+                        self._name = self.public_node.getName()
+                    except Exception:
+                        pass
+            elif request_type == MegaRequest.TYPE_FETCH_NODES:
+                self.node = api.getRootNode()
+                if self.node:
+                    try:
+                        self._name = self.node.getName()
+                    except Exception:
+                        pass
+
+            if self._is_expected_request(request_type) and self._is_expected_source(source):
+                self._set_request_event()
+        except Exception as e:
+            self.error = f"Mega request callback exception: {e}"
+            LOGGER.error(self.error, exc_info=True)
+            self._set_request_event()
+            self._set_transfer_event()
+
+    def onRequestTemporaryError(self, api, request, error: MegaError, source="main"):
+        if self.is_cancelled:
+            self._set_request_event()
+
+    def onTransferStart(self, api, transfer):
+        try:
+            if not self._is_target_transfer(transfer):
+                return
+            self._bytes_transferred = 0
+            self._set_request_event()
+        except Exception as e:
+            LOGGER.error(f"Mega transfer start callback exception: {e}", exc_info=True)
+
+    def onTransferUpdate(self, api: MegaApi, transfer: MegaTransfer):
+        try:
+            if not self._is_target_transfer(transfer):
+                return
+            if self.is_cancelled:
+                token = self._cancel_token
+                if token is not None:
+                    try:
+                        if not token.isCancelled():
+                            token.cancel()
+                    except Exception:
+                        pass
+                else:
+                    try:
+                        api.cancelTransfer(transfer, None)
+                    except Exception:
+                        pass
+                return
+            self._speed = transfer.getSpeed()
+            alpha = 0.3
+            self._smoothed_speed = alpha * self._speed + (1 - alpha) * self._smoothed_speed
+            self._last_speed_time = time()
+            self._bytes_transferred = transfer.getTransferredBytes()
+        except Exception as e:
+            LOGGER.error(f"Mega transfer update callback exception: {e}", exc_info=True)
+
+    def onTransferFinish(self, api: MegaApi, transfer: MegaTransfer, error):
+        try:
+            err_code = error.getErrorCode() if error else MegaError.API_OK
+            if self.is_cancelled:
+                self._set_transfer_event()
+                return
+            if not self._is_target_transfer(transfer):
+                return
+            if err_code != MegaError.API_OK:
+                self.error = f"{err_code} {error.toString()}"
+                if err_code == MegaError.API_EINCOMPLETE:
+                    self.retryable_error = self.error
+                    self._set_transfer_event()
+                    return
+                LOGGER.error(f"Mega onTransferFinishError: {self.error}")
+                self.is_cancelled = True
+                async_to_sync(self.listener.on_download_error, friendly_mega_error(self.error))
+                self._set_transfer_event()
+                return
+            if not self._caller_manages_completion:
+                async_to_sync(self.listener.on_download_complete)
+            self._set_transfer_event()
+        except Exception as e:
+            LOGGER.error(f"onTransferFinish exception: {e}")
+            self._set_transfer_event()
+
+    def onTransferTemporaryError(self, api, transfer, error):
+        try:
+            if self.is_cancelled:
+                return
+            err_code = error.getErrorCode() if error else 0
+            err_str = error.toString() if error else "unknown"
+            if err_code == MegaError.API_EOVERQUOTA:
+                msg = f"TransferTempError: Over quota: {err_str}"
+                self.error = msg
+                self.is_cancelled = True
+                async_to_sync(self.listener.on_download_error, friendly_mega_error(msg))
+                self._set_transfer_event()
+                return
+            if err_code == MegaError.API_EINCOMPLETE:
+                self.retryable_error = f"{err_code} {err_str}"
+        except Exception as e:
+            LOGGER.error(
+                f"Mega transfer temporary-error callback exception: {e}",
+                exc_info=True,
+            )
+
+    async def cancel_task(self):
+        if self.is_cancelled:
+            return
+        self.is_cancelled = True
+        token = self._cancel_token
+        if token is not None:
+            try:
+                if not token.isCancelled():
+                    token.cancel()
+            except Exception as e:
+                LOGGER.error(f"Mega cancel-token cancel failed: {e}")
+        self._set_request_event()
+        self._set_transfer_event()
+
+    def onUsersUpdate(self, api, users):
+        pass
+
+    def onUserAlertsUpdate(self, api, alerts):
+        pass
+
+    def onNodesUpdate(self, api, nodes):
+        pass
+
+    def onAccountUpdate(self, api):
+        pass
+
+    def onSetsUpdate(self, api, sets):
+        pass
+
+    def onSetElementsUpdate(self, api, elements):
+        pass
+
+    def onContactRequestsUpdate(self, api, requests):
+        pass
+
+    def onReloadNeeded(self, api):
+        pass
+
+    def onSyncFileStateChanged(self, *args):
+        pass
+
+    def onSyncAdded(self, *args):
+        pass
+
+    def onSyncDeleted(self, *args):
+        pass
+
+    def onSyncStateChanged(self, *args):
+        pass
+
+    def onSyncStatsUpdated(self, *args):
+        pass
+
+    def onGlobalSyncStateChanged(self, api):
+        pass
+
+    def onSyncRemoteRootChanged(self, *args):
+        pass
+
+    def onBackupStateChanged(self, *args):
+        pass
+
+    def onBackupStart(self, *args):
+        pass
+
+    def onBackupFinish(self, *args):
+        pass
+
+    def onBackupUpdate(self, *args):
+        pass
+
+    def onBackupTemporaryError(self, *args):
+        pass
+
+    def onChatsUpdate(self, api, chats):
+        pass
+
+    def onEvent(self, api, event):
+        pass
+
+    def onMountAdded(self, *args):
+        pass
+
+    def onMountChanged(self, *args):
+        pass

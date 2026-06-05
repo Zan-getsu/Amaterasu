@@ -48,7 +48,7 @@ class EngineStatus:
         self.STATUS_GDAPI = f"Google-API v{ver.get('gapi', 'N/A')}"
         self.STATUS_QBIT = f"qBit v{ver.get('qBittorrent', 'N/A')}"
         self.STATUS_TGRAM = f"Pyro v{ver.get('pyrotgfork', 'N/A')}"
-        self.STATUS_MEGA = f"MegaCMD v{ver.get('mega', 'N/A')}"
+        self.STATUS_MEGA = f"MegaSDK v{ver.get('mega', 'N/A')}"
         self.STATUS_YTDLP = f"yt-dlp v{ver.get('yt-dlp', 'N/A')}"
         self.STATUS_FFMPEG = f"ffmpeg v{ver.get('ffmpeg', 'N/A')}"
         self.STATUS_7Z = f"7z v{ver.get('7z', 'N/A')}"
