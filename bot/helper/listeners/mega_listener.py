@@ -3,7 +3,7 @@ from time import time
 
 from mega import MegaApi, MegaError, MegaListener, MegaRequest, MegaTransfer
 
-from bot import LOGGER, bot_loop
+from ... import LOGGER, bot_loop
 from ..ext_utils.bot_utils import async_to_sync, sync_to_async
 
 _ACTIVE_LISTENERS = []
@@ -20,7 +20,7 @@ async def mega_cleanup():
 
 _REQUEST_TIMEOUT_SECONDS = 300
 
-MEGA_FRIENDLY_ERRORS = {
+MEGA_ERRORS = {
     "-16": "File(s) Banned",
     "-9": "File(s) not found or deleted",
     "-11": "File(s) Access Denied",
@@ -30,11 +30,11 @@ MEGA_FRIENDLY_ERRORS = {
 }
 
 
-def friendly_mega_error(raw_error):
+def _mega_error_format(raw_error):
     if not raw_error:
         return raw_error
     stripped = str(raw_error).lstrip()
-    for code, friendly in MEGA_FRIENDLY_ERRORS.items():
+    for code, friendly in MEGA_ERRORS.items():
         if stripped.startswith(code):
             return friendly
     return raw_error
@@ -349,7 +349,7 @@ class MegaAppListener(MegaListener):
                     return
                 LOGGER.error(f"Mega onTransferFinishError: {self.error}")
                 self.is_cancelled = True
-                async_to_sync(self.listener.on_download_error, friendly_mega_error(self.error))
+                async_to_sync(self.listener.on_download_error, _mega_error_format(self.error))
                 self._set_transfer_event()
                 return
             if not self._caller_manages_completion:
@@ -369,7 +369,7 @@ class MegaAppListener(MegaListener):
                 msg = f"TransferTempError: Over quota: {err_str}"
                 self.error = msg
                 self.is_cancelled = True
-                async_to_sync(self.listener.on_download_error, friendly_mega_error(msg))
+                async_to_sync(self.listener.on_download_error, _mega_error_format(msg))
                 self._set_transfer_event()
                 return
             if err_code == MegaError.API_EINCOMPLETE:

@@ -7,8 +7,8 @@ from aiofiles.os import makedirs, path as aiopath
 from aioshutil import rmtree
 from mega import MegaApi, MegaCancelToken
 
-from bot import LOGGER, task_dict, task_dict_lock
-from ...core.config_manager import Config
+from .... import LOGGER, task_dict, task_dict_lock
+from ....core.config_manager import Config
 from ...telegram_helper.message_utils import send_status_message
 from ..ext_utils.files_utils import check_storage_threshold
 from ..ext_utils.status_utils import get_readable_file_size
@@ -17,7 +17,7 @@ from ..ext_utils.task_manager import (
     limit_checker,
     stop_duplicate_check,
 )
-from ..listeners.mega_listener import AsyncMega, MegaAppListener, friendly_mega_error
+from ..listeners.mega_listener import AsyncMega, MegaAppListener, _mega_error_format
 from ..mirror_leech_utils.status_utils.mega_status import MegaDownloadStatus
 from ..mirror_leech_utils.status_utils.queue_status import QueueStatus
 
@@ -85,11 +85,11 @@ async def add_mega_download(listener, path):
         if (mega_email := Config.MEGA_EMAIL) and (mega_password := Config.MEGA_PASSWORD):
             await async_api.login(mega_email, mega_password)
             if mega_listener.error:
-                await listener.on_download_error(friendly_mega_error(mega_listener.error))
+                await listener.on_download_error(_mega_error_format(mega_listener.error))
                 return
             await async_api.fetchNodes()
             if mega_listener.error:
-                await listener.on_download_error(friendly_mega_error(mega_listener.error))
+                await listener.on_download_error(_mega_error_format(mega_listener.error))
                 return
 
         await async_api.getPublicNode(listener.link)
@@ -185,7 +185,7 @@ async def add_mega_download(listener, path):
             if not mega_listener.retryable_error:
                 return
             if attempt >= 4:
-                await listener.on_download_error(friendly_mega_error(mega_listener.retryable_error))
+                await listener.on_download_error(_mega_error_format(mega_listener.retryable_error))
                 return
             await _cleanup_dir(download_path)
             await sleep(2 ** attempt)

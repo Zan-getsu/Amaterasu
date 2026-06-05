@@ -370,7 +370,7 @@ def debrid_link(url):
         f"https://debrid-link.com/api/v2/downloader/add?access_token={Config.DEBRID_LINK_API}",
         data={"url": url},
     ).json()
-    if resp["success"] != True:
+    if not resp["success"]:
         raise DirectDownloadLinkException(
             f"ERROR: {resp['error']} & ERROR ID: {resp['error_id']}"
         )
@@ -2374,7 +2374,6 @@ def swisstransfer(link):
     for file in files:
         file_uuid = file["UUID"]
         file_name = file["fileName"]
-        file["fileSizeInBytes"]
 
         token = gettoken(password, container_uuid, file_uuid)
         if not token:
