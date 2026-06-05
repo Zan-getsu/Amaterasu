@@ -23,9 +23,11 @@ from .mirror_leech import (
     nzb_mirror,
 )
 from .restart import (
+    clear_incomplete_tasks,
     restart_bot,
     restart_notification,
     confirm_restart,
+    resume_incomplete_tasks,
     restart_sessions,
 )
 from .imdb import imdb_search, imdb_callback
@@ -44,9 +46,11 @@ from .mirror_leech import (
     nzb_mirror,
 )
 from .restart import (
+    clear_incomplete_tasks,
     restart_bot,
     restart_notification,
     confirm_restart,
+    resume_incomplete_tasks,
     restart_sessions,
 )
 from .imdb import imdb_search, imdb_callback
@@ -98,9 +102,11 @@ __all__ = [
     "jd_mirror",
     "nzb_leech",
     "nzb_mirror",
+    "clear_incomplete_tasks",
     "restart_bot",
     "restart_notification",
     "confirm_restart",
+    "resume_incomplete_tasks",
     "restart_sessions",
     "imdb_search",
     "imdb_callback",
@@ -129,9 +135,11 @@ __all__ = [
     "jd_mirror",
     "nzb_leech",
     "nzb_mirror",
+    "clear_incomplete_tasks",
     "restart_bot",
     "restart_notification",
     "confirm_restart",
+    "resume_incomplete_tasks",
     "restart_sessions",
     "imdb_search",
     "imdb_callback",

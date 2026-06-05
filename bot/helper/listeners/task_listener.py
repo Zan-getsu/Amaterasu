@@ -128,7 +128,7 @@ class TaskListener(TaskConfig):
             and Config.DATABASE_URL
         ):
             await database.add_incomplete_task(
-                self.message.chat.id, self.message.link, self.tag
+                self.message.chat.id, self.message.link, self.tag, self.user_id
             )
 
     async def _metadata_handler_cb(self, _, message):

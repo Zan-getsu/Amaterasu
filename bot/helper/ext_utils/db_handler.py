@@ -256,11 +256,18 @@ class DbManager:
             return
         await self.db.rss[TgClient.ID].delete_one({"_id": user_id})
 
-    async def add_incomplete_task(self, cid, link, tag):
+    async def add_incomplete_task(self, cid, link, tag, user_id=None):
         if self._return:
             return
-        await self.db.tasks[TgClient.ID].insert_one(
-            {"_id": link, "cid": cid, "tag": tag}
+        data = {
+            "cid": cid,
+            "tag": tag,
+            "restart_notified": False,
+        }
+        if user_id is not None:
+            data["user_id"] = user_id
+        await self.db.tasks[TgClient.ID].update_one(
+            {"_id": link}, {"$set": data}, upsert=True
         )
 
     async def get_pm_uids(self):
@@ -284,6 +291,51 @@ class DbManager:
         if self._return:
             return
         await self.db.tasks[TgClient.ID].delete_one({"_id": link})
+
+    async def get_incomplete_task_docs(self, notified=False):
+        if self._return:
+            return []
+        query = {}
+        if not notified:
+            query["restart_notified"] = {"$ne": True}
+        return [
+            row async for row in self.db.tasks[TgClient.ID].find(query)
+        ]
+
+    async def update_incomplete_task(self, link, data):
+        if self._return:
+            return
+        await self.db.tasks[TgClient.ID].update_one(
+            {"_id": link}, {"$set": data}
+        )
+
+    async def mark_incomplete_tasks_notified(self, links):
+        if self._return or not links:
+            return
+        await self.db.tasks[TgClient.ID].update_many(
+            {"_id": {"$in": links}}, {"$set": {"restart_notified": True}}
+        )
+
+    async def get_user_incomplete_tasks(self, user_id):
+        if self._return:
+            return []
+        return [
+            row async for row in self.db.tasks[TgClient.ID].find({"user_id": user_id})
+        ]
+
+    async def clear_user_incomplete_tasks(self, user_id):
+        if self._return:
+            return 0
+        result = await self.db.tasks[TgClient.ID].delete_many({"user_id": user_id})
+        return result.deleted_count
+
+    async def clear_incomplete_tasks_by_links(self, links):
+        if self._return or not links:
+            return 0
+        result = await self.db.tasks[TgClient.ID].delete_many(
+            {"_id": {"$in": links}}
+        )
+        return result.deleted_count
 
     async def get_incomplete_tasks(self):
         notifier_dict = {}

@@ -65,7 +65,6 @@ async def main():
     from .modules import (
         get_packages_version,
         initiate_search_tools,
-        restart_notification,
     )
 
     await gather(
@@ -74,7 +73,6 @@ async def main():
         clean_all(),
         initiate_search_tools(),
         get_packages_version(),
-        restart_notification(),
         telegraph.create_account(),
         rclone_serve_booter(),
     )
@@ -89,6 +87,10 @@ from .helper.listeners.aria2_listener import add_aria2_callbacks
 add_aria2_callbacks()
 create_help_buttons()
 add_handlers()
+
+from .modules import restart_notification
+
+bot_loop.run_until_complete(restart_notification())
 
 from .core.plugin_manager import get_plugin_manager
 from .modules.plugin_manager import register_plugin_commands

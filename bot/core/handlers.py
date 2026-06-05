@@ -265,6 +265,18 @@ def add_handlers():
         )
     )
     TgClient.bot.add_handler(
+        CallbackQueryHandler(
+            resume_incomplete_tasks,
+            filters=regex(r"^resume_tasks_\d+$"),
+        )
+    )
+    TgClient.bot.add_handler(
+        CallbackQueryHandler(
+            clear_incomplete_tasks,
+            filters=regex(r"^clear_tasks_\d+$"),
+        )
+    )
+    TgClient.bot.add_handler(
         MessageHandler(
             restart_sessions,
             filters=command(BotCommands.RestartSessionsCommand, case_sensitive=True)
