@@ -6,6 +6,7 @@ from lxml.etree import HTML
 from os import path as ospath
 from re import findall, match, search
 from requests import Session, post, get
+from requests import Session, post, get
 from requests.adapters import HTTPAdapter
 from time import sleep, time
 from urllib.parse import parse_qs, urlparse, quote, unquote
