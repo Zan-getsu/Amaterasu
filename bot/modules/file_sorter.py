@@ -59,6 +59,8 @@ def _get_media_entry(message):
             file_name = f"{media_type.title()}_{message.id}.{fallback_ext}"
 
         return {
+            "caption": message.caption,
+            "caption_entities": message.caption_entities,
             "file_id": media.file_id,
             "file_name": file_name,
             "file_size": getattr(media, "file_size", 0) or 0,
@@ -69,10 +71,6 @@ def _get_media_entry(message):
     return None
 
 
-def _caption(file_name):
-    return f"<b>File Name:</b> <code>{file_name}</code>"
-
-
 async def _send_cached_file(client, message, entry):
     kwargs = {
         "chat_id": message.chat.id,
@@ -80,29 +78,30 @@ async def _send_cached_file(client, message, entry):
     }
     if message.is_topic_message:
         kwargs["message_thread_id"] = message.message_thread_id
+    if entry["caption"]:
+        kwargs["caption"] = entry["caption"]
+        if entry["caption_entities"]:
+            kwargs["caption_entities"] = entry["caption_entities"]
 
     file_id = entry["file_id"]
-    file_name = entry["file_name"]
     media_type = entry["media_type"]
 
     try:
         if media_type == "photo":
-            return await client.send_photo(photo=file_id, caption=_caption(file_name), **kwargs)
+            return await client.send_photo(photo=file_id, **kwargs)
         if media_type == "video":
             return await client.send_video(
                 video=file_id,
-                caption=_caption(file_name),
                 supports_streaming=True,
                 **kwargs,
             )
         if media_type == "audio":
-            return await client.send_audio(audio=file_id, caption=_caption(file_name), **kwargs)
+            return await client.send_audio(audio=file_id, **kwargs)
         if media_type == "voice":
-            return await client.send_voice(voice=file_id, caption=_caption(file_name), **kwargs)
+            return await client.send_voice(voice=file_id, **kwargs)
         if media_type == "animation":
             return await client.send_animation(
                 animation=file_id,
-                caption=_caption(file_name),
                 **kwargs,
             )
         if media_type == "video_note":
@@ -112,7 +111,6 @@ async def _send_cached_file(client, message, entry):
 
         return await client.send_document(
             document=file_id,
-            caption=_caption(file_name),
             **kwargs,
         )
     except FloodWait as flood:
