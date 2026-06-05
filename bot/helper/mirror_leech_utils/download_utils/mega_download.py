@@ -7,7 +7,7 @@ from aiofiles.os import makedirs, path as aiopath
 from aioshutil import rmtree
 from mega import MegaApi, MegaCancelToken
 
-from ... import LOGGER, task_dict, task_dict_lock
+from bot import LOGGER, task_dict, task_dict_lock
 from ...core.config_manager import Config
 from ...telegram_helper.message_utils import send_status_message
 from ..ext_utils.files_utils import check_storage_threshold
