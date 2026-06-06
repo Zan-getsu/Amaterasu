@@ -31,6 +31,14 @@ def _is_folder_link(link: str) -> bool:
     return "/folder/" in (link or "")
 
 
+def _get_subfolder_handle(link: str) -> str | None:
+    parts = link.split("/folder/")
+    if len(parts) < 3:
+        return None
+    handle = parts[-1].split("#")[0].split("/")[0].split("?")[0]
+    return handle if handle else None
+
+
 def _make_cancel_token():
     if MegaCancelToken is None:
         return None
@@ -115,6 +123,13 @@ async def add_mega_download(listener, path):
             if not node:
                 await listener.on_download_error("Failed to get folder root node", is_limit=False)
                 return
+            subfolder_handle = _get_subfolder_handle(listener.link)
+            if subfolder_handle:
+                handle = await sync_to_async(async_api.folder_api.base64ToHandle, subfolder_handle)
+                sub_node = await sync_to_async(async_api.folder_api.getNodeByHandle, handle)
+                if sub_node:
+                    node = sub_node
+                    mega_listener.node = node
             download_api = async_api.folder_api
         else:
             await async_api.getPublicNode(listener.link)
