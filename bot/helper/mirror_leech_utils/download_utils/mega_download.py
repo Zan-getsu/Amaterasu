@@ -1,5 +1,5 @@
 import os
-from asyncio import Lock as AsyncLock, sleep
+from asyncio import Lock as AsyncLock, sleep, wait_for
 from contextlib import suppress
 from secrets import token_hex
 
@@ -150,10 +150,16 @@ async def add_mega_download(listener, path):
         except Exception:
             listener.name = listener.name or f"MEGA_Download_{gid}"
 
-        try:
-            listener.size = await sync_to_async(download_api.getSize if download_api else api.getSize, node)
-        except Exception:
-            listener.size = 0
+        if mega_listener._size:
+            listener.size = mega_listener._size
+        else:
+            try:
+                listener.size = await wait_for(
+                    sync_to_async(download_api.getSize if download_api else api.getSize, node),
+                    timeout=10,
+                )
+            except Exception:
+                listener.size = 0
 
         msg, button = await stop_duplicate_check(listener)
         if msg:

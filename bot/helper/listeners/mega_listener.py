@@ -219,6 +219,7 @@ class MegaAppListener(MegaListener):
         self._target_handle = None
         self._caller_manages_completion = False
         self._subfolder_target = None
+        self._size = 0
         self._cancel_token = None
         super().__init__()
 
@@ -316,6 +317,7 @@ class MegaAppListener(MegaListener):
                 if self.public_node:
                     try:
                         self._name = self.public_node.getName()
+                        self._size = self.public_node.getSize()
                     except Exception:
                         pass
             elif request_type == MegaRequest.TYPE_LOGIN:
@@ -355,7 +357,12 @@ class MegaAppListener(MegaListener):
                                         self._name = self.node.getName()
                                     except Exception:
                                         pass
-                                    LOGGER.info(f"TYPE_FETCH_NODES: subfolder resolved, name={self._name}")
+                                    self._size = 0
+                                    try:
+                                        self._size = api.getSize(self.node)
+                                    except Exception as e:
+                                        LOGGER.warning(f"TYPE_FETCH_NODES: getSize error: {e}")
+                                    LOGGER.info(f"TYPE_FETCH_NODES: subfolder resolved, name={self._name}, size={self._size}")
                                     break
                     except Exception as e:
                         LOGGER.error(f"TYPE_FETCH_NODES: subfolder lookup error: {e}")
