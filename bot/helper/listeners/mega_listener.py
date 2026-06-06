@@ -407,6 +407,17 @@ class MegaAppListener(MegaListener):
             if self.is_cancelled:
                 self._set_transfer_event()
                 return
+
+            if self._async_api._download_is_folder:
+                try:
+                    is_ft = transfer.isFolderTransfer()
+                except Exception:
+                    is_ft = False
+                if not is_ft:
+                    self._total_downloaded_bytes += self._bytes_transferred
+                    self._bytes_transferred = 0
+                    return
+
             if not self._is_target_transfer(transfer, for_finish=True):
                 return
             if err_code != MegaError.API_OK:
