@@ -17,7 +17,7 @@ from ...ext_utils.task_manager import (
     limit_checker,
     stop_duplicate_check,
 )
-from ...listeners.mega_listener import AsyncMega, MegaAppListener, _mega_error_format
+from ...listeners.mega_listener import AsyncMega, MegaAppListener, MegaFolderListener, _mega_error_format
 from ...mirror_leech_utils.status_utils.mega_status import MegaDownloadStatus
 from ...mirror_leech_utils.status_utils.queue_status import QueueStatus
 
@@ -82,6 +82,13 @@ async def add_mega_download(listener, path):
         async_api._mega_listener = mega_listener
         api.addListener(mega_listener)
 
+        if _is_folder_link(listener.link):
+            mega_folder_dir = os.path.join(mega_base, "folder")
+            await makedirs(mega_folder_dir, exist_ok=True)
+            async_api.folder_api = MegaApi("", mega_folder_dir, "WZML-X", 4)
+            folder_listener = MegaFolderListener(mega_listener)
+            async_api.folder_api.addListener(folder_listener)
+
         if (mega_email := Config.MEGA_EMAIL) and (mega_password := Config.MEGA_PASSWORD):
             await async_api.login(mega_email, mega_password)
             if mega_listener.error:
@@ -92,8 +99,14 @@ async def add_mega_download(listener, path):
                 await listener.on_download_error(_mega_error_format(mega_listener.error))
                 return
 
-        await async_api.getPublicNode(listener.link)
-        node = mega_listener.public_node
+        if _is_folder_link(listener.link):
+            await async_api.loginToFolder(listener.link)
+            node = mega_listener.public_node
+            download_api = async_api.folder_api
+        else:
+            await async_api.getPublicNode(listener.link)
+            node = mega_listener.public_node
+            download_api = api
         if not node:
             await listener.on_download_error("Failed to resolve MEGA link")
             return
@@ -104,7 +117,7 @@ async def add_mega_download(listener, path):
             listener.name = listener.name or f"MEGA_Download_{gid}"
 
         try:
-            listener.size = api.getSize(node)
+            listener.size = download_api.getSize(node) if download_api else api.getSize(node)
         except Exception:
             listener.size = 0
 

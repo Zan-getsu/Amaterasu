@@ -43,15 +43,20 @@ def _mega_error_format(raw_error):
 class AsyncMega:
     def __init__(self):
         self.api = None
+        self.folder_api = None
         self.continue_event = Event()
         self._transfer_event = Event()
         self._expected_request_type = None
         self._expected_request_source = None
         self._download_is_folder = False
 
+    def _download_api(self):
+        return self.folder_api if self.folder_api else self.api
+
     def _request_type_for_name(self, name):
         request_types = {
             "login": getattr(MegaRequest, "TYPE_LOGIN", None),
+            "loginToFolder": getattr(MegaRequest, "TYPE_LOGIN", None),
             "fetchNodes": getattr(MegaRequest, "TYPE_FETCH_NODES", None),
             "getPublicNode": getattr(MegaRequest, "TYPE_GET_PUBLIC_NODE", None),
             "logout": getattr(MegaRequest, "TYPE_LOGOUT", None),
@@ -89,6 +94,12 @@ class AsyncMega:
         await self._transfer_event.wait()
 
     async def logout(self):
+        if self.folder_api:
+            await self.run(
+                self.folder_api.logout,
+                expected_type=self._request_type_for_name("logout"),
+                expected_source="folder",
+            )
         if self.api:
             await self.run(
                 self.api.logout,
@@ -121,6 +132,14 @@ class AsyncMega:
             expected_source="main",
         )
 
+    async def loginToFolder(self, link):
+        return await self.run(
+            self.folder_api.loginToFolder,
+            link,
+            expected_type=self._request_type_for_name("loginToFolder"),
+            expected_source="folder",
+        )
+
     async def startDownload(self, node, localPath, name, listener, startFirst, cancelToken, collisionCheck, collisionResolution, undelete):
         self.continue_event.clear()
         self._transfer_event.clear()
@@ -143,7 +162,7 @@ class AsyncMega:
                 self._mega_listener._target_handle = None
 
         await sync_to_async(
-            self.api.startDownload,
+            self._download_api().startDownload,
             node,
             localPath,
             name,
@@ -273,6 +292,13 @@ class MegaAppListener(MegaListener):
                     self.public_node = request.getPublicMegaNode()
                 except Exception:
                     self.public_node = None
+                if self.public_node:
+                    try:
+                        self._name = self.public_node.getName()
+                    except Exception:
+                        pass
+            elif request_type == MegaRequest.TYPE_LOGIN:
+                self.public_node = api.getRootNode()
                 if self.public_node:
                     try:
                         self._name = self.public_node.getName()
@@ -464,4 +490,115 @@ class MegaAppListener(MegaListener):
         pass
 
     def onMountChanged(self, *args):
+        pass
+
+
+class MegaFolderListener(MegaListener):
+    def __init__(self, main_listener: MegaAppListener):
+        self._main = main_listener
+        super().__init__()
+
+    def onRequestStart(self, api, request):
+        pass
+
+    def onRequestFinish(self, api, request, error):
+        self._main.onRequestFinish(api, request, error, source="folder")
+
+    def onRequestUpdate(self, api, request):
+        pass
+
+    def onRequestTemporaryError(self, api, request, error):
+        self._main.onRequestTemporaryError(api, request, error, source="folder")
+
+    def onTransferStart(self, api, transfer):
+        self._main.onTransferStart(api, transfer)
+
+    def onTransferUpdate(self, api, transfer):
+        self._main.onTransferUpdate(api, transfer)
+
+    def onTransferFinish(self, api, transfer, error):
+        self._main.onTransferFinish(api, transfer, error)
+
+    def onTransferTemporaryError(self, api, transfer, error):
+        self._main.onTransferTemporaryError(api, transfer, error)
+
+    def onUsersUpdate(self, api, users):
+        pass
+
+    def onUserAlertsUpdate(self, api, alerts):
+        pass
+
+    def onNodesUpdate(self, api, nodes):
+        pass
+
+    def onAccountUpdate(self, api):
+        pass
+
+    def onSetsUpdate(self, api, sets):
+        pass
+
+    def onSetElementsUpdate(self, api, elements):
+        pass
+
+    def onContactRequestsUpdate(self, api, requests):
+        pass
+
+    def onReloadNeeded(self, api):
+        pass
+
+    def onSyncFileStateChanged(self, *args):
+        pass
+
+    def onSyncAdded(self, *args):
+        pass
+
+    def onSyncDeleted(self, *args):
+        pass
+
+    def onSyncStateChanged(self, *args):
+        pass
+
+    def onSyncStatsUpdated(self, *args):
+        pass
+
+    def onGlobalSyncStateChanged(self, api):
+        pass
+
+    def onSyncRemoteRootChanged(self, *args):
+        pass
+
+    def onBackupStateChanged(self, *args):
+        pass
+
+    def onBackupStart(self, *args):
+        pass
+
+    def onBackupFinish(self, *args):
+        pass
+
+    def onBackupUpdate(self, *args):
+        pass
+
+    def onBackupTemporaryError(self, *args):
+        pass
+
+    def onChatsUpdate(self, api, chats):
+        pass
+
+    def onEvent(self, api, event):
+        pass
+
+    def onMountAdded(self, *args):
+        pass
+
+    def onMountChanged(self, *args):
+        pass
+
+    def onMountDisabled(self, *args):
+        pass
+
+    def onMountEnabled(self, *args):
+        pass
+
+    def onMountRemoved(self, *args):
         pass

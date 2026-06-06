@@ -18,7 +18,6 @@ bc_cache = {}
 
 
 async def delete_broadcast(bc_id, message):
-    """Delete broadcasted messages based on the broadcast ID."""
     if bc_id not in bc_cache:
         return await send_message(message, "Invalid Broadcast ID!")
 
@@ -51,7 +50,6 @@ async def delete_broadcast(bc_id, message):
 
 
 async def edit_broadcast(bc_id, message, rply):
-    """Edit broadcasted messages based on the broadcast ID."""
     if bc_id not in bc_cache:
         return await send_message(message, "Invalid Broadcast ID!")
 
@@ -99,7 +97,6 @@ async def edit_broadcast(bc_id, message, rply):
 
 @new_task
 async def broadcast(_, message):
-    """Handle different broadcast actions: send, edit, delete, or forward."""
     bc_id, forwarded, quietly, deleted, edited = "", False, False, False, False
     if not Config.DATABASE_URL:
         return await send_message(
