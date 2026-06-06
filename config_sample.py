@@ -108,6 +108,7 @@ JD_EMAIL = ""
 JD_PASS = ""
 MEGA_EMAIL = ""
 MEGA_PASSWORD = ""
+DISABLE_MEGA = False
 USENET_SERVERS = []
 
 # ==========================================

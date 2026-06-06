@@ -10,8 +10,6 @@ from mega import MegaApi, MegaCancelToken
 from .... import LOGGER, task_dict, task_dict_lock
 from ....core.config_manager import Config
 from ...telegram_helper.message_utils import send_status_message
-from ...ext_utils.files_utils import check_storage_threshold
-from ...ext_utils.status_utils import get_readable_file_size
 from ...ext_utils.task_manager import (
     check_running_tasks,
     limit_checker,
@@ -27,15 +25,27 @@ _ACTIVE_MEGA_LINKS_LOCK = AsyncLock()
 
 
 def _is_folder_link(link: str) -> bool:
-    return "/folder/" in (link or "")
+    if not link:
+        return False
+    return "/folder/" in link or "#F!" in link
 
 
 def _get_subfolder_handle(link: str) -> str | None:
-    parts = link.split("/folder/")
-    if len(parts) < 3:
+    if not link:
         return None
-    handle = parts[-1].split("#")[0].split("/")[0].split("?")[0]
-    return handle if handle else None
+    # /folder/X/folder/Y format
+    parts = link.split("/folder/")
+    if len(parts) >= 3:
+        handle = parts[-1].split("#")[0].split("/")[0].split("?")[0]
+        if handle:
+            return handle
+    # #F!X#F!Y format
+    parts = link.split("#F!")
+    if len(parts) >= 3:
+        handle = parts[-1].split("!")[0].split("/")[0].split("?")[0]
+        if handle:
+            return handle
+    return None
 
 
 def _make_cancel_token():
@@ -67,8 +77,8 @@ async def _cleanup_dir(directory: str):
 
 
 async def add_mega_download(listener, path):
-    if not getattr(Config, "MEGA_ENABLED", True):
-        await listener.on_download_error("Mega.nz downloads are currently disabled by the bot owner.")
+    if Config.DISABLE_MEGA:
+        await listener.on_download_error("Mega Link downloads are currently disabled by the Bot Owner.")
         return
 
     if not await _reserve_link(listener.link):
@@ -78,9 +88,9 @@ async def add_mega_download(listener, path):
     async_api = None
     mega_base = ""
     try:
-        gid = token_hex(5)
+        sdk_gid = token_hex(5)
         await makedirs(path, exist_ok=True)
-        mega_base = os.path.join(os.path.dirname(path.rstrip("/")), ".mega_sdk", gid)
+        mega_base = os.path.join(os.path.dirname(path.rstrip("/")), ".mega_sdk", sdk_gid)
         mega_dir = os.path.join(mega_base, "main")
         await makedirs(mega_dir, exist_ok=True)
 
@@ -133,8 +143,9 @@ async def add_mega_download(listener, path):
             return
 
         LOGGER.info(f"Mega: resolved node, name={mega_listener._name}, size={mega_listener._size}, is_folder={mega_listener._is_folder}")
-        listener.name = listener.name or mega_listener._name or f"MEGA_Download_{gid}"
+        listener.name = listener.name or mega_listener._name or f"MEGA_Download_{token_hex(5)}"
         listener.size = mega_listener._size
+        gid = token_hex(5)
 
         msg, button = await stop_duplicate_check(listener)
         if msg:
@@ -148,7 +159,7 @@ async def add_mega_download(listener, path):
         added_to_queue, event = await check_running_tasks(listener)
         if added_to_queue:
             async with task_dict_lock:
-                task_dict[listener.mid] = QueueStatus(listener, gid, "Dl")
+                task_dict[listener.mid] = QueueStatus(listener, gid, "dl")
             await listener.on_download_start()
             if listener.multi <= 1:
                 await send_status_message(listener.message)
@@ -156,22 +167,8 @@ async def add_mega_download(listener, path):
             if listener.is_cancelled:
                 return
 
-        if listener.size and not await check_storage_threshold(
-            listener.size, Config.STORAGE_LIMIT * 1024**3
-        ):
-            await listener.on_download_error(
-                " • <b>Required Disk:</b> "
-                f"{get_readable_file_size(Config.STORAGE_LIMIT * 1024**3 + listener.size)}\n"
-                f" • <b>Storage Reserve:</b> {get_readable_file_size(Config.STORAGE_LIMIT * 1024**3)}\n"
-                " • <i>Insufficient disk space for this Task, use other bots</i>",
-                is_limit=True,
-            )
-            return
-
         async with task_dict_lock:
             task_dict[listener.mid] = MegaDownloadStatus(listener, mega_listener, gid, "dl")
-
-        mega_listener._status_obj = task_dict[listener.mid]
 
         if added_to_queue:
             LOGGER.info(f"Start queued MegaSDK download: {listener.name}")

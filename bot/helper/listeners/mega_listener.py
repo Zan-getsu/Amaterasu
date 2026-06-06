@@ -6,9 +6,6 @@ from mega import MegaApi, MegaError, MegaListener, MegaRequest, MegaTransfer
 from ... import LOGGER, bot_loop
 from ..ext_utils.bot_utils import async_to_sync, sync_to_async
 
-_ACTIVE_LISTENERS = []
-
-
 async def mega_cleanup():
     from ... import task_dict, task_dict_lock
 
@@ -445,7 +442,7 @@ class MegaAppListener(MegaListener):
                 async_to_sync(self.listener.on_download_error, _mega_error_format(msg))
                 self._set_transfer_event()
                 return
-            if err_code == MegaError.API_EINCOMPLETE:
+            if err_code == MegaError.API_EINCOMPLETE and self._is_target_transfer(transfer):
                 self.retryable_error = f"{err_code} {err_str}"
         except Exception as e:
             LOGGER.error(

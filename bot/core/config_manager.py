@@ -48,6 +48,7 @@ class Config:
     JD_PASS = ""
     MEGA_EMAIL = ""
     MEGA_PASSWORD = ""
+    DISABLE_MEGA = False
     DIRECT_LIMIT = 0
     MEGA_LIMIT = 0
     TORRENT_LIMIT = 0

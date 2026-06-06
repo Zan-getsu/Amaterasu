@@ -1,4 +1,5 @@
 from ...ext_utils.status_utils import (
+    MirrorStatus,
     EngineStatus,
     get_readable_file_size,
     get_readable_time,
@@ -27,7 +28,10 @@ class MegaDownloadStatus:
         return f"{self.progress_raw()}%"
 
     def status(self):
-        return self._status
+        if self._status == "up":
+            return MirrorStatus.STATUS_UPLOAD
+        elif self._status == "dl":
+            return MirrorStatus.STATUS_DOWNLOAD
 
     def processed_bytes(self):
         return get_readable_file_size(self._obj.downloaded_bytes)
