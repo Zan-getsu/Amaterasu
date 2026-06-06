@@ -114,8 +114,15 @@ async def add_mega_download(listener, path):
             if mega_listener.error:
                 await listener.on_download_error(_mega_error_format(mega_listener.error))
                 return
+            subfolder_handle = _get_subfolder_handle(listener.link)
+            if subfolder_handle:
+                try:
+                    mega_listener._subfolder_target = async_api.folder_api.base64ToHandle(subfolder_handle)
+                    LOGGER.info(f"Mega: subfolder target handle set to {mega_listener._subfolder_target}")
+                except Exception as e:
+                    LOGGER.warning(f"Mega subfolder handle conversion failed: {e}")
             await async_api.fetchNodes(async_api.folder_api, source="folder")
-            LOGGER.info("Mega: fetchNodes done, resolving node")
+            LOGGER.info(f"Mega: fetchNodes done, node resolved via callback, node={mega_listener.node is not None}")
             node = mega_listener.node
             if not node:
                 try:
@@ -128,20 +135,6 @@ async def add_mega_download(listener, path):
             if not node:
                 await listener.on_download_error("Failed to get folder root node", is_limit=False)
                 return
-            subfolder_handle = _get_subfolder_handle(listener.link)
-            if subfolder_handle:
-                LOGGER.info(f"Mega: subfolder handle={subfolder_handle}, looking up node by handle")
-                try:
-                    handle = async_api.folder_api.base64ToHandle(subfolder_handle)
-                    LOGGER.info(f"Mega: base64ToHandle({subfolder_handle}) returned {handle}")
-                    sub_node = async_api.folder_api.getNodeByHandle(handle)
-                    LOGGER.info(f"Mega: getNodeByHandle returned {sub_node is not None}")
-                    if sub_node:
-                        node = sub_node
-                        mega_listener.node = node
-                        LOGGER.info(f"Mega: subfolder resolved, node name={sub_node.getName()}")
-                except Exception as e:
-                    LOGGER.warning(f"Mega subfolder lookup failed: {e}")
             download_api = async_api.folder_api
         else:
             await async_api.getPublicNode(listener.link)

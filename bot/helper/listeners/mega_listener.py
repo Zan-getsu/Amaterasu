@@ -158,11 +158,13 @@ class AsyncMega:
                 self._download_is_folder = False
 
         if hasattr(self, "_mega_listener"):
-            self._mega_listener._name = name
+            if not self._mega_listener._name:
+                self._mega_listener._name = name
             try:
                 self._mega_listener._target_handle = node.getHandle()
             except Exception:
                 self._mega_listener._target_handle = None
+            LOGGER.info(f"startDownload: name='{self._mega_listener._name}', target_handle={self._mega_listener._target_handle}, is_folder={self._download_is_folder}")
 
         await sync_to_async(
             self._download_api().startDownload,
@@ -216,6 +218,7 @@ class MegaAppListener(MegaListener):
         self._name = ""
         self._target_handle = None
         self._caller_manages_completion = False
+        self._subfolder_target = None
         self._cancel_token = None
         super().__init__()
 
@@ -252,18 +255,31 @@ class MegaAppListener(MegaListener):
     def _is_target_transfer(self, transfer):
         if self._async_api._download_is_folder:
             try:
-                return transfer.isFolderTransfer()
-            except Exception:
-                return False
-        if self._target_handle is not None:
-            try:
-                return transfer.getNodeHandle() == self._target_handle
+                if transfer.isFolderTransfer():
+                    return True
             except Exception:
                 pass
-        try:
-            return transfer.getFileName() == self._name
-        except Exception:
+            try:
+                node_handle = transfer.getNodeHandle()
+                if node_handle == self._target_handle:
+                    return True
+            except Exception:
+                pass
             return False
+        target_match = False
+        if self._target_handle is not None:
+            try:
+                if transfer.getNodeHandle() == self._target_handle:
+                    target_match = True
+            except Exception:
+                pass
+        if not target_match:
+            try:
+                if transfer.getFileName() == self._name:
+                    target_match = True
+            except Exception:
+                pass
+        return target_match
 
     def onRequestStart(self, api, request):
         pass
@@ -326,6 +342,23 @@ class MegaAppListener(MegaListener):
                         self._name = self.node.getName()
                     except Exception:
                         pass
+                if self._subfolder_target is not None and self.node:
+                    try:
+                        LOGGER.info(f"TYPE_FETCH_NODES: looking up subfolder target={self._subfolder_target}")
+                        children = api.getChildren(self.node)
+                        if children:
+                            for i in range(children.size()):
+                                child = children.get(i)
+                                if child.getHandle() == self._subfolder_target:
+                                    self.node = child
+                                    try:
+                                        self._name = self.node.getName()
+                                    except Exception:
+                                        pass
+                                    LOGGER.info(f"TYPE_FETCH_NODES: subfolder resolved, name={self._name}")
+                                    break
+                    except Exception as e:
+                        LOGGER.error(f"TYPE_FETCH_NODES: subfolder lookup error: {e}")
 
             LOGGER.info(f"onRequestFinish: after setting node, self.node={self.node is not None}, public_node={self.public_node is not None}")
 
