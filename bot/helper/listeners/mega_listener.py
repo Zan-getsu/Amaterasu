@@ -72,6 +72,7 @@ class AsyncMega:
             self._request_type_for(function) if expected_type is None else expected_type
         )
         self._expected_request_source = expected_source
+        LOGGER.info(f"AsyncMega.run: expecting type={self._expected_request_type}, source={expected_source}")
         try:
             await sync_to_async(function, *args, **kwargs)
             try:
@@ -87,6 +88,7 @@ class AsyncMega:
                     listener.error = msg
                 self._transfer_event.set()
         finally:
+            LOGGER.info(f"AsyncMega.run: finished, clearing expected_type/source")
             self._expected_request_type = None
             self._expected_request_source = None
 
@@ -272,6 +274,7 @@ class MegaAppListener(MegaListener):
         try:
             request_type = request.getType()
             err_code = error.getErrorCode() if error else MegaError.API_OK
+            LOGGER.info(f"onRequestFinish: type={request_type}, source={source}, err={err_code}")
             if err_code != MegaError.API_OK:
                 if self.is_cancelled:
                     self._set_request_event()
@@ -280,6 +283,7 @@ class MegaAppListener(MegaListener):
                 if err_code in (MegaError.API_EAGAIN, MegaError.API_ERATELIMIT):
                     return
                 if not (self._is_expected_request(request_type) and self._is_expected_source(source)):
+                    LOGGER.info(f"Ignoring unexpected request: type={request_type}, source={source}")
                     return
                 self.error = f"{err_code} {error.toString()}"
                 LOGGER.error(f"Mega onRequestFinishError: {self.error}")
@@ -298,21 +302,34 @@ class MegaAppListener(MegaListener):
                     except Exception:
                         pass
             elif request_type == MegaRequest.TYPE_LOGIN:
-                self.public_node = api.getRootNode()
-                if self.public_node:
+                # For folder API, loginToFolder should set node; for main API, set public_node
+                root = api.getRootNode()
+                if source == "folder":
+                    self.node = root
+                    LOGGER.info(f"TYPE_LOGIN (folder source): set node={root is not None}")
+                else:
+                    self.public_node = root
+                    LOGGER.info(f"TYPE_LOGIN (main source): set public_node={root is not None}")
+                if self.node or self.public_node:
                     try:
-                        self._name = self.public_node.getName()
+                        name_node = self.node if source == "folder" else self.public_node
+                        self._name = name_node.getName()
                     except Exception:
                         pass
             elif request_type == MegaRequest.TYPE_FETCH_NODES:
-                self.node = api.getRootNode()
+                root_node = api.getRootNode()
+                LOGGER.info(f"TYPE_FETCH_NODES: setting node={root_node is not None}, source={source}")
+                self.node = root_node
                 if self.node:
                     try:
                         self._name = self.node.getName()
                     except Exception:
                         pass
 
+            LOGGER.info(f"onRequestFinish: after setting node, self.node={self.node is not None}, public_node={self.public_node is not None}")
+
             if self._is_expected_request(request_type) and self._is_expected_source(source):
+                LOGGER.info(f"onRequestFinish: setting continue_event (expected_type={self._async_api._expected_request_type}, expected_source={self._async_api._expected_request_source})")
                 self._set_request_event()
         except Exception as e:
             self.error = f"Mega request callback exception: {e}"

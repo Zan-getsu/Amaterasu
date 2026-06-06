@@ -162,7 +162,7 @@ async def apply_metadata_title(
             if media_info:
                 ffmpeg._total_time = media_info[0]
 
-            LOGGER.debug(f"FFmpeg command: {' '.join(met_cmd)}")
+            LOGGER.info(f"FFmpeg command: {' '.join(met_cmd)}")
             self.subproc = await create_subprocess_exec(
                 *met_cmd, stdout=PIPE, stderr=PIPE
             )

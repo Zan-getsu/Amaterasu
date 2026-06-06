@@ -18,6 +18,7 @@ from ...ext_utils.task_manager import (
     stop_duplicate_check,
 )
 from ...listeners.mega_listener import AsyncMega, MegaAppListener, MegaFolderListener, _mega_error_format
+from ...ext_utils.bot_utils import sync_to_async
 from ...mirror_leech_utils.status_utils.mega_status import MegaDownloadStatus
 from ...mirror_leech_utils.status_utils.queue_status import QueueStatus
 
@@ -100,8 +101,34 @@ async def add_mega_download(listener, path):
                 return
 
         if _is_folder_link(listener.link):
+            if (mega_email := Config.MEGA_EMAIL) and (mega_password := Config.MEGA_PASSWORD):
+                LOGGER.info(f"Setting folder_api auth from logged in account")
+                auth = await sync_to_async(api.getAccountAuth)
+                if auth:
+                    await sync_to_async(async_api.folder_api.setAccountAuth, auth)
+            LOGGER.info(f"Calling loginToFolder for: {listener.link}")
             await async_api.loginToFolder(listener.link)
-            node = mega_listener.public_node
+            LOGGER.info(f"loginToFolder done. source='loginToFolder' expected_type='TYPE_LOGIN' - continue_event is_set={async_api.continue_event.is_set()}")
+            if mega_listener.error:
+                LOGGER.error(f"Mega loginToFolder error: {mega_listener.error}")
+                await listener.on_download_error(_mega_error_format(mega_listener.error))
+                return
+            LOGGER.info(f"loginToFolder succeeded, calling fetchNodes for folder")
+            await async_api.fetchNodes(async_api.folder_api, source="folder")
+            LOGGER.info(f"fetchNodes callback done. node={mega_listener.node is not None}, error={mega_listener.error}")
+            
+            # After fetchNodes, node should be set
+            node = mega_listener.node
+            if not node:
+                LOGGER.warning("node is None after fetchNodes, trying fallback getRootNode")
+                node = await sync_to_async(async_api.folder_api.getRootNode)
+                LOGGER.info(f"Fallback getRootNode: node={node is not None}")
+                if node:
+                    mega_listener.node = node
+            LOGGER.info(f"Got node: {node is not None}")
+            if not node:
+                await listener.on_download_error("Failed to get folder root node", is_limit=False)
+                return
             download_api = async_api.folder_api
         else:
             await async_api.getPublicNode(listener.link)
