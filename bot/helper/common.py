@@ -169,7 +169,7 @@ class TaskConfig:
             )
         )
 
-        out_mode = f"#{'Leech' if self.is_leech else 'UphosterUpload' if self.is_uphoster else 'Clone' if self.is_clone else 'RClone' if self.up_dest.startswith('mrcc:') or is_rclone_path(self.up_dest) else 'GDrive' if self.up_dest.startswith(('mtp:', 'tp:', 'sa:')) or is_gdrive_id(self.up_dest) else 'UpHosters'}"
+        out_mode = f"#{'Leech' if self.is_leech else 'UphosterUpload' if self.is_uphoster else 'Clone' if self.is_clone else 'Mega' if self.up_dest in ('mega', 'mega:') else 'RClone' if self.up_dest.startswith('mrcc:') or is_rclone_path(self.up_dest) else 'GDrive' if self.up_dest.startswith(('mtp:', 'tp:', 'sa:')) or is_gdrive_id(self.up_dest) else 'UpHosters'}"
         out_mode += " (Zip)" if self.compress else " (Unzip)" if self.extract else ""
 
         self.is_rclone = is_rclone_path(self.link)
@@ -314,6 +314,8 @@ class TaskConfig:
                 (not self.up_dest and default_upload == "gd") or self.up_dest == "gd"
             ):
                 self.up_dest = self.user_dict.get("GDRIVE_ID") or Config.GDRIVE_ID
+            elif (not self.up_dest and default_upload == "mega") or self.up_dest == "mega":
+                self.up_dest = "mega:"
 
             if self.is_uphoster and not self.up_dest:
                 uphoster_service = self.user_dict.get("UPHOSTER_SERVICE", "gofile")
@@ -346,6 +348,8 @@ class TaskConfig:
                     ("mtp:", "tp:", "sa:")
                 ) and self.user_dict.get("USER_TOKENS", False):
                     self.up_dest = f"mtp:{self.up_dest}"
+            elif self.up_dest == "mega:":
+                pass
             elif is_rclone_path(self.up_dest):
                 if not self.up_dest.startswith("mrcc:") and self.user_dict.get(
                     "USER_TOKENS", False
@@ -357,7 +361,7 @@ class TaskConfig:
             else:
                 raise ValueError("Wrong Upload Destination!")
 
-            if self.up_dest not in ["rcl", "gdl"] and not self.is_uphoster:
+            if self.up_dest not in ["rcl", "gdl"] and not self.is_uphoster and self.up_dest != "mega:":
                 await self.is_token_exists(self.up_dest, "up")
 
             if self.up_dest == "rcl":

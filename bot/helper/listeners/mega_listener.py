@@ -58,6 +58,7 @@ class AsyncMega:
             "fetchNodes": getattr(MegaRequest, "TYPE_FETCH_NODES", None),
             "getPublicNode": getattr(MegaRequest, "TYPE_GET_PUBLIC_NODE", None),
             "logout": getattr(MegaRequest, "TYPE_LOGOUT", None),
+            "getAccountDetails": getattr(MegaRequest, "TYPE_ACCOUNT_DETAILS", None),
         }
         return request_types.get(name)
 
@@ -171,6 +172,35 @@ class AsyncMega:
         except AsyncTimeoutError:
             pass
 
+    async def startUpload(self, localPath, parentNode, customName, cancelToken, mtime=-1):
+        self.continue_event.clear()
+        self._transfer_event.clear()
+        self._expected_request_type = None
+        self._expected_request_source = None
+
+        ml = getattr(self, "_mega_listener", None)
+        if ml:
+            ml._bytes_transferred = 0
+            ml._total_downloaded_bytes = 0
+            ml._speed = 0
+            ml._smoothed_speed = 0
+            ml._target_handle = parentNode.getHandle() if parentNode else None
+            LOGGER.info(f"startUpload: name='{customName}', target_handle={ml._target_handle}")
+
+        await sync_to_async(
+            self.api.startUpload,
+            localPath,
+            parentNode,
+            customName,
+            mtime,
+            cancelToken,
+            None,
+        )
+        try:
+            await wait_for(self.continue_event.wait(), timeout=_REQUEST_TIMEOUT_SECONDS)
+        except AsyncTimeoutError:
+            pass
+
     def __getattr__(self, name):
         attr = getattr(self.api, name)
         if callable(attr):
@@ -204,6 +234,7 @@ class MegaAppListener(MegaListener):
         self._caller_manages_completion = False
         self._cancel_token = None
         self._subfolder_target = None
+        self._upload_mode = False
         self.node = None
         self.public_node = None
         self._name = ""
@@ -258,6 +289,8 @@ class MegaAppListener(MegaListener):
         return expected is None or source == expected
 
     def _is_target_transfer(self, transfer):
+        if self._upload_mode:
+            return True
         if self._async_api._download_is_folder:
             try:
                 return transfer.isFolderTransfer()
@@ -419,7 +452,8 @@ class MegaAppListener(MegaListener):
                     return
                 LOGGER.error(f"Mega onTransferFinishError: {self.error}")
                 self.is_cancelled = True
-                async_to_sync(self.listener.on_download_error, _mega_error_format(self.error))
+                if not self._upload_mode:
+                    async_to_sync(self.listener.on_download_error, _mega_error_format(self.error))
                 self._set_transfer_event()
                 return
             if not self._caller_manages_completion:
@@ -439,7 +473,8 @@ class MegaAppListener(MegaListener):
                 msg = f"TransferTempError: Over quota: {err_str}"
                 self.error = msg
                 self.is_cancelled = True
-                async_to_sync(self.listener.on_download_error, _mega_error_format(msg))
+                if not self._upload_mode:
+                    async_to_sync(self.listener.on_download_error, _mega_error_format(msg))
                 self._set_transfer_event()
                 return
             if err_code == MegaError.API_EINCOMPLETE and self._is_target_transfer(transfer):

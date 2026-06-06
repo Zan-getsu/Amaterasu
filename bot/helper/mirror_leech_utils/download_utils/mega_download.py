@@ -7,7 +7,7 @@ from aiofiles.os import makedirs, path as aiopath
 from aioshutil import rmtree
 from mega import MegaApi, MegaCancelToken
 
-from .... import LOGGER, task_dict, task_dict_lock
+from .... import LOGGER, task_dict, task_dict_lock, user_data
 from ....core.config_manager import Config
 from ...telegram_helper.message_utils import send_status_message
 from ...ext_utils.task_manager import (
@@ -81,6 +81,10 @@ async def add_mega_download(listener, path):
         await listener.on_download_error("Mega Link downloads are currently disabled by the Bot Owner.")
         return
 
+    user_dict = user_data.get(listener.user_id, {})
+    mega_email = user_dict.get("MEGA_EMAIL") or Config.MEGA_EMAIL
+    mega_password = user_dict.get("MEGA_PASSWORD") or Config.MEGA_PASSWORD
+
     if not await _reserve_link(listener.link):
         await listener.on_download_error("This Mega link is already being downloaded! Wait for it to finish.")
         return
@@ -108,7 +112,7 @@ async def add_mega_download(listener, path):
             async_api._folder_listener = folder_listener
             async_api.folder_api.addListener(folder_listener)
 
-        if (mega_email := Config.MEGA_EMAIL) and (mega_password := Config.MEGA_PASSWORD):
+        if mega_email and mega_password:
             await async_api.login(mega_email, mega_password)
             if mega_listener.error:
                 await listener.on_download_error(_mega_error_format(mega_listener.error))
