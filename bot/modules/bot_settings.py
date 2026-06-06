@@ -369,8 +369,11 @@ async def get_buttons(key=None, edit_type=None, edit_mode=False):
             if edit_mode and key not in BOOL_VARS:
                 msg += "<i>Send a valid value for the above Var.</i>\n┖ <b>Time Left :</b> <code>60 sec</code>"
     elif key == "var":
-        conf_dict = Config.get_all()
-        for k in list(conf_dict.keys())[start : 10 + start]:
+        conf_dict = {
+            k: v for k, v in Config.get_all().items() if not k.startswith("DISABLE_")
+        }
+        all_keys = list(conf_dict.keys())
+        for k in all_keys[start : 10 + start]:
             buttons.data_button(k, f"botset editvar {k}")
         if state == "view":
             buttons.data_button("Edit", "botset edit var", style=ButtonStyle.PRIMARY)
@@ -378,7 +381,7 @@ async def get_buttons(key=None, edit_type=None, edit_mode=False):
             buttons.data_button("View", "botset view var", style=ButtonStyle.PRIMARY)
         buttons.data_button("↩ BACK", "botset back")
         buttons.data_button("✕ CLOSE", "botset close", style=ButtonStyle.DANGER)
-        for x in range(0, len(conf_dict), 10):
+        for x in range(0, len(all_keys), 10):
             buttons.data_button(
                 f"{int(x / 10) + 1}", f"botset start var {x}", position="footer"
             )
@@ -387,10 +390,10 @@ async def get_buttons(key=None, edit_type=None, edit_mode=False):
         for k in ONOFF_VARS:
             val = Config.get(k)
             label = k.removeprefix("DISABLE_")
-            if val:
-                buttons.data_button(f"✅ {label}", f"botset toggleonoff {k} off")
+            if not val:
+                buttons.data_button(f"✅ {label}", f"botset toggleonoff {k} on")
             else:
-                buttons.data_button(label, f"botset toggleonoff {k} on")
+                buttons.data_button(label, f"botset toggleonoff {k} off")
         buttons.data_button("Back", "botset back", position="footer")
         buttons.data_button("Close", "botset close", position="footer", style=ButtonStyle.DANGER)
         msg = "⌬ <b><u>On/Off Settings</u></b>"
