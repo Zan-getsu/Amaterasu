@@ -44,6 +44,7 @@ class AsyncMega:
     def __init__(self):
         self.api = None
         self.folder_api = None
+        self._folder_listener = None
         self.continue_event = Event()
         self._transfer_event = Event()
         self._expected_request_type = None

@@ -88,6 +88,7 @@ async def add_mega_download(listener, path):
             await makedirs(mega_folder_dir, exist_ok=True)
             async_api.folder_api = MegaApi("", mega_folder_dir, "WZML-X", 4)
             folder_listener = MegaFolderListener(mega_listener)
+            async_api._folder_listener = folder_listener
             async_api.folder_api.addListener(folder_listener)
 
         if (mega_email := Config.MEGA_EMAIL) and (mega_password := Config.MEGA_PASSWORD):
