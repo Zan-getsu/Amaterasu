@@ -1,4 +1,5 @@
 import re
+from ast import literal_eval
 from contextlib import suppress
 from fractions import Fraction
 from PIL import Image
@@ -66,7 +67,7 @@ async def download_image_thumb(url):
     )
     try:
         async with AsyncClient(
-            verify=False, follow_redirects=True, timeout=30
+            follow_redirects=True, timeout=30
         ) as client:
             # HEAD request to check content type and size
             try:
@@ -181,7 +182,7 @@ async def get_media_info(path, extra_info=False):
         except json.JSONDecodeError as e:
             LOGGER.error(f"get_media_info: invalid ffprobe JSON: {e}")
             return (0, "", "", "") if extra_info else (0, None, None)
-            
+
         fields = ffresult.get("format")
         if fields is None:
             LOGGER.error(f"get_media_info: {result}")

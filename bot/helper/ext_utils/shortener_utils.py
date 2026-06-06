@@ -51,7 +51,7 @@ async def short_url(longurl, attempt=0):
             ).json()["link"]
         elif "ouo.io" in _shortener:
             return cget(
-                "GET", f"http://ouo.io/api/{_shortener_api}?s={longurl}", verify=False
+                "GET", f"http://ouo.io/api/{_shortener_api}?s={longurl}"
             ).text
         elif "cutt.ly" in _shortener:
             return cget(

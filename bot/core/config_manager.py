@@ -119,6 +119,7 @@ class Config:
     USER_TRANSMISSION = True
     USE_SERVICE_ACCOUNTS = False
     WEB_PINCODE = True
+    WZMLX_WEB_SECRET = ""
     YT_DLP_OPTIONS = {}
     YT_DESP = "Uploaded with Amaterasu"
     YT_TAGS = ["telegram", "bot", "youtube"]

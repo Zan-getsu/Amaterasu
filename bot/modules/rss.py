@@ -135,7 +135,7 @@ async def rss_sub(_, message, pre_event):
             stv = False
         try:
             async with AsyncClient(
-                headers=headers, follow_redirects=True, timeout=60, verify=False
+                headers=headers, follow_redirects=True, timeout=60
             ) as client:
                 res = await client.get(feed_link)
             html = res.text
@@ -348,7 +348,7 @@ async def rss_get(_, message, pre_event):
                     message, f"Getting the last <b>{count}</b> item(s) from {title}"
                 )
                 async with AsyncClient(
-                    headers=headers, follow_redirects=True, timeout=60, verify=False
+                    headers=headers, follow_redirects=True, timeout=60
                 ) as client:
                     res = await client.get(data["link"])
                 html = res.text
@@ -692,7 +692,6 @@ async def rss_monitor():
                             headers=headers,
                             follow_redirects=True,
                             timeout=60,
-                            verify=False,
                         ) as client:
                             res = await client.get(data["link"])
                         html = res.text

@@ -26,7 +26,7 @@ from time import time
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
-from .core.config_manager import BinConfig
+from .core.config_manager import BinConfig, Config
 from sabnzbdapi import SabnzbdClient
 
 getLogger("requests").setLevel(WARNING)
@@ -98,9 +98,18 @@ jd_listener_lock = Lock()
 cpu_eater_lock = Lock()
 same_directory_lock = Lock()
 
+def _sabnzbd_key():
+    from bot.helper.ext_utils.bot_utils import derive_service_password
+
+    return derive_service_password(
+        (Config.BOT_TOKEN or "").split(":", 1)[0] or "0",
+        "sabnzbd",
+    )
+
+
 sabnzbd_client = SabnzbdClient(
     host="http://localhost",
-    api_key="admin",
+    api_key=_sabnzbd_key(),
     port="8070",
 )
 srun([BinConfig.QBIT_NAME, "-d", f"--profile={getcwd()}"], check=False)

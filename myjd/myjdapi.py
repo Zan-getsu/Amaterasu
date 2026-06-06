@@ -729,10 +729,10 @@ class MyJdApi:
         if self._http_session is not None:
             return self._http_session
 
-        transport = AsyncHTTPTransport(retries=10, verify=False)
+        transport = AsyncHTTPTransport(retries=10)
 
         self._http_session = clientSession(transport=transport)
-        self._http_session.verify = False
+        self._http_session.verify = True
 
         return self._http_session
 

@@ -1,4 +1,5 @@
 from sys import exit
+from hashlib import sha256
 from importlib import import_module
 from logging import (
     FileHandler,
@@ -14,6 +15,7 @@ from os import path, remove, environ
 from shutil import rmtree
 from pymongo.mongo_client import MongoClient
 from pymongo.server_api import ServerApi
+from re import compile as re_compile
 from subprocess import run as srun, call as scall
 
 getLogger("pymongo").setLevel(ERROR)
@@ -25,6 +27,12 @@ def as_bool(value):
     if isinstance(value, str):
         return value.strip().lower() in ("true", "1", "yes", "on")
     return bool(value)
+
+_DB_PARTITION_SALT = b"wzmlx_v3_db_partition_salt"
+_ALLOWED_UPSTREAM = re_compile(
+    r"^https://(github\.com/[\w.-]+/[\w.-]+/?|raw\.githubusercontent\.com/[\w.-]+/[\w.-]+/?)$"
+)
+_BRANCH_RE = re_compile(r"^[\w./-]+$")
 
 var_list = [
     "BOT_TOKEN",
@@ -77,6 +85,7 @@ if not BOT_TOKEN:
     exit(1)
 
 BOT_ID = BOT_TOKEN.split(":", 1)[0]
+_DB_PART = "p_" + sha256(_DB_PARTITION_SALT + str(BOT_ID).encode("utf-8")).hexdigest()[:24]
 
 if DATABASE_URL := config_file.get("DATABASE_URL", "").strip():
     try:
@@ -96,6 +105,14 @@ if DATABASE_URL := config_file.get("DATABASE_URL", "").strip():
 
 UPSTREAM_REPO = config_file.get("UPSTREAM_REPO", "").strip() or "https://github.com/its-niloy/Amaterasu"
 UPSTREAM_BRANCH = config_file.get("UPSTREAM_BRANCH", "").strip() or "main"
+
+if UPSTREAM_REPO and not _ALLOWED_UPSTREAM.match(UPSTREAM_REPO):
+    log_error(f"UPSTREAM_REPO rejected (must be github.com/raw.githubusercontent.com): {UPSTREAM_REPO}")
+    exit(1)
+
+if not _BRANCH_RE.match(UPSTREAM_BRANCH):
+    log_error(f"UPSTREAM_BRANCH rejected (invalid characters): {UPSTREAM_BRANCH}")
+    exit(1)
 
 if UPSTREAM_REPO:
     if path.exists(".git"):

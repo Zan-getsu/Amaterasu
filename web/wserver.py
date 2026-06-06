@@ -1,5 +1,8 @@
 from asyncio import sleep
 import re
+from importlib import import_module
+from os import environ
+from re import compile as re_compile
 from urllib.parse import urlparse
 from contextlib import asynccontextmanager, suppress
 from logging import INFO, WARNING, FileHandler, StreamHandler, basicConfig, getLogger
@@ -20,16 +23,88 @@ from aiohttp import ClientSession
 getLogger("httpx").setLevel(WARNING)
 getLogger("aiohttp").setLevel(WARNING)
 
+_SAFE_PATH = re_compile(r"^[A-Za-z0-9_./-]+$")
+_SAFE_GID = re_compile(r"^[A-Za-z0-9_-]{1,64}$")
+_SERVICE_PWD_SALT = b"wzmlx_v3_service_pwd_salt"
+_PIN_TOKEN_SALT = b"wzmlx_v3_pin_token_salt"
+_PIN_TOKEN_TTL = 600
+_PIN_ALLOWED_CHARS = frozenset(
+    "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+)
+
+_cached_secret_bytes = None
+
+
+def _load_config():
+    try:
+        cfg = import_module("config")
+    except ModuleNotFoundError:
+        cfg = None
+    bot_token = environ.get("BOT_TOKEN", "") or (getattr(cfg, "BOT_TOKEN", "") if cfg else "")
+    secret = environ.get("WZMLX_WEB_SECRET", "") or (
+        getattr(cfg, "WZMLX_WEB_SECRET", "") if cfg else ""
+    )
+    return bot_token, secret
+
+
+_BOT_TOKEN, _WEB_SECRET = _load_config()
+_BOT_ID = (_BOT_TOKEN.split(":", 1)[0] or "0").strip()
+
+
+def _service_pwd(service):
+    from hashlib import sha256
+    from hmac import new as hmac_new
+    from secrets import token_bytes
+    global _cached_secret_bytes
+    if not _WEB_SECRET:
+        if _cached_secret_bytes is None:
+            _cached_secret_bytes = token_bytes(32)
+        secret = _cached_secret_bytes
+    elif isinstance(_WEB_SECRET, str):
+        secret = _WEB_SECRET.encode("utf-8")
+    else:
+        secret = _WEB_SECRET
+    msg = f"{_BOT_ID}:{service}".encode("utf-8")
+    digest = hmac_new(_SERVICE_PWD_SALT, msg, sha256)
+    digest.update(secret)
+    raw = digest.hexdigest()
+    return raw[:20] + raw[-4:]
+
+
+def _verify_pin_token(gid, token):
+    if not gid or not token:
+        return False
+    from time import time
+    from hmac import new as hmac_new
+    from hashlib import sha256
+    try:
+        issued_str, sig = token.split(".", 1)
+        issued = int(issued_str)
+    except (ValueError, AttributeError):
+        return False
+    if not sig or not all(c in _PIN_ALLOWED_CHARS for c in sig):
+        return False
+    if abs(int(time()) - issued) > _PIN_TOKEN_TTL:
+        return False
+    if not _WEB_SECRET:
+        return False
+    payload = f"{gid}|{_BOT_ID}|{issued}".encode("utf-8")
+    expected = hmac_new(_PIN_TOKEN_SALT, payload, sha256).hexdigest()[:24]
+    a = hmac_new(_PIN_TOKEN_SALT, expected.encode("utf-8"), sha256).hexdigest()
+    b = hmac_new(_PIN_TOKEN_SALT, sig.encode("utf-8"), sha256).hexdigest()
+    return a == b
+
+
 aria2 = None
 qbittorrent = None
 sabnzbd_client = SabnzbdClient(
     host="http://localhost",
-    api_key="admin",
+    api_key=_service_pwd("sabnzbd"),
     port="8070",
 )
 SERVICES = {
-    "nzb": {"url": "http://localhost:8070/"},
-    "qbit": {"url": "http://localhost:8090"},
+    "nzb": {"url": "http://localhost:8070/", "password": _service_pwd("sabnzbd")},
+    "qbit": {"url": "http://localhost:8090", "password": _service_pwd("qbit")},
 }
 
 
@@ -223,6 +298,16 @@ async def handle_torrent(request: Request):
             }
         )
 
+    if not _SAFE_GID.match(gid):
+        return JSONResponse(
+            {
+                "files": [],
+                "engine": "",
+                "error": "Invalid GID",
+                "message": "Invalid GID",
+            }
+        )
+
     if not (pin := params.get("pin")):
         return JSONResponse(
             {
@@ -409,18 +494,28 @@ async def protected_proxy(
     service_info = SERVICES.get(service)
     if not service_info:
         raise HTTPException(status_code=404, detail="Service not found")
-    expected_password = _service_password()
-    if not expected_password:
-        raise HTTPException(status_code=403, detail="Proxy access is not configured")
-    if password != expected_password:
-        raise HTTPException(status_code=403, detail="Unauthorized access")
+    if "password" in service_info:
+        if password is None:
+            password = request.query_params.get("pass") or request.cookies.get(
+                f"{service}_pass"
+            )
+        if password != service_info["password"]:
+            raise HTTPException(status_code=403, detail="Unauthorized access")
+    if path:
+        if not _SAFE_PATH.match(path):
+            raise HTTPException(status_code=400, detail="Invalid path")
+        if ".." in path.split("/"):
+            raise HTTPException(status_code=400, detail="Invalid path")
     base = service_info["url"]
     url = f"{base}/{path}" if path else base
     headers = {k: v for k, v in request.headers.items() if k.lower() != "host"}
     body = await request.body()
-    return await proxy_fetch(
+    response = await proxy_fetch(
         request.method, url, headers, dict(request.query_params), body, f"/{service}"
     )
+    if "pass" in request.query_params:
+        response.set_cookie(f"{service}_pass", password, httponly=True, samesite="strict")
+    return response
 
 
 @app.api_route("/nzb/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH"])
@@ -436,13 +531,7 @@ async def sabnzbd_proxy(path: str = "", request: Request = None):
 
 @app.api_route("/qbit/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH"])
 async def qbittorrent_proxy(path: str = "", request: Request = None):
-    password = request.query_params.get("pass") or request.cookies.get("proxy_pass")
-    if not password:
-        raise HTTPException(status_code=403, detail="Missing password")
-    response = await protected_proxy("qbit", path, request, password)
-    if "pass" in request.query_params:
-        response.set_cookie("proxy_pass", password, httponly=True, samesite="strict")
-    return response
+    return await protected_proxy("qbit", path, request)
 
 
 # FileToLink dynamic load-balanced streaming endpoints

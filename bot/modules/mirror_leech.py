@@ -1,3 +1,4 @@
+from ast import literal_eval
 from base64 import b64encode
 from ast import literal_eval
 from asyncio import sleep
@@ -322,7 +323,10 @@ class Mirror(TaskListener):
                 if isinstance(args["-ff"], set):
                     self.ffmpeg_cmds = args["-ff"]
                 else:
-                    self.ffmpeg_cmds = literal_eval(args["-ff"])
+                    value = literal_eval(args["-ff"])
+                    if not isinstance(value, (dict, set, list, tuple)):
+                        raise ValueError("ffmpeg_cmds must be a dict/set/list/tuple")
+                    self.ffmpeg_cmds = value
         except Exception as e:
             self.ffmpeg_cmds = None
             LOGGER.error(e)

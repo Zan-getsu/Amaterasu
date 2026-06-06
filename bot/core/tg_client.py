@@ -1,9 +1,17 @@
 from pyrogram import Client, enums
 from asyncio import Lock, gather
+from hashlib import sha256
 from inspect import signature
 
 from .. import LOGGER
 from .config_manager import Config
+
+_DB_PARTITION_SALT = b"wzmlx_v3_db_partition_salt"
+
+
+def db_partition_id(bot_id):
+    raw = sha256(_DB_PARTITION_SALT + str(bot_id).encode("utf-8")).hexdigest()
+    return f"p_{raw[:24]}"
 
 
 class TgClient:
@@ -19,6 +27,7 @@ class TgClient:
 
     BNAME = ""
     ID = 0
+    PARTITION = ""
     IS_PREMIUM_USER = False
     MAX_SPLIT_SIZE = 2097152000
 
@@ -109,6 +118,7 @@ class TgClient:
     async def start_bot(cls):
         LOGGER.info("Generating client from BOT_TOKEN")
         cls.ID = Config.BOT_TOKEN.split(":", 1)[0]
+        cls.PARTITION = db_partition_id(cls.ID)
         cls.bot = cls.tgClient(
             f"Amaterasu-Bot{cls.ID}",
             bot_token=Config.BOT_TOKEN,

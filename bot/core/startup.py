@@ -1,6 +1,6 @@
 from asyncio import create_subprocess_exec, create_subprocess_shell, sleep
 from importlib import import_module
-from os import environ, getenv, path as ospath
+from os import environ, path as ospath, getenv
 
 from aiofiles import open as aiopen
 from aiofiles.os import makedirs, remove, path as aiopath
@@ -24,14 +24,23 @@ from .. import (
     sabnzbd_client,
     sudo_users,
 )
+from ..helper.ext_utils.bot_utils import derive_service_password
 from ..helper.ext_utils.db_handler import database
 from .config_manager import Config, BinConfig
-from .tg_client import TgClient
+from .tg_client import TgClient, db_partition_id
 from .torrent_manager import TorrentManager
+
+
+def _qbit_password():
+    return derive_service_password(
+        (Config.BOT_TOKEN or "").split(":", 1)[0] or "0",
+        "qbit",
+    )
 
 
 async def update_qb_options():
     LOGGER.info("Get qBittorrent options from server")
+    pwd = _qbit_password()
     if not qbit_options:
         if not TorrentManager.qbittorrent:
             LOGGER.warning(
@@ -44,11 +53,13 @@ async def update_qb_options():
         for k in list(qbit_options.keys()):
             if k.startswith("rss"):
                 del qbit_options[k]
-        qbit_options["web_ui_password"] = "admin1"
+        qbit_options["web_ui_password"] = pwd
         await TorrentManager.qbittorrent.app.set_preferences(
-            {"web_ui_password": "admin1"}
+            {"web_ui_password": pwd}
         )
     else:
+        if qbit_options.get("web_ui_password") in ("admin", "admin1", ""):
+            qbit_options["web_ui_password"] = pwd
         await TorrentManager.qbittorrent.app.set_preferences(qbit_options)
 
 
@@ -83,7 +94,13 @@ async def load_settings():
     await database.connect()
     await database.migrate_from_wzmlx()
     if database.db is not None:
-        BOT_ID = Config.BOT_TOKEN.split(":", 1)[0]
+        if TgClient.PARTITION:
+            PART = str(TgClient.PARTITION)
+        else:
+            BOT_ID = Config.BOT_TOKEN.split(":", 1)[0]
+            PART = db_partition_id(BOT_ID)
+            TgClient.PARTITION = PART
+        deploy_filter = {"_id": PART}
         try:
             settings = import_module("config")
             config_file = {
@@ -102,19 +119,19 @@ async def load_settings():
         )
 
         old_config = await database.db.settings.deployConfig.find_one(
-            {"_id": BOT_ID}, {"_id": 0}
+            deploy_filter, {"_id": 0}
         )
         if old_config is None:
             await database.db.settings.deployConfig.replace_one(
-                {"_id": BOT_ID}, config_file, upsert=True
+                deploy_filter, config_file, upsert=True
             )
         if old_config and old_config != config_file:
             LOGGER.info("Saving.. Deploy Config imported from Bot")
             await database.db.settings.deployConfig.replace_one(
-                {"_id": BOT_ID}, config_file, upsert=True
+                deploy_filter, config_file, upsert=True
             )
             config_dict = (
-                await database.db.settings.config.find_one({"_id": BOT_ID}, {"_id": 0})
+                await database.db.settings.config.find_one(deploy_filter, {"_id": 0})
                 or {}
             )
             is_changed = False
@@ -136,13 +153,13 @@ async def load_settings():
         else:
             LOGGER.info("Updating.. Saved Config imported from MongoDB")
             config_dict = await database.db.settings.config.find_one(
-                {"_id": BOT_ID}, {"_id": 0}
+                deploy_filter, {"_id": 0}
             )
             if config_dict:
                 Config.load_dict(config_dict)
 
         if pf_dict := await database.db.settings.files.find_one(
-            {"_id": BOT_ID}, {"_id": 0}
+            deploy_filter, {"_id": 0}
         ):
             for key, value in pf_dict.items():
                 if value:
@@ -151,31 +168,32 @@ async def load_settings():
                         await f.write(value)
 
         if a2c_options := await database.db.settings.aria2c.find_one(
-            {"_id": BOT_ID}, {"_id": 0}
+            deploy_filter, {"_id": 0}
         ):
             aria2_options.update(a2c_options)
 
         if not Config.DISABLE_TORRENTS:
             if qbit_opt := await database.db.settings.qbittorrent.find_one(
-                {"_id": BOT_ID}, {"_id": 0}
+                deploy_filter, {"_id": 0}
             ):
                 qbit_options.update(qbit_opt)
 
         if nzb_opt := await database.db.settings.nzb.find_one(
-            {"_id": BOT_ID}, {"_id": 0}
+            deploy_filter, {"_id": 0}
         ):
             if await aiopath.exists("sabnzbd/SABnzbd.ini.bak"):
                 await remove("sabnzbd/SABnzbd.ini.bak")
-            ((key, value),) = nzb_opt.items()
-            file_ = key.replace("__", ".")
             if not await aiopath.exists("sabnzbd"):
                 await makedirs("sabnzbd")
-            async with aiopen(f"sabnzbd/{file_}", "wb+") as f:
-                await f.write(value)
+            for key, value in nzb_opt.items():
+                if value:
+                    file_ = key.replace("__", ".")
+                    async with aiopen(f"sabnzbd/{file_}", "wb+") as f:
+                        await f.write(value)
             LOGGER.info("Loaded.. Sabnzbd Data from MongoDB")
 
-        if await database.db.users[BOT_ID].find_one():
-            rows = database.db.users[BOT_ID].find({})
+        if await database.db.users[PART].find_one():
+            rows = database.db.users[PART].find({})
             async for row in rows:
                 uid = row["_id"]
                 del row["_id"]
@@ -208,8 +226,8 @@ async def load_settings():
                 user_data[uid] = row
             LOGGER.info("Users Data has been imported from MongoDB")
 
-        if await database.db.rss[BOT_ID].find_one():
-            rows = database.db.rss[BOT_ID].find({})
+        if await database.db.rss[PART].find_one():
+            rows = database.db.rss[PART].find({})
             async for row in rows:
                 user_id = row["_id"]
                 del row["_id"]
@@ -221,16 +239,22 @@ async def save_settings():
     if database.db is None:
         return
     config_file = Config.get_all()
+    if TgClient.PARTITION:
+        PART = str(TgClient.PARTITION)
+    else:
+        PART = db_partition_id(TgClient.ID)
+        TgClient.PARTITION = PART
+    deploy_filter = {"_id": PART}
     await database.db.settings.config.update_one(
-        {"_id": TgClient.ID}, {"$set": config_file}, upsert=True
+        deploy_filter, {"$set": config_file}, upsert=True
     )
-    if await database.db.settings.aria2c.find_one({"_id": TgClient.ID}) is None:
+    if await database.db.settings.aria2c.find_one(deploy_filter) is None:
         await database.db.settings.aria2c.update_one(
-            {"_id": TgClient.ID}, {"$set": aria2_options}, upsert=True
+            deploy_filter, {"$set": aria2_options}, upsert=True
         )
-    if await database.db.settings.qbittorrent.find_one({"_id": TgClient.ID}) is None:
+    if await database.db.settings.qbittorrent.find_one(deploy_filter) is None:
         await database.save_qbit_settings()
-    if await database.db.settings.nzb.find_one({"_id": TgClient.ID}) is None:
+    if await database.db.settings.nzb.find_one(deploy_filter) is None:
         is_exist = False
         for _ in range(15):
             if await aiopath.exists("sabnzbd/SABnzbd.ini"):
@@ -241,7 +265,7 @@ async def save_settings():
             async with aiopen("sabnzbd/SABnzbd.ini", "rb+") as pf:
                 nzb_conf = await pf.read()
             await database.db.settings.nzb.update_one(
-                {"_id": TgClient.ID}, {"$set": {"SABnzbd__ini": nzb_conf}}, upsert=True
+                deploy_filter, {"$set": {"SABnzbd__ini": nzb_conf}}, upsert=True
             )
 
 

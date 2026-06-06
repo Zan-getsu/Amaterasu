@@ -246,7 +246,7 @@ def extract_info(link, options):
 
 async def _mdisk(link, name):
     key = link.split("/")[-1]
-    async with AsyncClient(verify=False) as client:
+    async with AsyncClient() as client:
         resp = await client.get(
             f"https://diskuploader.entertainvideo.com/v1/file/cdnurl?param={key}"
         )
@@ -356,13 +356,18 @@ class YtDlp(TaskListener):
                 if isinstance(args["-ff"], set):
                     self.ffmpeg_cmds = args["-ff"]
                 else:
-                    self.ffmpeg_cmds = literal_eval(args["-ff"])
+                    value = literal_eval(args["-ff"])
+                    if not isinstance(value, (dict, set, list, tuple)):
+                        raise ValueError("ffmpeg_cmds must be a dict/set/list/tuple")
+                    self.ffmpeg_cmds = value
         except Exception as e:
             self.ffmpeg_cmds = None
             LOGGER.error(e)
 
         try:
             opt = literal_eval(args["-opt"]) if args["-opt"] else {}
+            if not isinstance(opt, dict):
+                raise ValueError("yt-dlp options must be a dict")
         except Exception as e:
             LOGGER.error(e)
             opt = {}

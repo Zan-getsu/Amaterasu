@@ -8,6 +8,7 @@ from ast import literal_eval
 from functools import partial
 from io import BytesIO
 from os import getcwd
+from shlex import quote as shlex_quote
 from time import time
 
 from aiofiles import open as aiopen
@@ -92,6 +93,132 @@ DEFAULT_VALUES = {
     },
 }
 
+BOOL_VARS = [
+    "AS_DOCUMENT",
+    "BOT_PM",
+    "STOP_DUPLICATE",
+    "SET_COMMANDS",
+    "SAVE_MSG",
+    "SHOW_MEDIAINFO",
+    "SOURCE_LINK",
+    "SAFE_MODE",
+    "SHOW_EXTRA_CMDS",
+    "IS_TEAM_DRIVE",
+    "USE_SERVICE_ACCOUNTS",
+    "WEB_PINCODE",
+    "EQUAL_SPLITS",
+    "DISABLE_DRIVE_LINK",
+    "DELETE_LINKS",
+    "CLEAN_LOG_MSG",
+    "USER_TD_MODE",
+    "INCOMPLETE_TASK_NOTIFIER",
+    "UPGRADE_PACKAGES",
+    "SCREENSHOTS_MODE",
+    "MEDIA_GROUP",
+]
+
+DEFAULT_DESP = {
+    "AS_DOCUMENT": "Default type of Telegram file upload. Default is False mean as media.",
+    "ANIME_TEMPLATE": "Set template for AniList Template. HTML Tags supported",
+    "AUTHORIZED_CHATS": "Fill user_id and chat_id of groups/users you want to authorize. Separate them by space.",
+    "AUTO_DELETE_MESSAGE_DURATION": "Interval of time (in seconds), after which the bot deletes it's message and command message which is expected to be viewed instantly.\n\n <b>NOTE:</b> Set to -1 to disable auto message deletion.",
+    "BASE_URL": "Valid BASE URL where the bot is deployed to use torrent web files selection. Format of URL should be http://myip, where myip is the IP/Domain(public) of your bot or if you have chosen port other than 80 so write it in this format http://myip:port (http and not https).",
+    "BASE_URL_PORT": "Which is the BASE_URL Port. Default is 80. Int",
+    "BLACKLIST_USERS": "Restrict User from Using the Bot. It will Display a BlackListed Msg. USER_ID separated by space. Str",
+    "BOT_MAX_TASKS": "Maximum number of Task Bot will Run parallel. (Queue Tasks Included). Int",
+    "STORAGE_THRESHOLD": "To leave specific storage free and any download will lead to leave free storage less than this value will be cancelled the default unit is GB. Int",
+    "LEECH_LIMIT": "To limit the Torrent/Direct/ytdlp leech size. the default unit is GB. Int",
+    "CLONE_LIMIT": "To limit the size of Google Drive folder/file which you can clone. the default unit is GB. Int",
+    "MEGA_LIMIT": "To limit the size of Mega download. the default unit is GB. Int",
+    "TORRENT_LIMIT": "To limit the size of torrent download. the default unit is GB. Int",
+    "DIRECT_LIMIT": "To limit the size of direct link download. the default unit is GB. Int",
+    "YTDLP_LIMIT": "To limit the size of ytdlp download. the default unit is GB. Int",
+    "PLAYLIST_LIMIT": "To limit Maximum Playlist Number. Int",
+    "IMAGES": "Add multiple telgraph(graph.org) image links that are seperated by spaces.",
+    "IMG_SEARCH": "Put Keyword to Download Images. Sperarte each name by , like anime, iron man, god of war",
+    "IMG_PAGE": "Set the page value for downloading a image. Each page have approx 70 images. Deafult is 1. Int",
+    "IMDB_TEMPLATE": "Set Bot Default IMDB Template. HTML Tags, Emojis supported. str",
+    "AUTHOR_NAME": "Author name for Telegraph pages, Shown in Telegraph Page as by AUTHOR_NAME",
+    "AUTHOR_URL": "Author URL for Telegraph page, Put Channel URL to Show Join Channel. Str",
+    "COVER_IMAGE": "Cover Image for Telegraph Page. Put Telegraph Photo Link",
+    "TITLE_NAME": "Title name for Telegraph pages (while using /list command)",
+    "GD_INFO": "Description of file uploaded to gdrive using bot",
+    "DELETE_LINKS": "Delete TgLink/Magnet/File on Start of Task to Auto Clean Group. Default is False",
+    "EXCEP_CHATS": "Exception Chats which will not use Logging, chat_id separated by space. Str",
+    "SAFE_MODE": "Hide Task Name, Source Link and Indexing of Leech Link for Safety Precautions. Default is False",
+    "SOURCE_LINK": "Add a Extra Button of Source Link whether it is Magnet Link or File Link or DL Link. Default is False",
+    "SHOW_EXTRA_CMDS": "Add Extra Commands beside Arg Format for -z or -e.",
+    "USER_MAX_TASKS": "Limit the Maximum task for users of group at a time. use the Int",
+    "DAILY_TASK_LIMIT": "Maximum task a user can do in one day. use the Int",
+    "DISABLE_DRIVE_LINK": "Disable drive link button. Default is False. Bool",
+    "DAILY_MIRROR_LIMIT": "Total size upto which user can Mirror in one day. the default unit is GB. Int",
+    "GDRIVE_LIMIT": "To limit the size of Google Drive folder/file link for leech, Zip, Unzip. the default unit is GB. Int",
+    "DAILY_LEECH_LIMIT": "Total size upto which user can Leech in one day. the default unit is GB. Int",
+    "FSUB_IDS": "Fill chat_id(-100xxxxxx) of groups/channel you want to force subscribe. Separate them by space. Int\n\nNote: Bot should be added in the filled chat_id as admin",
+    "BOT_PM": "File/links send to the BOT PM also. Default is False",
+    "BOT_TOKEN": "The Telegram Bot Token that you got from @BotFather",
+    "CMD_SUFFIX": "Telegram Bot Command Index number or Custom Text. This will added at the end all commands except Global Commands. Str",
+    "DATABASE_URL": "Your Mongo Database URL (Connection string). Data will be saved in Database: auth and sudo users, users settings including thumbnails for each user, rss data and incomplete tasks.",
+    "DEFAULT_UPLOAD": "Whether rc to upload to RCLONE_PATH or gd to upload to GDRIVE_ID or ddl to upload to DDLserver. Default is gd.",
+    "DOWNLOAD_DIR": "The path to the local folder where the downloads should be downloaded to.",
+    "MDL_TEMPLATE": "Set Bot Custom Default MyDramaList Template. HTML Tags, Emojis Supported",
+    "CLEAN_LOG_MSG": "Clean Leech Log & Bot PM Task Start Message. Default is False",
+    "LEECH_LOG_ID": "Chat ID to where leeched files would be uploaded. Int. NOTE: Only available for superGroup/channel. Add -100 before channel/superGroup id.",
+    "MIRROR_LOG_ID": "Chat ID to where Mirror files would be Send. Int. NOTE: Only available for superGroup/channel. Add -100 before channel/superGroup id. For Multiple id Separate them by space.",
+    "EQUAL_SPLITS": "Split files larger than LEECH_SPLIT_SIZE into equal parts size (Not working with zip cmd). Default is False.",
+    "EXTENSION_FILTER": "File extensions that won't upload/clone. Separate them by space.",
+    "GDRIVE_ID": "This is the Folder/TeamDrive ID of the Google Drive OR root to which you want to upload all the mirrors using google-api-python-client.",
+    "INCOMPLETE_TASK_NOTIFIER": "Get incomplete task messages after restart. Require database and superGroup. Default is False",
+    "INDEX_URL": "Refer to https://gitlab.com/ParveenBhadooOfficial/Google-Drive-Index.",
+    "IS_TEAM_DRIVE": "Set True if uploading to TeamDrive using google-api-python-client. Default is False",
+    "SHOW_MEDIAINFO": "Add Button to Show MediaInfo in Leeched file. Bool",
+    "SCREENSHOTS_MODE": "Enable or Disable generating Screenshots via -ss arg. Default is False. Bool",
+    "CAP_FONT": "Add Custom Caption Font to Leeched Files, Available Values : b, i, u, s, code, spoiler. Reset Var to use Regular ( No Format )",
+    "LEECH_FILENAME_PREFIX": "Add custom word prefix to leeched file name. Str",
+    "LEECH_FILENAME_SUFFIX": "Add custom word suffix to leeched file name. Str",
+    "LEECH_FILENAME_CAPTION": "Add custom word caption to leeched file/vedios. Str",
+    "LEECH_FILENAME_REMNAME": "Remove custom word from the leeched file name. Str",
+    "LOGIN_PASS": "Permanent pass for user to skip the token system",
+    "TOKEN_TIMEOUT": "Token timeout for each group member in sec. Int",
+    "DEBRID_LINK_API": "Set debrid-link.com API for 172 Supported Hosters Leeching Support. Str",
+    "LEECH_SPLIT_SIZE": "Size of split in bytes. Default is 2GB. Default is 4GB if your account is premium.",
+    "MEDIA_GROUP": "View Uploaded splitted file parts in media group. Default is False.",
+    "MEGA_EMAIL": "E-Mail used to sign-in on mega.nz for using premium account. Str",
+    "MEGA_PASSWORD": "Password for mega.nz account. Str",
+    "OWNER_ID": "The Telegram User ID (not username) of the Owner of the bot.",
+    "QUEUE_ALL": "Number of parallel tasks of downloads and uploads. Int",
+    "QUEUE_DOWNLOAD": "Number of all parallel downloading tasks. Int",
+    "QUEUE_UPLOAD": "Number of all parallel uploading tasks. Int",
+    "RCLONE_FLAGS": "key:value|key|key|key:value . Check here all RcloneFlags.",
+    "RCLONE_PATH": "Default rclone path to which you want to upload all the mirrors using rclone.",
+    "RCLONE_SERVE_URL": "Valid URL where the bot is deployed to use rclone serve. Format of URL should be http://myip.",
+    "RCLONE_SERVE_USER": "Username for rclone serve authentication.",
+    "RCLONE_SERVE_PASS": "Password for rclone serve authentication.",
+    "RCLONE_SERVE_PORT": "Which is the RCLONE_SERVE_URL Port. Default is 8080.",
+    "RSS_DELAY": "Time in seconds for rss refresh interval. Recommended 900 second at least. Default is 900 in sec. Int",
+    "SEARCH_API_LINK": "Search api app link. Get your api from deploying this repository.",
+    "SEARCH_LIMIT": "Search limit for search api, limit for each site and not overall result limit. Default is zero (Default api limit for each site).",
+    "SEARCH_PLUGINS": "List of qBittorrent search plugins (github raw links). I have added some plugins, you can remove/add plugins as you want.",
+    "STATUS_UPDATE_INTERVAL": "Time in seconds after which the progress/status message will be updated. Recommended 10 seconds at least.",
+    "STOP_DUPLICATE": "Bot will check file/folder name in Drive incase uploading to GDRIVE_ID. If it's present in Drive then downloading or cloning will be stopped. Default is False",
+    "SUDO_USERS": "Fill user_id of users whom you want to give sudo permission. Separate them by space. Int",
+    "TELEGRAM_API": "This is to authenticate your Telegram account for downloading Telegram files. You can get this from https://my.telegram.org.",
+    "TELEGRAM_HASH": "This is to authenticate your Telegram account for downloading Telegram files. You can get this from https://my.telegram.org.",
+    "TIMEZONE": 'Set your Preferred Time Zone for Restart Message.',
+    "TORRENT_TIMEOUT": "Timeout of dead torrents downloading with qBittorrent and Aria2c in seconds. Int",
+    "UPSTREAM_REPO": "Your github repository link. So you can update your bot from filled repository on each restart.",
+    "UPSTREAM_BRANCH": "Upstream branch for update. Default is master.",
+    "UPGRADE_PACKAGES": "Install New Requirements File without thinking of Crash. Bool",
+    "SAVE_MSG": "Add button of save message. Bool",
+    "SET_COMMANDS": "Set bot command automatically. Bool",
+    "USER_TD_MODE": "Enable User GDrive TD to Use. Default is False",
+    "USER_TD_SA": "Add Global SA mail for User to give Permissions to Bot for UserTD Upload. Like wzmlx@googlegroups.com. Str",
+    "USER_SESSION_STRING": "To download/upload from your telegram account and to send rss. To generate session string use this command <code>python3 generate_string_session.py</code>.",
+    "USE_SERVICE_ACCOUNTS": "Whether to use Service Accounts or not, with google-api-python-client. Default is False",
+    "WEB_PINCODE": "Whether to ask for pincode before selecting files from torrent in web or not. Default is False. Bool.",
+    "YT_DLP_OPTIONS": 'Default yt-dlp options. Check all possible options or use this script to convert cli arguments to api options. Format: key:value|key:value|key:value.',
+}
+
 
 async def get_buttons(key=None, edit_type=None, edit_mode=False):
     buttons = ButtonMaker()
@@ -161,12 +288,52 @@ async def get_buttons(key=None, edit_type=None, edit_mode=False):
                 msg = "Send one server as dictionary {}, like in config.py without []. Timeout: 60 sec"
             else:
                 msg = f"Send a valid value for {key} in server {Config.USENET_SERVERS[index]['name']}. Current value is {Config.USENET_SERVERS[index][key]}. Timeout: 60 sec"
+        elif edit_type == "editvar":
+            # Per-variable help menu (dual-open behavior from master)
+            msg = f"<b>Variable:</b> <code>{key}</code>\n\n"
+            msg += f"<b>Description:</b> {DEFAULT_DESP.get(key, 'No Description Provided')}\n\n"
+            value = Config.get(key)
+            if value == "":
+                value = "None"
+            msg += f"<b>Current Value:</b> <code>{value}</code>\n\n"
+            buttons.data_button(
+                "View Value", f"botset showvar {key}", position="header"
+            )
+            buttons.data_button("Back", "botset back var", position="footer")
+            protected_vars = [
+                "TELEGRAM_HASH", "TELEGRAM_API", "OWNER_ID", "BOT_TOKEN",
+                "AUTHORIZED_CHATS", "DATABASE_URL", "DOWNLOAD_DIR",
+                "SUDO_USERS", "CMD_SUFFIX", "USER_SESSION_STRING", "TG_PROXY",
+            ]
+            if key not in BOOL_VARS:
+                if not edit_mode:
+                    buttons.data_button(
+                        "Edit Value", f"botset editvar {key} edit"
+                    )
+                else:
+                    buttons.data_button("Stop Edit", f"botset editvar {key}")
+            else:
+                msg += "<i>Choose a valid value for the above Var</i>\n\n"
+                buttons.data_button("True", f"botset boolvar {key} on")
+                buttons.data_button("False", f"botset boolvar {key} off")
+            if key not in BOOL_VARS and key not in protected_vars:
+                buttons.data_button("Reset", f"botset resetvar {key}")
+            buttons.data_button("Close", "botset close", position="footer")
+            restart_vars = [
+                "CMD_SUFFIX", "OWNER_ID", "USER_SESSION_STRING",
+                "TELEGRAM_HASH", "TELEGRAM_API", "BOT_TOKEN",
+                "TG_PROXY", "AUTHORIZED_CHATS", "DATABASE_URL", "DOWNLOAD_DIR",
+            ]
+            if edit_mode and key in restart_vars:
+                msg += "\n<b>Note:</b> Restart required for this edit to take effect!\n\n"
+            if edit_mode and key not in BOOL_VARS:
+                msg += "<i>Send a valid value for the above Var.</i> <b>Timeout:</b> 60 sec"
     elif key == "var":
         conf_dict = Config.get_all()
         for k in list(conf_dict.keys())[start : 10 + start]:
             if k == "DATABASE_URL" and state != "view":
                 continue
-            buttons.data_button(k, f"botset botvar {k}")
+            buttons.data_button(k, f"botset editvar {k}")
         if state == "view":
             buttons.data_button("Edit", "botset edit var", style=ButtonStyle.PRIMARY)
         else:
@@ -393,8 +560,10 @@ async def edit_variable(_, message, pre_message, key):
         value = literal_eval(value)
     elif value.startswith("{") and value.endswith("}"):
         value = literal_eval(value)
+    if not isinstance(value, (str, int, float, bool, list, dict, type(None))):
+        value = str(value)
     Config.set(key, value)
-    await update_buttons(pre_message, "var")
+    await update_buttons(pre_message, key, "editvar", False)
     await delete_message(message)
     await database.update_config({key: value})
     if key in ["SEARCH_PLUGINS", "SEARCH_API_LINK"]:
@@ -415,6 +584,33 @@ async def edit_variable(_, message, pre_message, key):
     elif key == "USENET_SERVERS":
         for s in value:
             await sabnzbd_client.set_special_config("servers", s)
+
+
+@new_task
+async def toggle_bool_var(_, query, pre_message, key, value):
+    handler_dict[query.message.chat.id] = False
+    bool_value = value == "on"
+    Config.set(key, bool_value)
+    await update_buttons(pre_message, key, "editvar", False)
+    await database.update_config({key: bool_value})
+    if key == "INCOMPLETE_TASK_NOTIFIER" and not bool_value and Config.DATABASE_URL:
+        await database.trunc_table("tasks")
+    elif key in ["QUEUE_ALL", "QUEUE_DOWNLOAD", "QUEUE_UPLOAD"]:
+        await start_from_queued()
+
+
+@new_task
+async def show_var_value(_, query, key):
+    value = f"{Config.get(key)}"
+    if value == "":
+        value = "None"
+    if len(value) > 200:
+        await query.answer()
+        with BytesIO(str.encode(value)) as out_file:
+            out_file.name = f"{key}.txt"
+            await send_file(query.message, out_file)
+    else:
+        await query.answer(value, show_alert=True)
 
 
 @new_task
@@ -460,7 +656,10 @@ async def edit_nzb(_, message, pre_message, key):
         value = int(value)
     elif value.startswith("[") and value.endswith("]"):
         try:
-            value = ",".join(literal_eval(value))
+            parsed = literal_eval(value)
+            if not isinstance(parsed, (list, tuple)):
+                raise ValueError("Expected a list")
+            value = ",".join(str(x) for x in parsed)
         except Exception as e:
             LOGGER.error(e)
             await update_buttons(pre_message, "nzb")
@@ -660,8 +859,10 @@ async def edit_bot_settings(client, query):
         await delete_message(message)
     elif data[1] == "back":
         await query.answer()
-        globals()["start"] = 0
-        await update_buttons(message, None)
+        key = data[2] if len(data) == 3 else None
+        if key is None:
+            globals()["start"] = 0
+        await update_buttons(message, key)
     elif data[1] == "syncjd":
         if not Config.JD_EMAIL or not Config.JD_PASS:
             await query.answer(
@@ -735,7 +936,7 @@ async def edit_bot_settings(client, query):
         elif data[2] == "SUDO_USERS":
             sudo_users.clear()
         Config.set(data[2], value)
-        await update_buttons(message, "var")
+        await update_buttons(message, data[2], "editvar", False)
         if data[2] == "DATABASE_URL":
             await database.disconnect()
         await database.update_config({data[2]: value})
@@ -837,6 +1038,25 @@ async def edit_bot_settings(client, query):
         elif value == "":
             value = None
         await query.answer(f"{value}", show_alert=True)
+    elif data[1] == "editvar":
+        await query.answer()
+        key = data[2]
+        edit_mode = len(data) > 3 and data[3] == "edit"
+        if edit_mode:
+            await update_buttons(message, key, "editvar", True)
+            pfunc = partial(edit_variable, pre_message=message, key=key)
+            rfunc = partial(update_buttons, message, key, "editvar", False)
+            await event_handler(client, query, pfunc, rfunc)
+        else:
+            await update_buttons(message, key, "editvar", False)
+    elif data[1] == "boolvar":
+        await query.answer()
+        key = data[2]
+        value = data[3]
+        await toggle_bool_var(client, query, message, key, value)
+    elif data[1] == "showvar":
+        key = data[2]
+        await show_var_value(client, query, key)
     elif data[1] == "ariavar" and (state == "edit" or data[2] == "newkey"):
         await query.answer()
         await update_buttons(message, data[2], data[1])
@@ -933,6 +1153,8 @@ async def edit_bot_settings(client, query):
     elif data[1] == "push":
         await query.answer()
         filename = data[2].rsplit(".zip", 1)[0]
+        safe_filename = shlex_quote(filename)
+        safe_branch = shlex_quote(Config.UPSTREAM_BRANCH)
         if await aiopath.exists(filename):
             commands = [
                 ("git", "add", "-f", "--", filename),

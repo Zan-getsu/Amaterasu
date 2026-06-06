@@ -17,5 +17,14 @@ sabnzbd/*
 list_drives.txt
 shortener.txt
 downloads/*
+<<<<<<< HEAD
+=======
+.github/instructions/*
+.github/skills/*
+.github/agents/*
+graphify-out/*
+.graphify_*
+.agent*
+>>>>>>> 5e3455e (feat: harden security across deployment and runtime)
 __pycache__/
 *.pyc

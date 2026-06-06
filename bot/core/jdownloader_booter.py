@@ -55,13 +55,13 @@ class JDownloader(MyJdApi):
             "deprecatedapiport": 3128,
             "localapiserverheaderxcontenttypeoptions": "nosniff",
             "localapiserverheaderxframeoptions": "DENY",
-            "externinterfaceenabled": True,
+            "externinterfaceenabled": False,
             "deprecatedapilocalhostonly": True,
             "localapiserverheaderreferrerpolicy": "no-referrer",
             "deprecatedapienabled": True,
             "localapiserverheadercontentsecuritypolicy": "default-src 'self'",
-            "jdanywhereapienabled": True,
-            "externinterfacelocalhostonly": False,
+            "jdanywhereapienabled": False,
+            "externinterfacelocalhostonly": True,
             "localapiserverheaderxxssprotection": "1; mode=block",
         }
         await makedirs("/JDownloader/cfg", exist_ok=True)
