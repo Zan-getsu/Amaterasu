@@ -260,11 +260,21 @@ RESTART_VARS = {
     "TG_PROXY", "AUTHORIZED_CHATS", "DATABASE_URL", "DOWNLOAD_DIR",
 }
 
+ONOFF_VARS = [
+    "DISABLE_TORRENTS",
+    "DISABLE_LEECH",
+    "DISABLE_BULK",
+    "DISABLE_MULTI",
+    "DISABLE_SEED",
+    "DISABLE_FF_MODE",
+]
+
 
 async def get_buttons(key=None, edit_type=None, edit_mode=False):
     buttons = ButtonMaker()
     if key is None:
         buttons.data_button("Config Variables", "botset var")
+        buttons.data_button("On/Off Settings", "botset setonoff")
         buttons.data_button("Private Files", "botset private open")
         buttons.data_button("Qbit Settings", "botset qbit")
         buttons.data_button("Aria2c Settings", "botset aria")
@@ -299,36 +309,36 @@ async def get_buttons(key=None, edit_type=None, edit_mode=False):
                 val_str = f"'{escape(str(val))}'"
             msg += f"Send a valid value for {key}. Current value is {val_str}. Timeout: 60 sec"
         elif edit_type == "ariavar":
-            buttons.data_button("↩ BACK", "botset aria")
+            buttons.data_button("↩ BACK", "botset aria", style=ButtonStyle.PRIMARY)
             if key != "newkey":
                 buttons.data_button("Empty String", f"botset emptyaria {key}")
             buttons.data_button("✕ CLOSE", "botset close", style=ButtonStyle.DANGER)
             msg = (
-                "Send a key with value. Example: https-proxy-user:value. Timeout: 60 sec"
+                "<i>Send a key with value.</i> Example: <code>https-proxy-user:value</code>\n┖ <b>Time Left :</b> <code>60 sec</code>"
                 if key == "newkey"
-                else f"Send a valid value for {key}. Current value is '{aria2_options[key]}'. Timeout: 60 sec"
+                else f"<i>Send a valid value for <code>{key}</code>.</i> Current value is <code>{aria2_options[key]}</code>\n┖ <b>Time Left :</b> <code>60 sec</code>"
             )
         elif edit_type == "qbitvar":
-            buttons.data_button("↩ BACK", "botset qbit")
+            buttons.data_button("↩ BACK", "botset qbit", style=ButtonStyle.PRIMARY)
             buttons.data_button("Empty String", f"botset emptyqbit {key}")
             buttons.data_button("✕ CLOSE", "botset close", style=ButtonStyle.DANGER)
-            msg = f"Send a valid value for {key}. Current value is '{qbit_options[key]}'. Timeout: 60 sec"
+            msg = f"<i>Send a valid value for <code>{key}</code>.</i> Current value is <code>{qbit_options[key]}</code>\n┖ <b>Time Left :</b> <code>60 sec</code>"
         elif edit_type == "nzbvar":
-            buttons.data_button("↩ BACK", "botset nzb")
+            buttons.data_button("↩ BACK", "botset nzb", style=ButtonStyle.PRIMARY)
             buttons.data_button("Default", f"botset resetnzb {key}")
             buttons.data_button("Empty String", f"botset emptynzb {key}")
             buttons.data_button("✕ CLOSE", "botset close", style=ButtonStyle.DANGER)
-            msg = f"Send a valid value for {key}. Current value is '{nzb_options[key]}'.\nIf the value is list then seperate them by space or ,\nExample: .exe,info or .exe .info\nTimeout: 60 sec"
+            msg = f"<i>Send a valid value for <code>{key}</code>.</i> Current value is <code>{nzb_options[key]}</code>\nIf the value is list then separate them by space or ,\nExample: <code>.exe,info</code> or <code>.exe .info</code>\n┖ <b>Time Left :</b> <code>60 sec</code>"
         elif edit_type.startswith("nzbsevar"):
             index = 0 if key == "newser" else int(edit_type.replace("nzbsevar", ""))
-            buttons.data_button("↩ BACK", f"botset nzbser{index}")
+            buttons.data_button("↩ BACK", f"botset nzbser{index}", style=ButtonStyle.PRIMARY)
             if key != "newser":
                 buttons.data_button("Empty", f"botset emptyserkey {index} {key}")
             buttons.data_button("✕ CLOSE", "botset close", style=ButtonStyle.DANGER)
             if key == "newser":
-                msg = "Send one server as dictionary {}, like in config.py without []. Timeout: 60 sec"
+                msg = "<i>Send one server as dictionary <code>{}</code>, like in config.py without <code>[]</code>.</i>\n┖ <b>Time Left :</b> <code>60 sec</code>"
             else:
-                msg = f"Send a valid value for {key} in server {Config.USENET_SERVERS[index]['name']}. Current value is {Config.USENET_SERVERS[index][key]}. Timeout: 60 sec"
+                msg = f"<i>Send a valid value for <code>{key}</code> in server <code>{Config.USENET_SERVERS[index]['name']}</code>.</i> Current value is <code>{Config.USENET_SERVERS[index][key]}</code>\n┖ <b>Time Left :</b> <code>60 sec</code>"
         elif edit_type == "editvar":
             msg = f"<b>Variable:</b> <code>{key}</code>\n\n"
             msg += f"<b>Description:</b> {DEFAULT_DESP.get(key, 'No Description Provided')}\n\n"
@@ -343,7 +353,7 @@ async def get_buttons(key=None, edit_type=None, edit_mode=False):
             if key not in BOOL_VARS:
                 if not edit_mode:
                     buttons.data_button(
-                        "Edit Value", f"botset editvar {key} edit"
+                        "Edit Value", f"botset editvar {key} edit", style=ButtonStyle.PRIMARY
                     )
                 else:
                     buttons.data_button("Stop Edit", f"botset editvar {key}")
@@ -353,11 +363,11 @@ async def get_buttons(key=None, edit_type=None, edit_mode=False):
                 buttons.data_button("False", f"botset boolvar {key} off")
             if key not in BOOL_VARS and key not in PROTECTED_VARS:
                 buttons.data_button("Reset", f"botset resetvar {key}")
-            buttons.data_button("Close", "botset close", position="footer")
+            buttons.data_button("Close", "botset close", position="footer", style=ButtonStyle.DANGER)
             if edit_mode and key in RESTART_VARS:
                 msg += "\n<b>Note:</b> Restart required for this edit to take effect!\n\n"
             if edit_mode and key not in BOOL_VARS:
-                msg += "<i>Send a valid value for the above Var.</i> <b>Timeout:</b> 60 sec"
+                msg += "<i>Send a valid value for the above Var.</i>\n┖ <b>Time Left :</b> <code>60 sec</code>"
     elif key == "var":
         conf_dict = Config.get_all()
         for k in list(conf_dict.keys())[start : 10 + start]:
@@ -373,6 +383,17 @@ async def get_buttons(key=None, edit_type=None, edit_mode=False):
                 f"{int(x / 10) + 1}", f"botset start var {x}", position="footer"
             )
         msg = f"⌬ <b><u>Config Variables</u></b> | <b><u>Page: {int(start / 10) + 1}</b></u>"
+    elif key == "setonoff":
+        for k in ONOFF_VARS:
+            val = Config.get(k)
+            label = k.removeprefix("DISABLE_")
+            if val:
+                buttons.data_button(f"✅ {label}", f"botset toggleonoff {k} off")
+            else:
+                buttons.data_button(label, f"botset toggleonoff {k} on")
+        buttons.data_button("Back", "botset back", position="footer")
+        buttons.data_button("Close", "botset close", position="footer", style=ButtonStyle.DANGER)
+        msg = "⌬ <b><u>On/Off Settings</u></b>"
     elif key == "private":
         if edit_mode:
             buttons.data_button("Stop Invoke File", "botset private stop", "header")
@@ -405,7 +426,7 @@ async def get_buttons(key=None, edit_type=None, edit_mode=False):
 └─ Note        : Changing .netrc requires restart
 </pre>"""
         if edit_mode:
-            msg += "\n<b>FORMAT:</b>\n<pre>\nfile_name\ncontents of file\n</pre>\n<b>Time Left :</b> 60 sec"
+            msg += "\n\n<i>Send the file name to delete, upload a file to save, or create a new file with this format.</i>\n\n<b>Format:</b>\n<pre>file_name\n\ncontents of file</pre>\n┖ <b>Time Left :</b> <code>60 sec</code>"
     elif key == "aria":
         for k in list(aria2_options.keys())[start : 10 + start]:
             if k not in ["checksum", "index-out", "out", "pause", "select-file"]:
@@ -625,6 +646,15 @@ async def toggle_bool_var(_, query, pre_message, key, value):
         await database.trunc_table("tasks")
     elif key in ["QUEUE_ALL", "QUEUE_DOWNLOAD", "QUEUE_UPLOAD"]:
         await start_from_queued()
+
+
+@new_task
+async def toggle_onoff_var(_, query, pre_message, key, value):
+    handler_dict[query.message.chat.id] = False
+    bool_value = value == "on"
+    Config.set(key, bool_value)
+    await update_buttons(pre_message, "setonoff")
+    await database.update_config({key: bool_value})
 
 
 @new_task
@@ -864,15 +894,14 @@ async def event_handler(client, query, pfunc, rfunc, document=False):
         if time() - start_time > 60:
             handler_dict[chat_id] = False
             await rfunc()
-        elif document:
-            if time() - update_time > 6 and handler_dict[chat_id]:
-                update_time = time()
-                msg = await client.get_messages(chat_id, query.message.id)
-                text = msg.text.split("\n")
-                text[-1] = (
-                    f"<b>Time Left :</b> <code>{round(60 - (time() - start_time), 2)} sec</code>"
-                )
-                await edit_message(msg, "\n".join(text), msg.reply_markup)
+        elif time() - update_time > 8 and handler_dict[chat_id]:
+            update_time = time()
+            msg = await client.get_messages(chat_id, query.message.id)
+            text = msg.text.split("\n")
+            text[-1] = (
+                f"┖ <b>Time Left :</b> <code>{round(60 - (time() - start_time), 2)} sec</code>"
+            )
+            await edit_message(msg, "\n".join(text), msg.reply_markup)
     client.remove_handler(*handler)
 
 
@@ -903,7 +932,7 @@ async def edit_bot_settings(client, query):
             show_alert=True,
         )
         await sync_jdownloader()
-    elif data[1] in ["var", "aria", "qbit", "nzb", "nzbserver"] or data[1].startswith(
+    elif data[1] in ["var", "aria", "qbit", "nzb", "nzbserver", "setonoff"] or data[1].startswith(
         "nzbser"
     ):
         if data[1] == "nzbserver":
@@ -1082,6 +1111,11 @@ async def edit_bot_settings(client, query):
         key = data[2]
         value = data[3]
         await toggle_bool_var(client, query, message, key, value)
+    elif data[1] == "toggleonoff":
+        await query.answer()
+        key = data[2]
+        value = data[3]
+        await toggle_onoff_var(client, query, message, key, value)
     elif data[1] == "showvar":
         key = data[2]
         await show_var_value(client, query, key)

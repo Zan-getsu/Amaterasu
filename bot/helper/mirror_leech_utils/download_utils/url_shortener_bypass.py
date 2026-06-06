@@ -1,12 +1,3 @@
-"""URL shortener bypassers.
-
-Each handler resolves a shortened URL back to its underlying target URL.
-Handlers are pure resolvers: input a shortened URL, output the target URL
-string (or raise DirectDownloadLinkException). The caller in
-direct_link_generator.py is responsible for re-dispatching the returned URL
-through the regular host handlers.
-"""
-
 from re import search
 from urllib.parse import urlparse
 
