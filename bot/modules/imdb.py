@@ -69,8 +69,8 @@ async def imdb_search(_, message):
         else:
             movies = get_poster(title, bulk=True)
             if not movies:
-                return edit_message(
-                    "<i>No Results Found</i>, Try Again or Use <b>Title ID</b>", k
+                return await edit_message(
+                    k, "<i>No Results Found</i>, Try Again or Use <b>Title ID</b>"
                 )
             for movie in movies:
                 buttons.data_button(
