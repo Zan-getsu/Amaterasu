@@ -86,7 +86,7 @@ class AsyncMega:
                     listener.error = msg
                 self._transfer_event.set()
         finally:
-            LOGGER.info(f"AsyncMega.run: finished, clearing expected_type/source")
+            LOGGER.info("AsyncMega.run: finished, clearing expected_type/source")
             self._expected_request_type = None
             self._expected_request_source = None
 
