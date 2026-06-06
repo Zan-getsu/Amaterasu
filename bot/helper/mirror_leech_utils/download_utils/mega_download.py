@@ -1,5 +1,5 @@
 import os
-from asyncio import Lock as AsyncLock, sleep, wait_for
+from asyncio import Lock as AsyncLock, sleep
 from contextlib import suppress
 from secrets import token_hex
 
@@ -18,7 +18,6 @@ from ...ext_utils.task_manager import (
     stop_duplicate_check,
 )
 from ...listeners.mega_listener import AsyncMega, MegaAppListener, MegaFolderListener, _mega_error_format
-from ...ext_utils.bot_utils import sync_to_async
 from ...mirror_leech_utils.status_utils.mega_status import MegaDownloadStatus
 from ...mirror_leech_utils.status_utils.queue_status import QueueStatus
 
@@ -122,44 +121,20 @@ async def add_mega_download(listener, path):
                 except Exception as e:
                     LOGGER.warning(f"Mega subfolder handle conversion failed: {e}")
             await async_api.fetchNodes(async_api.folder_api, source="folder")
-            LOGGER.info(f"Mega: fetchNodes done, node resolved via callback, node={mega_listener.node is not None}")
             node = mega_listener.node
-            if not node:
-                try:
-                    node = async_api.folder_api.getRootNode()
-                    LOGGER.info(f"Mega: fallback getRootNode returned {node is not None}")
-                except Exception:
-                    node = None
-                if node:
-                    mega_listener.node = node
             if not node:
                 await listener.on_download_error("Failed to get folder root node", is_limit=False)
                 return
-            download_api = async_api.folder_api
         else:
             await async_api.getPublicNode(listener.link)
             node = mega_listener.public_node
-            download_api = api
         if not node:
             await listener.on_download_error("Failed to resolve MEGA link")
             return
 
-        LOGGER.info("Mega: resolving node name & size")
-        try:
-            listener.name = listener.name or node.getName()
-        except Exception:
-            listener.name = listener.name or f"MEGA_Download_{gid}"
-
-        if mega_listener._size:
-            listener.size = mega_listener._size
-        else:
-            try:
-                listener.size = await wait_for(
-                    sync_to_async(download_api.getSize if download_api else api.getSize, node),
-                    timeout=10,
-                )
-            except Exception:
-                listener.size = 0
+        LOGGER.info(f"Mega: resolved node, name={mega_listener._name}, size={mega_listener._size}, is_folder={mega_listener._is_folder}")
+        listener.name = listener.name or mega_listener._name or f"MEGA_Download_{gid}"
+        listener.size = mega_listener._size
 
         msg, button = await stop_duplicate_check(listener)
         if msg:

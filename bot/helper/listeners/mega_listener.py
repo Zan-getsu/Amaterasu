@@ -148,23 +148,14 @@ class AsyncMega:
         self._transfer_event.clear()
         self._expected_request_type = None
         self._expected_request_source = None
-        self._download_is_folder = False
-        try:
-            self._download_is_folder = bool(node.isFolder())
-        except Exception:
-            try:
-                self._download_is_folder = node.getType() == 1
-            except Exception:
-                self._download_is_folder = False
 
-        if hasattr(self, "_mega_listener"):
-            if not self._mega_listener._name:
-                self._mega_listener._name = name
-            try:
-                self._mega_listener._target_handle = node.getHandle()
-            except Exception:
-                self._mega_listener._target_handle = None
-            LOGGER.info(f"startDownload: name='{self._mega_listener._name}', target_handle={self._mega_listener._target_handle}, is_folder={self._download_is_folder}")
+        ml = getattr(self, "_mega_listener", None)
+        if ml:
+            self._download_is_folder = ml._is_folder
+            if not ml._name:
+                ml._name = name
+            ml._target_handle = ml._handle
+            LOGGER.info(f"startDownload: name='{ml._name}', target_handle={ml._target_handle}, is_folder={self._download_is_folder}")
 
         await sync_to_async(
             self._download_api().startDownload,
@@ -204,8 +195,6 @@ class MegaAppListener(MegaListener):
         self._async_api = async_api
         self.continue_event = async_api.continue_event
         self._transfer_event = async_api._transfer_event
-        self.node = None
-        self.public_node = None
         self.listener = listener
         self.is_cancelled = False
         self.error = None
@@ -215,12 +204,16 @@ class MegaAppListener(MegaListener):
         self._speed = 0
         self._smoothed_speed = 0
         self._last_speed_time = 0
-        self._name = ""
-        self._target_handle = None
         self._caller_manages_completion = False
-        self._subfolder_target = None
-        self._size = 0
         self._cancel_token = None
+        self._subfolder_target = None
+        self.node = None
+        self.public_node = None
+        self._name = ""
+        self._size = 0
+        self._handle = None
+        self._is_folder = False
+        self._target_handle = None
         super().__init__()
 
     @property
@@ -245,6 +238,14 @@ class MegaAppListener(MegaListener):
         except Exception as e:
             LOGGER.error(f"Mega transfer event signal failed: {e}")
 
+    def _cache_node_data(self, node):
+        try:
+            self._name = node.getName()
+            self._handle = node.getHandle()
+            self._is_folder = node.isFolder()
+        except Exception:
+            pass
+
     def _is_expected_request(self, request_type):
         expected = self._async_api._expected_request_type
         return expected is None or request_type == expected
@@ -253,20 +254,14 @@ class MegaAppListener(MegaListener):
         expected = self._async_api._expected_request_source
         return expected is None or source == expected
 
-    def _is_target_transfer(self, transfer):
+    def _is_target_transfer(self, transfer, for_finish=False):
         if self._async_api._download_is_folder:
-            try:
-                if transfer.isFolderTransfer():
-                    return True
-            except Exception:
-                pass
-            try:
-                node_handle = transfer.getNodeHandle()
-                if node_handle == self._target_handle:
-                    return True
-            except Exception:
-                pass
-            return False
+            if for_finish:
+                try:
+                    return transfer.isFolderTransfer()
+                except Exception:
+                    return False
+            return True
         target_match = False
         if self._target_handle is not None:
             try:
@@ -315,13 +310,12 @@ class MegaAppListener(MegaListener):
                 except Exception:
                     self.public_node = None
                 if self.public_node:
+                    self._cache_node_data(self.public_node)
                     try:
-                        self._name = self.public_node.getName()
                         self._size = self.public_node.getSize()
                     except Exception:
                         pass
             elif request_type == MegaRequest.TYPE_LOGIN:
-                # For folder API, loginToFolder should set node; for main API, set public_node
                 root = api.getRootNode()
                 if source == "folder":
                     self.node = root
@@ -329,21 +323,14 @@ class MegaAppListener(MegaListener):
                 else:
                     self.public_node = root
                     LOGGER.info(f"TYPE_LOGIN (main source): set public_node={root is not None}")
-                if self.node or self.public_node:
-                    try:
-                        name_node = self.node if source == "folder" else self.public_node
-                        self._name = name_node.getName()
-                    except Exception:
-                        pass
+                if root:
+                    self._cache_node_data(root)
             elif request_type == MegaRequest.TYPE_FETCH_NODES:
                 root_node = api.getRootNode()
                 LOGGER.info(f"TYPE_FETCH_NODES: setting node={root_node is not None}, source={source}")
                 self.node = root_node
                 if self.node:
-                    try:
-                        self._name = self.node.getName()
-                    except Exception:
-                        pass
+                    self._cache_node_data(self.node)
                 if self._subfolder_target is not None and self.node:
                     try:
                         LOGGER.info(f"TYPE_FETCH_NODES: looking up subfolder target={self._subfolder_target}")
@@ -353,16 +340,13 @@ class MegaAppListener(MegaListener):
                                 child = children.get(i)
                                 if child.getHandle() == self._subfolder_target:
                                     self.node = child
-                                    try:
-                                        self._name = self.node.getName()
-                                    except Exception:
-                                        pass
+                                    self._cache_node_data(self.node)
                                     self._size = 0
                                     try:
                                         self._size = api.getSize(self.node)
                                     except Exception as e:
                                         LOGGER.warning(f"TYPE_FETCH_NODES: getSize error: {e}")
-                                    LOGGER.info(f"TYPE_FETCH_NODES: subfolder resolved, name={self._name}, size={self._size}")
+                                    LOGGER.info(f"TYPE_FETCH_NODES: subfolder resolved, name={self._name}, size={self._size}, is_folder={self._is_folder}")
                                     break
                     except Exception as e:
                         LOGGER.error(f"TYPE_FETCH_NODES: subfolder lookup error: {e}")
@@ -423,7 +407,7 @@ class MegaAppListener(MegaListener):
             if self.is_cancelled:
                 self._set_transfer_event()
                 return
-            if not self._is_target_transfer(transfer):
+            if not self._is_target_transfer(transfer, for_finish=True):
                 return
             if err_code != MegaError.API_OK:
                 self.error = f"{err_code} {error.toString()}"
