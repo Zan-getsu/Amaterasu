@@ -514,7 +514,13 @@ async def protected_proxy(
         request.method, url, headers, dict(request.query_params), body, f"/{service}"
     )
     if "pass" in request.query_params:
-        response.set_cookie(f"{service}_pass", password, httponly=True, samesite="strict")
+        response.set_cookie(
+            f"{service}_pass",
+            password,
+            httponly=True,
+            samesite="strict",
+            secure=False,
+        )
     return response
 
 
