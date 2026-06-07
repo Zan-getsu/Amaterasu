@@ -4,21 +4,27 @@ from asyncio import (
     run_coroutine_threadsafe,
     sleep,
 )
-from hashlib import sha256
-from hmac import new as hmac_new
-from secrets import token_bytes
-from pyrogram.enums import ButtonStyle
 from asyncio.subprocess import PIPE
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial, wraps
+from hashlib import sha256
+from hmac import new as hmac_new
+from os import path as ospath
+from re import compile as re_compile
+from secrets import token_bytes
 from urllib.parse import unquote, urlparse
 
+from aiofiles import open as aiopen
+from aiofiles.os import mkdir
+from aiofiles.os import path as aiopath
 from httpx import AsyncClient, Limits
+from pyrogram.enums import ButtonStyle
 
 from ... import LOGGER, bot_loop, user_data
 from ...core.config_manager import Config
 from ..telegram_helper.button_build import ButtonMaker
 from web.security import make_short_token
+from .db_handler import database
 from .help_messages import (
     CLONE_HELP_DICT,
     MIRROR_HELP_DICT,
@@ -422,11 +428,28 @@ def safe_int(value, default=0):
         return default
 
 
+async def download_image_url(url):
+    path = "Images/"
+    if not await aiopath.isdir(path):
+        await mkdir(path)
+    image_name = url.split("/")[-1].split("?")[0]
+    des_dir = ospath.join(path, image_name)
+    try:
+        async with AsyncClient(headers={"User-Agent": "Mozilla/5.0"}, follow_redirects=True) as client:
+            resp = await client.get(url, timeout=15)
+            if resp.status_code == 200:
+                async with aiopen(des_dir, "wb") as f:
+                    await f.write(resp.content)
+                return des_dir
+        LOGGER.error(f"Failed to download image from {url}: status {resp.status_code}")
+    except Exception as e:
+        LOGGER.error(f"Failed to download image from {url}: {e}")
+    return None
+
+
 async def search_images():
     if not Config.IMG_SEARCH or not Config.USE_IMAGES:
         return
-    from re import compile as re_compile
-    from ..ext_utils.db_handler import database
 
     query_list = [
         q.strip().replace(" ", "+")

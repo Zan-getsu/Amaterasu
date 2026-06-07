@@ -25,7 +25,7 @@ except ImportError:
 from ... import LOGGER, intervals, status_dict, task_dict_lock
 from ...core.config_manager import Config
 from ...core.tg_client import TgClient
-from ..ext_utils.bot_utils import SetInterval
+from ..ext_utils.bot_utils import SetInterval, download_image_url
 from ..ext_utils.exceptions import TgLinkException
 from ..ext_utils.status_utils import get_readable_message
 
@@ -89,7 +89,16 @@ async def send_message(message, text, buttons=None, block=True, photo=None, **kw
                     photo,
                 )
             except (PhotoInvalidDimensions, WebpageCurlFailed, MediaEmpty):
-                LOGGER.error("Invalid photo dimensions or empty media", exc_info=True)
+                try:
+                    des_dir = await download_image_url(photo)
+                    if des_dir:
+                        msg = await send_message(message, text, buttons, block, des_dir)
+                        from aiofiles.os import remove as aioremove
+
+                        await aioremove(des_dir)
+                        return msg
+                except Exception:
+                    LOGGER.error("Failed to send fallback photo", exc_info=True)
                 return
             except Exception:
                 LOGGER.error("Error while sending photo", exc_info=True)
