@@ -96,13 +96,16 @@ async def pics_callback(_, query):
         buttons.data_button("Remove Image", f"images {data[1]} remov {ind}")
         buttons.data_button("Close", f"images {data[1]} close")
         buttons.data_button("Remove All", f"images {data[1]} removall", "footer")
-        await delete_message(message)
-        await send_message(
-            message,
-            pic_info,
-            buttons.build_menu(2),
-            photo=Config.IMAGES[ind],
-        )
+        if message.media:
+            await edit_message(message, pic_info, buttons.build_menu(2), photo=Config.IMAGES[ind])
+        else:
+            await delete_message(message)
+            await send_message(
+                message,
+                pic_info,
+                buttons.build_menu(2),
+                photo=Config.IMAGES[ind],
+            )
     elif data[2] == "remov":
         Config.IMAGES.pop(int(data[3]))
         if Config.DATABASE_URL:
@@ -126,13 +129,16 @@ async def pics_callback(_, query):
         buttons.data_button("Remove Image", f"images {data[1]} remov {ind}")
         buttons.data_button("Close", f"images {data[1]} close")
         buttons.data_button("Remove All", f"images {data[1]} removall", "footer")
-        await delete_message(message)
-        await send_message(
-            message,
-            pic_info,
-            buttons.build_menu(2),
-            photo=Config.IMAGES[ind],
-        )
+        if message.media:
+            await edit_message(message, pic_info, buttons.build_menu(2), photo=Config.IMAGES[ind])
+        else:
+            await delete_message(message)
+            await send_message(
+                message,
+                pic_info,
+                buttons.build_menu(2),
+                photo=Config.IMAGES[ind],
+            )
     elif data[2] == "removall":
         Config.IMAGES.clear()
         if Config.DATABASE_URL:

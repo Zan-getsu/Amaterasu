@@ -3,7 +3,7 @@ from random import choice
 from re import match as re_match
 from time import time
 
-from pyrogram.types import Message
+from pyrogram.types import Message, InputMediaPhoto
 from pyrogram.enums import ParseMode
 from pyrogram.errors import (
     FloodWait,
@@ -146,8 +146,39 @@ async def send_message(message, text, buttons=None, block=True, photo=None, **kw
         return str(e)
 
 
-async def edit_message(message, text, buttons=None, block=True):
+async def edit_message(message, text, buttons=None, block=True, photo=None):
     try:
+        if message.media:
+            if photo:
+                if photo == "IMAGES":
+                    if Config.USE_IMAGES and Config.IMAGES:
+                        photo = choice(Config.IMAGES)
+                    else:
+                        photo = None
+                if photo:
+                    try:
+                        return await message.edit_media(
+                            InputMediaPhoto(photo, text), reply_markup=buttons
+                        )
+                    except (
+                        PhotoInvalidDimensions,
+                        WebpageCurlFailed,
+                        WebpageMediaEmpty,
+                        MediaEmpty,
+                    ):
+                        des_dir = await download_image_url(photo)
+                        if des_dir:
+                            msg = await message.edit_media(
+                                InputMediaPhoto(des_dir, text), reply_markup=buttons
+                            )
+                            from aiofiles.os import remove as aioremove
+
+                            await aioremove(des_dir)
+                            return msg
+                        return await message.edit_caption(
+                            caption=text, reply_markup=buttons
+                        )
+            return await message.edit_caption(caption=text, reply_markup=buttons)
         return await message.edit(
             text=text,
             disable_web_page_preview=True,
@@ -157,13 +188,13 @@ async def edit_message(message, text, buttons=None, block=True):
         pass
     except ReplyMarkupInvalid as rmi:
         LOGGER.warning(str(rmi))
-        return await edit_message(message, text, None)
+        return await edit_message(message, text, None, block, photo)
     except FloodWait as f:
         LOGGER.warning(str(f))
         if not block:
             return str(f)
         await sleep(f.value * 1.2)
-        return await edit_message(message, text, buttons)
+        return await edit_message(message, text, buttons, block, photo)
     except Exception as e:
         LOGGER.error(str(e), exc_info=True)
         return str(e)
@@ -353,7 +384,7 @@ async def update_status_message(sid, force=False):
             return
         if text != status_dict[sid]["message"].text:
             message = await edit_message(
-                status_dict[sid]["message"], text, buttons, block=False
+                status_dict[sid]["message"], text, buttons, block=False, photo="IMAGES"
             )
             if isinstance(message, str):
                 if message.startswith("Telegram says: [40"):
