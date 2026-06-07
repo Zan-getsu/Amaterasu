@@ -7,7 +7,6 @@ from asyncio import (
 from hashlib import sha256
 from hmac import new as hmac_new
 from secrets import token_bytes
-from time import time
 from pyrogram.enums import ButtonStyle
 from asyncio.subprocess import PIPE
 from concurrent.futures import ThreadPoolExecutor
@@ -28,11 +27,10 @@ from .help_messages import (
 from .telegraph_helper import telegraph
 
 _SERVICE_PWD_SALT = b"wzmlx_v3_service_pwd_salt"
-_PIN_TOKEN_SALT = b"wzmlx_v3_pin_token_salt"
-_PIN_TOKEN_TTL = 600
-_PIN_ALLOWED_CHARS = frozenset(
-    "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
-)
+_PIN_SALT = b"wzmlx_v3_pin_salt"
+_PIN_LEN = 4
+_PIN_RATE_LIMIT = 5
+_PIN_RATE_WINDOW = 60
 
 _cached_secret_bytes = None
 
@@ -61,45 +59,32 @@ def derive_service_password(bot_id, service):
     return raw[:20] + raw[-4:]
 
 
-def derive_pin_token(gid, bot_id, issued_at=None):
+def derive_pin(gid, bot_id):
     if not gid:
         return None
-    issued = int(issued_at if issued_at is not None else time())
-    payload = f"{gid}|{bot_id}|{issued}"
-    secret = _shared_secret()
+    if not bot_id:
+        bot_id = "0"
     sig = hmac_new(
-        _PIN_TOKEN_SALT,
-        payload.encode("utf-8"),
+        _PIN_SALT,
+        f"{gid}|{bot_id}".encode("utf-8"),
         sha256,
-    ).hexdigest()[:24]
-    return f"{issued}.{sig}"
+    ).hexdigest()
+    digits = "".join(c for c in sig if c.isdigit())[:_PIN_LEN]
+    if len(digits) < _PIN_LEN:
+        digits = (digits + sig).ljust(_PIN_LEN, "0")[:_PIN_LEN]
+    return digits
 
 
-def verify_pin_token(gid, token, bot_id):
-    if not gid or not token:
+def verify_pin(gid, pin, bot_id):
+    if not gid or not pin:
         return False
-    try:
-        issued_str, sig = token.split(".", 1)
-        issued = int(issued_str)
-    except (ValueError, AttributeError):
+    if not pin.isdigit() or len(pin) != _PIN_LEN:
         return False
-    if not all(c in _PIN_ALLOWED_CHARS for c in sig):
+    expected = derive_pin(gid, bot_id)
+    if not expected:
         return False
-    if abs(int(time()) - issued) > _PIN_TOKEN_TTL:
-        return False
-    expected = hmac_new(
-        _PIN_TOKEN_SALT,
-        f"{gid}|{bot_id}|{issued}".encode("utf-8"),
-        sha256,
-    ).hexdigest()[:24]
-    return hmac_new(
-        _PIN_TOKEN_SALT,
-        expected.encode("utf-8"),
-        sha256,
-    ).hexdigest() == hmac_new(
-        _PIN_TOKEN_SALT,
-        sig.encode("utf-8"),
-        sha256,
+    return hmac_new(_PIN_SALT, expected.encode(), sha256).hexdigest() == hmac_new(
+        _PIN_SALT, pin.encode(), sha256
     ).hexdigest()
 
 COMMAND_USAGE = {}

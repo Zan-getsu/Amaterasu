@@ -137,17 +137,15 @@ async def load_settings():
             is_changed = False
             for key, value in config_file.items():
                 if key not in old_config or old_config[key] != value:
-                    config_dict[key] = value
                     is_changed = True
-            
+                    if value:
+                        config_dict[key] = value
+
             if is_changed and not config_file.get("BASE_URL"):
                 for key in ["PORT", "BASE_URL_PORT", "FQDN", "HAS_SSL", "NO_PORT"]:
                     if old_config.get(key) != config_file.get(key):
                         config_dict["BASE_URL"] = ""
                         break
-
-            config_file.update(config_dict)
-            config_dict = config_file
             if config_dict:
                 Config.load_dict(config_dict)
         else:

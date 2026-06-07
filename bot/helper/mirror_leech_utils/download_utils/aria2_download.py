@@ -97,7 +97,7 @@ async def add_aria2_download(
         if not add_to_queue:
             await TorrentManager.aria2.forcePause(gid)
         SBUTTONS = bt_selection_buttons(gid)
-        msg = "Your download paused. Choose files then press Done Selecting button to start downloading."
+        msg = "<b>Download Paused!</b>\n\n<i>Select your files &amp; press <b>Done Selecting</b> to start.</i>"
         await send_message(listener.message, msg, SBUTTONS)
 
     if add_to_queue:

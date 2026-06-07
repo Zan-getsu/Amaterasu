@@ -8,12 +8,13 @@ from ..helper.telegram_helper.message_utils import send_message
 
 def _parse_time(time_str):
     time_str = time_str.strip().lower()
-    if time_str.endswith("d"):
-        return int(time_str[:-1]) * 86400
-    if time_str.endswith("h"):
-        return int(time_str[:-1]) * 3600
-    if time_str.endswith("m"):
-        return int(time_str[:-1]) * 60
+    mult = {"d": 86400, "h": 3600, "m": 60}
+    for suffix, factor in mult.items():
+        if time_str.endswith(suffix):
+            try:
+                return int(time_str[: -len(suffix)]) * factor
+            except ValueError:
+                return None
     return None
 
 
@@ -163,23 +164,30 @@ async def add_blacklist(_, message):
 
     i = 1
     while i < len(msg):
-        if msg[i].lower() == "-t" and i + 1 < len(msg):
+        arg = msg[i].lower()
+        if arg.startswith("-t") and len(arg) > 2:
+            time_str = arg[2:]
+            i += 1
+        elif arg == "-t" and i + 1 < len(msg):
             time_str = msg[i + 1]
             i += 2
         else:
-            id_ = int(msg[i])
+            try:
+                id_ = int(msg[i])
+            except ValueError:
+                pass
             i += 1
 
     if id_ is None and message.reply_to_message:
         id_ = (message.reply_to_message.from_user or message.reply_to_message.sender_chat).id
 
     if id_ is None:
-        help_msg = """⌬ <b><u>BlackList Usage</u></b>
+        help_msg = f"""⌬ <b><u>BlackList Usage</u></b>
 │
 ┠ <b>Permanent:</b> <code>/bl {{user_id}}</code>
 ┠ <b>Temporary:</b> <code>/bl {{user_id}} -t 1d</code>
 ┠ <b>Reply:</b> <code>/bl -t 2h</code> <i>(reply to user)</i>
-┖ <b>Time Format:</b> <code>1d</code> | <code>2h</code> | <code>30m</code>"""
+┖ <b>Time Format:</b> <code>3d</code> | <code>12h</code> | <code>20m</code> <i>(any digit)</i>"""
         return await send_message(message, help_msg)
 
     if id_ in user_data and _get_blacklist_info(user_data[id_].get("BLACKLIST"))[0]:

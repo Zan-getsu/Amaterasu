@@ -100,7 +100,7 @@ async def add_qb_torrent(listener, path, ratio, seed_time):
 
         if Config.BASE_URL and listener.select:
             if listener.link.startswith("magnet:"):
-                metamsg = "Downloading Metadata, wait then you can select files. Use torrent file to avoid this wait."
+                metamsg = "<b>Fetching Metadata...</b>\n\n<i>Hold tight! You can select files once it's done.</i>\n\n<b>💡 Tip:</b> Use <code>.torrent</code> file instead to skip this wait."
                 meta = await send_message(listener.message, metamsg)
                 while True:
                     tor_info = await TorrentManager.qbittorrent.torrents.info(
@@ -126,7 +126,7 @@ async def add_qb_torrent(listener, path, ratio, seed_time):
             if not add_to_queue:
                 await TorrentManager.qbittorrent.torrents.stop([ext_hash])
             SBUTTONS = bt_selection_buttons(ext_hash)
-            msg = "Your download paused. Choose files then press Done Selecting button to start downloading."
+            msg = "<b>Download Paused!</b>\n\n<i>Select your files &amp; press <b>Done Selecting</b> to start !</i>"
             await send_message(listener.message, msg, SBUTTONS)
         elif listener.multi <= 1:
             await send_status_message(listener.message)

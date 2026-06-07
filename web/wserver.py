@@ -25,12 +25,13 @@ getLogger("aiohttp").setLevel(WARNING)
 
 _SAFE_PATH = re_compile(r"^[A-Za-z0-9_./-]+$")
 _SAFE_GID = re_compile(r"^[A-Za-z0-9_-]{1,64}$")
+_SAFE_PIN = re_compile(r"^\d{4}$")
 _SERVICE_PWD_SALT = b"wzmlx_v3_service_pwd_salt"
-_PIN_TOKEN_SALT = b"wzmlx_v3_pin_token_salt"
-_PIN_TOKEN_TTL = 600
-_PIN_ALLOWED_CHARS = frozenset(
-    "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
-)
+_PIN_SALT = b"wzmlx_v3_pin_salt"
+_PIN_LEN = 4
+_PIN_RATE_LIMIT = 5
+_PIN_RATE_WINDOW = 60
+_pin_attempts: dict = {}
 
 _cached_secret_bytes = None
 
@@ -71,28 +72,61 @@ def _service_pwd(service):
     return raw[:20] + raw[-4:]
 
 
-def _verify_pin_token(gid, token):
-    if not gid or not token:
-        return False
-    from time import time
-    from hmac import new as hmac_new
+def _derive_pin(gid):
     from hashlib import sha256
-    try:
-        issued_str, sig = token.split(".", 1)
-        issued = int(issued_str)
-    except (ValueError, AttributeError):
-        return False
-    if not sig or not all(c in _PIN_ALLOWED_CHARS for c in sig):
-        return False
-    if abs(int(time()) - issued) > _PIN_TOKEN_TTL:
-        return False
+    from hmac import new as hmac_new
     if not _WEB_SECRET:
+        return None
+    sig = hmac_new(
+        _PIN_SALT,
+        f"{gid}|{_BOT_ID}".encode("utf-8"),
+        sha256,
+    ).hexdigest()
+    digits = "".join(c for c in sig if c.isdigit())[:_PIN_LEN]
+    if len(digits) < _PIN_LEN:
+        digits = (digits + sig).ljust(_PIN_LEN, "0")[:_PIN_LEN]
+    return digits
+
+
+def _pin_rate_limited(gid):
+    from time import time
+    now = time()
+    cutoff = now - _PIN_RATE_WINDOW
+    attempts = _pin_attempts.get(gid, [])
+    attempts = [t for t in attempts if t > cutoff]
+    if attempts:
+        _pin_attempts[gid] = attempts
+    else:
+        _pin_attempts.pop(gid, None)
+    if len(_pin_attempts) > 10000:
+        stale = [
+            g
+            for g, ts in _pin_attempts.items()
+            if not ts or (ts and ts[-1] < cutoff)
+        ]
+        for g in stale:
+            _pin_attempts.pop(g, None)
+    return len(attempts) >= _PIN_RATE_LIMIT
+
+
+def _record_pin_attempt(gid):
+    from time import time
+    _pin_attempts.setdefault(gid, []).append(time())
+
+
+def _verify_pin(gid, pin):
+    from hashlib import sha256
+    from hmac import new as hmac_new
+    if not gid or not pin:
         return False
-    payload = f"{gid}|{_BOT_ID}|{issued}".encode("utf-8")
-    expected = hmac_new(_PIN_TOKEN_SALT, payload, sha256).hexdigest()[:24]
-    a = hmac_new(_PIN_TOKEN_SALT, expected.encode("utf-8"), sha256).hexdigest()
-    b = hmac_new(_PIN_TOKEN_SALT, sig.encode("utf-8"), sha256).hexdigest()
-    return a == b
+    if not _SAFE_PIN.match(pin):
+        return False
+    expected = _derive_pin(gid)
+    if not expected:
+        return False
+    return hmac_new(_PIN_SALT, expected.encode(), sha256).hexdigest() == hmac_new(
+        _PIN_SALT, pin.encode(), sha256
+    ).hexdigest()
 
 
 aria2 = None
@@ -318,7 +352,19 @@ async def handle_torrent(request: Request):
             }
         )
 
+    if _pin_rate_limited(gid):
+        return JSONResponse(
+            {
+                "files": [],
+                "engine": "",
+                "error": "Too many attempts",
+                "message": f"Too many PIN attempts. Try again in {_PIN_RATE_WINDOW}s.",
+            },
+            status_code=429,
+        )
+
     if not verify_short_token(pin, _web_secret(), "torrent-select", gid):
+        _record_pin_attempt(gid)
         return JSONResponse(
             {
                 "files": [],
@@ -327,6 +373,7 @@ async def handle_torrent(request: Request):
                 "message": "The PIN you entered is incorrect",
             }
         )
+    _pin_attempts.pop(gid, None)
 
     if request.method == "POST":
         if not (mode := params.get("mode")):
