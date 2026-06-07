@@ -526,12 +526,30 @@ class MegaAppListener(MegaListener):
                 if self._upload_mode and self._bytes_transferred == 0 and self._size:
                     self._bytes_transferred = self._size
                     self._last_speed_time = time()
-                if self._upload_mode and self._uploaded_node_handle and transfer.getType() == MegaTransfer.TYPE_UPLOAD:
+                if self._upload_mode and transfer.getType() == MegaTransfer.TYPE_UPLOAD:
                     self._export_done.clear()
                     try:
-                        node = api.getNodeByHandle(self._uploaded_node_handle)
+                        node = None
+                        handle = self._uploaded_node_handle
+                        if handle:
+                            node = api.getNodeByHandle(handle)
+                        if not node:
+                            parent = api.getNodeByHandle(transfer.getParentHandle())
+                            if parent:
+                                name = transfer.getFileName()
+                                LOGGER.info(f"onTransferFinish: searching parent for '{name}'")
+                                children = api.getChildren(parent)
+                                if children:
+                                    for i in range(children.size()):
+                                        child = children.get(i)
+                                        try:
+                                            if child.getName() == name:
+                                                node = child
+                                                break
+                                        except Exception:
+                                            pass
                         if node:
-                            api.exportNode(node, 0, False, False, self)
+                            api.exportNode(node, 0, False, False, None)
                         else:
                             LOGGER.warning("onTransferFinish: node not found for export")
                             self._export_done.set()
