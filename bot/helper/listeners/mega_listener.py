@@ -147,10 +147,7 @@ class AsyncMega:
         )
 
     async def startDownload(self, node, localPath, name, listener, startFirst, cancelToken, collisionCheck, collisionResolution, undelete):
-        self.continue_event.clear()
         self._transfer_event.clear()
-        self._expected_request_type = -1
-        self._expected_request_source = "download"
 
         ml = getattr(self, "_mega_listener", None)
         if ml:
@@ -158,6 +155,10 @@ class AsyncMega:
             if not ml._name:
                 ml._name = name
             ml._target_handle = ml._handle
+            ml._bytes_transferred = 0
+            ml._total_downloaded_bytes = 0
+            ml._speed = 0
+            ml._smoothed_speed = 0
             LOGGER.info(f"startDownload: name='{ml._name}', target_handle={ml._target_handle}, is_folder={self._download_is_folder}")
 
         await sync_to_async(
@@ -172,16 +173,9 @@ class AsyncMega:
             collisionResolution,
             undelete,
         )
-        try:
-            await wait_for(self.continue_event.wait(), timeout=_REQUEST_TIMEOUT_SECONDS)
-        except AsyncTimeoutError:
-            pass
 
     async def startUpload(self, localPath, parentNode, customName, cancelToken, mtime=-1):
-        self.continue_event.clear()
         self._transfer_event.clear()
-        self._expected_request_type = -1
-        self._expected_request_source = "upload"
 
         ml = getattr(self, "_mega_listener", None)
         if ml:
@@ -206,10 +200,6 @@ class AsyncMega:
             cancelToken,
             None,
         )
-        try:
-            await wait_for(self.continue_event.wait(), timeout=_REQUEST_TIMEOUT_SECONDS)
-        except AsyncTimeoutError:
-            pass
 
     def __getattr__(self, name):
         attr = getattr(self.api, name)
