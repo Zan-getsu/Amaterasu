@@ -15,7 +15,7 @@ from urllib.parse import unquote, urlparse
 
 from httpx import AsyncClient
 
-from ... import bot_loop, user_data
+from ... import LOGGER, bot_loop, user_data
 from ...core.config_manager import Config
 from ..telegram_helper.button_build import ButtonMaker
 from web.security import make_short_token
@@ -412,3 +412,54 @@ def safe_int(value, default=0):
         return int(value)
     except (ValueError, TypeError):
         return default
+
+
+async def search_images():
+    if not Config.IMG_SEARCH:
+        return
+    if not Config.USE_IMAGES:
+        return
+    try:
+        from bs4 import BeautifulSoup
+
+        query_list = (
+            Config.IMG_SEARCH.replace("'", "").replace('"', "").split(",")
+        )
+        total_pages = Config.IMG_PAGE or 1
+        base_url = "https://www.wallpaperflare.com/search"
+        async with AsyncClient() as client:
+            for query in query_list:
+                query = query.strip().replace(" ", "+")
+                if not query:
+                    continue
+                for page in range(1, total_pages + 1):
+                    url = f"{base_url}?wallpaper={query}&width=1280&height=720&page={page}"
+                    try:
+                        resp = await client.get(url, follow_redirects=True)
+                        soup = BeautifulSoup(resp.text, "html.parser")
+                        imgs = soup.select(
+                            'img[data-src^="https://c4.wallpaperflare.com/wallpaper"]'
+                        )
+                        if not imgs:
+                            LOGGER.info(
+                                "Maybe Site is Blocked on your Server, Add Images Manually !!"
+                            )
+                        for img in imgs:
+                            img_url = img["data-src"]
+                            if img_url not in Config.IMAGES:
+                                Config.IMAGES.append(img_url)
+                    except Exception as e:
+                        LOGGER.error(f"Error fetching images: {e}")
+        if Config.IMAGES:
+            Config.STATUS_LIMIT = 2
+        from ..ext_utils.db_handler import database
+
+        if Config.DATABASE_URL:
+            await database.update_config(
+                {
+                    "IMAGES": Config.IMAGES,
+                    "STATUS_LIMIT": Config.STATUS_LIMIT,
+                }
+            )
+    except Exception as e:
+        LOGGER.error(f"An error occurred in search_images: {e}")

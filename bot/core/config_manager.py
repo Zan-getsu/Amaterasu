@@ -42,6 +42,9 @@ class Config:
     INSTADL_API = ""
     IMDB_TEMPLATE = ""
     IMAGES = []
+    IMG_SEARCH = ""
+    IMG_PAGE = 1
+    USE_IMAGES = False
     INCOMPLETE_TASK_NOTIFIER = False
     INDEX_URL = ""
     IS_TEAM_DRIVE = False

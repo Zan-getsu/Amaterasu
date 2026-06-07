@@ -29,6 +29,10 @@ async def main():
 
     await load_settings()
 
+    from .helper.telegram_helper.bot_commands import BotCommands
+
+    BotCommands.refresh_commands()
+
     try:
         tz = timezone(Config.TIMEZONE)
     except Exception:
@@ -59,6 +63,7 @@ async def main():
         update_nzb_options(),
     )
     from .core.jdownloader_booter import jdownloader
+    from .helper.ext_utils.bot_utils import search_images
     from .helper.ext_utils.files_utils import clean_all
     from .helper.ext_utils.telegraph_helper import telegraph
     from .helper.mirror_leech_utils.rclone_utils.serve import rclone_serve_booter
@@ -75,6 +80,7 @@ async def main():
         get_packages_version(),
         telegraph.create_account(),
         rclone_serve_booter(),
+        search_images(),
     )
 
 

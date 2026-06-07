@@ -1,4 +1,5 @@
 from asyncio import sleep, gather
+from random import choice
 from re import match as re_match
 from time import time
 
@@ -33,6 +34,28 @@ async def send_message(message, text, buttons=None, block=True, photo=None, **kw
     try:
         if photo:
             try:
+                if photo == "IMAGES":
+                    if Config.USE_IMAGES and Config.IMAGES:
+                        photo = choice(Config.IMAGES)
+                    else:
+                        photo = None
+                if photo is None:
+                    if isinstance(message, int):
+                        return await TgClient.bot.send_message(
+                            chat_id=message,
+                            text=text,
+                            disable_web_page_preview=True,
+                            disable_notification=True,
+                            reply_markup=buttons,
+                        )
+                    return await message.reply(
+                        text=text,
+                        quote=True,
+                        disable_web_page_preview=True,
+                        disable_notification=True,
+                        reply_markup=buttons,
+                        **kwargs,
+                    )
                 if isinstance(message, int):
                     return await TgClient.bot.send_photo(
                         chat_id=message,
@@ -352,7 +375,7 @@ async def send_status_message(msg, user_id=0):
                     del intervals["status"][sid]
                 return
             old_message = status_dict[sid]["message"]
-            message = await send_message(msg, text, buttons, block=False)
+            message = await send_message(msg, text, buttons, block=False, photo="IMAGES")
             if isinstance(message, str):
                 LOGGER.error(
                     f"Status with id: {sid} haven't been sent. Error: {message}"
@@ -365,7 +388,7 @@ async def send_status_message(msg, user_id=0):
             text, buttons = await get_readable_message(sid, is_user)
             if text is None:
                 return
-            message = await send_message(msg, text, buttons, block=False)
+            message = await send_message(msg, text, buttons, block=False, photo="IMAGES")
             if isinstance(message, str):
                 LOGGER.error(
                     f"Status with id: {sid} haven't been sent. Error: {message}"

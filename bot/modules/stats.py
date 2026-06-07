@@ -235,7 +235,7 @@ async def get_stats(event, key="home"):
 @new_task
 async def bot_stats(_, message):
     msg, btns = await get_stats(message)
-    await send_message(message, msg, btns)
+    await send_message(message, msg, btns, photo="IMAGES")
 
 
 @new_task

@@ -90,18 +90,20 @@ async def start(_, message):
         start_string = lang.START_MSG.format(
             cmd=BotCommands.HelpCommand[0],
         )
-        await send_message(message, start_string, reply_markup)
+        await send_message(message, start_string, reply_markup, photo="IMAGES")
     elif Config.BOT_PM:
         await send_message(
             message,
             "<i>Now, Bot will send you all your files and links here. Start Using Now...</i>",
             reply_markup,
+            photo="IMAGES",
         )
     else:
         await send_message(
             message,
             "<i>Bot can mirror/leech from links|tgfiles|torrents|nzb|rclone-cloud to any rclone cloud, Google Drive or to telegram.\n\n⚠️ You Are not authorized user! Deploy your own Amaterasu bot</i>",
             reply_markup,
+            photo="IMAGES",
         )
     await database.set_pm_users(userid)
 

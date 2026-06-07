@@ -39,4 +39,4 @@ async def count_node(_, message):
             "Send Gdrive link along with command or by replying to the link by command"
         )
 
-    await send_message(message, msg)
+    await send_message(message, msg, photo="IMAGES")

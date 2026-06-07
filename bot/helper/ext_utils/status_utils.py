@@ -198,10 +198,19 @@ def speed_string_to_bytes(size_text: str):
 def get_progress_bar_string(pct):
     pct = float(str(pct).strip("%"))
     p = min(max(pct, 0), 100)
-    cFull = int(p // 10)
-    p_str = "█" * cFull
-    p_str += "░" * (10 - cFull)
-    return p_str
+    slots = 12
+    exact = p * slots / 100
+    full = int(exact)
+    if full >= slots:
+        p_str = "■" * slots
+        return f"[{p_str}]"
+
+    p_str = "■" * full
+    partial = int((exact - full) * 7)
+    if partial:
+        p_str += ["▤", "▥", "▦", "▧", "▨", "▩"][partial - 1]
+    p_str += "□" * (slots - len(p_str))
+    return f"[{p_str}]"
 
 
 async def get_readable_message(sid, is_user, page_no=1, status="All", page_step=1):
