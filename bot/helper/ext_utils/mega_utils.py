@@ -1,4 +1,4 @@
-from asyncio import Event, TimeoutError as AsyncTimeoutError, wait_for
+from asyncio import TimeoutError as AsyncTimeoutError, get_running_loop, wait_for
 from os import path as ospath
 from secrets import token_hex
 
@@ -13,29 +13,49 @@ from .status_utils import get_readable_file_size
 
 class MegaAccountListener(MegaListener):
     def __init__(self):
-        self.event = Event()
+        self._fut = None
         self.result = None
         self.error = None
         self.root_handle = None
+        self.expected_type = None
         super().__init__()
 
     def onRequestFinish(self, api, request, error):
+        req_type = request.getType()
+        if req_type != self.expected_type:
+            return
         err_code = error.getErrorCode() if error else MegaError.API_OK
         if err_code != MegaError.API_OK:
             self.error = error.toString()
-        else:
-            req_type = request.getType()
-            if req_type == MegaRequest.TYPE_ACCOUNT_DETAILS:
-                self.result = request.getMegaAccountDetails()
-            elif req_type == MegaRequest.TYPE_FETCH_NODES:
-                self.result = True
-                try:
-                    self.root_handle = api.getRootNode().getHandle()
-                except Exception:
-                    pass
-            elif req_type == MegaRequest.TYPE_LOGIN:
-                self.result = True
-        self.event.set()
+        elif req_type == MegaRequest.TYPE_ACCOUNT_DETAILS:
+            ad = request.getMegaAccountDetails()
+            info = {
+                "storage_max": ad.getStorageMax(),
+                "storage_used": ad.getStorageUsed(),
+                "transfer_max": ad.getTransferMax(),
+                "transfer_used": ad.getTransferUsed(),
+                "pro_level": ad.getProLevel(),
+                "pro_expiration": ad.getProExpiration(),
+            }
+            try:
+                root_handle = api.getRootNode().getHandle()
+                info["num_files"] = ad.getNumFiles(root_handle)
+                info["num_folders"] = ad.getNumFolders(root_handle)
+                self.root_handle = root_handle
+            except Exception:
+                pass
+            self.result = info
+        elif req_type == MegaRequest.TYPE_FETCH_NODES:
+            self.result = True
+            try:
+                self.root_handle = api.getRootNode().getHandle()
+            except Exception:
+                pass
+        elif req_type == MegaRequest.TYPE_LOGIN:
+            self.result = True
+        f = self._fut
+        if f and not f.done():
+            self._loop.call_soon_threadsafe(f.set_result, True)
 
     def onRequestTemporaryError(self, api, request, error):
         pass
@@ -56,8 +76,10 @@ class MegaAccountListener(MegaListener):
         pass
 
     async def wait(self):
+        self._loop = get_running_loop()
+        self._fut = self._loop.create_future()
         try:
-            await wait_for(self.event.wait(), timeout=120)
+            await wait_for(self._fut, timeout=120)
         except AsyncTimeoutError:
             self.error = "Request timed out after 120s"
 
@@ -78,34 +100,34 @@ async def get_mega_account_info(email: str, password: str) -> str:
     api.addListener(listener)
 
     try:
-        listener.event.clear()
+        listener.expected_type = MegaRequest.TYPE_LOGIN
         await sync_to_async(api.login, email, password)
         await listener.wait()
         if listener.error:
             return f"⌬ <b>Mega Account Info</b>\n│\n┖ Login failed: {listener.error}"
 
-        listener.event.clear()
+        listener.expected_type = MegaRequest.TYPE_FETCH_NODES
         await sync_to_async(api.fetchNodes)
         await listener.wait()
         if listener.error:
             return f"⌬ <b>Mega Account Info</b>\n│\n┖ Fetch nodes failed: {listener.error}"
 
-        listener.event.clear()
+        listener.expected_type = MegaRequest.TYPE_ACCOUNT_DETAILS
         await sync_to_async(api.getAccountDetails)
         await listener.wait()
         if listener.error:
             return f"⌬ <b>Mega Account Info</b>\n│\n┖ Account details failed: {listener.error}"
 
-        details = listener.result
-        if not details:
+        info = listener.result
+        if not info:
             return "⌬ <b>Mega Account Info</b>\n│\n┖ No account details available."
 
-        storage_max = details.getStorageMax()
-        storage_used = details.getStorageUsed()
-        transfer_max = details.getTransferMax()
-        transfer_used = details.getTransferUsed()
-        pro_level = details.getProLevel()
-        pro_expiration = details.getProExpiration()
+        storage_max = info["storage_max"]
+        storage_used = info["storage_used"]
+        transfer_max = info["transfer_max"]
+        transfer_used = info["transfer_used"]
+        pro_level = info["pro_level"]
+        pro_expiration = info["pro_expiration"]
 
         storage_pct = round(storage_used / max(storage_max, 1) * 100, 2)
         transfer_pct = round(transfer_used / max(transfer_max, 1) * 100, 2)
@@ -133,8 +155,8 @@ async def get_mega_account_info(email: str, password: str) -> str:
 
         if listener.root_handle is not None:
             try:
-                num_files = details.getNumFiles(listener.root_handle)
-                num_folders = details.getNumFolders(listener.root_handle)
+                num_files = info["num_files"]
+                num_folders = info["num_folders"]
                 text += (
                     f"┃\n"
                     f"┠ <b>Files</b> → {num_files}\n"
