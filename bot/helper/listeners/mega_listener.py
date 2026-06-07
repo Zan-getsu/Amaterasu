@@ -1,6 +1,6 @@
 from asyncio import Event, TimeoutError as AsyncTimeoutError, wait_for
 from time import time
-from re import rematch
+from re import match as rematch
 
 from mega import MegaApi, MegaError, MegaListener, MegaRequest, MegaTransfer
 
