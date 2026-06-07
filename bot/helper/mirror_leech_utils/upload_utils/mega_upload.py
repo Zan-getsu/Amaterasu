@@ -1,4 +1,5 @@
 import os
+from asyncio import TimeoutError as AsyncTimeoutError, wait_for
 from contextlib import suppress
 from mimetypes import guess_type
 from secrets import token_hex
@@ -81,45 +82,16 @@ async def _upload_file(
     node_handle = getattr(mega_listener, "_uploaded_node_handle", None)
     LOGGER.info(f"MegaUpload: _uploaded_node_handle={node_handle}")
 
-    uploaded_node = None
     if node_handle:
+        LOGGER.info("MegaUpload: waiting for export (started in onTransferFinish)...")
         try:
-            uploaded_node = await sync_to_async(
-                async_api.api.getNodeByHandle, node_handle,
-            )
-            LOGGER.info(f"MegaUpload: getNodeByHandle returned {uploaded_node}")
-        except Exception as e:
-            LOGGER.warning(f"MegaUpload: getNodeByHandle error: {e}")
-
-    if not uploaded_node:
-        LOGGER.info(f"MegaUpload: searching parent for '{custom_name}'")
-        uploaded_node = await sync_to_async(
-            _find_node_by_name, async_api.api, parent_node, custom_name,
-        )
-        if uploaded_node:
-            LOGGER.info(f"MegaUpload: found node by name search, handle={uploaded_node.getHandle()}")
-        else:
-            LOGGER.info("MegaUpload: not found in cache, refreshing nodes...")
-            await async_api.fetchNodes()
-            uploaded_node = await sync_to_async(
-                _find_node_by_name, async_api.api, parent_node, custom_name,
-            )
-            if uploaded_node:
-                LOGGER.info(f"MegaUpload: found node after fetchNodes refresh, handle={uploaded_node.getHandle()}")
-            else:
-                LOGGER.warning(f"MegaUpload: '{custom_name}' not found after fetchNodes refresh")
-
-    if uploaded_node:
-        try:
-            link = await async_api.export_node(uploaded_node)
-            if link:
-                LOGGER.info(f"MegaUpload: generated link={link}")
-            else:
-                LOGGER.warning("MegaUpload: export_node returned no link")
-        except Exception as e:
-            LOGGER.error(f"MegaUpload: link generation failed: {e}")
+            await wait_for(mega_listener._export_done.wait(), timeout=60)
+            link = getattr(mega_listener, "_export_link", None)
+            LOGGER.info(f"MegaUpload: export result link={link}")
+        except AsyncTimeoutError:
+            LOGGER.warning("MegaUpload: export timed out after 60s")
     else:
-        LOGGER.warning("MegaUpload: no node found for export (link will be None)")
+        LOGGER.warning("MegaUpload: no handle from transfer, link will be None")
 
     LOGGER.info(f"MegaUpload: completed {custom_name}")
     return True, link

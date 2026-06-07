@@ -70,6 +70,7 @@ class AsyncMega:
         self._folder_listener = None
         self.continue_event = Event()
         self._transfer_event = Event()
+        self._export_done = Event()
         self._expected_request_type = None
         self._expected_request_source = None
         self._download_is_folder = False
@@ -269,6 +270,7 @@ class MegaAppListener(MegaListener):
         self._async_api = async_api
         self.continue_event = async_api.continue_event
         self._transfer_event = async_api._transfer_event
+        self._export_done = async_api._export_done
         self.listener = listener
         self.is_cancelled = False
         self.error = None
@@ -440,6 +442,7 @@ class MegaAppListener(MegaListener):
                     LOGGER.info(f"TYPE_EXPORT: link={self._export_link}")
                 except Exception as e:
                     LOGGER.warning(f"TYPE_EXPORT: getLink failed: {e}")
+                self._export_done.set()
 
             LOGGER.info(f"onRequestFinish: after setting node, self.node={self.node is not None}, public_node={self.public_node is not None}")
 
@@ -523,6 +526,18 @@ class MegaAppListener(MegaListener):
                 if self._upload_mode and self._bytes_transferred == 0 and self._size:
                     self._bytes_transferred = self._size
                     self._last_speed_time = time()
+                if self._upload_mode and self._uploaded_node_handle and transfer.getType() == MegaTransfer.TYPE_UPLOAD:
+                    self._export_done.clear()
+                    try:
+                        node = api.getNodeByHandle(self._uploaded_node_handle)
+                        if node:
+                            api.exportNode(node, 0, False, False, self)
+                        else:
+                            LOGGER.warning("onTransferFinish: node not found for export")
+                            self._export_done.set()
+                    except Exception as e:
+                        LOGGER.error(f"onTransferFinish: export failed: {e}")
+                        self._export_done.set()
             self._set_transfer_event()
         except Exception as e:
             LOGGER.error(f"onTransferFinish exception: {e}")
