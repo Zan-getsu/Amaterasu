@@ -12,6 +12,7 @@ from pyrogram.errors import (
     ReplyMarkupInvalid,
     PhotoInvalidDimensions,
     WebpageCurlFailed,
+    WebpageMediaEmpty,
     MediaEmpty,
     MediaCaptionTooLong,
     EntityBoundsInvalid,
@@ -88,7 +89,12 @@ async def send_message(message, text, buttons=None, block=True, photo=None, **kw
                     block,
                     photo,
                 )
-            except (PhotoInvalidDimensions, WebpageCurlFailed, MediaEmpty):
+            except (
+                PhotoInvalidDimensions,
+                WebpageCurlFailed,
+                WebpageMediaEmpty,
+                MediaEmpty,
+            ):
                 try:
                     des_dir = await download_image_url(photo)
                     if des_dir:
