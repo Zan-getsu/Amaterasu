@@ -30,6 +30,22 @@ async def _cleanup_dir(directory: str):
         await rmtree(directory, ignore_errors=True)
 
 
+def _find_node_by_name(api, parent_node, name):
+    try:
+        children = api.getChildren(parent_node)
+        if children:
+            for i in range(children.size()):
+                child = children.get(i)
+                try:
+                    if child.getName() == name:
+                        return child
+                except Exception:
+                    pass
+    except Exception as e:
+        LOGGER.warning(f"_find_node_by_name error: {e}")
+    return None
+
+
 async def _upload_file(
     async_api, mega_listener, file_path, parent_node, custom_name
 ):
@@ -76,25 +92,22 @@ async def _upload_file(
             LOGGER.warning(f"MegaUpload: getNodeByHandle error: {e}")
 
     if not uploaded_node:
-        try:
-            LOGGER.info(f"MegaUpload: searching parent for '{custom_name}'")
-            children = await sync_to_async(
-                async_api.api.getChildren, parent_node,
+        LOGGER.info(f"MegaUpload: searching parent for '{custom_name}'")
+        uploaded_node = await sync_to_async(
+            _find_node_by_name, async_api.api, parent_node, custom_name,
+        )
+        if uploaded_node:
+            LOGGER.info(f"MegaUpload: found node by name search, handle={uploaded_node.getHandle()}")
+        else:
+            LOGGER.info("MegaUpload: not found in cache, refreshing nodes...")
+            await async_api.fetchNodes()
+            uploaded_node = await sync_to_async(
+                _find_node_by_name, async_api.api, parent_node, custom_name,
             )
-            if children:
-                for i in range(children.size()):
-                    child = children.get(i)
-                    try:
-                        if child.getName() == custom_name:
-                            uploaded_node = child
-                            LOGGER.info(f"MegaUpload: found node by name search, handle={uploaded_node.getHandle()}")
-                            break
-                    except Exception:
-                        pass
-            if not uploaded_node:
-                LOGGER.warning(f"MegaUpload: '{custom_name}' not found among {children.size() if children else 0} children")
-        except Exception as e:
-            LOGGER.warning(f"MegaUpload: parent search error: {e}")
+            if uploaded_node:
+                LOGGER.info(f"MegaUpload: found node after fetchNodes refresh, handle={uploaded_node.getHandle()}")
+            else:
+                LOGGER.warning(f"MegaUpload: '{custom_name}' not found after fetchNodes refresh")
 
     if uploaded_node:
         try:

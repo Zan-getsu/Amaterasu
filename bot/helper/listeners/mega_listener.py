@@ -520,6 +520,9 @@ class MegaAppListener(MegaListener):
                     LOGGER.info(f"onTransferFinish (upload): _uploaded_node_handle={self._uploaded_node_handle}")
                 except Exception as e:
                     LOGGER.warning(f"onTransferFinish: getNodeHandle failed: {e}")
+                if self._upload_mode and self._bytes_transferred == 0 and self._size:
+                    self._bytes_transferred = self._size
+                    self._last_speed_time = time()
             self._set_transfer_event()
         except Exception as e:
             LOGGER.error(f"onTransferFinish exception: {e}")
