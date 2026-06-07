@@ -131,7 +131,6 @@ async def add_mega_download(listener, path):
             if subfolder_handle:
                 try:
                     mega_listener._subfolder_target = async_api.folder_api.base64ToHandle(subfolder_handle)
-                    LOGGER.info(f"Mega: subfolder target handle set to {mega_listener._subfolder_target}")
                 except Exception as e:
                     LOGGER.warning(f"Mega subfolder handle conversion failed: {e}")
             await async_api.fetchNodes(async_api.folder_api, source="folder")
@@ -146,7 +145,6 @@ async def add_mega_download(listener, path):
             await listener.on_download_error("Failed to resolve MEGA link")
             return
 
-        LOGGER.info(f"Mega: resolved node, name={mega_listener._name}, size={mega_listener._size}, is_folder={mega_listener._is_folder}")
         listener.name = listener.name or mega_listener._name or f"MEGA_Download_{token_hex(5)}"
         listener.size = mega_listener._size
         gid = token_hex(5)
@@ -175,9 +173,8 @@ async def add_mega_download(listener, path):
             task_dict[listener.mid] = MegaDownloadStatus(listener, mega_listener, gid, "dl")
 
         if added_to_queue:
-            LOGGER.info(f"Start queued MegaSDK download: {listener.name}")
+            await listener.on_download_start()
         else:
-            LOGGER.info(f"Start MegaSDK download: {listener.name}")
             await listener.on_download_start()
             if listener.multi <= 1:
                 await send_status_message(listener.message)

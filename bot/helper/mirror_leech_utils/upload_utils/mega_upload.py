@@ -80,10 +80,8 @@ async def _upload_file(
 
     link = None
     node_handle = getattr(mega_listener, "_uploaded_node_handle", None)
-    LOGGER.info(f"MegaUpload: _uploaded_node_handle={node_handle}")
 
     if node_handle:
-        LOGGER.info("MegaUpload: waiting for export (started in onTransferFinish)...")
         try:
             await wait_for(mega_listener._export_done.wait(), timeout=60)
             link = getattr(mega_listener, "_export_link", None)
@@ -93,7 +91,6 @@ async def _upload_file(
     else:
         LOGGER.warning("MegaUpload: no handle from transfer, link will be None")
 
-    LOGGER.info(f"MegaUpload: completed {custom_name}")
     return True, link
 
 

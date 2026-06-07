@@ -187,13 +187,10 @@ async def _do_sync_step(api, listener, expected_type, method, *args, step_name: 
     listener.expected_type = expected_type
     listener._loop = get_running_loop()
     listener._fut = listener._loop.create_future()
-    LOGGER.info(f"get_mega_account_info: starting {step_name}")
     await sync_to_async(method, *args)
     await listener.wait()
     if listener.error:
         LOGGER.warning(f"get_mega_account_info: {step_name} failed: {listener.error}")
-    else:
-        LOGGER.info(f"get_mega_account_info: {step_name} OK")
     return listener.error
 
 
@@ -208,12 +205,10 @@ async def get_mega_account_info(email: str, password: str) -> str:
     base_dir = ospath.join("/tmp", f".mega_account_{token_hex(5)}")
     await makedirs(base_dir, exist_ok=True)
 
-    LOGGER.info("get_mega_account_info: creating MegaApi instance")
     api = await sync_to_async(MegaApi, "", base_dir, "WZML-X", 4)
     listener = MegaAccountListener()
     api.addListener(listener)
     api._listener_ref = listener
-    LOGGER.info("get_mega_account_info: MegaApi created")
 
     try:
         err = await _do_sync_step(api, listener, MegaRequest.TYPE_LOGIN,

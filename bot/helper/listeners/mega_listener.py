@@ -99,7 +99,7 @@ class AsyncMega:
             self._request_type_for(function) if expected_type is None else expected_type
         )
         self._expected_request_source = expected_source
-        LOGGER.info(f"AsyncMega.run: expecting type={self._expected_request_type}, source={expected_source}")
+        
         try:
             await sync_to_async(function, *args, **kwargs)
             try:
@@ -115,7 +115,6 @@ class AsyncMega:
                     listener.error = msg
                 self._transfer_event.set()
         finally:
-            LOGGER.info("AsyncMega.run: finished, clearing expected_type/source")
             self._expected_request_type = None
             self._expected_request_source = None
 
