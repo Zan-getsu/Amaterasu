@@ -62,19 +62,51 @@ async def _upload_file(
         return False, None
 
     link = None
-    if getattr(mega_listener, "_uploaded_node_handle", None):
+    node_handle = getattr(mega_listener, "_uploaded_node_handle", None)
+    LOGGER.info(f"MegaUpload: _uploaded_node_handle={node_handle}")
+
+    uploaded_node = None
+    if node_handle:
         try:
-            node = await sync_to_async(
-                async_api.api.getNodeByHandle,
-                mega_listener._uploaded_node_handle,
+            uploaded_node = await sync_to_async(
+                async_api.api.getNodeByHandle, node_handle,
             )
-            if node:
-                await async_api.exportNode(node, 0, False, False)
-                link = getattr(mega_listener, "_export_link", None)
-                if link:
-                    LOGGER.info(f"MegaUpload: link={link}")
+            LOGGER.info(f"MegaUpload: getNodeByHandle returned {uploaded_node}")
+        except Exception as e:
+            LOGGER.warning(f"MegaUpload: getNodeByHandle error: {e}")
+
+    if not uploaded_node:
+        try:
+            LOGGER.info(f"MegaUpload: searching parent for '{custom_name}'")
+            children = await sync_to_async(
+                async_api.api.getChildren, parent_node,
+            )
+            if children:
+                for i in range(children.size()):
+                    child = children.get(i)
+                    try:
+                        if child.getName() == custom_name:
+                            uploaded_node = child
+                            LOGGER.info(f"MegaUpload: found node by name search, handle={uploaded_node.getHandle()}")
+                            break
+                    except Exception:
+                        pass
+            if not uploaded_node:
+                LOGGER.warning(f"MegaUpload: '{custom_name}' not found among {children.size() if children else 0} children")
+        except Exception as e:
+            LOGGER.warning(f"MegaUpload: parent search error: {e}")
+
+    if uploaded_node:
+        try:
+            link = await async_api.export_node(uploaded_node)
+            if link:
+                LOGGER.info(f"MegaUpload: generated link={link}")
+            else:
+                LOGGER.warning("MegaUpload: export_node returned no link")
         except Exception as e:
             LOGGER.error(f"MegaUpload: link generation failed: {e}")
+    else:
+        LOGGER.warning("MegaUpload: no node found for export (link will be None)")
 
     LOGGER.info(f"MegaUpload: completed {custom_name}")
     return True, link

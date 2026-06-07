@@ -125,6 +125,27 @@ class AsyncMega:
             LOGGER.error("Mega transfer timed out after 300s")
             self._transfer_event.set()
 
+    async def export_node(self, node, expireTime=0, writable=False, megaHosted=False):
+        self.continue_event.clear()
+        self._expected_request_type = MegaRequest.TYPE_EXPORT
+        self._expected_request_source = "main"
+        LOGGER.info(f"export_node: exporting handle={node.getHandle()}")
+        try:
+            await sync_to_async(
+                self.api.exportNode, node, expireTime, writable, megaHosted,
+            )
+            await wait_for(self.continue_event.wait(), timeout=_REQUEST_TIMEOUT_SECONDS)
+            ml = getattr(self, "_mega_listener", None)
+            link = getattr(ml, "_export_link", None) if ml else None
+            LOGGER.info(f"export_node: link={link}")
+            return link
+        except AsyncTimeoutError:
+            LOGGER.error("export_node timed out waiting for TYPE_EXPORT callback")
+            return None
+        finally:
+            self._expected_request_type = None
+            self._expected_request_source = None
+
     async def logout(self):
         if self.folder_api:
             await self.run(
@@ -496,6 +517,7 @@ class MegaAppListener(MegaListener):
             else:
                 try:
                     self._uploaded_node_handle = transfer.getNodeHandle()
+                    LOGGER.info(f"onTransferFinish (upload): _uploaded_node_handle={self._uploaded_node_handle}")
                 except Exception as e:
                     LOGGER.warning(f"onTransferFinish: getNodeHandle failed: {e}")
             self._set_transfer_event()
