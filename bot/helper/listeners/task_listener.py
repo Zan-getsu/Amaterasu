@@ -643,7 +643,11 @@ class TaskListener(TaskConfig):
             ):
                 buttons = ButtonMaker()
                 if link and Config.SHOW_CLOUD_LINK:
-                    buttons.url_button("☁️ Cloud Link", link, style=ButtonStyle.PRIMARY)
+                    if "mega.nz" in link:
+                        btn_label = "🔗 Mega Link"
+                    else:
+                        btn_label = "☁️ Cloud Link"
+                    buttons.url_button(btn_label, link, style=ButtonStyle.PRIMARY)
                 elif multi_links:
                     for name, url in multi_links:
                         buttons.url_button(name, url)

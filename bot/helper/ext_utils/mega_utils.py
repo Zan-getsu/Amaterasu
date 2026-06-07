@@ -170,8 +170,9 @@ class MegaAccountListener(MegaListener):
         pass
 
     async def wait(self):
-        self._loop = get_running_loop()
-        self._fut = self._loop.create_future()
+        if self._fut is None:
+            self._loop = get_running_loop()
+            self._fut = self._loop.create_future()
         try:
             await wait_for(self._fut, timeout=120)
         except AsyncTimeoutError:
@@ -196,18 +197,24 @@ async def get_mega_account_info(email: str, password: str) -> str:
 
     try:
         listener.expected_type = MegaRequest.TYPE_LOGIN
+        listener._loop = get_running_loop()
+        listener._fut = listener._loop.create_future()
         await sync_to_async(api.login, email, password)
         await listener.wait()
         if listener.error:
             return f"⌬ <b>Mega Account Info</b>\n│\n┖ Login failed: {listener.error}"
 
         listener.expected_type = MegaRequest.TYPE_FETCH_NODES
+        listener._loop = get_running_loop()
+        listener._fut = listener._loop.create_future()
         await sync_to_async(api.fetchNodes)
         await listener.wait()
         if listener.error:
             return f"⌬ <b>Mega Account Info</b>\n│\n┖ Fetch nodes failed: {listener.error}"
 
         listener.expected_type = MegaRequest.TYPE_ACCOUNT_DETAILS
+        listener._loop = get_running_loop()
+        listener._fut = listener._loop.create_future()
         await sync_to_async(api.getAccountDetails)
         await listener.wait()
         if listener.error:
