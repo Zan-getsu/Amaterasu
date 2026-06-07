@@ -114,3 +114,48 @@ async def remove_sudo(_, message):
     else:
         msg = "Give ID or Reply To message of whom you want to remove from Sudo"
     await send_message(message, msg)
+
+
+@new_task
+async def add_blacklist(_, message):
+    id_ = ""
+    msg = message.text.split()
+    if len(msg) > 1:
+        id_ = int(msg[1].strip())
+    elif reply_to := message.reply_to_message:
+        id_ = (reply_to.from_user or reply_to.sender_chat).id
+    if id_:
+        if id_ in user_data and user_data[id_].get("BLACKLIST"):
+            msg = "User Already BlackListed!"
+        else:
+            update_user_ldata(id_, "BLACKLIST", True)
+            await database.update_user_data(id_)
+            msg = "User BlackListed"
+    else:
+        msg = "Give ID or Reply To message of whom you want to blacklist."
+    await send_message(message, msg)
+
+
+@new_task
+async def remove_blacklist(_, message):
+    id_ = ""
+    msg = message.text.split()
+    if len(msg) > 1:
+        id_ = int(msg[1].strip())
+    elif reply_to := message.reply_to_message:
+        id_ = (reply_to.from_user or reply_to.sender_chat).id
+    if id_:
+        if id_ in user_data and not user_data[id_].get("BLACKLIST"):
+            msg = "User Already Freed"
+        else:
+            update_user_ldata(id_, "BLACKLIST", False)
+            await database.update_user_data(id_)
+            msg = "User Set Free!"
+    else:
+        msg = "Give ID or Reply To message of whom you want to remove from blacklist"
+    await send_message(message, msg)
+
+
+@new_task
+async def black_listed(_, message):
+    await send_message(message, "BlackListed Detected, Restricted from Bot")

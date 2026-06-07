@@ -82,3 +82,9 @@ class CustomFilters:
         )
 
     sudo = create(sudo_user)
+
+    async def blacklisted_user(self, _, update):
+        uid = (update.from_user or update.sender_chat).id
+        return uid in user_data and user_data[uid].get("BLACKLIST", False)
+
+    blacklisted = create(blacklisted_user)
