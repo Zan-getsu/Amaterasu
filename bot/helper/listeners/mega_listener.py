@@ -2,7 +2,7 @@ from asyncio import Event, TimeoutError as AsyncTimeoutError, wait_for
 from time import time
 from re import match as rematch
 
-from mega import MegaApi, MegaError, MegaListener, MegaRequest, MegaTransfer
+from mega import MegaApi, MegaError, MegaListener, MegaRequest, MegaTransfer, MegaUploadOptions
 
 from ... import LOGGER, bot_loop
 from ..ext_utils.bot_utils import async_to_sync, sync_to_async
@@ -224,6 +224,11 @@ class AsyncMega:
     async def startUpload(self, localPath, parentNode, customName, cancelToken, mtime=-1):
         self._transfer_event.clear()
 
+        options = MegaUploadOptions.createInstance()
+        options.fileName = customName
+        options.mtime = mtime
+        options.isSourceTemporary = False
+
         ml = getattr(self, "_mega_listener", None)
         if ml:
             ml._bytes_transferred = 0
@@ -239,13 +244,8 @@ class AsyncMega:
             self.api.startUpload,
             localPath,
             parentNode,
-            customName,
-            mtime,
-            None,
-            False,
-            False,
             cancelToken,
-            None,
+            options,
         )
 
     def __getattr__(self, name):
