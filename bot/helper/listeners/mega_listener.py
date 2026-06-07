@@ -1,5 +1,6 @@
 from asyncio import Event, TimeoutError as AsyncTimeoutError, wait_for
 from time import time
+from re import rematch
 
 from mega import MegaApi, MegaError, MegaListener, MegaRequest, MegaTransfer
 
@@ -18,22 +19,47 @@ async def mega_cleanup():
 _REQUEST_TIMEOUT_SECONDS = 300
 
 MEGA_ERRORS = {
-    "-16": "File(s) Banned",
-    "-9": "File(s) not found or deleted",
-    "-11": "File(s) Access Denied",
-    "-15": "Decryption key error",
-    "-13": "Incomplete transfer",
-    "-6": "Too many requests",
+    -30: "Sub-user encryption key missing",
+    -29: "Paywall – upgrade required",
+    -28: "Business account payment past due",
+    -27: "Master account only operation",
+    -26: "Two-factor authentication required",
+    -25: "Transfer rolled back",
+    -24: "Transfer quota exceeded, wait before retrying",
+    -23: "SSL/TLS connection error",
+    -22: "Invalid application key",
+    -21: "Read error",
+    -20: "Write error",
+    -19: "Too many connections",
+    -18: "Temporarily unavailable",
+    -17: "Storage quota exceeded",
+    -16: "Account or file(s) blocked/banned",
+    -15: "Session expired or decryption key error",
+    -14: "Encryption/decryption error",
+    -13: "Incomplete transfer",
+    -12: "File(s) already exist",
+    -11: "File(s) Access Denied",
+    -10: "Circular linkage detected",
+    -9: "File(s) not found or deleted",
+    -8: "Resource expired",
+    -7: "Out of range",
+    -6: "Too many requests",
+    -5: "Transfer failed",
+    -4: "Rate limit exceeded, slowing down",
+    -3: "Temporary failure, retrying",
+    -2: "Bad arguments",
+    -1: "Internal error",
 }
 
 
 def _mega_error_format(raw_error):
     if not raw_error:
         return raw_error
-    stripped = str(raw_error).lstrip()
-    for code, friendly in MEGA_ERRORS.items():
-        if stripped.startswith(code):
-            return friendly
+    m = rematch(r"\s*(-?\d+)", str(raw_error))
+    if m:
+        code = int(m.group(1))
+        if code in MEGA_ERRORS:
+            return MEGA_ERRORS[code]
     return raw_error
 
 
