@@ -149,8 +149,8 @@ class AsyncMega:
     async def startDownload(self, node, localPath, name, listener, startFirst, cancelToken, collisionCheck, collisionResolution, undelete):
         self.continue_event.clear()
         self._transfer_event.clear()
-        self._expected_request_type = None
-        self._expected_request_source = None
+        self._expected_request_type = -1
+        self._expected_request_source = "download"
 
         ml = getattr(self, "_mega_listener", None)
         if ml:
@@ -180,8 +180,8 @@ class AsyncMega:
     async def startUpload(self, localPath, parentNode, customName, cancelToken, mtime=-1):
         self.continue_event.clear()
         self._transfer_event.clear()
-        self._expected_request_type = None
-        self._expected_request_source = None
+        self._expected_request_type = -1
+        self._expected_request_source = "upload"
 
         ml = getattr(self, "_mega_listener", None)
         if ml:
