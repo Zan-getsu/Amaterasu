@@ -16,6 +16,7 @@ class MegaAccountListener(MegaListener):
         self.event = Event()
         self.result = None
         self.error = None
+        self.root_handle = None
         super().__init__()
 
     def onRequestFinish(self, api, request, error):
@@ -26,10 +27,13 @@ class MegaAccountListener(MegaListener):
             req_type = request.getType()
             if req_type == MegaRequest.TYPE_ACCOUNT_DETAILS:
                 self.result = request.getMegaAccountDetails()
-            elif req_type in (
-                MegaRequest.TYPE_LOGIN,
-                MegaRequest.TYPE_FETCH_NODES,
-            ):
+            elif req_type == MegaRequest.TYPE_FETCH_NODES:
+                self.result = True
+                try:
+                    self.root_handle = api.getRootNode().getHandle()
+                except Exception:
+                    pass
+            elif req_type == MegaRequest.TYPE_LOGIN:
                 self.result = True
         self.event.set()
 
@@ -100,8 +104,6 @@ async def get_mega_account_info(email: str, password: str) -> str:
         storage_used = details.getStorageUsed()
         transfer_max = details.getTransferMax()
         transfer_used = details.getTransferUsed()
-        num_files = details.getNumFiles()
-        num_folders = details.getNumFolders()
         pro_level = details.getProLevel()
         pro_expiration = details.getProExpiration()
 
@@ -127,10 +129,24 @@ async def get_mega_account_info(email: str, password: str) -> str:
             f"{get_readable_file_size(storage_max)} ({storage_pct}%)\n"
             f"┠ <b>Transfer</b> → {get_readable_file_size(transfer_used)} / "
             f"{get_readable_file_size(transfer_max)} ({transfer_pct}%)\n"
-            f"┃\n"
-            f"┠ <b>Files</b> → {num_files}\n"
-            f"┖ <b>Folders</b> → {num_folders}"
         )
+
+        if listener.root_handle is not None:
+            try:
+                num_files = details.getNumFiles(listener.root_handle)
+                num_folders = details.getNumFolders(listener.root_handle)
+                text += (
+                    f"┃\n"
+                    f"┠ <b>Files</b> → {num_files}\n"
+                    f"┖ <b>Folders</b> → {num_folders}"
+                )
+            except Exception:
+                text += (
+                    "┃\n"
+                    "┖ <b>Files/Folders</b> → N/A"
+                )
+        else:
+            text += "┖ <b>Files/Folders</b> → N/A"
 
         return text
 
