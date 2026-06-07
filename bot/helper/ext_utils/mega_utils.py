@@ -155,7 +155,7 @@ async def get_mega_account_info(email: str, password: str) -> str:
         return f"⌬ <b>Mega Account Info</b>\n│\n┖ Error: {e}"
     finally:
         try:
-            api.logout()
+            api.logout(False, None)
         except Exception:
             pass
         if base_dir and await aiopath.exists(base_dir):

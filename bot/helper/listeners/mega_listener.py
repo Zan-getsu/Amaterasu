@@ -97,13 +97,13 @@ class AsyncMega:
     async def logout(self):
         if self.folder_api:
             await self.run(
-                self.folder_api.logout,
+                self.folder_api.logout, False, None,
                 expected_type=self._request_type_for_name("logout"),
                 expected_source="folder",
             )
         if self.api:
             await self.run(
-                self.api.logout,
+                self.api.logout, False, None,
                 expected_type=self._request_type_for_name("logout"),
                 expected_source="main",
             )
