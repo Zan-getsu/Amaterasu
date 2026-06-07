@@ -75,8 +75,6 @@ def _service_pwd(service):
 def _derive_pin(gid):
     from hashlib import sha256
     from hmac import new as hmac_new
-    if not _WEB_SECRET:
-        return None
     sig = hmac_new(
         _PIN_SALT,
         f"{gid}|{_BOT_ID}".encode("utf-8"),
@@ -370,7 +368,7 @@ async def handle_torrent(request: Request):
                 "files": [],
                 "engine": "",
                 "error": "Invalid pin",
-                "message": "The PIN you entered is incorrect",
+                "message": "The PIN you entered is incorrect. Try Again!",
             }
         )
     _pin_attempts.pop(gid, None)
