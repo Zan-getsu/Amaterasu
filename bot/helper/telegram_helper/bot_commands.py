@@ -42,6 +42,8 @@ class BotCommands:
         "ClearLocals": "clearlocals",
         "IMDB": "imdb",
         "Rss": "rss",
+        "AddImage": ["addimage", "ai"],
+        "Images": ["images", "img"],
         "Authorize": ["authorize", "a"],
         "UnAuthorize": ["unauthorize", "ua"],
         "AddSudo": ["addsudo", "as"],

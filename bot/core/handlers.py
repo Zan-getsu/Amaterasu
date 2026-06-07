@@ -336,6 +336,23 @@ def add_handlers():
             & CustomFilters.authorized,
         )
     )
+    TgClient.bot.add_handler(
+        MessageHandler(
+            picture_add,
+            filters=command(BotCommands.AddImageCommand, case_sensitive=True)
+            & CustomFilters.authorized,
+        )
+    )
+    TgClient.bot.add_handler(
+        MessageHandler(
+            pictures,
+            filters=command(BotCommands.ImagesCommand, case_sensitive=True)
+            & CustomFilters.authorized,
+        )
+    )
+    TgClient.bot.add_handler(
+        CallbackQueryHandler(pics_callback, filters=regex("^images"))
+    )
 
     TgClient.bot.add_handler(
         MessageHandler(

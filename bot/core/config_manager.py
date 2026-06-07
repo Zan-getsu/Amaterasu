@@ -41,6 +41,7 @@ class Config:
     AUTHOR_URL = "https://t.me/itsniloybhowmick"
     INSTADL_API = ""
     IMDB_TEMPLATE = ""
+    IMAGES = []
     INCOMPLETE_TASK_NOTIFIER = False
     INDEX_URL = ""
     IS_TEAM_DRIVE = False

@@ -553,6 +553,10 @@ def get_help_string():
             help_lines.append(f"{cmd_str}: Blacklist a user from using the bot (Only Owner & Sudo).")
         elif key == "RmBlackList":
             help_lines.append(f"{cmd_str}: Remove a user from blacklist (Only Owner & Sudo).")
+        elif key == "AddImage":
+            help_lines.append(f"{cmd_str}: Add an image to the gallery by reply to photo or link.")
+        elif key == "Images":
+            help_lines.append(f"{cmd_str}: View and manage the image gallery.")
         elif key == "Restart":
             help_lines.append(
                 f"{cmd_str}: Restart and update the bot (Only Owner & Sudo)."

@@ -163,6 +163,7 @@ DEFAULT_DESP = {
     "AUTHOR_URL": "Author URL for Telegraph pages. Use channel URL for join button.",
     "INSTADL_API": "Instagram downloader API key.",
     "IMDB_TEMPLATE": "HTML template for IMDB results display.",
+    "IMAGES": "List of image URLs or file_ids for the gallery. Managed via /addimage command.",
     "INCOMPLETE_TASK_NOTIFIER": "Notify about incomplete tasks after restart. Default: False.",
     "INDEX_URL": "Google Drive Index URL for direct links.",
     "IS_TEAM_DRIVE": "Set True for TeamDrive uploads. Default: False.",

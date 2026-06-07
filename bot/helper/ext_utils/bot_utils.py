@@ -205,6 +205,12 @@ async def get_telegraph_list(telegraph_content):
     return buttons.build_menu(1)
 
 
+def handleIndex(index, lst):
+    if not lst:
+        return 0
+    return index % len(lst)
+
+
 def arg_parser(items, arg_base):
     if not items:
         return

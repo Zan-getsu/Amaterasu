@@ -21,6 +21,7 @@ from .gd_count import count_node
 from .gd_delete import delete_file
 from .gd_search import gdrive_search, select_type
 from .help import arg_usage, bot_help
+from .images import pics_callback, picture_add, pictures
 from .imdb import imdb_callback, imdb_search
 from .mediainfo import mediainfo
 from .mirror_leech import (
@@ -99,6 +100,9 @@ __all__ = [
     "mirror",
     "nzb_leech",
     "nzb_mirror",
+    "pics_callback",
+    "picture_add",
+    "pictures",
     "ping",
     "private_media_handler",
     "qb_leech",
