@@ -179,6 +179,24 @@ class MegaAccountListener(MegaListener):
             self.error = "Request timed out after 120s"
 
 
+async def _do_mega_api_create(base_dir: str):
+    return MegaApi("", base_dir, "WZML-X", 4)
+
+
+async def _do_sync_step(api, listener, expected_type, method, *args, step_name: str):
+    listener.expected_type = expected_type
+    listener._loop = get_running_loop()
+    listener._fut = listener._loop.create_future()
+    LOGGER.info(f"get_mega_account_info: starting {step_name}")
+    await sync_to_async(method, *args)
+    await listener.wait()
+    if listener.error:
+        LOGGER.warning(f"get_mega_account_info: {step_name} failed: {listener.error}")
+    else:
+        LOGGER.info(f"get_mega_account_info: {step_name} OK")
+    return listener.error
+
+
 async def get_mega_account_info(email: str, password: str) -> str:
     if not email or not password:
         return (
@@ -190,35 +208,28 @@ async def get_mega_account_info(email: str, password: str) -> str:
     base_dir = ospath.join("/tmp", f".mega_account_{token_hex(5)}")
     await makedirs(base_dir, exist_ok=True)
 
-    api = MegaApi("", base_dir, "WZML-X", 4)
+    LOGGER.info("get_mega_account_info: creating MegaApi instance")
+    api = await sync_to_async(MegaApi, "", base_dir, "WZML-X", 4)
     listener = MegaAccountListener()
     api.addListener(listener)
     api._listener_ref = listener
+    LOGGER.info("get_mega_account_info: MegaApi created")
 
     try:
-        listener.expected_type = MegaRequest.TYPE_LOGIN
-        listener._loop = get_running_loop()
-        listener._fut = listener._loop.create_future()
-        await sync_to_async(api.login, email, password)
-        await listener.wait()
-        if listener.error:
-            return f"⌬ <b>Mega Account Info</b>\n│\n┖ Login failed: {listener.error}"
+        err = await _do_sync_step(api, listener, MegaRequest.TYPE_LOGIN,
+                                   api.login, email, password, step_name="login")
+        if err:
+            return f"⌬ <b>Mega Account Info</b>\n│\n┖ Login failed: {err}"
 
-        listener.expected_type = MegaRequest.TYPE_FETCH_NODES
-        listener._loop = get_running_loop()
-        listener._fut = listener._loop.create_future()
-        await sync_to_async(api.fetchNodes)
-        await listener.wait()
-        if listener.error:
-            return f"⌬ <b>Mega Account Info</b>\n│\n┖ Fetch nodes failed: {listener.error}"
+        err = await _do_sync_step(api, listener, MegaRequest.TYPE_FETCH_NODES,
+                                   api.fetchNodes, step_name="fetchNodes")
+        if err:
+            return f"⌬ <b>Mega Account Info</b>\n│\n┖ Fetch nodes failed: {err}"
 
-        listener.expected_type = MegaRequest.TYPE_ACCOUNT_DETAILS
-        listener._loop = get_running_loop()
-        listener._fut = listener._loop.create_future()
-        await sync_to_async(api.getAccountDetails)
-        await listener.wait()
-        if listener.error:
-            return f"⌬ <b>Mega Account Info</b>\n│\n┖ Account details failed: {listener.error}"
+        err = await _do_sync_step(api, listener, MegaRequest.TYPE_ACCOUNT_DETAILS,
+                                   api.getAccountDetails, step_name="getAccountDetails")
+        if err:
+            return f"⌬ <b>Mega Account Info</b>\n│\n┖ Account details failed: {err}"
 
         info = listener.result
         if not info:
