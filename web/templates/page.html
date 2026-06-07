@@ -3,6 +3,7 @@
 
 <head>
     <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Amaterasu | Torrent File Selector</title>
     <!-- Tailwind CSS v2 -->
@@ -625,21 +626,14 @@
     <!-- Glowing Glass Modal -->
     <div id="reusableModal" class="modal">
         <div class="modal-content">
-            <h2 id="modalTitle" class="text-xl font-bold mb-4"></h2>
+            <h2 id="modalTitle" style="margin-bottom: 1rem;"></h2>
             <div id="modalBody"></div>
             <div id="modalFooter" class="mt-6 flex justify-end gap-3"></div>
         </div>
     </div>
 
     <script>
-        const themeToggle = document.getElementById('themeToggle');
-        const themeIcon = document.getElementById('themeIcon');
-        const body = document.body;
         const fileTree = document.getElementById('fileTree');
-        const selectedCount = document.getElementById('selectedCount');
-        const totalCount = document.getElementById('totalCount');
-        const selectedSize = document.getElementById('selectedSize');
-        const totalSize = document.getElementById('totalSize');
         const selectAllBtn = document.getElementById('selectAllBtn');
         const submitBtn = document.getElementById('submitBtn');
         const pinEntry = document.getElementById('pinEntry');
@@ -650,12 +644,17 @@
         const modalTitle = document.getElementById('modalTitle');
         const modalBody = document.getElementById('modalBody');
         const modalFooter = document.getElementById('modalFooter');
+        const selectedCountEl = document.getElementById('selectedCount');
+        const totalCountEl = document.getElementById('totalCount');
+        const selectedSizeEl = document.getElementById('selectedSize');
+        const totalSizeEl = document.getElementById('totalSize');
+
         pinInput.focus();
         const urlParams = new Proxy(new URLSearchParams(window.location.search), {
             get: (searchParams, prop) => searchParams.get(prop),
         });
         if (urlParams.pin) {
-            pinInput.value = urlParams.pin
+            pinInput.value = urlParams.pin;
             setTimeout(() => submitPin.click(), 0);
         }
         let currentFolder = null;
@@ -821,6 +820,7 @@
                 div.appendChild(fileInfo);
 
                 if (node.type === 'folder') {
+                    div.classList.add('folder');
                     nameElement.classList.add('folder', 'folder-name');
                     if (areAllChildrenSelected(node)) {
                         checkbox.checked = true;
@@ -878,7 +878,7 @@
         }
 
         function findParent(root, id) {
-            if (root.children) {
+            if (root && root.children) {
                 for (const child of root.children) {
                     if (child.id === id) {
                         return root;
@@ -892,10 +892,10 @@
 
         function updateStats() {
             const stats = calculateStats(files);
-            selectedCount.textContent = stats.selectedCount;
-            totalCount.textContent = stats.totalCount;
-            selectedSize.textContent = formatSize(stats.selectedSize);
-            totalSize.textContent = formatSize(stats.totalSize);
+            selectedCountEl.textContent = stats.selectedCount;
+            totalCountEl.textContent = stats.totalCount;
+            selectedSizeEl.textContent = formatSize(stats.selectedSize);
+            totalSizeEl.textContent = formatSize(stats.totalSize);
         }
 
         function calculateStats(nodes) {
@@ -1064,7 +1064,7 @@
             });
 
             openModal();
-            editNameInput.setSelectionRange(editNameInput.value.length, editNameInput.value.length)
+            editNameInput.setSelectionRange(editNameInput.value.length, editNameInput.value.length);
             editNameInput.focus();
         }
 
@@ -1077,7 +1077,7 @@
         }
 
         function submitData() {
-            if (parseInt(selectedCount.innerText) === 0) {
+            if (parseInt(selectedCountEl.innerText) === 0) {
                 modalTitle.textContent = 'Error';
                 modalBody.innerHTML = '<p>No files selected.</p>';
                 modalFooter.innerHTML = '<button class="btn btn-primary px-5 py-2" onclick="closeModal()">Okay</button>';
@@ -1085,7 +1085,7 @@
                 return;
             }
             modalTitle.textContent = 'Processing...';
-            modalBody.innerHTML = `<p>Submitting, ${selectedCount.innerText} file(s)... </p>`;
+            modalBody.innerHTML = `<p>Submitting, ${selectedCountEl.innerText} file(s)... </p>`;
             modalFooter.innerHTML = '';
             openModal();
             const requestUrl = `/app/files/torrent?gid=${urlParams.gid}&pin=${pinInput.value}&mode=selection`;
@@ -1141,7 +1141,7 @@
                             pinEntry.classList.add('fadeOut');
                             setTimeout(() => {
                                 pinEntry.style.display = 'none';
-                                fileManager.classList.remove('hidden');
+                                fileManager.style.display = 'block';
                                 renderFileTree(files);
                                 updateStats();
                                 updateSelectAllButtonText();
@@ -1181,6 +1181,10 @@
 
         function updateSelectAllButtonText() {
             const nodes = currentFolder ? currentFolder.children : files;
+            if (nodes.length === 0) {
+                selectAllBtn.textContent = 'Select All';
+                return;
+            }
             const allSelected = nodes.every(node => node.type === 'folder' ? areAllChildrenSelected(node) : node.selected);
             selectAllBtn.innerHTML = allSelected 
                 ? '<i class="fa-solid fa-list-check"></i> Deselect Folder' 
@@ -1195,7 +1199,6 @@
                 : '<i class="fa-solid fa-check-double"></i> Select Everything';
         }
 
-        loadThemePreference();
     </script>
 </body>
 

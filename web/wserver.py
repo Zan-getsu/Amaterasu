@@ -22,6 +22,17 @@ from aiohttp import ClientSession
 
 getLogger("httpx").setLevel(WARNING)
 getLogger("aiohttp").setLevel(WARNING)
+getLogger("uvicorn").setLevel(WARNING)
+getLogger("uvicorn.access").setLevel(WARNING)
+
+basicConfig(
+    format="[%(asctime)s] [%(levelname)s] - %(message)s",
+    datefmt="%d-%b-%y %I:%M:%S %p",
+    handlers=[FileHandler("log.txt"), StreamHandler()],
+    level=INFO,
+)
+
+LOGGER = getLogger(__name__)
 
 _SAFE_PATH = re_compile(r"^[A-Za-z0-9_./-]+$")
 _SAFE_GID = re_compile(r"^[A-Za-z0-9_-]{1,64}$")
@@ -48,8 +59,17 @@ def _load_config():
     return bot_token, secret
 
 
+def _resolve_bot_id(token):
+    if not token or not isinstance(token, str):
+        return "0"
+    token = token.strip()
+    if not token:
+        return "0"
+    return (token.split(":", 1)[0] or "0").strip()
+
+
 _BOT_TOKEN, _WEB_SECRET = _load_config()
-_BOT_ID = (_BOT_TOKEN.split(":", 1)[0] or "0").strip()
+_BOT_ID = _resolve_bot_id(_BOT_TOKEN)
 
 
 def _service_pwd(service):

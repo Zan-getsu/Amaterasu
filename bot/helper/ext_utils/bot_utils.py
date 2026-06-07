@@ -59,6 +59,14 @@ def derive_service_password(bot_id, service):
     return raw[:20] + raw[-4:]
 
 
+def _resolve_bot_id():
+    token = getattr(Config, "BOT_TOKEN", "")
+    if not isinstance(token, str) or not token.strip():
+        return "0"
+    token = token.strip()
+    return (token.split(":", 1)[0] or "0").strip()
+
+
 def derive_pin(gid, bot_id):
     if not gid:
         return None
@@ -415,51 +423,59 @@ def safe_int(value, default=0):
 
 
 async def search_images():
-    if not Config.IMG_SEARCH:
+    if not Config.IMG_SEARCH or not Config.USE_IMAGES:
         return
-    if not Config.USE_IMAGES:
+    from re import compile as re_compile
+    from ..ext_utils.db_handler import database
+
+    query_list = [
+        q.strip().replace(" ", "+")
+        for q in Config.IMG_SEARCH.replace("'", "").replace('"', "").split(",")
+        if q.strip()
+    ]
+    if not query_list:
         return
+
+    total_pages = max(Config.IMG_PAGE or 1, 1)
+    base_url = "https://www.wallpaperflare.com/search"
+    img_pattern = re_compile(r'data-src="(https://c4\.wallpaperflare\.com/wallpaper[^"]+)"')
+    seen = set(Config.IMAGES)
+    new_images = []
+
+    async def fetch_page(client, query, page):
+        url = f"{base_url}?wallpaper={query}&width=1280&height=720&page={page}"
+        try:
+            resp = await client.get(url, follow_redirects=True, timeout=15)
+            if resp.status_code != 200:
+                return []
+            return [
+                m for m in img_pattern.findall(resp.text) if m not in seen
+            ]
+        except Exception as e:
+            LOGGER.warning(f"IMG_SEARCH fetch failed [{query} p{page}]: {e}")
+            return []
+
     try:
-        from bs4 import BeautifulSoup
-
-        query_list = (
-            Config.IMG_SEARCH.replace("'", "").replace('"', "").split(",")
-        )
-        total_pages = Config.IMG_PAGE or 1
-        base_url = "https://www.wallpaperflare.com/search"
-        async with AsyncClient() as client:
+        async with AsyncClient(
+            headers={"User-Agent": "Mozilla/5.0"},
+            limits={"max_connections": 5},
+        ) as client:
             for query in query_list:
-                query = query.strip().replace(" ", "+")
-                if not query:
-                    continue
                 for page in range(1, total_pages + 1):
-                    url = f"{base_url}?wallpaper={query}&width=1280&height=720&page={page}"
-                    try:
-                        resp = await client.get(url, follow_redirects=True)
-                        soup = BeautifulSoup(resp.text, "html.parser")
-                        imgs = soup.select(
-                            'img[data-src^="https://c4.wallpaperflare.com/wallpaper"]'
-                        )
-                        if not imgs:
-                            LOGGER.info(
-                                "Maybe Site is Blocked on your Server, Add Images Manually !!"
-                            )
-                        for img in imgs:
-                            img_url = img["data-src"]
-                            if img_url not in Config.IMAGES:
-                                Config.IMAGES.append(img_url)
-                    except Exception as e:
-                        LOGGER.error(f"Error fetching images: {e}")
-        if Config.IMAGES:
-            Config.STATUS_LIMIT = 2
-        from ..ext_utils.db_handler import database
+                    results = await fetch_page(client, query, page)
+                    for url in results:
+                        if url not in seen:
+                            seen.add(url)
+                            new_images.append(url)
+    except Exception as e:
+        LOGGER.error(f"search_images error: {e}")
+        return
 
+    if new_images:
+        Config.IMAGES.extend(new_images)
+        Config.STATUS_LIMIT = 2
+        LOGGER.info(f"IMG_SEARCH: fetched {len(new_images)} new images (total: {len(Config.IMAGES)})")
         if Config.DATABASE_URL:
             await database.update_config(
-                {
-                    "IMAGES": Config.IMAGES,
-                    "STATUS_LIMIT": Config.STATUS_LIMIT,
-                }
+                {"IMAGES": Config.IMAGES, "STATUS_LIMIT": Config.STATUS_LIMIT}
             )
-    except Exception as e:
-        LOGGER.error(f"An error occurred in search_images: {e}")
