@@ -280,7 +280,11 @@ async def re_verify(paused, resumed, hash_id):
 
 @app.get("/app/files", response_class=HTMLResponse)
 async def files(request: Request):
-    return templates.TemplateResponse(request, "page.html")
+    response = templates.TemplateResponse(request, "page.html")
+    response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
+    return response
 
 
 @app.get("/app/encode-profiles", response_class=HTMLResponse)
@@ -506,7 +510,11 @@ async def set_aria2(gid, selected_files):
 
 @app.get("/", response_class=HTMLResponse)
 async def homepage(request: Request):
-    return templates.TemplateResponse(request, "landing.html")
+    response = templates.TemplateResponse(request, "landing.html")
+    response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
+    return response
 
 
 def rewrite_location(location: str, proxy_prefix: str) -> str:

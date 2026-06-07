@@ -13,7 +13,7 @@ from concurrent.futures import ThreadPoolExecutor
 from functools import partial, wraps
 from urllib.parse import unquote, urlparse
 
-from httpx import AsyncClient
+from httpx import AsyncClient, Limits
 
 from ... import LOGGER, bot_loop, user_data
 from ...core.config_manager import Config
@@ -458,7 +458,7 @@ async def search_images():
     try:
         async with AsyncClient(
             headers={"User-Agent": "Mozilla/5.0"},
-            limits={"max_connections": 5},
+            limits=Limits(max_connections=5),
         ) as client:
             for query in query_list:
                 for page in range(1, total_pages + 1):
