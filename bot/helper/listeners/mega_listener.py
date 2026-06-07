@@ -59,6 +59,7 @@ class AsyncMega:
             "getPublicNode": getattr(MegaRequest, "TYPE_GET_PUBLIC_NODE", None),
             "logout": getattr(MegaRequest, "TYPE_LOGOUT", None),
             "getAccountDetails": getattr(MegaRequest, "TYPE_ACCOUNT_DETAILS", None),
+            "exportNode": getattr(MegaRequest, "TYPE_EXPORT", None),
         }
         return request_types.get(name)
 
@@ -92,7 +93,11 @@ class AsyncMega:
             self._expected_request_source = None
 
     async def wait_for_transfer(self):
-        await self._transfer_event.wait()
+        try:
+            await wait_for(self._transfer_event.wait(), timeout=300)
+        except AsyncTimeoutError:
+            LOGGER.error("Mega transfer timed out after 300s")
+            self._transfer_event.set()
 
     async def logout(self):
         if self.folder_api:
@@ -185,6 +190,8 @@ class AsyncMega:
             ml._speed = 0
             ml._smoothed_speed = 0
             ml._target_handle = parentNode.getHandle() if parentNode else None
+            ml._uploaded_node_handle = None
+            ml._export_link = None
             LOGGER.info(f"startUpload: name='{customName}', target_handle={ml._target_handle}")
 
         await sync_to_async(
@@ -245,6 +252,8 @@ class MegaAppListener(MegaListener):
         self._handle = None
         self._is_folder = False
         self._target_handle = None
+        self._uploaded_node_handle = None
+        self._export_link = None
         super().__init__()
 
     @property
@@ -388,6 +397,13 @@ class MegaAppListener(MegaListener):
                     except Exception as e:
                         LOGGER.error(f"TYPE_FETCH_NODES: subfolder lookup error: {e}")
 
+            elif request_type == MegaRequest.TYPE_EXPORT:
+                try:
+                    self._export_link = request.getLink()
+                    LOGGER.info(f"TYPE_EXPORT: link={self._export_link}")
+                except Exception as e:
+                    LOGGER.warning(f"TYPE_EXPORT: getLink failed: {e}")
+
             LOGGER.info(f"onRequestFinish: after setting node, self.node={self.node is not None}, public_node={self.public_node is not None}")
 
             if self._is_expected_request(request_type) and self._is_expected_source(source):
@@ -461,6 +477,11 @@ class MegaAppListener(MegaListener):
                 return
             if not self._caller_manages_completion:
                 async_to_sync(self.listener.on_download_complete)
+            else:
+                try:
+                    self._uploaded_node_handle = transfer.getNodeHandle()
+                except Exception as e:
+                    LOGGER.warning(f"onTransferFinish: getNodeHandle failed: {e}")
             self._set_transfer_event()
         except Exception as e:
             LOGGER.error(f"onTransferFinish exception: {e}")

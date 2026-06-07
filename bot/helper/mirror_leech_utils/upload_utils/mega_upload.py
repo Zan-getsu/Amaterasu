@@ -55,14 +55,29 @@ async def _upload_file(
     await async_api.wait_for_transfer()
 
     if mega_listener.is_cancelled:
-        return False
+        return False, None
     if mega_listener.error:
         msg = _mega_error_format(mega_listener.error)
         LOGGER.error(f"MegaUpload error: {msg}")
-        return False
+        return False, None
+
+    link = None
+    if getattr(mega_listener, "_uploaded_node_handle", None):
+        try:
+            node = await sync_to_async(
+                async_api.api.getNodeByHandle,
+                mega_listener._uploaded_node_handle,
+            )
+            if node:
+                await async_api.exportNode(node, 0, False, False)
+                link = getattr(mega_listener, "_export_link", None)
+                if link:
+                    LOGGER.info(f"MegaUpload: link={link}")
+        except Exception as e:
+            LOGGER.error(f"MegaUpload: link generation failed: {e}")
 
     LOGGER.info(f"MegaUpload: completed {custom_name}")
-    return True
+    return True, link
 
 
 async def add_mega_upload(listener, path, mega_email, mega_password, gid):
@@ -119,6 +134,7 @@ async def add_mega_upload(listener, path, mega_email, mega_password, gid):
         uploaded_files = 0
         mime_type = "application/octet-stream"
 
+        upload_link = None
         if await aiopath.isdir(path):
             entries = await sync_to_async(os.listdir, path)
             for entry in entries:
@@ -137,11 +153,13 @@ async def add_mega_upload(listener, path, mega_email, mega_password, gid):
                     return
                 entry_path = os.path.join(path, entry)
                 if await sync_to_async(os.path.isfile, entry_path):
-                    ok = await _upload_file(
+                    ok, link = await _upload_file(
                         async_api, mega_listener, entry_path, root_node, entry
                     )
                     if ok:
                         uploaded_files += 1
+                        if link:
+                            upload_link = link
                     else:
                         if not listener.is_cancelled:
                             await listener.on_upload_error(
@@ -154,11 +172,12 @@ async def add_mega_upload(listener, path, mega_email, mega_password, gid):
         else:
             total_files = 1
             file_name = os.path.basename(path)
-            ok = await _upload_file(
+            ok, link = await _upload_file(
                 async_api, mega_listener, path, root_node, file_name
             )
             if ok:
                 uploaded_files = 1
+                upload_link = link
                 mime_type = guess_type(file_name)[0] or "application/octet-stream"
             else:
                 if not listener.is_cancelled:
@@ -172,7 +191,7 @@ async def add_mega_upload(listener, path, mega_email, mega_password, gid):
                 f"MegaUpload: completed, {uploaded_files}/{total_files} files"
             )
             await listener.on_upload_complete(
-                None, uploaded_files, 0, mime_type
+                upload_link, uploaded_files, 0, mime_type
             )
 
     except Exception as e:

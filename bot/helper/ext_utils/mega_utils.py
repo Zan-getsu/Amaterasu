@@ -21,58 +21,152 @@ class MegaAccountListener(MegaListener):
         super().__init__()
 
     def onRequestFinish(self, api, request, error):
-        req_type = request.getType()
-        if req_type != self.expected_type:
-            return
-        err_code = error.getErrorCode() if error else MegaError.API_OK
-        if err_code != MegaError.API_OK:
-            self.error = error.toString()
-        elif req_type == MegaRequest.TYPE_ACCOUNT_DETAILS:
-            ad = request.getMegaAccountDetails()
-            info = {
-                "storage_max": ad.getStorageMax(),
-                "storage_used": ad.getStorageUsed(),
-                "transfer_max": ad.getTransferMax(),
-                "transfer_used": ad.getTransferUsed(),
-                "pro_level": ad.getProLevel(),
-                "pro_expiration": ad.getProExpiration(),
-            }
-            try:
-                root_handle = api.getRootNode().getHandle()
-                info["num_files"] = ad.getNumFiles(root_handle)
-                info["num_folders"] = ad.getNumFolders(root_handle)
-                self.root_handle = root_handle
-            except Exception:
-                pass
-            self.result = info
-        elif req_type == MegaRequest.TYPE_FETCH_NODES:
-            self.result = True
-            try:
-                self.root_handle = api.getRootNode().getHandle()
-            except Exception:
-                pass
-        elif req_type == MegaRequest.TYPE_LOGIN:
-            self.result = True
-        f = self._fut
-        if f and not f.done():
-            self._loop.call_soon_threadsafe(f.set_result, True)
+        try:
+            req_type = request.getType()
+            if req_type != self.expected_type:
+                return
+            err_code = error.getErrorCode() if error else MegaError.API_OK
+            if err_code != MegaError.API_OK:
+                self.error = error.toString()
+            elif req_type == MegaRequest.TYPE_ACCOUNT_DETAILS:
+                ad = request.getMegaAccountDetails()
+                if ad is None:
+                    self.error = "getMegaAccountDetails returned None"
+                else:
+                    info = {
+                        "storage_max": ad.getStorageMax(),
+                        "storage_used": ad.getStorageUsed(),
+                        "transfer_max": ad.getTransferMax(),
+                        "transfer_used": ad.getTransferUsed(),
+                        "pro_level": ad.getProLevel(),
+                        "pro_expiration": ad.getProExpiration(),
+                    }
+                    try:
+                        root_handle = api.getRootNode().getHandle()
+                        info["num_files"] = ad.getNumFiles(root_handle)
+                        info["num_folders"] = ad.getNumFolders(root_handle)
+                        self.root_handle = root_handle
+                    except Exception:
+                        pass
+                    self.result = info
+            elif req_type == MegaRequest.TYPE_FETCH_NODES:
+                self.result = True
+                try:
+                    self.root_handle = api.getRootNode().getHandle()
+                except Exception:
+                    pass
+            elif req_type == MegaRequest.TYPE_LOGIN:
+                self.result = True
+            f = self._fut
+            if f and not f.done():
+                self._loop.call_soon_threadsafe(f.set_result, True)
+        except Exception as e:
+            LOGGER.error(f"MegaAccountListener.onRequestFinish exception: {e}", exc_info=True)
+            self.error = str(e)
+            f = self._fut
+            if f and not f.done():
+                self._loop.call_soon_threadsafe(f.set_result, True)
 
-    def onRequestTemporaryError(self, api, request, error):
+    def onRequestTemporaryError(self, *args):
         pass
 
-    def onUsersUpdate(self, api, users):
+    def onRequestStart(self, *args):
         pass
 
-    def onNodesUpdate(self, api, nodes):
+    def onRequestUpdate(self, *args):
         pass
 
-    def onAccountUpdate(self, api):
+    def onTransferStart(self, *args):
         pass
 
-    def onEvent(self, api, event):
+    def onTransferUpdate(self, *args):
         pass
 
-    def onReloadNeeded(self, api):
+    def onTransferFinish(self, *args):
+        pass
+
+    def onTransferTemporaryError(self, *args):
+        pass
+
+    def onUsersUpdate(self, *args):
+        pass
+
+    def onUserAlertsUpdate(self, *args):
+        pass
+
+    def onNodesUpdate(self, *args):
+        pass
+
+    def onAccountUpdate(self, *args):
+        pass
+
+    def onSetsUpdate(self, *args):
+        pass
+
+    def onSetElementsUpdate(self, *args):
+        pass
+
+    def onContactRequestsUpdate(self, *args):
+        pass
+
+    def onReloadNeeded(self, *args):
+        pass
+
+    def onSyncFileStateChanged(self, *args):
+        pass
+
+    def onSyncAdded(self, *args):
+        pass
+
+    def onSyncDeleted(self, *args):
+        pass
+
+    def onSyncStateChanged(self, *args):
+        pass
+
+    def onSyncStatsUpdated(self, *args):
+        pass
+
+    def onGlobalSyncStateChanged(self, *args):
+        pass
+
+    def onSyncRemoteRootChanged(self, *args):
+        pass
+
+    def onBackupStateChanged(self, *args):
+        pass
+
+    def onBackupStart(self, *args):
+        pass
+
+    def onBackupFinish(self, *args):
+        pass
+
+    def onBackupUpdate(self, *args):
+        pass
+
+    def onBackupTemporaryError(self, *args):
+        pass
+
+    def onChatsUpdate(self, *args):
+        pass
+
+    def onEvent(self, *args):
+        pass
+
+    def onMountAdded(self, *args):
+        pass
+
+    def onMountChanged(self, *args):
+        pass
+
+    def onMountDisabled(self, *args):
+        pass
+
+    def onMountEnabled(self, *args):
+        pass
+
+    def onMountRemoved(self, *args):
         pass
 
     async def wait(self):
@@ -98,6 +192,7 @@ async def get_mega_account_info(email: str, password: str) -> str:
     api = MegaApi("", base_dir, "WZML-X", 4)
     listener = MegaAccountListener()
     api.addListener(listener)
+    api._listener_ref = listener
 
     try:
         listener.expected_type = MegaRequest.TYPE_LOGIN
