@@ -13,12 +13,15 @@ from ...mirror_leech_utils.status_utils.aria2_status import Aria2Status
 from ...telegram_helper.message_utils import send_status_message, send_message
 
 
-async def add_aria2_download(listener, dpath, header, ratio, seed_time):
+async def add_aria2_download(
+    listener, dpath, header, ratio, seed_time, notify_error=True
+):
     if Config.DISABLE_TORRENTS and (
         listener.link.startswith("magnet:") or listener.link.endswith(".torrent")
     ):
-        await listener.on_download_error("Torrent and magnet downloads are disabled.")
-        return
+        if notify_error:
+            await listener.on_download_error("Torrent and magnet downloads are disabled.")
+        return False
     a2c_opt = {"dir": dpath}
     if listener.name:
         a2c_opt["out"] = listener.name
@@ -56,15 +59,17 @@ async def add_aria2_download(listener, dpath, header, ratio, seed_time):
             )
     except (TimeoutError, ClientError, Exception) as e:
         LOGGER.info(f"Aria2c Download Error: {e}")
-        await listener.on_download_error(f"{e}")
-        return
+        if notify_error:
+            await listener.on_download_error(f"{e}")
+        return False
     download = await TorrentManager.aria2.tellStatus(gid)
     if download.get("errorMessage"):
         error = str(download["errorMessage"]).replace("<", " ").replace(">", " ")
         LOGGER.info(f"Aria2c Download Error: {error}")
         await TorrentManager.aria2_remove(download)
-        await listener.on_download_error(error)
-        return
+        if notify_error:
+            await listener.on_download_error(error)
+        return False
     if await aiopath.exists(listener.link):
         await remove(listener.link)
 
@@ -107,3 +112,5 @@ async def add_aria2_download(listener, dpath, header, ratio, seed_time):
 
         await TorrentManager.aria2.unpause(new_gid)
         LOGGER.info(f"Start Queued Download from Aria2c: {name}. Gid: {new_gid}")
+
+    return True

@@ -188,6 +188,21 @@ async def _on_download_error(api, data):
         if options.get("follow-torrent", "") == "false":
             return
     if task := await get_task_by_gid(gid):
+        listener = task.listener
+        if (
+            getattr(listener, "allow_ytdlp_fallback", False)
+            and not listener.is_cancelled
+            and hasattr(listener, "_add_ytdlp_fallback")
+        ):
+            listener.allow_ytdlp_fallback = False
+            LOGGER.info(
+                f"Aria2 download failed. Falling back to yt-dlp for: {listener.link}"
+            )
+            await TorrentManager.aria2_remove(download)
+            await listener._add_ytdlp_fallback(
+                getattr(listener, "ytdlp_fallback_path", listener.dir)
+            )
+            return
         await task.listener.on_download_error(error)
 
 

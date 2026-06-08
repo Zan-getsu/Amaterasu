@@ -512,7 +512,22 @@ class Mirror(TaskListener):
                 headers += (
                     f" authorization: Basic {b64encode(auth.encode()).decode('ascii')}"
                 )
-            await add_aria2_download(self, path, headers, ratio, seed_time)
+            can_fallback = self.link.startswith(("http://", "https://", "ftp://"))
+            self.allow_ytdlp_fallback = can_fallback
+            self.ytdlp_fallback_path = path
+            aria2_started = await add_aria2_download(
+                self,
+                path,
+                headers,
+                ratio,
+                seed_time,
+                notify_error=not can_fallback,
+            )
+            if not aria2_started and can_fallback:
+                LOGGER.info(
+                    f"Aria2 could not start download. Falling back to yt-dlp for: {self.link}"
+                )
+                await self._add_ytdlp_fallback(path)
 
 
 async def mirror(client, message):
