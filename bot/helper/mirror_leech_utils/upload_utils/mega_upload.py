@@ -59,10 +59,6 @@ async def _upload_file(
     mega_listener._caller_manages_completion = True
     mega_listener._size = await sync_to_async(os.path.getsize, file_path)
 
-    LOGGER.info(
-        f"MegaUpload: uploading {custom_name} ({get_readable_file_size(mega_listener._size)})"
-    )
-
     await async_api.startUpload(
         file_path,
         parent_node,
@@ -141,8 +137,6 @@ async def add_mega_upload(listener, path, mega_email, mega_password, gid):
                 "Failed to get Mega root node."
             )
             return
-
-        LOGGER.info(f"MegaUpload: root node obtained, uploading from {path}")
 
         total_files = 0
         uploaded_files = 0

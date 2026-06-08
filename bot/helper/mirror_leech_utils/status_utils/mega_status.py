@@ -21,6 +21,8 @@ class MegaDownloadStatus:
     def _size(self):
         if self._status == "up" and hasattr(self._obj, "_size") and self._obj._size:
             return self._obj._size
+        if hasattr(self._obj, "_total_folder_size") and self._obj._total_folder_size:
+            return self._obj._total_folder_size
         return self._init_size
 
     def progress_raw(self):

@@ -129,16 +129,13 @@ class AsyncMega:
         self.continue_event.clear()
         self._expected_request_type = MegaRequest.TYPE_EXPORT
         self._expected_request_source = "main"
-        LOGGER.info(f"export_node: exporting handle={node.getHandle()}")
         try:
             await sync_to_async(
                 self.api.exportNode, node, expireTime, writable, megaHosted,
             )
             await wait_for(self.continue_event.wait(), timeout=_REQUEST_TIMEOUT_SECONDS)
             ml = getattr(self, "_mega_listener", None)
-            link = getattr(ml, "_export_link", None) if ml else None
-            LOGGER.info(f"export_node: link={link}")
-            return link
+            return getattr(ml, "_export_link", None) if ml else None
         except AsyncTimeoutError:
             LOGGER.error("export_node timed out waiting for TYPE_EXPORT callback")
             return None
@@ -206,7 +203,6 @@ class AsyncMega:
             ml._total_downloaded_bytes = 0
             ml._speed = 0
             ml._smoothed_speed = 0
-            LOGGER.info(f"startDownload: name='{ml._name}', target_handle={ml._target_handle}, is_folder={self._download_is_folder}")
 
         await sync_to_async(
             self._download_api().startDownload,
@@ -238,7 +234,6 @@ class AsyncMega:
             ml._target_handle = parentNode.getHandle() if parentNode else None
             ml._uploaded_node_handle = None
             ml._export_link = None
-            LOGGER.info(f"startUpload: name='{customName}', target_handle={ml._target_handle}")
 
         await sync_to_async(
             self.api.startUpload,
@@ -276,6 +271,8 @@ class MegaAppListener(MegaListener):
         self.retryable_error = None
         self._bytes_transferred = 0
         self._total_downloaded_bytes = 0
+        self._total_folder_size = 0
+        self._current_transfer = None
         self._speed = 0
         self._smoothed_speed = 0
         self._last_speed_time = 0
@@ -371,7 +368,6 @@ class MegaAppListener(MegaListener):
         try:
             request_type = request.getType()
             err_code = error.getErrorCode() if error else MegaError.API_OK
-            LOGGER.info(f"onRequestFinish: type={request_type}, source={source}, err={err_code}")
             if err_code != MegaError.API_OK:
                 if self.is_cancelled:
                     self._set_request_event()
@@ -380,7 +376,6 @@ class MegaAppListener(MegaListener):
                 if err_code in (MegaError.API_EAGAIN, MegaError.API_ERATELIMIT):
                     return
                 if not (self._is_expected_request(request_type) and self._is_expected_source(source)):
-                    LOGGER.info(f"Ignoring unexpected request: type={request_type}, source={source}")
                     return
                 self.error = f"{err_code} {error.toString()}"
                 LOGGER.error(f"Mega onRequestFinishError: {self.error}")
@@ -403,21 +398,17 @@ class MegaAppListener(MegaListener):
                 root = api.getRootNode()
                 if source == "folder":
                     self.node = root
-                    LOGGER.info(f"TYPE_LOGIN (folder source): set node={root is not None}")
                 else:
                     self.public_node = root
-                    LOGGER.info(f"TYPE_LOGIN (main source): set public_node={root is not None}")
                 if root:
                     self._cache_node_data(root)
             elif request_type == MegaRequest.TYPE_FETCH_NODES:
                 root_node = api.getRootNode()
-                LOGGER.info(f"TYPE_FETCH_NODES: setting node={root_node is not None}, source={source}")
                 self.node = root_node
                 if self.node:
                     self._cache_node_data(self.node)
                 if self._subfolder_target is not None and self.node:
                     try:
-                        LOGGER.info(f"TYPE_FETCH_NODES: looking up subfolder target={self._subfolder_target}")
                         children = api.getChildren(self.node)
                         if children:
                             for i in range(children.size()):
@@ -428,9 +419,8 @@ class MegaAppListener(MegaListener):
                                     self._size = 0
                                     try:
                                         self._size = api.getSize(self.node)
-                                    except Exception as e:
-                                        LOGGER.warning(f"TYPE_FETCH_NODES: getSize error: {e}")
-                                    LOGGER.info(f"TYPE_FETCH_NODES: subfolder resolved, name={self._name}, size={self._size}, is_folder={self._is_folder}")
+                                    except Exception:
+                                        pass
                                     break
                     except Exception as e:
                         LOGGER.error(f"TYPE_FETCH_NODES: subfolder lookup error: {e}")
@@ -443,10 +433,7 @@ class MegaAppListener(MegaListener):
                     LOGGER.warning(f"TYPE_EXPORT: getLink failed: {e}")
                 self._export_done.set()
 
-            LOGGER.info(f"onRequestFinish: after setting node, self.node={self.node is not None}, public_node={self.public_node is not None}")
-
             if self._is_expected_request(request_type) and self._is_expected_source(source):
-                LOGGER.info(f"onRequestFinish: setting continue_event (expected_type={self._async_api._expected_request_type}, expected_source={self._async_api._expected_request_source})")
                 self._set_request_event()
         except Exception as e:
             self.error = f"Mega request callback exception: {e}"
@@ -462,6 +449,7 @@ class MegaAppListener(MegaListener):
         try:
             if not self._is_target_transfer(transfer):
                 return
+            self._current_transfer = transfer
             self._bytes_transferred = 0
             self._set_request_event()
         except Exception as e:
@@ -473,23 +461,24 @@ class MegaAppListener(MegaListener):
                 return
             if self.is_cancelled:
                 token = self._cancel_token
-                if token is not None:
+                if token is not None and not token.isCancelled():
                     try:
-                        if not token.isCancelled():
-                            token.cancel()
+                        token.cancel()
                     except Exception:
                         pass
-                else:
-                    try:
-                        api.cancelTransfer(transfer, None)
-                    except Exception:
-                        pass
+                try:
+                    api.cancelTransfer(transfer, None)
+                except Exception:
+                    pass
                 return
             self._speed = transfer.getSpeed()
             alpha = 0.3
             self._smoothed_speed = alpha * self._speed + (1 - alpha) * self._smoothed_speed
             self._last_speed_time = time()
             self._bytes_transferred = transfer.getTransferredBytes()
+            total = transfer.getTotalBytes()
+            if total > self._total_folder_size:
+                self._total_folder_size = total
         except Exception as e:
             LOGGER.error(f"Mega transfer update callback exception: {e}", exc_info=True)
 
@@ -519,7 +508,6 @@ class MegaAppListener(MegaListener):
             else:
                 try:
                     self._uploaded_node_handle = transfer.getNodeHandle()
-                    LOGGER.info(f"onTransferFinish (upload): _uploaded_node_handle={self._uploaded_node_handle}")
                 except Exception as e:
                     LOGGER.warning(f"onTransferFinish: getNodeHandle failed: {e}")
                 if self._upload_mode and self._bytes_transferred == 0 and self._size:
@@ -536,7 +524,6 @@ class MegaAppListener(MegaListener):
                             parent = api.getNodeByHandle(transfer.getParentHandle())
                             if parent:
                                 name = transfer.getFileName()
-                                LOGGER.info(f"onTransferFinish: searching parent for '{name}'")
                                 children = api.getChildren(parent)
                                 if children:
                                     for i in range(children.size()):
@@ -587,12 +574,17 @@ class MegaAppListener(MegaListener):
             return
         self.is_cancelled = True
         token = self._cancel_token
-        if token is not None:
+        if token is not None and not token.isCancelled():
             try:
-                if not token.isCancelled():
-                    token.cancel()
+                token.cancel()
             except Exception as e:
                 LOGGER.error(f"Mega cancel-token cancel failed: {e}")
+        current = getattr(self, '_current_transfer', None)
+        if current is not None:
+            try:
+                self._async_api.api.cancelTransfer(current, None)
+            except Exception as e:
+                LOGGER.error(f"Mega cancel-transfer failed: {e}")
         self._set_request_event()
         self._set_transfer_event()
 
