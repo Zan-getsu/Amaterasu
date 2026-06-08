@@ -18,6 +18,7 @@ from ..helper.ext_utils.links_utils import (
     is_gdrive_link,
     is_mega_link,
     is_magnet,
+    is_pixeldrain_link,
     is_rclone_path,
     is_telegram_link,
     is_url,
@@ -375,7 +376,11 @@ class Uphoster(TaskListener):
             and not is_mega_link(self.link)
         ):
             content_type = await get_content_type(self.link)
-            if content_type is None or re_match(r"text/html|text/plain", content_type):
+            if (
+                is_pixeldrain_link(self.link)
+                or content_type is None
+                or re_match(r"text/html|text/plain", content_type)
+            ):
                 try:
                     self.link = await sync_to_async(direct_link_generator, self.link)
                     if isinstance(self.link, tuple):

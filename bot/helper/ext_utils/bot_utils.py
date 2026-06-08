@@ -24,6 +24,11 @@ from .telegraph_helper import telegraph
 COMMAND_USAGE = {}
 
 THREAD_POOL = ThreadPoolExecutor(max_workers=500)
+DEFAULT_BROWSER_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/125.0.0.0 Safari/537.36"
+)
 
 
 class SetInterval:
@@ -230,7 +235,12 @@ def get_size_bytes(size):
 async def get_content_type(url):
     try:
         async with AsyncClient() as client:
-            response = await client.get(url, allow_redirects=True, verify=False)
+            response = await client.get(
+                url,
+                allow_redirects=True,
+                headers={"User-Agent": DEFAULT_BROWSER_USER_AGENT},
+                verify=False,
+            )
             return response.headers.get("Content-Type")
     except Exception:
         return None

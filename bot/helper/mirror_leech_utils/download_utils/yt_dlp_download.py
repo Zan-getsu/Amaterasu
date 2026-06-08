@@ -210,7 +210,7 @@ class YoutubeDLHelper:
             async_to_sync(self._listener.on_download_complete)
         return
 
-    async def add_download(self, path, qual, playlist, options):
+    async def add_download(self, path, qual, playlist, options, extra_postprocess=True):
         if playlist:
             self.opts["ignoreerrors"] = True
             self.is_playlist = True
@@ -219,14 +219,18 @@ class YoutubeDLHelper:
 
         await self._on_download_start()
 
-        self.opts["postprocessors"] = [
-            {
-                "add_chapters": True,
-                "add_infojson": "if_exists",
-                "add_metadata": True,
-                "key": "FFmpegMetadata",
-            }
-        ]
+        self.opts["postprocessors"] = []
+        if extra_postprocess:
+            self.opts["postprocessors"].append(
+                {
+                    "add_chapters": True,
+                    "add_infojson": "if_exists",
+                    "add_metadata": True,
+                    "key": "FFmpegMetadata",
+                }
+            )
+        else:
+            self.opts["writethumbnail"] = False
 
         if qual.startswith("ba/b-"):
             audio_info = qual.split("-")
@@ -307,7 +311,7 @@ class YoutubeDLHelper:
         if qual.startswith("ba/b"):
             self._listener.name = f"{base_name}{self._ext}"
 
-        if self.opts["writethumbnail"]:
+        if self.opts["writethumbnail"] and extra_postprocess:
             self.opts["postprocessors"].append(
                 {
                     "format": "jpg",
@@ -315,7 +319,7 @@ class YoutubeDLHelper:
                     "when": "before_dl",
                 }
             )
-        if self._ext in [
+        if extra_postprocess and self._ext in [
             ".mp3",
             ".mkv",
             ".mka",

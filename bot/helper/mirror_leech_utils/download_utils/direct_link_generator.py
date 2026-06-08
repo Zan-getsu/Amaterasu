@@ -693,13 +693,21 @@ def onedrive(link):
 
 
 def pixeldrain(url):
-    try:
-        url = url.rstrip("/")
-        code = url.split("/")[-1].split("?", 1)[0]
-        response = get(f"https://{url.split('/')[2]}/api/file/", allow_redirects=True)
-        return response.url + code
-    except Exception as e:
+    parsed_url = urlparse(url)
+    path_parts = [part for part in parsed_url.path.split("/") if part]
+    code = ""
+    if len(path_parts) >= 3 and path_parts[:2] == ["api", "file"]:
+        code = path_parts[2]
+    elif len(path_parts) >= 2 and path_parts[0] in {"u", "file"}:
+        code = path_parts[1]
+    elif path_parts:
+        code = path_parts[-1]
+    if not code:
         raise DirectDownloadLinkException("ERROR: Direct link not found")
+    return (
+        f"{parsed_url.scheme}://{parsed_url.netloc}/api/file/{code}?download",
+        "Referer: https://pixeldrain.com/",
+    )
         
 
 def streamtape(url):

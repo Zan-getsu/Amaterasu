@@ -4,6 +4,7 @@ from re import match as re_match
 
 from aiofiles.os import path as aiopath
 from bot.core.config_manager import Config
+from yt_dlp import YoutubeDL
 
 from .. import DOWNLOAD_DIR, LOGGER, bot_loop, task_dict_lock
 from ..helper.ext_utils.bot_utils import (
@@ -19,6 +20,7 @@ from ..helper.ext_utils.links_utils import (
     is_mega_link,
     is_magnet,
     is_rclone_path,
+    is_pixeldrain_link,
     is_telegram_link,
     is_url,
 )
@@ -44,12 +46,21 @@ from ..helper.mirror_leech_utils.download_utils.rclone_download import (
 from ..helper.mirror_leech_utils.download_utils.telegram_download import (
     TelegramDownloadHelper,
 )
+from ..helper.mirror_leech_utils.download_utils.yt_dlp_download import YoutubeDLHelper
 from ..helper.telegram_helper.message_utils import (
     auto_delete_message,
     delete_links,
     get_tg_link_message,
     send_message,
 )
+
+
+def extract_ytdlp_info(link, options):
+    with YoutubeDL(options) as ydl:
+        result = ydl.extract_info(link, download=False)
+        if result is None:
+            raise ValueError("Info result is None")
+        return result
 
 
 class Mirror(TaskListener):
@@ -84,6 +95,45 @@ class Mirror(TaskListener):
         self.is_jd = is_jd
         self.is_nzb = is_nzb
         self.is_uphoster = is_uphoster
+
+    async def _add_ytdlp_fallback(self, path):
+        self.is_ytdlp = True
+        self._set_mode_engine()
+
+        opt = self.user_dict.get("YT_DLP_OPTIONS") or Config.YT_DLP_OPTIONS or {}
+        if not isinstance(opt, dict):
+            opt = {}
+
+        cookie_to_use = (
+            usr_cookie
+            if not self.user_dict.get("USE_DEFAULT_COOKIE", False)
+            and (usr_cookie := self.user_dict.get("USER_COOKIE_FILE", ""))
+            and await aiopath.exists(usr_cookie)
+            else "cookies.txt"
+        )
+        options = {"usenetrc": True, "cookiefile": cookie_to_use}
+        qual = ""
+        for key, value in opt.items():
+            if key in ["postprocessors", "download_ranges"]:
+                continue
+            if key == "format" and isinstance(value, str):
+                qual = value
+            options[key] = value
+        options["playlist_items"] = "0"
+
+        try:
+            result = await sync_to_async(extract_ytdlp_info, self.link, options)
+        except Exception as e:
+            msg = str(e).replace("<", " ").replace(">", " ")
+            await send_message(self.message, f"{self.tag} {msg}")
+            await self.remove_from_same_dir()
+            return
+
+        playlist = "entries" in result
+        ydl = YoutubeDLHelper(self)
+        await ydl.add_download(
+            path, qual or "best/b", playlist, opt, extra_postprocess=False
+        )
 
     async def new_event(self):
 
@@ -221,6 +271,7 @@ class Mirror(TaskListener):
         reply_to = None
         file_ = None
         session = ""
+        use_ytdlp_fallback = False
 
         try:
             self.multi = int(args["-i"])
@@ -405,7 +456,11 @@ class Mirror(TaskListener):
             and not is_mega_link(self.link)
         ):
             content_type = await get_content_type(self.link)
-            if content_type is None or re_match(r"text/html|text/plain", content_type):
+            if (
+                is_pixeldrain_link(self.link)
+                or content_type is None
+                or re_match(r"text/html|text/plain", content_type)
+            ):
                 try:
                     self.link = await sync_to_async(direct_link_generator, self.link)
                     if isinstance(self.link, tuple):
@@ -414,13 +469,13 @@ class Mirror(TaskListener):
                         LOGGER.info(f"Generated link: {self.link}")
                 except DirectDownloadLinkException as e:
                     e = str(e)
-                    if "This link requires a password!" not in e:
-                        LOGGER.info(e)
-                    if e.startswith("ERROR:"):
+                    if "This link requires a password!" in e:
                         await send_message(self.message, e)
                         await self.remove_from_same_dir()
                         await delete_links(self.message)
                         return
+                    LOGGER.info(f"{e}. Falling back to yt-dlp for: {self.link}")
+                    use_ytdlp_fallback = True
                 except Exception as e:
                     await send_message(self.message, e)
                     await self.remove_from_same_dir()
@@ -433,6 +488,8 @@ class Mirror(TaskListener):
             await TelegramDownloadHelper(self).add_download(
                 reply_to, f"{path}/", session
             )
+        elif use_ytdlp_fallback:
+            await self._add_ytdlp_fallback(path)
         elif isinstance(self.link, dict):
             await add_direct_download(self, path)
         elif self.is_jd:

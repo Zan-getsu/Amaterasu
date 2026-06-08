@@ -7,7 +7,7 @@ from asyncio import TimeoutError
 from .... import task_dict_lock, task_dict, LOGGER
 from ....core.config_manager import Config
 from ....core.torrent_manager import TorrentManager, is_metadata, aria2_name
-from ...ext_utils.bot_utils import bt_selection_buttons
+from ...ext_utils.bot_utils import DEFAULT_BROWSER_USER_AGENT, bt_selection_buttons
 from ...ext_utils.task_manager import check_running_tasks
 from ...mirror_leech_utils.status_utils.aria2_status import Aria2Status
 from ...telegram_helper.message_utils import send_status_message, send_message
@@ -24,6 +24,10 @@ async def add_aria2_download(listener, dpath, header, ratio, seed_time):
         a2c_opt["out"] = listener.name
     if header:
         a2c_opt["header"] = header
+    if listener.link.startswith(("http://", "https://", "ftp://")) and (
+        "user-agent" not in str(header).lower()
+    ):
+        a2c_opt["user-agent"] = DEFAULT_BROWSER_USER_AGENT
     if ratio:
         a2c_opt["seed-ratio"] = ratio
     if seed_time:

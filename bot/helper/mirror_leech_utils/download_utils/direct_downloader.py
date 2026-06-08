@@ -10,6 +10,7 @@ from ...ext_utils.task_manager import (
     stop_duplicate_check,
     limit_checker,
 )
+from ...ext_utils.bot_utils import DEFAULT_BROWSER_USER_AGENT
 from ...listeners.direct_listener import DirectListener
 from ...mirror_leech_utils.status_utils.direct_status import DirectStatus
 from ...mirror_leech_utils.status_utils.queue_status import QueueStatus
@@ -52,6 +53,8 @@ async def add_direct_download(listener, path):
     a2c_opt = {"follow-torrent": "false", "follow-metalink": "false"}
     if header := details.get("header"):
         a2c_opt["header"] = header
+    if "user-agent" not in str(header).lower():
+        a2c_opt["user-agent"] = DEFAULT_BROWSER_USER_AGENT
     directListener = DirectListener(path, listener, a2c_opt)
 
     async with task_dict_lock:
