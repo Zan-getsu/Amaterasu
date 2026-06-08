@@ -1,5 +1,6 @@
 from base64 import b64encode
 from ast import literal_eval
+from asyncio import sleep
 from re import match as re_match
 
 from aiofiles.os import path as aiopath
@@ -140,6 +141,37 @@ class Mirror(TaskListener):
             extra_postprocess=False,
             forced_name=forced_name,
         )
+
+    async def _retry_aria2_or_ytdlp(self, path):
+        if not getattr(self, "aria2_fallback_retried", False):
+            self.aria2_fallback_retried = True
+            await sleep(5)
+
+            content_type, content_filename = await get_content_info(self.link)
+            is_text_response = bool(
+                content_type and re_match(r"text/html|text/plain", content_type)
+            )
+            if content_filename and not self.name and (
+                not is_text_response or "." in content_filename
+            ):
+                self.ytdlp_fallback_name = content_filename
+
+            LOGGER.info(f"Retrying Aria2 before yt-dlp fallback for: {self.link}")
+            self.allow_ytdlp_fallback = True
+            aria2_started = await add_aria2_download(
+                self,
+                path,
+                getattr(self, "aria2_fallback_headers", ""),
+                getattr(self, "aria2_fallback_ratio", None),
+                getattr(self, "aria2_fallback_seed_time", None),
+                notify_error=False,
+            )
+            if aria2_started:
+                return
+
+        LOGGER.info(f"Aria2 retry failed. Falling back to yt-dlp for: {self.link}")
+        self.allow_ytdlp_fallback = False
+        await self._add_ytdlp_fallback(path)
 
     async def new_event(self):
 
@@ -529,7 +561,11 @@ class Mirror(TaskListener):
                 )
             can_fallback = self.link.startswith(("http://", "https://", "ftp://"))
             self.allow_ytdlp_fallback = can_fallback
+            self.aria2_fallback_retried = False
             self.ytdlp_fallback_path = path
+            self.aria2_fallback_headers = headers
+            self.aria2_fallback_ratio = ratio
+            self.aria2_fallback_seed_time = seed_time
             aria2_started = await add_aria2_download(
                 self,
                 path,
@@ -540,9 +576,9 @@ class Mirror(TaskListener):
             )
             if not aria2_started and can_fallback:
                 LOGGER.info(
-                    f"Aria2 could not start download. Falling back to yt-dlp for: {self.link}"
+                    f"Aria2 could not start download. Retrying before yt-dlp fallback for: {self.link}"
                 )
-                await self._add_ytdlp_fallback(path)
+                await self._retry_aria2_or_ytdlp(path)
 
 
 async def mirror(client, message):

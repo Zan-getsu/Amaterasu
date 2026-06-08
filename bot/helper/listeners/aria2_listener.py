@@ -192,14 +192,14 @@ async def _on_download_error(api, data):
         if (
             getattr(listener, "allow_ytdlp_fallback", False)
             and not listener.is_cancelled
-            and hasattr(listener, "_add_ytdlp_fallback")
+            and hasattr(listener, "_retry_aria2_or_ytdlp")
         ):
             listener.allow_ytdlp_fallback = False
             LOGGER.info(
-                f"Aria2 download failed. Falling back to yt-dlp for: {listener.link}"
+                f"Aria2 download failed. Retrying before yt-dlp fallback for: {listener.link}"
             )
             await TorrentManager.aria2_remove(download)
-            await listener._add_ytdlp_fallback(
+            await listener._retry_aria2_or_ytdlp(
                 getattr(listener, "ytdlp_fallback_path", listener.dir)
             )
             return

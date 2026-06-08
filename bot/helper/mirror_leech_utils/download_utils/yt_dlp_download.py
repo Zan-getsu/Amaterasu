@@ -1,13 +1,16 @@
 from logging import getLogger
-from os import path as ospath, listdir
+from mimetypes import guess_extension
+from os import path as ospath, listdir, replace
 from re import search as re_search
 from contextlib import suppress
 from secrets import token_hex
+from zipfile import ZipFile, is_zipfile
 from yt_dlp import YoutubeDL, DownloadError
 
 from .... import task_dict_lock, task_dict, user_data
 from ....core.config_manager import BinConfig
-from ...ext_utils.bot_utils import sync_to_async, async_to_sync
+from ...ext_utils.bot_utils import sync_to_async, async_to_sync, get_content_info
+from ...ext_utils.files_utils import get_mime_type
 from ...ext_utils.task_manager import (
     check_running_tasks,
     stop_duplicate_check,
@@ -58,6 +61,7 @@ class YoutubeDLHelper:
         self._ext = ""
         self.is_playlist = False
         self.keep_thumb = False
+        self.extra_postprocess = True
         self.playlist_count = 0
         self.opts = {
             "progress_hooks": [self._on_download_progress],
@@ -152,6 +156,114 @@ class YoutubeDLHelper:
         self._listener.is_cancelled = True
         async_to_sync(self._listener.on_download_error, error)
 
+    @staticmethod
+    def _valid_filename(name):
+        return bool(name and "." in name and not name.endswith(".unknown_video"))
+
+    @staticmethod
+    def _is_apk_file(file_path):
+        try:
+            if not is_zipfile(file_path):
+                return False
+            with ZipFile(file_path) as archive:
+                return "AndroidManifest.xml" in archive.namelist()
+        except Exception:
+            return False
+
+    def _extension_from_file(self, file_path):
+        if self._is_apk_file(file_path):
+            return ".apk"
+
+        mime_type = get_mime_type(file_path)
+        known_extensions = {
+            "application/vnd.android.package-archive": ".apk",
+            "application/zip": ".zip",
+            "application/x-zip": ".zip",
+            "application/x-zip-compressed": ".zip",
+            "application/x-7z-compressed": ".7z",
+            "application/x-rar": ".rar",
+            "application/x-rar-compressed": ".rar",
+            "application/vnd.rar": ".rar",
+            "application/gzip": ".gz",
+            "application/x-gzip": ".gz",
+            "application/x-bzip2": ".bz2",
+            "application/x-xz": ".xz",
+            "application/x-tar": ".tar",
+            "application/x-gtar": ".tar",
+            "application/zstd": ".zst",
+            "application/x-zstd": ".zst",
+            "application/x-iso9660-image": ".iso",
+            "application/vnd.debian.binary-package": ".deb",
+            "application/x-debian-package": ".deb",
+            "application/x-rpm": ".rpm",
+            "application/x-msdownload": ".exe",
+            "application/vnd.microsoft.portable-executable": ".exe",
+            "application/pdf": ".pdf",
+            "application/epub+zip": ".epub",
+        }
+        ext = known_extensions.get(mime_type) or guess_extension(mime_type)
+        if ext == ".jpe":
+            ext = ".jpg"
+        return ext or ""
+
+    @staticmethod
+    def _unique_path(path, filename):
+        base_name, ext = ospath.splitext(filename)
+        target = f"{path}/{filename}"
+        suffix = 1
+        while ospath.exists(target):
+            filename = f"{base_name}.{suffix}{ext}"
+            target = f"{path}/{filename}"
+            suffix += 1
+        return target, filename
+
+    def _repair_unknown_video_name(self, path):
+        if self.is_playlist or self.extra_postprocess:
+            return
+
+        filename = self._listener.name.rsplit("/", 1)[-1]
+        file_path = f"{path}/{filename}"
+        if not filename.endswith(".unknown_video") or not ospath.isfile(file_path):
+            filename = next(
+                (
+                    file_
+                    for file_ in listdir(path)
+                    if file_.endswith(".unknown_video")
+                    and ospath.isfile(f"{path}/{file_}")
+                ),
+                "",
+            )
+            if not filename:
+                return
+            file_path = f"{path}/{filename}"
+
+        repaired_name = getattr(self._listener, "ytdlp_fallback_name", "")
+        if not self._valid_filename(repaired_name):
+            with suppress(Exception):
+                _, content_filename = async_to_sync(
+                    get_content_info, self._listener.link
+                )
+                if self._valid_filename(content_filename):
+                    repaired_name = content_filename
+
+        if not self._valid_filename(repaired_name):
+            base_name = filename[: -len(".unknown_video")]
+            with suppress(Exception):
+                if ext := self._extension_from_file(file_path):
+                    repaired_name = f"{base_name}{ext}"
+
+        if not self._valid_filename(repaired_name):
+            return
+
+        target_path, repaired_name = self._unique_path(path, repaired_name)
+        try:
+            replace(file_path, target_path)
+            self._listener.name = repaired_name
+            self._ext = ospath.splitext(repaired_name)[-1]
+            LOGGER.info(f"Renamed yt-dlp fallback file to: {repaired_name}")
+        except Exception as e:
+            LOGGER.warning(f"Unable to repair yt-dlp fallback filename: {e}")
+
     def _extract_meta_data(self):
         if self._listener.link.startswith(("rtmp", "mms", "rstp", "rtmps")):
             self.opts["external_downloader"] = BinConfig.FFMPEG_NAME
@@ -198,6 +310,7 @@ class YoutubeDLHelper:
                     if not self._listener.is_cancelled:
                         self._on_download_error(str(e))
                     return
+            self._repair_unknown_video_name(path)
             if self.is_playlist and (
                 not ospath.exists(path) or len(listdir(path)) == 0
             ):
@@ -213,6 +326,7 @@ class YoutubeDLHelper:
     async def add_download(
         self, path, qual, playlist, options, extra_postprocess=True, forced_name=None
     ):
+        self.extra_postprocess = extra_postprocess
         if playlist:
             self.opts["ignoreerrors"] = True
             self.is_playlist = True
