@@ -210,7 +210,9 @@ class YoutubeDLHelper:
             async_to_sync(self._listener.on_download_complete)
         return
 
-    async def add_download(self, path, qual, playlist, options, extra_postprocess=True):
+    async def add_download(
+        self, path, qual, playlist, options, extra_postprocess=True, forced_name=None
+    ):
         if playlist:
             self.opts["ignoreerrors"] = True
             self.is_playlist = True
@@ -262,6 +264,9 @@ class YoutubeDLHelper:
         await sync_to_async(self._extract_meta_data)
         if self._listener.is_cancelled:
             return
+        if forced_name:
+            self._listener.name = forced_name
+            self._ext = ospath.splitext(forced_name)[-1]
 
         base_name, ext = ospath.splitext(self._listener.name)
         trim_name = self._listener.name if self.is_playlist else base_name

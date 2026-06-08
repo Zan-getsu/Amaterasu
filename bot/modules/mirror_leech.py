@@ -10,7 +10,7 @@ from .. import DOWNLOAD_DIR, LOGGER, bot_loop, task_dict_lock
 from ..helper.ext_utils.bot_utils import (
     COMMAND_USAGE,
     arg_parser,
-    get_content_type,
+    get_content_info,
     sync_to_async,
 )
 from ..helper.ext_utils.exceptions import DirectDownloadLinkException
@@ -96,7 +96,7 @@ class Mirror(TaskListener):
         self.is_nzb = is_nzb
         self.is_uphoster = is_uphoster
 
-    async def _add_ytdlp_fallback(self, path):
+    async def _add_ytdlp_fallback(self, path, forced_name=None):
         self.is_ytdlp = True
         self._set_mode_engine()
 
@@ -131,8 +131,14 @@ class Mirror(TaskListener):
 
         playlist = "entries" in result
         ydl = YoutubeDLHelper(self)
+        forced_name = forced_name or getattr(self, "ytdlp_fallback_name", "")
         await ydl.add_download(
-            path, qual or "best/b", playlist, opt, extra_postprocess=False
+            path,
+            qual or "best/b",
+            playlist,
+            opt,
+            extra_postprocess=False,
+            forced_name=forced_name,
         )
 
     async def new_event(self):
@@ -272,6 +278,7 @@ class Mirror(TaskListener):
         file_ = None
         session = ""
         use_ytdlp_fallback = False
+        ytdlp_fallback_name = ""
 
         try:
             self.multi = int(args["-i"])
@@ -455,11 +462,18 @@ class Mirror(TaskListener):
             and not is_gdrive_id(self.link)
             and not is_mega_link(self.link)
         ):
-            content_type = await get_content_type(self.link)
+            content_type, content_filename = await get_content_info(self.link)
+            is_text_response = bool(
+                content_type and re_match(r"text/html|text/plain", content_type)
+            )
+            if content_filename and not self.name and (
+                not is_text_response or "." in content_filename
+            ):
+                ytdlp_fallback_name = content_filename
             if (
                 is_pixeldrain_link(self.link)
                 or content_type is None
-                or re_match(r"text/html|text/plain", content_type)
+                or is_text_response
             ):
                 try:
                     self.link = await sync_to_async(direct_link_generator, self.link)
@@ -483,13 +497,14 @@ class Mirror(TaskListener):
                     return
 
         await delete_links(self.message)
+        self.ytdlp_fallback_name = ytdlp_fallback_name
 
         if file_ is not None:
             await TelegramDownloadHelper(self).add_download(
                 reply_to, f"{path}/", session
             )
         elif use_ytdlp_fallback:
-            await self._add_ytdlp_fallback(path)
+            await self._add_ytdlp_fallback(path, ytdlp_fallback_name)
         elif isinstance(self.link, dict):
             await add_direct_download(self, path)
         elif self.is_jd:

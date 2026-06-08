@@ -7,6 +7,7 @@ from asyncio import (
 from asyncio.subprocess import PIPE
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial, wraps
+from urllib.parse import unquote, urlparse
 
 from httpx import AsyncClient
 
@@ -232,18 +233,50 @@ def get_size_bytes(size):
     return size
 
 
-async def get_content_type(url):
+def get_filename_from_headers(headers, url=""):
+    content_disposition = headers.get("Content-Disposition", "")
+    filename = ""
+    for part in content_disposition.split(";"):
+        key, sep, value = part.strip().partition("=")
+        if not sep:
+            continue
+        key = key.lower()
+        value = value.strip().strip("\"'")
+        if key == "filename*":
+            value = value.split("''", 1)[-1]
+            filename = unquote(value)
+            break
+        if key == "filename" and not filename:
+            filename = unquote(value)
+
+    if not filename and url:
+        filename = unquote(urlparse(url).path.rsplit("/", 1)[-1])
+
+    filename = filename.replace("\\", "/").rsplit("/", 1)[-1].strip()
+    return filename or ""
+
+
+async def get_content_info(url):
+    headers = {"User-Agent": DEFAULT_BROWSER_USER_AGENT}
     try:
-        async with AsyncClient() as client:
-            response = await client.get(
-                url,
-                allow_redirects=True,
-                headers={"User-Agent": DEFAULT_BROWSER_USER_AGENT},
-                verify=False,
-            )
-            return response.headers.get("Content-Type")
+        async with AsyncClient(verify=False, follow_redirects=True) as client:
+            async with client.stream("GET", url, headers=headers) as response:
+                return (
+                    response.headers.get("Content-Type"),
+                    get_filename_from_headers(response.headers, str(response.url)),
+                )
     except Exception:
-        return None
+        return None, ""
+
+
+async def get_content_type(url):
+    content_type, _ = await get_content_info(url)
+    return content_type
+
+
+async def get_content_filename(url):
+    _, filename = await get_content_info(url)
+    return filename
 
 
 def update_user_ldata(id_, key, value):
