@@ -3,7 +3,6 @@ from tempfile import mkdtemp
 
 from mega import MegaApi, MegaError, MegaListener, MegaRequest
 
-from ... import LOGGER
 from .bot_utils import sync_to_async
 from .status_utils import get_readable_file_size
 
@@ -56,7 +55,6 @@ class MegaAccountListener(MegaListener):
                 self.result = True
             self._done = True
         except Exception as e:
-            LOGGER.error(f"MegaAccountListener.onRequestFinish exception: {e}", exc_info=True)
             self.error = str(e)
             self._done = True
 
@@ -164,32 +162,21 @@ class MegaAccountListener(MegaListener):
 
 
 def _get_mega_account_info_sync(email: str, password: str) -> str:
-    from time import sleep, gmtime, strftime, time
-
-    LOGGER.info("[MegaAccountInfo] _get_mega_account_info_sync START")
-    t0 = time()
+    from time import sleep, gmtime, strftime
 
     if not email or not password:
-        LOGGER.info("[MegaAccountInfo] No credentials configured, returning early")
         return (
             "⌬ <b>Mega Account Info</b>\n"
             "│\n"
             "┖ <i>No credentials configured.</i>"
         )
 
-    LOGGER.info("[MegaAccountInfo] Creating temp dir")
     base_dir = mkdtemp(prefix=".mega_account_")
 
-    LOGGER.info("[MegaAccountInfo] Calling MegaApi constructor...")
-    t1 = time()
     api = MegaApi("", base_dir, "WZML-X", 4)
-    LOGGER.info(f"[MegaAccountInfo] MegaApi constructor done in {time()-t1:.3f}s")
-
-    LOGGER.info("[MegaAccountInfo] Creating listener")
     listener = MegaAccountListener()
     api.addListener(listener)
     api._listener_ref = listener
-    LOGGER.info("[MegaAccountInfo] Listener attached")
 
     try:
         for expected_type, method, args, step_name in [
@@ -202,29 +189,19 @@ def _get_mega_account_info_sync(email: str, password: str) -> str:
             listener.error = None
             listener.result = None
 
-            LOGGER.info(f"[MegaAccountInfo] Calling {step_name}...")
-            t2 = time()
             method(*args)
-            LOGGER.info(f"[MegaAccountInfo] {step_name} returned (sync call done in {time()-t2:.3f}s), polling for callback...")
 
-            for i in range(50):
+            for _ in range(50):
                 if listener._done:
-                    LOGGER.info(f"[MegaAccountInfo] {step_name} callback received after {i*0.1:.1f}s")
                     break
                 sleep(0.1)
             else:
-                LOGGER.info(f"[MegaAccountInfo] {step_name} TIMEOUT after 5s")
                 return f"⌬ <b>Mega Account Info</b>\n│\n┖ {step_name} timed out after 5s"
 
             if listener.error:
-                LOGGER.info(f"[MegaAccountInfo] {step_name} error: {listener.error}")
                 return f"⌬ <b>Mega Account Info</b>\n│\n┖ {step_name} failed: {listener.error}"
 
-            LOGGER.info(f"[MegaAccountInfo] {step_name} OK")
-
         info = listener.result
-        LOGGER.info(f"[MegaAccountInfo] All steps done in {time()-t0:.3f}s, building response text")
-
         if not info:
             return "⌬ <b>Mega Account Info</b>\n│\n┖ No account details available."
 
@@ -236,7 +213,7 @@ def _get_mega_account_info_sync(email: str, password: str) -> str:
         pro_expiration = info["pro_expiration"]
 
         storage_pct = round(storage_used / max(storage_max, 1) * 100, 2)
-        transfer_pct = round(transfer_used / max(transfer_max, 1) * 100, 2)
+        transfer_pct = round(transfer_used / max(transfer_max, 1) * 100, 2) if transfer_max else None
 
         pro_names = {0: "Free", 1: "Pro I", 2: "Pro II", 3: "Pro III", 4: "Lite"}
         pro_name = pro_names.get(pro_level, f"Level {pro_level}")
@@ -254,9 +231,17 @@ def _get_mega_account_info_sync(email: str, password: str) -> str:
             f"┃\n"
             f"┠ <b>Storage</b> → {get_readable_file_size(storage_used)} / "
             f"{get_readable_file_size(storage_max)} ({storage_pct}%)\n"
-            f"┠ <b>Transfer</b> → {get_readable_file_size(transfer_used)} / "
-            f"{get_readable_file_size(transfer_max)} ({transfer_pct}%)\n"
         )
+
+        if transfer_pct is not None:
+            text += (
+                f"┠ <b>Transfer</b> → {get_readable_file_size(transfer_used)} / "
+                f"{get_readable_file_size(transfer_max)} ({transfer_pct}%)\n"
+            )
+        else:
+            text += (
+                f"┠ <b>Transfer</b> → {get_readable_file_size(transfer_used)} / Unlimited\n"
+            )
 
         if listener.root_handle is not None:
             try:
@@ -268,21 +253,15 @@ def _get_mega_account_info_sync(email: str, password: str) -> str:
                     f"┖ <b>Folders</b> → {num_folders}"
                 )
             except Exception:
-                text += (
-                    "┃\n"
-                    "┖ <b>Files/Folders</b> → N/A"
-                )
+                text += "┃\n┖ <b>Files/Folders</b> → N/A"
         else:
             text += "┖ <b>Files/Folders</b> → N/A"
 
-        LOGGER.info(f"[MegaAccountInfo] Returning result, total {time()-t0:.3f}s")
         return text
 
     except Exception as e:
-        LOGGER.info(f"[MegaAccountInfo] Exception: {e}", exc_info=True)
         return f"⌬ <b>Mega Account Info</b>\n│\n┖ Error: {e}"
     finally:
-        LOGGER.info("[MegaAccountInfo] Cleaning up")
         try:
             api.removeListener(listener)
         except Exception:
@@ -291,11 +270,7 @@ def _get_mega_account_info_sync(email: str, password: str) -> str:
             shutil_rmtree(base_dir, ignore_errors=True)
         except Exception:
             pass
-        LOGGER.info("[MegaAccountInfo] Cleanup done")
 
 
 async def get_mega_account_info(email: str, password: str) -> str:
-    LOGGER.info("[MegaAccountInfo] get_mega_account_info called, submitting to thread pool")
-    result = await sync_to_async(_get_mega_account_info_sync, email, password)
-    LOGGER.info("[MegaAccountInfo] Thread pool task completed")
-    return result
+    return await sync_to_async(_get_mega_account_info_sync, email, password)
