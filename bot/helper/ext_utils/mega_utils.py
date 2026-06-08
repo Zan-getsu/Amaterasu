@@ -1,4 +1,4 @@
-from asyncio import TimeoutError as AsyncTimeoutError, get_running_loop, wait_for
+from asyncio import Event, TimeoutError as AsyncTimeoutError, wait_for
 from os import path as ospath
 from secrets import token_hex
 
@@ -13,7 +13,7 @@ from .status_utils import get_readable_file_size
 
 class MegaAccountListener(MegaListener):
     def __init__(self):
-        self._fut = None
+        self._event = Event()
         self.result = None
         self.error = None
         self.root_handle = None
@@ -57,15 +57,11 @@ class MegaAccountListener(MegaListener):
                     pass
             elif req_type == MegaRequest.TYPE_LOGIN:
                 self.result = True
-            f = self._fut
-            if f and not f.done():
-                self._loop.call_soon_threadsafe(f.set_result, True)
+            self._event.set()
         except Exception as e:
             LOGGER.error(f"MegaAccountListener.onRequestFinish exception: {e}", exc_info=True)
             self.error = str(e)
-            f = self._fut
-            if f and not f.done():
-                self._loop.call_soon_threadsafe(f.set_result, True)
+            self._event.set()
 
     def onRequestTemporaryError(self, *args):
         pass
@@ -169,28 +165,18 @@ class MegaAccountListener(MegaListener):
     def onMountRemoved(self, *args):
         pass
 
-    async def wait(self):
-        if self._fut is None:
-            self._loop = get_running_loop()
-            self._fut = self._loop.create_future()
-        try:
-            await wait_for(self._fut, timeout=120)
-        except AsyncTimeoutError:
-            self.error = "Request timed out after 120s"
-
-
-async def _do_mega_api_create(base_dir: str):
-    return MegaApi("", base_dir, "WZML-X", 4)
-
 
 async def _do_sync_step(api, listener, expected_type, method, *args, step_name: str):
+    listener._event.clear()
     listener.expected_type = expected_type
-    listener._loop = get_running_loop()
-    listener._fut = listener._loop.create_future()
+    listener.error = None
+    listener.result = None
     await sync_to_async(method, *args)
-    await listener.wait()
-    if listener.error:
-        LOGGER.warning(f"get_mega_account_info: {step_name} failed: {listener.error}")
+    try:
+        await wait_for(listener._event.wait(), timeout=5)
+    except AsyncTimeoutError:
+        if not listener.error:
+            listener.error = f"Request timed out after 5s ({step_name})"
     return listener.error
 
 
@@ -205,7 +191,7 @@ async def get_mega_account_info(email: str, password: str) -> str:
     base_dir = ospath.join("/tmp", f".mega_account_{token_hex(5)}")
     await makedirs(base_dir, exist_ok=True)
 
-    api = await sync_to_async(MegaApi, "", base_dir, "WZML-X", 4)
+    api = MegaApi("", base_dir, "WZML-X", 4)
     listener = MegaAccountListener()
     api.addListener(listener)
     api._listener_ref = listener
