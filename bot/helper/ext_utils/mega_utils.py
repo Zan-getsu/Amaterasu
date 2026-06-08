@@ -279,12 +279,12 @@ def _get_mega_account_info_sync(email: str, password: str) -> str:
         return text
 
     except Exception as e:
-        LOGGER.error(f"[MegaAccountInfo] Exception: {e}", exc_info=True)
+        LOGGER.info(f"[MegaAccountInfo] Exception: {e}", exc_info=True)
         return f"⌬ <b>Mega Account Info</b>\n│\n┖ Error: {e}"
     finally:
-        LOGGER.info("[MegaAccountInfo] Cleaning up (logout + rmtree)")
+        LOGGER.info("[MegaAccountInfo] Cleaning up")
         try:
-            api.logout(False, None)
+            api.removeListener(listener)
         except Exception:
             pass
         try:
