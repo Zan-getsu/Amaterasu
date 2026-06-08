@@ -15,6 +15,7 @@ from ...ext_utils.task_manager import (
     limit_checker,
     stop_duplicate_check,
 )
+from ...ext_utils.bot_utils import sync_to_async
 from ...listeners.mega_listener import AsyncMega, MegaAppListener, MegaFolderListener, _mega_error_format
 from ...mirror_leech_utils.status_utils.mega_status import MegaDownloadStatus
 from ...mirror_leech_utils.status_utils.queue_status import QueueStatus
@@ -147,6 +148,12 @@ async def add_mega_download(listener, path):
 
         listener.name = listener.name or mega_listener._name or f"MEGA_Download_{token_hex(5)}"
         listener.size = mega_listener._size
+        if not listener.size and node:
+            try:
+                the_api = async_api.folder_api if _is_folder_link(listener.link) else api
+                listener.size = await sync_to_async(the_api.getSize, node)
+            except Exception:
+                pass
         gid = token_hex(5)
 
         msg, button = await stop_duplicate_check(listener)
