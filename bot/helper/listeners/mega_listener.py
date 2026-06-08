@@ -120,9 +120,9 @@ class AsyncMega:
 
     async def wait_for_transfer(self):
         try:
-            await wait_for(self._transfer_event.wait(), timeout=300)
+            await wait_for(self._transfer_event.wait(), timeout=43200)
         except AsyncTimeoutError:
-            LOGGER.error("Mega transfer timed out after 300s")
+            LOGGER.error("Mega transfer timed out after 12h")
             self._transfer_event.set()
 
     async def export_node(self, node, expireTime=0, writable=False, megaHosted=False):

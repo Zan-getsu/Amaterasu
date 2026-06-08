@@ -825,9 +825,6 @@ async def get_user_settings(from_user, stype="main"):
 ┠ <b>Mega Email</b> → <code>{email_display}</code>
 ┠ <b>Mega Password</b> → <code>{pass_display}</code>
 ┖ <b>Account</b> → {account_status}"""
-        if has_creds:
-            info_text = await get_mega_account_info(mega_email, mega_password)
-            text += f"\n\n{info_text}"
 
     elif stype == "ffset":
         buttons.data_button(
@@ -1413,10 +1410,19 @@ async def edit_user_settings(client, query):
         "gdrive",
         "rclone",
         "encode",
-        "mega",
     ]:
         await query.answer()
         await update_user_settings(query, data[2])
+    elif data[2] == "mega":
+        await query.answer()
+        msg, button = await get_user_settings(query.from_user, "mega")
+        await edit_message(message, msg, button)
+        mega_email = user_dict.get("MEGA_EMAIL", "")
+        mega_password = user_dict.get("MEGA_PASSWORD", "")
+        if mega_email and mega_password:
+            info_text = await get_mega_account_info(mega_email, mega_password)
+            msg += f"\n\n{info_text}"
+            await edit_message(message, msg, button)
     elif data[2] == "yttools":
         await query.answer()
         await update_user_settings(query, data[2])
