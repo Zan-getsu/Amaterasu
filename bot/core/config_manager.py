@@ -124,6 +124,7 @@ class Config:
     USER_TRANSMISSION = True
     USE_SERVICE_ACCOUNTS = False
     WEB_PINCODE = True
+    AMATERASU_WEB_SECRET = ""
     WZMLX_WEB_SECRET = ""
     YT_DLP_OPTIONS = {}
     YT_DESP = "Uploaded with Amaterasu"
@@ -173,6 +174,10 @@ class Config:
         if hasattr(cls, key):
             value = cls._convert_env_type(key, value)
             setattr(cls, key, value)
+            if key == "AMATERASU_WEB_SECRET":
+                cls.WZMLX_WEB_SECRET = value
+            elif key == "WZMLX_WEB_SECRET" and not cls.AMATERASU_WEB_SECRET:
+                cls.AMATERASU_WEB_SECRET = value
             if key in ["PORT", "BASE_URL_PORT", "FQDN", "HAS_SSL", "NO_PORT", "BASE_URL"]:
                 cls.construct_base_url()
         elif key.startswith("MULTI_TOKEN"):
@@ -195,7 +200,15 @@ class Config:
     def load(cls):
         cls.load_config()
         cls.load_env()
+        cls._sync_legacy_aliases()
         cls.construct_base_url()
+
+    @classmethod
+    def _sync_legacy_aliases(cls):
+        if cls.AMATERASU_WEB_SECRET:
+            cls.WZMLX_WEB_SECRET = cls.AMATERASU_WEB_SECRET
+        elif cls.WZMLX_WEB_SECRET:
+            cls.AMATERASU_WEB_SECRET = cls.WZMLX_WEB_SECRET
 
     @classmethod
     def construct_base_url(cls):
@@ -340,6 +353,7 @@ class Config:
                 setattr(cls, key, value)
             elif key.startswith("MULTI_TOKEN") and value:
                 cls.MULTI_TOKENS[key] = value.strip() if isinstance(value, str) else str(value)
+        cls._sync_legacy_aliases()
         for key in ["BOT_TOKEN", "OWNER_ID", "TELEGRAM_API", "TELEGRAM_HASH"]:
             value = getattr(cls, key)
             if isinstance(value, str):

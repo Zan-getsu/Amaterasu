@@ -100,7 +100,7 @@ async def add_mega_download(listener, path):
         await makedirs(mega_dir, exist_ok=True)
 
         async_api = AsyncMega()
-        async_api.api = api = MegaApi("", mega_dir, "WZML-X", 4)
+        async_api.api = api = MegaApi("", mega_dir, "Amaterasu", 4)
         mega_listener = MegaAppListener(async_api, listener)
         async_api._mega_listener = mega_listener
         api.addListener(mega_listener)
@@ -108,7 +108,7 @@ async def add_mega_download(listener, path):
         if _is_folder_link(listener.link):
             mega_folder_dir = os.path.join(mega_base, "folder")
             await makedirs(mega_folder_dir, exist_ok=True)
-            async_api.folder_api = MegaApi("", mega_folder_dir, "WZML-X", 4)
+            async_api.folder_api = MegaApi("", mega_folder_dir, "Amaterasu", 4)
             folder_listener = MegaFolderListener(mega_listener)
             async_api._folder_listener = folder_listener
             async_api.folder_api.addListener(folder_listener)
