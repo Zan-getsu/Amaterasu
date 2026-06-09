@@ -545,6 +545,8 @@ async def edit_variable(_, message, pre_message, key):
                 intervals["status"][cid] = SetInterval(
                     value, update_status_message, cid
                 )
+    elif key == "STATUS_LIMIT":
+        value = max(int(value), 1)
     elif key == "TORRENT_TIMEOUT":
         await TorrentManager.change_aria2_option("bt-stop-timeout", value)
         value = int(value)

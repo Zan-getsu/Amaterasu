@@ -631,7 +631,7 @@ All limits are in **GB**. Set `0` to disable the limit.
 | `LEECH_DUMP_CHAT` | `str` | `""` | Chat ID where leeched files are dumped (e.g., `-100123456789`) |
 | `LINKS_LOG_ID` | `str` | `""` | Chat ID for logging generated links |
 | `MIRROR_LOG_ID` | `str` | `""` | Chat ID for logging mirror uploads |
-| `STATUS_LIMIT` | `int` | `0` | Max number of tasks shown per status page |
+| `STATUS_LIMIT` | `int` | `10` | Max number of tasks shown per status page |
 | `STATUS_UPDATE_INTERVAL` | `int` | `0` | Seconds between status message updates |
 | `INCOMPLETE_TASK_NOTIFIER` | `bool` | `False` | Notify about incomplete tasks on restart |
 | `INC_TASK_RESUME` | `bool` | `False` | Auto-resume incomplete tasks after restart |
