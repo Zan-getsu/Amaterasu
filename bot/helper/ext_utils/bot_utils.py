@@ -154,7 +154,20 @@ def create_help_buttons():
 
 
 def compare_versions(v1, v2):
-    v1, v2 = (list(map(int, v.split("-")[0].lstrip("v").split("."))) for v in (v1, v2))
+    def parse_version(version):
+        if not version:
+            return None
+        try:
+            return [
+                int(part)
+                for part in str(version).strip().split("-")[0].lstrip("vV").split(".")
+            ]
+        except ValueError:
+            return None
+
+    v1, v2 = (parse_version(version) for version in (v1, v2))
+    if v1 is None or v2 is None:
+        return "Latest version unavailable"
     return (
         "New Version Update is Available! Check Now!"
         if v1 < v2

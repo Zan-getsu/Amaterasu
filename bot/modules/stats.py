@@ -133,6 +133,7 @@ async def get_stats(event, key="home"):
                 True,
             )
         )[0]
+        official_v = official_v.strip() or "N/A"
         msg = f"""<b>❖ REPO METRICS</b>
 <pre>
 ├─ {'Updated':<10}: {last_commit}
