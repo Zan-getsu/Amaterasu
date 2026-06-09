@@ -31,32 +31,45 @@ from ..ext_utils.exceptions import TgLinkException
 from ..ext_utils.status_utils import get_readable_message
 
 
+def _resolve_photo(photo):
+    if photo == "IMAGES":
+        if Config.IMAGES:
+            Config.USE_IMAGES = True
+            return choice(Config.IMAGES)
+        return None
+    return photo
+
+
+async def _send_text(message, text, buttons=None, **kwargs):
+    if isinstance(message, (int, str)):
+        try:
+            chat_id = int(message)
+        except ValueError:
+            chat_id = message
+        return await TgClient.bot.send_message(
+            chat_id=chat_id,
+            text=text,
+            disable_web_page_preview=True,
+            disable_notification=True,
+            reply_markup=buttons,
+        )
+    return await message.reply(
+        text=text,
+        quote=True,
+        disable_web_page_preview=True,
+        disable_notification=True,
+        reply_markup=buttons,
+        **kwargs,
+    )
+
+
 async def send_message(message, text, buttons=None, block=True, photo=None, **kwargs):
     try:
         if photo:
             try:
-                if photo == "IMAGES":
-                    if Config.USE_IMAGES and Config.IMAGES:
-                        photo = choice(Config.IMAGES)
-                    else:
-                        photo = None
+                photo = _resolve_photo(photo)
                 if photo is None:
-                    if isinstance(message, (int, str)):
-                        return await TgClient.bot.send_message(
-                            chat_id=message,
-                            text=text,
-                            disable_web_page_preview=True,
-                            disable_notification=True,
-                            reply_markup=buttons,
-                        )
-                    return await message.reply(
-                        text=text,
-                        quote=True,
-                        disable_web_page_preview=True,
-                        disable_notification=True,
-                        reply_markup=buttons,
-                        **kwargs,
-                    )
+                    return await _send_text(message, text, buttons, **kwargs)
                 if isinstance(message, (int, str)):
                     return await TgClient.bot.send_photo(
                         chat_id=message,
@@ -105,10 +118,10 @@ async def send_message(message, text, buttons=None, block=True, photo=None, **kw
                         return msg
                 except Exception:
                     LOGGER.error("Failed to send fallback photo", exc_info=True)
-                return
+                return await _send_text(message, text, buttons, **kwargs)
             except Exception:
                 LOGGER.error("Error while sending photo", exc_info=True)
-                return
+                return await _send_text(message, text, buttons, **kwargs)
         if isinstance(message, (int, str)):
             try:
                 chat_id = int(message)
@@ -148,13 +161,9 @@ async def send_message(message, text, buttons=None, block=True, photo=None, **kw
 
 async def edit_message(message, text, buttons=None, block=True, photo=None):
     try:
+        photo = _resolve_photo(photo)
         if message.media:
             if photo:
-                if photo == "IMAGES":
-                    if Config.USE_IMAGES and Config.IMAGES:
-                        photo = choice(Config.IMAGES)
-                    else:
-                        photo = None
                 if photo:
                     try:
                         return await message.edit_media(
@@ -179,6 +188,15 @@ async def edit_message(message, text, buttons=None, block=True, photo=None):
                             caption=text, reply_markup=buttons
                         )
             return await message.edit_caption(caption=text, reply_markup=buttons)
+        if photo:
+            try:
+                new_message = await send_message(
+                    message.chat.id, text, buttons, block, photo
+                )
+                await delete_message(message)
+                return new_message
+            except Exception:
+                LOGGER.error("Failed to replace text message with photo", exc_info=True)
         return await message.edit(
             text=text,
             disable_web_page_preview=True,
