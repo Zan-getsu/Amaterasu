@@ -583,6 +583,7 @@ All limits are in **GB**. Set `0` to disable the limit.
 | `BASE_URL` | `str` | `""` | Base URL for the web server (e.g., `http://your-ip:8080`) |
 | `BASE_URL_PORT` | `int` | `0` | Port for the web server |
 | `WEB_PINCODE` | `bool` | `False` | Enable pincode verification for torrent file selection |
+| `AMATERASU_WEB_SECRET` | `str` | `""` | Secret used to sign and verify web interface tokens. Set a long random value so file-selector and web auth links keep working after restarts |
 | `QUEUE_ALL` | `int` | `0` | Max total tasks in queue (0 = unlimited) |
 | `QUEUE_DOWNLOAD` | `int` | `0` | Max concurrent downloads |
 | `QUEUE_UPLOAD` | `int` | `0` | Max concurrent uploads |
@@ -1237,6 +1238,7 @@ Configure `MULTI_TOKEN1`, `MULTI_TOKEN2`, `MULTI_TOKEN3` with additional bot tok
 ### Access Control
 | Feature | Variable | Description |
 |---|---|---|
+| Web Token Signing | `AMATERASU_WEB_SECRET` | Signs web interface tokens for file selection and web auth. If empty, Amaterasu uses a temporary in-memory secret that changes after restart |
 | Token Authentication | `TOKEN_ENABLED` | Require a token parameter in stream URLs |
 | Token Expiry | `TOKEN_TTL_HOURS` | Auto-expire tokens after N hours |
 | URL Shortening | `SHORTEN_ENABLED` | Shorten generated links via a URL shortener |
