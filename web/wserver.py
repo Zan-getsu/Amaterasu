@@ -55,8 +55,6 @@ def _load_config():
     bot_token = environ.get("BOT_TOKEN", "") or (getattr(cfg, "BOT_TOKEN", "") if cfg else "")
     secret = environ.get("AMATERASU_WEB_SECRET", "") or (
         getattr(cfg, "AMATERASU_WEB_SECRET", "") if cfg else ""
-    ) or environ.get("WZMLX_WEB_SECRET", "") or (
-        getattr(cfg, "WZMLX_WEB_SECRET", "") if cfg else ""
     )
     return bot_token, secret
 

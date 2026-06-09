@@ -249,7 +249,6 @@ DEFAULT_DESP = {
     "USE_SERVICE_ACCOUNTS": "Use Google Service Accounts. Default: False.",
     "WEB_PINCODE": "Ask for pincode in web file selection. Default: True.",
     "AMATERASU_WEB_SECRET": "Secret key for web interface authentication.",
-    "WZMLX_WEB_SECRET": "Legacy alias for AMATERASU_WEB_SECRET.",
     "YT_DLP_OPTIONS": "Default yt-dlp options. Format: key:value|key:value.",
     "YT_DESP": "Description for YouTube uploads. Default: Uploaded with Amaterasu.",
     "YT_TAGS": "Tags for YouTube uploads. List format.",
