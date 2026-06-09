@@ -35,11 +35,12 @@ async def picture_add(_, message):
 ┖ <b>Supported:</b> <i>Telegra.ph, DDL links, Telegram photos</i>"""
         return await edit_message(editable, help_msg)
     Config.IMAGES.append(pic_add)
+    Config.USE_IMAGES = True
     if Config.DATABASE_URL:
-        await database.update_config({"IMAGES": Config.IMAGES})
+        await database.update_config({"IMAGES": Config.IMAGES, "USE_IMAGES": True})
     await edit_message(
         editable,
-        f"⌬ <b><u>Image Added</u></b>\n│\n┖ <b>Total Images :</b> <code>{len(Config.IMAGES)}</code>",
+        f"⌬ <b><u>Image Added</u></b>\n│\n┠ <b>Total Images :</b> <code>{len(Config.IMAGES)}</code>\n┖ <b>Random Message Images :</b> <code>Enabled</code>",
     )
 
 
@@ -51,6 +52,10 @@ async def pictures(_, message):
             f"<b>No Photo to Show !</b> Add by <code>/{BotCommands.AddImageCommand}</code>",
         )
     else:
+        if not Config.USE_IMAGES:
+            Config.USE_IMAGES = True
+            if Config.DATABASE_URL:
+                await database.update_config({"USE_IMAGES": True})
         to_edit = await send_message(message, "<i>Generating Grid of your Images...</i>")
         buttons = ButtonMaker()
         user_id = message.from_user.id

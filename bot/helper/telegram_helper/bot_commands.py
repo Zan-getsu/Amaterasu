@@ -43,7 +43,7 @@ class BotCommands:
         "IMDB": "imdb",
         "Rss": "rss",
         "AddImage": ["addimage", "ai"],
-        "Images": ["images", "img"],
+        "Images": ["images", "image", "img"],
         "Authorize": ["authorize", "a"],
         "UnAuthorize": ["unauthorize", "ua"],
         "AddSudo": ["addsudo", "as"],

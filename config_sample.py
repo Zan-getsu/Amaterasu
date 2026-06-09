@@ -115,6 +115,10 @@ USENET_SERVERS = []
 # ==========================================
 # 10. MEDIA SEARCH & IMDB
 # ==========================================
+IMAGES = []
+IMG_SEARCH = ""
+IMG_PAGE = 1
+USE_IMAGES = False
 IMDB_TEMPLATE = ""
 INSTADL_API = ""
 HYDRA_IP = ""

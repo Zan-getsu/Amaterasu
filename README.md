@@ -602,6 +602,10 @@ All limits are in **GB**. Set `0` to disable the limit.
 
 | Variable | Type | Default | Description |
 |---|---|---|---|
+| `IMAGES` | `list` | `[]` | Image URLs or Telegram photo file IDs used as random bot message photos |
+| `IMG_SEARCH` | `str` | `""` | Comma-separated wallpaper search keywords used to auto-fill `IMAGES` on startup |
+| `IMG_PAGE` | `int` | `1` | Number of Wallpaperflare result pages to fetch per `IMG_SEARCH` keyword |
+| `USE_IMAGES` | `bool` | `False` | Enable random images on supported bot messages |
 | `IMDB_TEMPLATE` | `str` | `""` | Custom HTML template for IMDB results |
 | `INSTADL_API` | `str` | `""` | Instagram downloader API endpoint |
 | `HYDRA_IP` | `str` | `""` | NZBHydra2 IP address for Usenet search |
