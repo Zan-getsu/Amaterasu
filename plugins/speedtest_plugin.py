@@ -16,7 +16,7 @@ from bot.helper.telegram_helper.message_utils import (
 class SpeedtestPlugin(PluginBase):
     PLUGIN_INFO = PluginInfo(
         name="speedtest_plugin",
-        version="1.0.0",
+        version="1.2.1",
         author="Amaterasu",
         description="Speedtest plugin for testing internet speed",
         enabled=True,

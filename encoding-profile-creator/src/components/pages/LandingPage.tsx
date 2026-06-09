@@ -23,7 +23,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate, profileCou
 
         <div className="version mb-6">
           <i className="fa-solid fa-bolt mr-2 text-[#ff7a00]"></i>
-          PROFILES v1.0
+          PROFILES v1.2.1
         </div>
 
         <h1 className="text-4xl md:text-5xl font-black font-outfit mb-4 tracking-wider uppercase text-transparent bg-clip-text bg-gradient-to-br from-[#ff3e3e] to-[#ff7a00] filter drop-shadow-[0_0_30px_rgba(255,62,62,0.15)]">
