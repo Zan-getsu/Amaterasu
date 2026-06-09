@@ -147,6 +147,7 @@ INCOMPLETE_TASK_NOTIFIER = False
 CLEAN_LOG_MSG = False
 DELETE_LINKS = False
 MEDIA_STORE = False
+COLORED_BTNS = False
 
 # ==========================================
 # 14. DYNAMIC FILE-TO-LINK STREAMING
