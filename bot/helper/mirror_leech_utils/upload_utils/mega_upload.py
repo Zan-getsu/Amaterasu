@@ -6,10 +6,14 @@ from secrets import token_hex
 
 from aiofiles.os import makedirs, path as aiopath
 from aioshutil import rmtree
-from mega import MegaApi, MegaCancelToken
-
 from .... import LOGGER, task_dict, task_dict_lock
 from ...ext_utils.bot_utils import sync_to_async
+from ...ext_utils.mega_sdk import (
+    MEGA_SDK_AVAILABLE,
+    MegaApi,
+    MegaCancelToken,
+    mega_sdk_missing_message,
+)
 from ...ext_utils.status_utils import get_readable_file_size
 from ...listeners.mega_listener import AsyncMega, MegaAppListener, _mega_error_format
 from ...mirror_leech_utils.status_utils.mega_status import MegaDownloadStatus
@@ -91,6 +95,9 @@ async def _upload_file(
 
 
 async def add_mega_upload(listener, path, mega_email, mega_password, gid):
+    if not MEGA_SDK_AVAILABLE:
+        await listener.on_upload_error(mega_sdk_missing_message())
+        return
     if not mega_email or not mega_password:
         await listener.on_upload_error(
             "Mega credentials not configured for this user."

@@ -2,10 +2,9 @@ from asyncio import Event, TimeoutError as AsyncTimeoutError, wait_for
 from time import time
 from re import match as rematch
 
-from mega import MegaApi, MegaError, MegaListener, MegaRequest, MegaTransfer, MegaUploadOptions
-
 from ... import LOGGER, bot_loop
 from ..ext_utils.bot_utils import async_to_sync, sync_to_async
+from ..ext_utils.mega_sdk import MegaApi, MegaError, MegaListener, MegaRequest, MegaTransfer, MegaUploadOptions
 
 async def mega_cleanup():
     from ... import task_dict, task_dict_lock
