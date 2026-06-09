@@ -428,7 +428,6 @@ class MegaAppListener(MegaListener):
             elif request_type == MegaRequest.TYPE_EXPORT:
                 try:
                     self._export_link = request.getLink()
-                    LOGGER.info(f"TYPE_EXPORT: link={self._export_link}")
                 except Exception as e:
                     LOGGER.warning(f"TYPE_EXPORT: getLink failed: {e}")
                 self._export_done.set()
