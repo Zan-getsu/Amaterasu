@@ -30,7 +30,11 @@ def as_bool(value):
 
 _DB_PARTITION_SALT = b"wzmlx_v3_db_partition_salt"
 _ALLOWED_UPSTREAM = re_compile(
-    r"^https://(github\.com/[\w.-]+/[\w.-]+/?|raw\.githubusercontent\.com/[\w.-]+/[\w.-]+/?)$"
+    r"^https://("
+    r"github\.com/[\w.-]+/[\w.-]+/?|"
+    r"raw\.githubusercontent\.com/[\w.-]+/[\w.-]+/?|"
+    r"git\.nbmirror\.qzz\.io/[\w.-]+/[\w.-]+/?"
+    r")$"
 )
 _BRANCH_RE = re_compile(r"^[\w./-]+$")
 
@@ -107,7 +111,10 @@ UPSTREAM_REPO = config_file.get("UPSTREAM_REPO", "").strip() or "https://github.
 UPSTREAM_BRANCH = config_file.get("UPSTREAM_BRANCH", "").strip() or "main"
 
 if UPSTREAM_REPO and not _ALLOWED_UPSTREAM.match(UPSTREAM_REPO):
-    log_error(f"UPSTREAM_REPO rejected (must be github.com/raw.githubusercontent.com): {UPSTREAM_REPO}")
+    log_error(
+        "UPSTREAM_REPO rejected (must be github.com, raw.githubusercontent.com, "
+        f"or git.nbmirror.qzz.io): {UPSTREAM_REPO}"
+    )
     exit(1)
 
 if not _BRANCH_RE.match(UPSTREAM_BRANCH):

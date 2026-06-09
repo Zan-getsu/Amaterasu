@@ -669,7 +669,7 @@ All limits are in **GB**. Set `0` to disable the limit.
 | `DISABLE_BULK` | `bool` | `False` | Disable bulk download feature |
 | `DISABLE_MULTI` | `bool` | `False` | Disable multi-link feature |
 | `DISABLE_FF_MODE` | `bool` | `False` | Disable FFmpeg processing |
-| `UPSTREAM_REPO` | `str` | GitHub URL | Repository URL for auto-updates on restart |
+| `UPSTREAM_REPO` | `str` | GitHub URL | Repository URL for auto-updates on restart. Allowed hosts: `github.com`, `raw.githubusercontent.com`, `git.nbmirror.qzz.io` |
 | `UPSTREAM_BRANCH` | `str` | `main` | Branch to pull updates from |
 | `UPDATE_PKGS` | `bool` | `True` | Auto-update pip packages on restart |
 | `RSS_DELAY` | `int` | `0` | Seconds between RSS feed checks |
