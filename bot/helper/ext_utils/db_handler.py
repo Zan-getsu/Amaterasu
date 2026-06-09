@@ -274,16 +274,25 @@ class DbManager:
             return
         await self.db.rss[_part()].delete_one({"_id": user_id})
 
-    async def add_incomplete_task(self, cid, link, tag, user_id=None):
+    async def add_incomplete_task(
+        self, cid, link, tag, user_id=None, command="", reply_to_msg_id=0, name=""
+    ):
         if self._return:
             return
         data = {
             "cid": cid,
             "tag": tag,
+            "link": link,
             "restart_notified": False,
         }
         if user_id is not None:
             data["user_id"] = user_id
+        if command:
+            data["command"] = command
+        if reply_to_msg_id:
+            data["reply_to_msg_id"] = reply_to_msg_id
+        if name:
+            data["name"] = name
         await self.db.tasks[TgClient.ID].update_one(
             {"_id": link}, {"$set": data}, upsert=True
         )
@@ -367,13 +376,20 @@ class DbManager:
                     continue
                 cid = row["cid"]
                 tag = row["tag"]
+                task_data = {
+                    "link": link,
+                    "command": row.get("command", ""),
+                    "user_id": row.get("user_id", 0),
+                    "reply_to_msg_id": row.get("reply_to_msg_id", 0),
+                    "name": row.get("name", ""),
+                }
                 if cid in notifier_dict:
                     if tag in notifier_dict[cid]:
-                        notifier_dict[cid][tag].append(link)
+                        notifier_dict[cid][tag].append(task_data)
                     else:
-                        notifier_dict[cid][tag] = [link]
+                        notifier_dict[cid][tag] = [task_data]
                 else:
-                    notifier_dict[cid] = {tag: [link]}
+                    notifier_dict[cid] = {tag: [task_data]}
         await self.db.tasks[_part()].drop()
         return notifier_dict
 

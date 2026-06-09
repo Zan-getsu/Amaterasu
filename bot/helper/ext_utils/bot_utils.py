@@ -19,6 +19,7 @@ from aiofiles.os import mkdir
 from aiofiles.os import path as aiopath
 from httpx import AsyncClient, Limits
 from pyrogram.enums import ButtonStyle
+from pyrogram.handlers import MessageHandler
 
 from ... import LOGGER, bot_loop, user_data
 from ...core.config_manager import Config
@@ -515,3 +516,38 @@ async def search_images():
             await database.update_config(
                 {"IMAGES": Config.IMAGES, "STATUS_LIMIT": Config.STATUS_LIMIT}
             )
+
+
+def _find_command_filters(flt):
+    if hasattr(flt, "commands"):
+        yield flt
+    for attr in ("base", "other"):
+        if child := getattr(flt, attr, None):
+            yield from _find_command_filters(child)
+
+
+def _build_command_map():
+    from ...core.tg_client import TgClient
+
+    mapping = {}
+    for group in TgClient.bot.dispatcher.groups.values():
+        for handler in group:
+            if not isinstance(handler, MessageHandler):
+                continue
+            if handler.filters is None:
+                continue
+            for cmd_filter in _find_command_filters(handler.filters):
+                for cmd in cmd_filter.commands:
+                    mapping[cmd] = handler.callback
+    return mapping
+
+
+def resolve_command(command_str):
+    cmd_name = command_str.strip().lstrip("/").split(maxsplit=1)[0]
+    mapping = _build_command_map()
+    handler = mapping.get(cmd_name)
+    if handler is None and Config.CMD_SUFFIX:
+        handler = mapping.get(cmd_name + Config.CMD_SUFFIX)
+    if handler is None:
+        LOGGER.warning(f"Unknown command '{cmd_name}' (from '{command_str}')")
+    return handler

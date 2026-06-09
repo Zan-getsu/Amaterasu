@@ -634,6 +634,7 @@ All limits are in **GB**. Set `0` to disable the limit.
 | `STATUS_LIMIT` | `int` | `0` | Max number of tasks shown per status page |
 | `STATUS_UPDATE_INTERVAL` | `int` | `0` | Seconds between status message updates |
 | `INCOMPLETE_TASK_NOTIFIER` | `bool` | `False` | Notify about incomplete tasks on restart |
+| `INC_TASK_RESUME` | `bool` | `False` | Auto-resume incomplete tasks after restart |
 | `CLEAN_LOG_MSG` | `bool` | `False` | Clean log messages after task completion |
 | `DELETE_LINKS` | `bool` | `False` | Delete user's link message after processing |
 | `MEDIA_STORE` | `bool` | `False` | Store media metadata |

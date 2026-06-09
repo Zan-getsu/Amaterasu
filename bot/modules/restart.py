@@ -15,7 +15,7 @@ from ..core.config_manager import Config, BinConfig
 from ..core.jdownloader_booter import jdownloader
 from ..core.tg_client import TgClient
 from ..core.torrent_manager import TorrentManager
-from ..helper.ext_utils.bot_utils import new_task
+from ..helper.ext_utils.bot_utils import new_task, resolve_command
 from ..helper.ext_utils.db_handler import database
 from ..helper.ext_utils.files_utils import clean_all
 from ..helper.listeners.mega_listener import mega_cleanup
@@ -183,6 +183,73 @@ async def notify_incomplete_tasks():
             LOGGER.error(f"Failed to send incomplete task recovery to {user_id}: {e}")
 
 
+async def _resume_from_command(task):
+    command = task.get("command", "")
+    user_id = task.get("user_id", 0)
+    reply_to_msg_id = task.get("reply_to_msg_id", 0)
+    if not command or not user_id:
+        return False
+
+    handler = resolve_command(command)
+    if handler is None:
+        return False
+
+    try:
+        user = await TgClient.bot.get_users(user_id)
+    except Exception as e:
+        LOGGER.warning(f"Resume: cannot get user {user_id}: {e}")
+        return False
+
+    try:
+        msg = await TgClient.bot.send_message(
+            chat_id=task["cid"],
+            text=command,
+            disable_notification=True,
+        )
+        msg.text = command
+        msg.from_user = user
+        if reply_to_msg_id:
+            try:
+                reply_msg = await TgClient.bot.get_messages(
+                    chat_id=task["cid"], message_ids=reply_to_msg_id
+                )
+                if reply_msg:
+                    msg.reply_to_message = reply_msg
+            except Exception as e:
+                LOGGER.warning(f"Resume: cannot fetch reply msg {reply_to_msg_id}: {e}")
+        await handler(TgClient.bot, msg)
+        await delete_message(msg)
+        return True
+    except Exception as e:
+        LOGGER.error(f"Resume: failed for '{command}' in {task['cid']}: {e}")
+        return False
+
+
+async def auto_resume_incomplete_tasks():
+    if not (Config.INC_TASK_RESUME and Config.DATABASE_URL):
+        return
+
+    tasks = await database.get_incomplete_task_docs(notified=True)
+    if not tasks:
+        return
+
+    await database.clear_incomplete_tasks_by_links([task["_id"] for task in tasks])
+    resumed = 0
+    skipped = 0
+    for task in tasks:
+        task = await _hydrate_incomplete_task(task)
+        if await _resume_from_command(task):
+            resumed += 1
+        else:
+            message, client = await _get_task_message(task)
+            if message and getattr(message, "text", None) and await _requeue_task(client, message):
+                resumed += 1
+            else:
+                skipped += 1
+        await sleep(1)
+    LOGGER.info(f"Auto-resumed incomplete tasks: {resumed}; skipped: {skipped}")
+
+
 async def _requeue_task(client, message):
     from .clone import clone_node
     from .mirror_leech import (
@@ -299,7 +366,10 @@ async def restart_notification():
 
     now = datetime.now(timezone(Config.TIMEZONE))
 
-    await notify_incomplete_tasks()
+    if Config.INC_TASK_RESUME:
+        await auto_resume_incomplete_tasks()
+    else:
+        await notify_incomplete_tasks()
 
     if await aiopath.isfile(".restartmsg"):
         try:

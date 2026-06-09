@@ -46,6 +46,7 @@ class Config:
     IMG_PAGE = 1
     USE_IMAGES = False
     INCOMPLETE_TASK_NOTIFIER = False
+    INC_TASK_RESUME = False
     INDEX_URL = ""
     IS_TEAM_DRIVE = False
     JD_EMAIL = ""

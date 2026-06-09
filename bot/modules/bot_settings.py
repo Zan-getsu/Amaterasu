@@ -108,6 +108,7 @@ BOOL_VARS = [
     "DISABLE_TORRENTS",
     "EQUAL_SPLITS",
     "HYBRID_LEECH",
+    "INC_TASK_RESUME",
     "INCOMPLETE_TASK_NOTIFIER",
     "IS_TEAM_DRIVE",
     "MEDIA_GROUP",
@@ -168,6 +169,7 @@ DEFAULT_DESP = {
     "IMG_SEARCH": "Comma-separated keywords to auto-fetch wallpaper images on startup. e.g. anime, nature, space",
     "IMG_PAGE": "Number of pages to search for each keyword in IMG_SEARCH. Each page has ~70 images. Default: 1",
     "USE_IMAGES": "Enable random photo backgrounds on bot messages. Requires IMAGES list. Default: False",
+    "INC_TASK_RESUME": "Auto-resume incomplete tasks after restart. Default: False.",
     "INCOMPLETE_TASK_NOTIFIER": "Notify about incomplete tasks after restart. Default: False.",
     "INDEX_URL": "Google Drive Index URL for direct links.",
     "IS_TEAM_DRIVE": "Set True for TeamDrive uploads. Default: False.",
@@ -533,7 +535,7 @@ async def edit_variable(_, message, pre_message, key):
         value = True
     elif value.lower() == "false":
         value = False
-        if key == "INCOMPLETE_TASK_NOTIFIER" and Config.DATABASE_URL:
+        if key in ("INCOMPLETE_TASK_NOTIFIER", "INC_TASK_RESUME") and Config.DATABASE_URL:
             await database.trunc_table("tasks")
     elif key == "STATUS_UPDATE_INTERVAL":
         value = int(value)
@@ -653,7 +655,7 @@ async def toggle_bool_var(_, query, pre_message, key, value):
     Config.set(key, bool_value)
     await update_buttons(pre_message, key, "editvar", False)
     await database.update_config({key: bool_value})
-    if key == "INCOMPLETE_TASK_NOTIFIER" and not bool_value and Config.DATABASE_URL:
+    if key in ("INCOMPLETE_TASK_NOTIFIER", "INC_TASK_RESUME") and not bool_value and Config.DATABASE_URL:
         await database.trunc_table("tasks")
     elif key in ["QUEUE_ALL", "QUEUE_DOWNLOAD", "QUEUE_UPLOAD"]:
         await start_from_queued()
@@ -992,7 +994,7 @@ async def edit_bot_settings(client, query):
         elif data[2] == "INDEX_URL":
             if drives_names and drives_names[0] == "Main":
                 index_urls[0] = ""
-        elif data[2] == "INCOMPLETE_TASK_NOTIFIER":
+        elif data[2] in ("INCOMPLETE_TASK_NOTIFIER", "INC_TASK_RESUME"):
             await database.trunc_table("tasks")
         elif data[2] in ["JD_EMAIL", "JD_PASS"]:
             await create_subprocess_exec("pkill", "-9", "-f", "java")
@@ -1279,7 +1281,7 @@ async def load_config():
         )
         await database.update_aria2("bt-stop-timeout", f"{Config.TORRENT_TIMEOUT}")
 
-    if not Config.INCOMPLETE_TASK_NOTIFIER:
+    if not Config.INCOMPLETE_TASK_NOTIFIER and not Config.INC_TASK_RESUME:
         await database.trunc_table("tasks")
 
     await (await create_subprocess_exec("pkill", "-9", "-f", "gunicorn")).wait()

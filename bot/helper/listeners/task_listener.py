@@ -126,11 +126,21 @@ class TaskListener(TaskConfig):
             )
         if (
             self.is_super_chat
-            and Config.INCOMPLETE_TASK_NOTIFIER
+            and (Config.INCOMPLETE_TASK_NOTIFIER or Config.INC_TASK_RESUME)
             and Config.DATABASE_URL
         ):
             await database.add_incomplete_task(
-                self.message.chat.id, self.message.link, self.tag, self.user_id
+                self.message.chat.id,
+                self.message.link,
+                self.tag,
+                user_id=self.user_id,
+                command=self.message.text or "",
+                reply_to_msg_id=(
+                    self.message.reply_to_message.id
+                    if self.message.reply_to_message
+                    else 0
+                ),
+                name=self.name or "",
             )
 
     async def _metadata_handler_cb(self, _, message):
@@ -524,7 +534,7 @@ class TaskListener(TaskConfig):
     ):
         if (
             self.is_super_chat
-            and Config.INCOMPLETE_TASK_NOTIFIER
+            and (Config.INCOMPLETE_TASK_NOTIFIER or Config.INC_TASK_RESUME)
             and Config.DATABASE_URL
         ):
             await database.rm_complete_task(self.message.link)
@@ -762,7 +772,7 @@ class TaskListener(TaskConfig):
 
         if (
             self.is_super_chat
-            and Config.INCOMPLETE_TASK_NOTIFIER
+            and (Config.INCOMPLETE_TASK_NOTIFIER or Config.INC_TASK_RESUME)
             and Config.DATABASE_URL
         ):
             await database.rm_complete_task(self.message.link)
@@ -800,7 +810,7 @@ class TaskListener(TaskConfig):
 
         if (
             self.is_super_chat
-            and Config.INCOMPLETE_TASK_NOTIFIER
+            and (Config.INCOMPLETE_TASK_NOTIFIER or Config.INC_TASK_RESUME)
             and Config.DATABASE_URL
         ):
             await database.rm_complete_task(self.message.link)
