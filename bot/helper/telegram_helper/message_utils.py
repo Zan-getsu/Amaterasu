@@ -1,6 +1,6 @@
 from asyncio import sleep, gather
 from random import choice
-from re import match as re_match
+from re import match as re_match, sub
 from time import time
 
 from pyrogram.types import Message, InputMediaPhoto
@@ -38,6 +38,14 @@ def _resolve_photo(photo):
             return choice(Config.IMAGES)
         return None
     return photo
+
+
+def _shorten_caption(text, limit=900):
+    text = sub(r"<[^>]+>", "", str(text))
+    suffix = "\n\n... (truncated)"
+    if len(text) <= limit:
+        return text
+    return f"{text[:limit - len(suffix)]}{suffix}"
 
 
 async def _send_text(message, text, buttons=None, **kwargs):
@@ -97,7 +105,7 @@ async def send_message(message, text, buttons=None, block=True, photo=None, **kw
             except MediaCaptionTooLong:
                 return await send_message(
                     message,
-                    text[:1024],
+                    _shorten_caption(text),
                     buttons,
                     block,
                     photo,
@@ -213,6 +221,32 @@ async def edit_message(message, text, buttons=None, block=True, photo=None):
             )
         return await message.edit(
             text=text,
+            disable_web_page_preview=True,
+            reply_markup=buttons,
+            parse_mode=ParseMode.DISABLED,
+        )
+    except MediaCaptionTooLong:
+        short_text = _shorten_caption(text)
+        if message.media:
+            if photo:
+                try:
+                    return await message.edit_media(
+                        InputMediaPhoto(
+                            photo,
+                            short_text,
+                            parse_mode=ParseMode.DISABLED,
+                        ),
+                        reply_markup=buttons,
+                    )
+                except Exception:
+                    pass
+            return await message.edit_caption(
+                caption=short_text,
+                reply_markup=buttons,
+                parse_mode=ParseMode.DISABLED,
+            )
+        return await message.edit(
+            text=short_text,
             disable_web_page_preview=True,
             reply_markup=buttons,
             parse_mode=ParseMode.DISABLED,
