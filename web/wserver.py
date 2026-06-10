@@ -3,7 +3,7 @@ import re
 from importlib import import_module
 from os import environ
 from re import compile as re_compile
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 from contextlib import asynccontextmanager, suppress
 from logging import INFO, WARNING, FileHandler, StreamHandler, basicConfig, getLogger
 
@@ -11,7 +11,7 @@ from aioaria2 import Aria2HttpClient
 from aiohttp.client_exceptions import ClientError
 from aioqbt.client import create_client
 from fastapi import FastAPI, Request, HTTPException
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.templating import Jinja2Templates
 from sabnzbdapi import SabnzbdClient
 from aioqbt.exc import AQError
@@ -193,7 +193,7 @@ def _get_config():
 
 def _web_secret() -> str:
     config = _get_config()
-    return config.PROTECTED_API or config.LOGIN_PASS or config.BOT_TOKEN
+    return config.AMATERASU_WEB_SECRET or config.LOGIN_PASS or config.BOT_TOKEN
 
 
 def _service_password() -> str:
@@ -615,7 +615,15 @@ async def qbittorrent_proxy(path: str = "", request: Request = None):
 
 # FileToLink dynamic load-balanced streaming endpoints
 CHUNK_SIZE = 1024 * 1024
+MAX_CONCURRENT_PER_CLIENT = 8
+VALID_DISPOSITIONS = {"inline", "attachment"}
 RANGE_REGEX = re.compile(r"^bytes=(?P<start>\d*)-(?P<end>\d*)$")
+CORS_HEADERS = {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS",
+    "Access-Control-Allow-Headers": "Range, Content-Type, *",
+    "Access-Control-Expose-Headers": "Content-Length, Content-Range, Content-Disposition",
+}
 
 def select_optimal_client() -> tuple[int, any]:
     from bot.core.tg_client import TgClient
@@ -624,7 +632,7 @@ def select_optimal_client() -> tuple[int, any]:
     
     available_clients = [
         (cid, load) for cid, load in TgClient.stream_loads.items()
-        if load < 8
+        if load < MAX_CONCURRENT_PER_CLIENT
     ]
     if available_clients:
         client_id = min(available_clients, key=lambda x: x[1])[0]
@@ -635,10 +643,19 @@ def select_optimal_client() -> tuple[int, any]:
 def get_media(message):
     if not message:
         return None
-    for media_type in ["document", "video", "audio", "photo", "voice", "animation", "video_note", "sticker"]:
+    for media_type in ["audio", "document", "photo", "sticker", "animation", "video", "voice", "video_note"]:
         if media := getattr(message, media_type, None):
             return media
     return None
+
+
+def get_media_type(message):
+    if not message:
+        return "file"
+    for media_type in ["audio", "document", "photo", "sticker", "animation", "video", "voice", "video_note"]:
+        if getattr(message, media_type, None):
+            return media_type
+    return "file"
 
 async def get_message(client, chat_id: int, message_id: int) -> any:
     import asyncio
@@ -663,6 +680,99 @@ def _decode_stream_route_token(token: str) -> tuple[int, int]:
     if route_subject is None:
         raise HTTPException(status_code=403, detail="Invalid secure token")
     return route_subject
+
+
+def _resolve_filename(message, media, message_id: int) -> str:
+    filename = getattr(media, "file_name", None)
+    if filename:
+        return filename.decode("utf-8", errors="replace") if isinstance(filename, bytes) else str(filename)
+
+    media_type = get_media_type(message)
+    ext_map = {
+        "photo": "jpg",
+        "audio": "mp3",
+        "voice": "ogg",
+        "video": "mp4",
+        "animation": "mp4",
+        "video_note": "mp4",
+        "sticker": "webp",
+    }
+    mime_type = getattr(media, "mime_type", None)
+    ext = ext_map.get(media_type)
+    if not ext and mime_type and "/" in mime_type:
+        ext = {"jpeg": "jpg", "mpeg": "mp3", "octet-stream": "bin"}.get(
+            mime_type.rsplit("/", 1)[-1],
+            mime_type.rsplit("/", 1)[-1],
+        )
+    return f"Amaterasu_FileToLink_{message_id}.{ext or 'bin'}"
+
+
+def _classify_file_type(filename: str, mime_type: str | None) -> str:
+    mime = (mime_type or "").lower()
+    if mime.startswith("video/"):
+        return "video"
+    if mime.startswith("audio/"):
+        return "audio"
+    if mime.startswith("image/"):
+        return "image"
+    if mime == "application/pdf":
+        return "pdf"
+
+    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    if ext in ["mp4", "mkv", "webm", "avi", "mov", "flv", "wmv", "m4v"]:
+        return "video"
+    if ext in ["mp3", "ogg", "wav", "flac", "m4a", "aac"]:
+        return "audio"
+    if ext in ["jpg", "jpeg", "png", "gif", "webp", "bmp", "svg"]:
+        return "image"
+    if ext == "pdf":
+        return "pdf"
+    if ext in ["doc", "docx", "txt"]:
+        return "doc"
+    return "unknown"
+
+
+def _parse_range_header(range_header: str | None, file_size: int) -> tuple[int, int, bool]:
+    if file_size <= 0:
+        raise HTTPException(status_code=404, detail="File size is unavailable")
+    if not range_header:
+        return 0, file_size - 1, False
+
+    match = RANGE_REGEX.fullmatch(range_header)
+    if not match:
+        raise HTTPException(status_code=400, detail="Invalid range header")
+
+    start_str = match.group("start")
+    end_str = match.group("end")
+    if start_str:
+        start = int(start_str)
+        end = int(end_str) if end_str else file_size - 1
+    else:
+        if not end_str:
+            raise HTTPException(status_code=400, detail="Invalid range header")
+        suffix_len = int(end_str)
+        if suffix_len <= 0:
+            raise HTTPException(
+                status_code=416,
+                detail="Requested range not satisfiable",
+                headers={"Content-Range": f"bytes */{file_size}"},
+            )
+        start = max(file_size - suffix_len, 0)
+        end = file_size - 1
+
+    if start < 0 or end >= file_size or start > end:
+        raise HTTPException(
+            status_code=416,
+            detail="Requested range not satisfiable",
+            headers={"Content-Range": f"bytes */{file_size}"},
+        )
+    return start, end, not (start == 0 and end == file_size - 1)
+
+
+@app.options("/watch/{path:path}")
+@app.options("/stream/{path:path}")
+async def stream_options(path: str = ""):
+    return Response(headers={**CORS_HEADERS, "Access-Control-Max-Age": "86400"})
 
 
 @app.api_route("/watch/{token}", methods=["GET"])
@@ -698,24 +808,19 @@ async def watch_media(chat_id: str, message_id: int, request: Request, filename:
             raise HTTPException(status_code=403, detail="Invalid secure token")
             
         if not filename:
-            filename = getattr(media, "file_name", None) or f"Stream_{message_id}.bin"
+            filename = _resolve_filename(message, media, message_id)
             
         file_size = getattr(media, "file_size", 0) or 0
+        mime_type = getattr(media, "mime_type", None)
         from bot.helper.ext_utils.status_utils import get_readable_file_size
         readable_size = get_readable_file_size(file_size)
             
         if _route_stream_token_matches(secure_hash, chat_id, message_id):
-            stream_url = f"/stream/{secure_hash}"
+            stream_url = f"/stream/{secure_hash}?disposition=inline"
         else:
-            stream_url = f"/stream/{chat_id}/{message_id}?hash={secure_hash}"
+            stream_url = f"/stream/{chat_id}/{message_id}/{quote(filename, safe='')}?hash={secure_hash}&disposition=inline"
         
-        ext = filename.split('.')[-1].lower() if '.' in filename else ''
-        if ext in ['mp4', 'mkv', 'webm', 'avi', 'mov', 'flv', 'wmv', 'm4v']: file_type = 'video'
-        elif ext in ['mp3', 'ogg', 'wav', 'flac', 'm4a', 'aac']: file_type = 'audio'
-        elif ext in ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg']: file_type = 'image'
-        elif ext in ['pdf']: file_type = 'pdf'
-        elif ext in ['doc', 'docx', 'txt']: file_type = 'doc'
-        else: file_type = 'unknown'
+        file_type = _classify_file_type(filename, mime_type)
         
         return templates.TemplateResponse(request, "player.html", {
             "file_name": filename,
@@ -741,7 +846,7 @@ async def stream_media(chat_id: str, message_id: int, request: Request, filename
     except ValueError:
         pass
     from bot.core.tg_client import TgClient
-    from fastapi.responses import StreamingResponse, Response
+    from fastapi.responses import StreamingResponse
 
     client_id, client = select_optimal_client()
     if client_id not in TgClient.stream_loads:
@@ -773,48 +878,36 @@ async def stream_media(chat_id: str, message_id: int, request: Request, filename
             mime_type = mime_map.get(media_type, "application/octet-stream")
         
         if not filename:
-            filename = getattr(media, "file_name", None) or f"Stream_{message_id}.bin"
+            filename = _resolve_filename(message, media, message_id)
         
         range_header = request.headers.get("Range")
-        start, end = 0, file_size - 1
-        
-        if range_header:
-            match = RANGE_REGEX.match(range_header)
-            if match:
-                start_str = match.group("start")
-                end_str = match.group("end")
-                start = int(start_str) if start_str else 0
-                end = int(end_str) if end_str else file_size - 1
-                
-        if start >= file_size or end >= file_size or start > end:
-            raise HTTPException(status_code=416, detail="Requested range not satisfiable")
+        start, end, ranged_response = _parse_range_header(range_header, file_size)
             
         content_length = end - start + 1
         
-        disposition = request.query_params.get("disposition", "inline")
-        if disposition not in ["inline", "attachment"]:
-            disposition = "inline"
+        disposition = request.query_params.get("disposition", "attachment").strip().lower()
+        if disposition not in VALID_DISPOSITIONS:
+            disposition = "attachment"
 
         from urllib.parse import quote
-        encoded_filename = quote(filename)
+        encoded_filename = quote(filename, safe="")
         headers = {
             "Accept-Ranges": "bytes",
             "Content-Type": mime_type,
-            "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS",
-            "Access-Control-Allow-Headers": "Range, Content-Type, *",
-            "Access-Control-Expose-Headers": "Content-Length, Content-Range, Content-Disposition",
+            "Cache-Control": "public, max-age=31536000",
+            "Connection": "keep-alive",
             "Content-Disposition": f"{disposition}; filename*=UTF-8''{encoded_filename}",
             "X-Content-Type-Options": "nosniff",
+            **CORS_HEADERS,
         }
         
-        if range_header:
+        if ranged_response:
             headers["Content-Range"] = f"bytes {start}-{end}/{file_size}"
             
         if request.method == "HEAD":
             headers["Content-Length"] = str(content_length)
             TgClient.stream_loads[client_id] -= 1
-            return Response(status_code=206 if range_header else 200, headers=headers)
+            return Response(status_code=206 if ranged_response else 200, headers=headers)
             
         async def stream_generator():
             try:
@@ -866,7 +959,7 @@ async def stream_media(chat_id: str, message_id: int, request: Request, filename
         headers["Content-Length"] = str(content_length)
         return StreamingResponse(
             stream_generator(),
-            status_code=206 if range_header else 200,
+            status_code=206 if ranged_response else 200,
             headers=headers
         )
         

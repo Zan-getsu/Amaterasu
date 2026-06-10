@@ -439,7 +439,9 @@
             
             // Build absolute URLs for intent schemes
             const absoluteStreamUrl = new URL('{{file_url}}', window.location.origin).href;
-            const absoluteDownloadUrl = absoluteStreamUrl + (absoluteStreamUrl.includes('?') ? '&' : '?') + 'disposition=attachment';
+            const downloadUrl = new URL(absoluteStreamUrl);
+            downloadUrl.searchParams.set('disposition', 'attachment');
+            const absoluteDownloadUrl = downloadUrl.href;
             const safeUrl = encodeURIComponent(absoluteStreamUrl);
             
             const actions = [
