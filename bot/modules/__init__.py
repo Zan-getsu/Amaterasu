@@ -15,7 +15,7 @@ from .clone import clone_node
 from .exec import aioexecute, clear, execute
 from .file_selector import confirm_selection, select
 from .file_sorter import sort_command, sort_media_handler
-from .filetolink import link_command_handler, private_media_handler
+from .filetolink import channel_media_handler, link_command_handler, private_media_handler
 from .force_start import remove_from_queue
 from .gd_count import count_node
 from .gd_delete import delete_file
@@ -72,6 +72,7 @@ __all__ = [
     "cancel_all_buttons",
     "cancel_all_update",
     "cancel_multi",
+    "channel_media_handler",
     "clear",
     "clear_incomplete_tasks",
     "clone_node",
