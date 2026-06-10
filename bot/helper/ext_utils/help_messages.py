@@ -427,6 +427,7 @@ def get_bot_commands():
         "Log": "[SUDO] Get Bot Logs for Internal Working",
         "Restart": "[SUDO] Reboot bot",
         "RestartSessions": "[SUDO] Reboot User Sessions",
+        "GenPyroSess": "[SUDO] Generate Pyrogram string session",
         "SpeedTest": "Check Bot Speed using Speedtest.com",
         "Telegraph": "[reply] Upload Image/Video (under 5MB) to Telegraph",
         "FileToLink": "[reply/batch] Generate direct stream and download links for media files",
@@ -577,6 +578,10 @@ def get_help_string():
             )
         elif key == "Rss":
             help_lines.append(f"/{BotCommands.RssCommand}: RSS Menu.")
+        elif key == "GenPyroSess":
+            help_lines.append(
+                f"{cmd_str}: Generate a Pyrogram string session (Only Owner & Sudo)."
+            )
         elif key == "FileToLink":
             help_lines.append(f"{cmd_str}: Generate direct stream and download links for a media file or batch of files.")
         elif key == "Rename":

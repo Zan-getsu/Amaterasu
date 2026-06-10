@@ -57,6 +57,10 @@ uphoster_options = [
     "BUZZHEAVIER_TOKEN",
     "BUZZHEAVIER_FOLDER_ID",
     "PIXELDRAIN_KEY",
+    "DEVUPLOADS_KEY",
+    "DEVUPLOADS_FOLDER",
+    "VIKINGFILE_HASH",
+    "VIKINGFILE_FOLDER",
 ]
 rclone_options = ["RCLONE_CONFIG", "RCLONE_PATH", "RCLONE_FLAGS"]
 gdrive_options = ["TOKEN_PICKLE", "GDRIVE_ID", "INDEX_URL"]
@@ -583,6 +587,8 @@ async def get_user_settings(from_user, stype="main"):
         buttons.data_button("⚙ Gofile Tools", f"userset {user_id} gofile")
         buttons.data_button("⚙ BuzzHeavier Tools", f"userset {user_id} buzzheavier")
         buttons.data_button("⚙ PixelDrain Tools", f"userset {user_id} pixeldrain")
+        buttons.data_button("⚙ DevUploads Tools", f"userset {user_id} devuploads")
+        buttons.data_button("⚙ VikingFile Tools", f"userset {user_id} vikingfile")
         buttons.data_button("↩ BACK", f"userset {user_id} back", "footer")
         buttons.data_button("✕ CLOSE", f"userset {user_id} close", "footer", style=ButtonStyle.DANGER)
         btns = buttons.build_menu(1)
@@ -609,6 +615,50 @@ async def get_user_settings(from_user, stype="main"):
         text = f"""<b>❖ PIXELDRAIN SETTINGS</b>
 <code>├─ Name : </code>{user_name}
 <code>└─ Token: {pdtoken}</code>
+"""
+
+    elif stype == "devuploads":
+        buttons.data_button(
+            "DevUploads API Key", f"userset {user_id} menu DEVUPLOADS_KEY"
+        )
+        buttons.data_button(
+            "DevUploads Folder ID", f"userset {user_id} menu DEVUPLOADS_FOLDER"
+        )
+        buttons.data_button("↩ BACK", f"userset {user_id} back uphoster", "footer")
+        buttons.data_button("✕ CLOSE", f"userset {user_id} close", "footer", style=ButtonStyle.DANGER)
+        btns = buttons.build_menu(1)
+
+        dukey = user_dict.get("DEVUPLOADS_KEY") or Config.DEVUPLOADS_KEY or "None"
+        dufolder = (
+            user_dict.get("DEVUPLOADS_FOLDER") or Config.DEVUPLOADS_FOLDER or "None"
+        )
+
+        text = f"""<b>❖ DEVUPLOADS SETTINGS</b>
+<code>├─ Name     : </code>{user_name}
+<code>├─ API Key  : {dukey}</code>
+<code>└─ Folder ID: {dufolder}</code>
+"""
+
+    elif stype == "vikingfile":
+        buttons.data_button(
+            "VikingFile Hash", f"userset {user_id} menu VIKINGFILE_HASH"
+        )
+        buttons.data_button(
+            "VikingFile Folder", f"userset {user_id} menu VIKINGFILE_FOLDER"
+        )
+        buttons.data_button("↩ BACK", f"userset {user_id} back uphoster", "footer")
+        buttons.data_button("✕ CLOSE", f"userset {user_id} close", "footer", style=ButtonStyle.DANGER)
+        btns = buttons.build_menu(1)
+
+        vfhash = user_dict.get("VIKINGFILE_HASH") or Config.VIKINGFILE_HASH or "None"
+        vffolder = (
+            user_dict.get("VIKINGFILE_FOLDER") or Config.VIKINGFILE_FOLDER or "None"
+        )
+
+        text = f"""<b>❖ VIKINGFILE SETTINGS</b>
+<code>├─ Name  : </code>{user_name}
+<code>├─ Hash  : {vfhash}</code>
+<code>└─ Folder: {vffolder}</code>
 """
 
     elif stype == "buzzheavier":
@@ -1405,6 +1455,8 @@ async def edit_user_settings(client, query):
         "gofile",
         "buzzheavier",
         "pixeldrain",
+        "devuploads",
+        "vikingfile",
         "ffset",
         "advanced",
         "gdrive",
@@ -1498,7 +1550,13 @@ async def edit_user_settings(client, query):
             )
 
         buttons = ButtonMaker()
-        for service in ["gofile", "buzzheavier", "pixeldrain"]:
+        for service in [
+            "gofile",
+            "buzzheavier",
+            "pixeldrain",
+            "devuploads",
+            "vikingfile",
+        ]:
             state = "✓" if service in selected_services else ""
             buttons.data_button(
                 f"{service.capitalize()} {state}",

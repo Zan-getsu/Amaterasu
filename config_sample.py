@@ -49,6 +49,16 @@ LEECH_CAPTION = ""
 THUMBNAIL_LAYOUT = ""
 EXCLUDED_EXTENSIONS = ""
 
+# DDL / Uphoster destinations
+GOFILE_API = ""
+GOFILE_FOLDER_ID = ""
+PIXELDRAIN_KEY = ""
+BUZZHEAVIER_API = ""
+DEVUPLOADS_KEY = ""
+DEVUPLOADS_FOLDER = ""
+VIKINGFILE_HASH = ""
+VIKINGFILE_FOLDER = ""
+
 # ==========================================
 # 5. GOOGLE DRIVE OPTIONS
 # ==========================================

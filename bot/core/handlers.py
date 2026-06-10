@@ -424,6 +424,13 @@ def add_handlers():
     )
     TgClient.bot.add_handler(
         MessageHandler(
+            gen_pyro_string,
+            filters=command(BotCommands.GenPyroSessCommand, case_sensitive=True)
+            & CustomFilters.sudo,
+        )
+    )
+    TgClient.bot.add_handler(
+        MessageHandler(
             speedtest,
             filters=command(BotCommands.SpeedTestCommand, case_sensitive=True)
             & CustomFilters.authorized,

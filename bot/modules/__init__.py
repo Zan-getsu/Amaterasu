@@ -20,6 +20,7 @@ from .force_start import remove_from_queue
 from .gd_count import count_node
 from .gd_delete import delete_file
 from .gd_search import gdrive_search, select_type
+from .gen_pyro_sess import gen_pyro_string
 from .help import arg_usage, bot_help
 from .images import pics_callback, picture_add, pictures
 from .imdb import imdb_callback, imdb_search
@@ -84,6 +85,7 @@ __all__ = [
     "get_packages_version",
     "get_rss_menu",
     "get_users_settings",
+    "gen_pyro_string",
     "gdrive_search",
     "hydra_search",
     "imdb_callback",

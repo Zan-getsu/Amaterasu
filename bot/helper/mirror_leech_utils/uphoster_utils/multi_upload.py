@@ -10,8 +10,22 @@ from bot.helper.mirror_leech_utils.uphoster_utils.buzzheavier_utils.upload impor
 from bot.helper.mirror_leech_utils.uphoster_utils.pixeldrain_utils.upload import (
     PixelDrainUpload,
 )
+from bot.helper.mirror_leech_utils.uphoster_utils.devuploads_utils.upload import (
+    DevUploadsUpload,
+)
+from bot.helper.mirror_leech_utils.uphoster_utils.vikingfile_utils.upload import (
+    VikingFileUpload,
+)
 
 LOGGER = getLogger(__name__)
+
+SERVICE_MAP = {
+    "gofile": GoFileUpload,
+    "buzzheavier": BuzzHeavierUpload,
+    "pixeldrain": PixelDrainUpload,
+    "devuploads": DevUploadsUpload,
+    "vikingfile": VikingFileUpload,
+}
 
 
 class MultiUphosterUpload:
@@ -27,16 +41,9 @@ class MultiUphosterUpload:
         self.failed = []
 
         for service in services:
-            if service == "gofile":
-                self.uploaders.append(GoFileUpload(ProxyListener(self, "gofile"), path))
-            elif service == "buzzheavier":
-                self.uploaders.append(
-                    BuzzHeavierUpload(ProxyListener(self, "buzzheavier"), path)
-                )
-            elif service == "pixeldrain":
-                self.uploaders.append(
-                    PixelDrainUpload(ProxyListener(self, "pixeldrain"), path)
-                )
+            uploader_cls = SERVICE_MAP.get(service)
+            if uploader_cls:
+                self.uploaders.append(uploader_cls(ProxyListener(self, service), path))
 
     @property
     def speed(self):
@@ -49,6 +56,9 @@ class MultiUphosterUpload:
         return sum(u.processed_bytes for u in self.uploaders) / len(self.uploaders)
 
     async def upload(self):
+        if not self.uploaders:
+            await self.listener.on_upload_error("No valid uphoster destination selected.")
+            return
         tasks = [u.upload() for u in self.uploaders]
         await gather(*tasks)
 
@@ -76,8 +86,12 @@ class MultiUphosterUpload:
         await self._check_completion()
 
     async def _check_completion(self):
-        if len(self.results) == len(self.uploaders):
-            if len(self.failed) == len(self.uploaders):
+        expected = len(self.uploaders)
+        if expected == 0:
+            await self.listener.on_upload_error("No valid uphoster destination selected.")
+            return
+        if len(self.results) == expected:
+            if len(self.failed) == expected:
                 await self.listener.on_upload_error("All uploads failed.")
             else:
                 successful_result = next(

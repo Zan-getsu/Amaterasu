@@ -130,7 +130,7 @@ It converges five industrial download engines (Aria2c, qBittorrent, JDownloader,
 | Category | Features |
 |---|---|
 | **Download Sources** | Direct links, Torrents (magnet & .torrent), Mega, Google Drive, Rclone remotes, Usenet (NZB), JDownloader, YouTube & 1800+ yt-dlp sites, Telegram files & links |
-| **Upload Destinations** | Google Drive, Rclone remotes (OneDrive, Dropbox, S3, etc.), Telegram (as document or media), DDL hosters (GoFile, BuzzHeavier, PixelDrain) |
+| **Upload Destinations** | Google Drive, Rclone remotes (OneDrive, Dropbox, S3, etc.), Telegram (as document or media), DDL hosters (GoFile, BuzzHeavier, PixelDrain, DevUploads, VikingFile) |
 | **Leech Features** | Custom prefixes & suffixes, captions, auto-split for large files, hybrid leech (bot + user session), equal splits, media grouping, thumbnail layouts |
 | **Media Processing** | FFmpeg integration, audio/video conversion (`-ca`, `-cv`), custom metadata injection (`-meta`), sample video generation (`-sv`), screenshot extraction (`-ss`), MediaInfo reports |
 | **File Management** | Extract (`.zip`, `.rar`, `.7z`, `.tar`), archive with password, join split files, rename, auto-rename templates, name substitution via regex |
@@ -167,7 +167,7 @@ graph TD
     G -->|Cloud Drives| H[Google Drive & Rclone]
     G -->|Direct Download| I[FileToLink Server]
     G -->|Telegram| J[Leech Uploader]
-    G -->|DDL Hosters| K[GoFile / BuzzHeavier / PixelDrain]
+    G -->|DDL Hosters| K[GoFile / BuzzHeavier / PixelDrain / DevUploads / VikingFile]
     
     style B fill:#FF4500,stroke:#333,stroke-width:2px,color:#fff
     style A fill:#2496ED,color:#fff
@@ -719,7 +719,7 @@ All limits are in **GB**. Set `0` to disable the limit.
 
 | Command | Shortcut | Description |
 |---|---|---|
-| `/uphoster` | `/up` | Download a link → upload to DDL servers (GoFile, BuzzHeavier, PixelDrain) |
+| `/uphoster` | `/up` | Download a link → upload to DDL servers (GoFile, BuzzHeavier, PixelDrain, DevUploads, VikingFile) |
 
 <a id="search--info-commands"></a>
 
