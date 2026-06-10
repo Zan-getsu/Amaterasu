@@ -105,6 +105,7 @@ class Config:
     SEARCH_LIMIT = 0
     SEARCH_PLUGINS = []
     SET_COMMANDS = True
+    PROGRESS_BAR = "█:░"
     STATUS_LIMIT = 10
     STATUS_UPDATE_INTERVAL = 15
     STOP_DUPLICATE = False

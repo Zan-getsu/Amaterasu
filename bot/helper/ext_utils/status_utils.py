@@ -198,19 +198,22 @@ def speed_string_to_bytes(size_text: str):
 def get_progress_bar_string(pct):
     pct = float(str(pct).strip("%"))
     p = min(max(pct, 0), 100)
-    slots = 12
-    exact = p * slots / 100
-    full = int(exact)
-    if full >= slots:
-        p_str = "■" * slots
-        return f"[{p_str}]"
+    slots = 10
+    full = int(p * slots / 100)
+    filled, empty = _get_progress_bar_icons()
+    return f"{filled * full}{empty * (slots - full)}"
 
-    p_str = "■" * full
-    partial = int((exact - full) * 7)
-    if partial:
-        p_str += ["▤", "▥", "▦", "▧", "▨", "▩"][partial - 1]
-    p_str += "□" * (slots - len(p_str))
-    return f"[{p_str}]"
+
+def _get_progress_bar_icons():
+    icons = str(Config.PROGRESS_BAR or "").strip()
+    filled, empty = "█", "░"
+    if ":" in icons:
+        custom_filled, custom_empty = icons.split(":", 1)
+        if custom_filled and custom_empty:
+            filled, empty = custom_filled, custom_empty
+    elif len(icons) >= 2:
+        filled, empty = icons[0], icons[1]
+    return escape(filled, quote=False), escape(empty, quote=False)
 
 
 async def get_readable_message(sid, is_user, page_no=1, status="All", page_step=1):

@@ -204,6 +204,19 @@ async def edit_message(message, text, buttons=None, block=True, photo=None):
         )
     except (MessageNotModified, MessageEmpty):
         pass
+    except EntityBoundsInvalid:
+        if message.media:
+            return await message.edit_caption(
+                caption=text,
+                reply_markup=buttons,
+                parse_mode=ParseMode.DISABLED,
+            )
+        return await message.edit(
+            text=text,
+            disable_web_page_preview=True,
+            reply_markup=buttons,
+            parse_mode=ParseMode.DISABLED,
+        )
     except ReplyMarkupInvalid as rmi:
         LOGGER.warning(str(rmi))
         return await edit_message(message, text, None, block, photo)

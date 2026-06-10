@@ -1,4 +1,5 @@
 from asyncio import Event, TimeoutError as AsyncTimeout, wait_for
+from html import escape
 from os import getcwd
 from os.path import exists as path_exists, join as path_join
 
@@ -30,6 +31,10 @@ _STOP = "gensess_stop"
 _TIMEOUT = 120
 
 
+def _safe(value):
+    return escape(str(value), quote=False)
+
+
 def _stop_filter(uid):
     async def _check(_, __, update):
         return update.data == _STOP and update.from_user.id == uid
@@ -53,19 +58,19 @@ def _stop_btns():
 def _header(user_name):
     return (
         "<b><u>Pyrogram String Session Generator</u></b>\n\n"
-        f"<b>User:</b> <code>{user_name}</code>"
+        f"<b>User:</b> <code>{_safe(user_name)}</code>"
     )
 
 
 def _collected(api_id=None, api_hash=None, phone=None):
     parts = []
     if api_id is not None:
-        parts.append(f"<b>API_ID:</b> <code>{api_id}</code>")
+        parts.append(f"<b>API_ID:</b> <code>{_safe(api_id)}</code>")
     if api_hash is not None:
         masked = api_hash[:4] + "*" * max(len(api_hash) - 4, 0)
-        parts.append(f"<b>API_HASH:</b> <code>{masked}</code>")
+        parts.append(f"<b>API_HASH:</b> <code>{_safe(masked)}</code>")
     if phone is not None:
-        parts.append(f"<b>Phone:</b> <code>{phone}</code>")
+        parts.append(f"<b>Phone:</b> <code>{_safe(phone)}</code>")
     return "\n".join(parts)
 
 
@@ -212,7 +217,7 @@ async def gen_pyro_string(_, message):
             _with_state(
                 header,
                 phone_state,
-                f"Is <code>{phone_no}</code> correct?\n"
+                f"Is <code>{_safe(phone_no)}</code> correct?\n"
                 "<b>Send:</b> <code>y</code> / <code>yes</code> or "
                 "<code>n</code> / <code>no</code>",
             ),
@@ -238,7 +243,7 @@ async def gen_pyro_string(_, message):
     except Exception as e:
         return await edit_message(
             sess_msg,
-            _error_msg(header, state, f"<b>Client error:</b> <i>{e}</i>"),
+            _error_msg(header, state, f"<b>Client error:</b> <i>{_safe(e)}</i>"),
         )
 
     try:
@@ -318,7 +323,7 @@ async def gen_pyro_string(_, message):
                 header,
                 state,
                 "<i>Account is protected with two-step verification.</i>\n"
-                f"<b>Hint:</b> <i>{hint}</i>\n\n"
+                f"<b>Hint:</b> <i>{_safe(hint)}</i>\n\n"
                 "<i>Send your password now.</i>",
             ),
             buttons,
@@ -334,13 +339,13 @@ async def gen_pyro_string(_, message):
             await _safe_disconnect(pyro_client)
             return await edit_message(
                 sess_msg,
-                _error_msg(header, state, f"<b>Password error:</b> <i>{e}</i>"),
+                _error_msg(header, state, f"<b>Password error:</b> <i>{_safe(e)}</i>"),
             )
     except Exception as e:
         await _safe_disconnect(pyro_client)
         return await edit_message(
             sess_msg,
-            _error_msg(header, state, f"<b>Sign-in error:</b> <i>{e}</i>"),
+            _error_msg(header, state, f"<b>Sign-in error:</b> <i>{_safe(e)}</i>"),
         )
 
     try:
@@ -348,7 +353,7 @@ async def gen_pyro_string(_, message):
         await pyro_client.send_message(
             "me",
             "<b><u>Pyrogram Session Generated</u></b>\n\n"
-            f"<code>{session_string}</code>\n\n"
+            f"<code>{_safe(session_string)}</code>\n\n"
             "<b>Via Amaterasu</b>",
             disable_web_page_preview=True,
         )
@@ -366,7 +371,7 @@ async def gen_pyro_string(_, message):
         await _safe_disconnect(pyro_client)
         return await edit_message(
             sess_msg,
-            _error_msg(header, state, f"<b>Export error:</b> <i>{e}</i>"),
+            _error_msg(header, state, f"<b>Export error:</b> <i>{_safe(e)}</i>"),
         )
 
     for ext in ("session", "session-journal"):
