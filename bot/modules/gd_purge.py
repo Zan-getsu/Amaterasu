@@ -16,7 +16,8 @@ from ..helper.telegram_helper.button_build import ButtonMaker
 from ..helper.telegram_helper.filters import CustomFilters
 from ..helper.telegram_helper.message_utils import delete_message, edit_message, send_message
 
-CONTROL_TIMEOUT = 60
+CONTROL_TIMEOUT = 300
+INPUT_TIMEOUT = 60
 BATCH_SIZE = 50
 CRITICAL_FILE_LIMIT = 1000
 CRITICAL_SIZE_LIMIT = 100 * 1024**3
@@ -237,7 +238,7 @@ async def _wait_for_text(client, query, validator, timeout_message, session=None
         MessageHandler(listener, filters=create(event_filter)), group=-1
     )
     try:
-        await wait_for(done.wait(), timeout=CONTROL_TIMEOUT)
+        await wait_for(done.wait(), timeout=INPUT_TIMEOUT)
         await delete_message(value_box.get("message"))
         return value_box["value"]
     except TimeoutError:
