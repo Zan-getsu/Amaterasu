@@ -546,8 +546,9 @@ def resolve_command(command_str):
     cmd_name = command_str.strip().lstrip("/").split(maxsplit=1)[0]
     mapping = _build_command_map()
     handler = mapping.get(cmd_name)
-    if handler is None and Config.CMD_SUFFIX:
-        handler = mapping.get(cmd_name + Config.CMD_SUFFIX)
+    suffix = str(Config.CMD_SUFFIX or "")
+    if handler is None and suffix:
+        handler = mapping.get(f"{cmd_name}{suffix}")
     if handler is None:
         LOGGER.warning(f"Unknown command '{cmd_name}' (from '{command_str}')")
     return handler

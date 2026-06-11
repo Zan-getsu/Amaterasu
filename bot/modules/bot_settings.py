@@ -627,6 +627,7 @@ async def edit_variable(_, message, pre_message, key):
         value = str(value)
     Config.set(key, value)
     if key == "CMD_SUFFIX":
+        value = Config.CMD_SUFFIX
         BotCommands.refresh_commands()
     await update_buttons(pre_message, key, "editvar", False)
     await delete_message(message)

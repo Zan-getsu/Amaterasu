@@ -268,6 +268,8 @@ class Config:
                             continue
                     except Exception:
                         continue
+                elif attr == "CMD_SUFFIX":
+                    value = str(value).strip()
                 setattr(cls, attr, value)
             elif attr.startswith("MULTI_TOKEN"):
                 value = getattr(settings, attr)
@@ -299,6 +301,8 @@ class Config:
 
     @classmethod
     def _convert_env_type(cls, key, value):
+        if key == "CMD_SUFFIX":
+            return str(value).strip() if value is not None else ""
         original_value = getattr(cls, key, None)
         if original_value is None:
             return value

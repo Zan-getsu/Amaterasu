@@ -190,7 +190,11 @@ async def _resume_from_command(task):
     if not command or not user_id:
         return False
 
-    handler = resolve_command(command)
+    try:
+        handler = resolve_command(command)
+    except Exception as error:
+        LOGGER.error("Resume: command resolution failed for %r: %s", command, error)
+        return False
     if handler is None:
         return False
 
