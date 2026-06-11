@@ -43,12 +43,20 @@ def _configured_root_id():
 def _mode_label(mode, value=None):
     labels = {
         "all": "Delete All",
-        "age": f"Delete Older Than {value:g} Day(s)",
-        "range": f"Delete First {int(value)} File(s)",
         "files": "Delete Files Only",
         "empty_folders": "Delete Empty Folders",
         "folders": "Delete Only Folders",
     }
+    if mode == "age":
+        try:
+            return f"Delete Older Than {float(value):g} Day(s)"
+        except (TypeError, ValueError):
+            return "Delete By Age"
+    if mode == "range":
+        try:
+            return f"Delete First {int(value)} File(s)"
+        except (TypeError, ValueError):
+            return "Delete By Range"
     return labels.get(mode, mode)
 
 
