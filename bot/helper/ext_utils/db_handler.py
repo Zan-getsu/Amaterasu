@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from importlib import import_module
 from uuid import uuid4
 
@@ -10,6 +11,8 @@ from pymongo.server_api import ServerApi
 from ... import LOGGER, qbit_options, rss_dict, user_data
 from ...core.config_manager import Config
 from ...core.tg_client import TgClient, db_partition_id
+
+INCOMPLETE_TASK_SCHEMA = 2
 
 
 def _bot_id():
@@ -284,6 +287,8 @@ class DbManager:
             "tag": tag,
             "link": link,
             "restart_notified": False,
+            "schema_version": INCOMPLETE_TASK_SCHEMA,
+            "created_at": datetime.now(timezone.utc),
         }
         if user_id is not None:
             data["user_id"] = user_id
@@ -317,12 +322,25 @@ class DbManager:
     async def rm_complete_task(self, link):
         if self._return:
             return
-        await self.db.tasks[_part()].delete_one({"link": link})
+        query = {"$or": [{"_id": link}, {"link": link}]}
+        collection = str(TgClient.ID)
+        await self.db.tasks[collection].delete_many(query)
+        legacy_collection = _part()
+        if legacy_collection != collection:
+            await self.db.tasks[legacy_collection].delete_many(query)
+
+    async def discard_legacy_incomplete_tasks(self):
+        if self._return:
+            return 0
+        result = await self.db.tasks[str(TgClient.ID)].delete_many(
+            {"schema_version": {"$ne": INCOMPLETE_TASK_SCHEMA}}
+        )
+        return result.deleted_count
 
     async def get_incomplete_task_docs(self, notified=False):
         if self._return:
             return []
-        query = {}
+        query = {"schema_version": INCOMPLETE_TASK_SCHEMA}
         if not notified:
             query["restart_notified"] = {"$ne": True}
         return [
@@ -347,7 +365,13 @@ class DbManager:
         if self._return:
             return []
         return [
-            row async for row in self.db.tasks[TgClient.ID].find({"user_id": user_id})
+            row
+            async for row in self.db.tasks[TgClient.ID].find(
+                {
+                    "user_id": user_id,
+                    "schema_version": INCOMPLETE_TASK_SCHEMA,
+                }
+            )
         ]
 
     async def clear_user_incomplete_tasks(self, user_id):
@@ -396,7 +420,10 @@ class DbManager:
     async def trunc_table(self, name):
         if self._return:
             return
-        await self.db[name][_part()].drop()
+        collection = str(TgClient.ID) if name == "tasks" else _part()
+        await self.db[name][collection].drop()
+        if name == "tasks" and collection != _part():
+            await self.db[name][_part()].drop()
 
     async def get_encode_profiles(self, user_id):
         if self._return:

@@ -28,6 +28,8 @@ from ..helper.telegram_helper.message_utils import (
     send_message,
 )
 
+RECOVERY_TASK_DELAY = 5
+
 
 @new_task
 async def restart_bot(_, message):
@@ -229,18 +231,46 @@ async def _resume_from_command(task):
         return False
 
 
+def _deduplicate_tasks(tasks):
+    unique = []
+    seen = set()
+    for task in tasks:
+        command = " ".join(str(task.get("command", "")).split())
+        identity = (
+            task.get("cid"),
+            task.get("user_id"),
+            task.get("reply_to_msg_id", 0),
+            command or task.get("link") or task.get("_id"),
+        )
+        if identity in seen:
+            continue
+        seen.add(identity)
+        unique.append(task)
+    return unique
+
+
 async def auto_resume_incomplete_tasks():
     if not (Config.INC_TASK_RESUME and Config.DATABASE_URL):
         return
+
+    discarded = await database.discard_legacy_incomplete_tasks()
+    if discarded:
+        LOGGER.warning(
+            "Discarded %s stale incomplete task record(s) created before "
+            "reliable completion tracking was enabled.",
+            discarded,
+        )
 
     tasks = await database.get_incomplete_task_docs(notified=True)
     if not tasks:
         return
 
     await database.clear_incomplete_tasks_by_links([task["_id"] for task in tasks])
+    unique_tasks = _deduplicate_tasks(tasks)
+    duplicates = len(tasks) - len(unique_tasks)
     resumed = 0
     skipped = 0
-    for task in tasks:
+    for task in unique_tasks:
         task = await _hydrate_incomplete_task(task)
         if await _resume_from_command(task):
             resumed += 1
@@ -250,8 +280,13 @@ async def auto_resume_incomplete_tasks():
                 resumed += 1
             else:
                 skipped += 1
-        await sleep(1)
-    LOGGER.info(f"Auto-resumed incomplete tasks: {resumed}; skipped: {skipped}")
+        await sleep(RECOVERY_TASK_DELAY)
+    LOGGER.info(
+        "Auto-resumed incomplete tasks: %s; skipped: %s; duplicates discarded: %s",
+        resumed,
+        skipped,
+        duplicates,
+    )
 
 
 async def _requeue_task(client, message):
@@ -324,10 +359,12 @@ async def resume_incomplete_tasks(_, query):
         return
 
     await database.clear_incomplete_tasks_by_links([task["_id"] for task in tasks])
+    unique_tasks = _deduplicate_tasks(tasks)
+    duplicates = len(tasks) - len(unique_tasks)
 
     resumed = 0
     skipped = 0
-    for task in tasks:
+    for task in unique_tasks:
         message, client = await _get_task_message(task)
         if not message or not getattr(message, "text", None):
             skipped += 1
@@ -336,13 +373,14 @@ async def resume_incomplete_tasks(_, query):
             resumed += 1
         else:
             skipped += 1
-        await sleep(1)
+        await sleep(RECOVERY_TASK_DELAY)
 
     await edit_message(
         query.message,
         "<b>Incomplete Task Recovery</b>\n"
         f"Re-queued: <code>{resumed}</code>\n"
-        f"Skipped: <code>{skipped}</code>",
+        f"Skipped: <code>{skipped}</code>\n"
+        f"Duplicates discarded: <code>{duplicates}</code>",
     )
 
 
@@ -373,6 +411,13 @@ async def restart_notification():
     if Config.INC_TASK_RESUME:
         await auto_resume_incomplete_tasks()
     else:
+        discarded = await database.discard_legacy_incomplete_tasks()
+        if discarded:
+            LOGGER.warning(
+                "Discarded %s stale incomplete task record(s) created before "
+                "reliable completion tracking was enabled.",
+                discarded,
+            )
         await notify_incomplete_tasks()
 
     if await aiopath.isfile(".restartmsg"):

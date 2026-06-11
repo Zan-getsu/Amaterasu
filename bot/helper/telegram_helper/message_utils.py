@@ -1,6 +1,6 @@
 from asyncio import sleep, gather
 from random import choice
-from re import match as re_match, sub
+from re import match as re_match, search as re_search, sub
 from time import time
 
 from pyrogram.types import Message, InputMediaPhoto
@@ -431,6 +431,8 @@ async def update_status_message(sid, force=False):
                 obj.cancel()
                 del intervals["status"][sid]
             return
+        if time() < status_dict[sid].get("flood_until", 0):
+            return
         if not force and time() - status_dict[sid]["time"] < 3:
             return
         status_dict[sid]["time"] = time()
@@ -452,6 +454,20 @@ async def update_status_message(sid, force=False):
                 status_dict[sid]["message"], text, buttons, block=False, photo="IMAGES"
             )
             if isinstance(message, str):
+                if "FLOOD_WAIT" in message:
+                    wait_match = re_search(r"wait (\d+) seconds", message)
+                    wait_seconds = (
+                        int(wait_match.group(1))
+                        if wait_match
+                        else Config.STATUS_UPDATE_INTERVAL
+                    )
+                    status_dict[sid]["flood_until"] = time() + wait_seconds
+                    LOGGER.warning(
+                        "Status updates for %s paused for %ss due to Telegram FloodWait.",
+                        sid,
+                        wait_seconds,
+                    )
+                    return
                 if message.startswith("Telegram says: [40"):
                     del status_dict[sid]
                     if obj := intervals["status"].get(sid):
