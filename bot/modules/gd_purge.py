@@ -19,6 +19,7 @@ from ..helper.telegram_helper.message_utils import delete_message, edit_message,
 CONTROL_TIMEOUT = 300
 INPUT_TIMEOUT = 60
 BATCH_SIZE = 50
+BATCH_DELAY = 1
 CRITICAL_FILE_LIMIT = 1000
 CRITICAL_SIZE_LIMIT = 100 * 1024**3
 
@@ -409,7 +410,7 @@ async def _run_purge(message, session):
                             f"{len(errors)} item(s) failed in the current batch: "
                             f"{first_error}"
                         )
-                await sleep(0.1)
+                await sleep(BATCH_DELAY)
             if session.get("stop"):
                 break
     except Exception as err:

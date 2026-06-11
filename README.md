@@ -834,7 +834,8 @@ for a Google Drive folder.
 - The control panel expires after five minutes of inactivity. Custom age and
   amount inputs expire after 60 seconds.
 - Only one purge panel or running purge can target the same Drive ID at a time.
-- Deletions use Drive API batches of 50 with retry and per-item fallback.
+- Deletions use Drive API batches of 50 with paced dispatch, per-item fallback,
+  and quota-aware exponential backoff with jitter.
 - **Stop Purge** finishes the current batch, stops new batches, and returns a
   partial completion report.
 - Actions and results are written to the bot log with the user, target, mode,

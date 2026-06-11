@@ -1,15 +1,27 @@
 from datetime import datetime, timedelta, timezone
+from email.utils import parsedate_to_datetime
+from json import loads
 from logging import getLogger
 from os.path import exists
+from random import uniform
 from re import fullmatch
-from time import time
+from time import sleep, time
 
 from googleapiclient.errors import HttpError
-from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
 from .helper import GoogleDriveHelper
 
 LOGGER = getLogger(__name__)
+
+API_MAX_RETRIES = 7
+API_MAX_BACKOFF = 64
+API_MAX_RETRY_AFTER = 300
+RETRYABLE_HTTP_STATUSES = {429, 500, 502, 503, 504}
+RETRYABLE_DRIVE_REASONS = {
+    "backendError",
+    "rateLimitExceeded",
+    "userRateLimitExceeded",
+}
 
 
 class GoogleDrivePurge(GoogleDriveHelper):
@@ -93,14 +105,82 @@ class GoogleDrivePurge(GoogleDriveHelper):
             or "notFound" in error_text
         )
 
-    @retry(
-        wait=wait_exponential(multiplier=2, min=3, max=8),
-        stop=stop_after_attempt(3),
-        retry=retry_if_exception_type(Exception),
-        reraise=True,
-    )
+    @staticmethod
+    def _http_error_reason(error):
+        content = getattr(error, "content", b"")
+        if isinstance(content, bytes):
+            content = content.decode("utf-8", "ignore")
+        try:
+            payload = loads(content or "{}")
+            details = payload.get("error", {}).get("errors", [])
+            if details:
+                return details[0].get("reason", "")
+        except (TypeError, ValueError):
+            pass
+        return ""
+
+    @classmethod
+    def _is_retryable_error(cls, error):
+        if isinstance(error, (TimeoutError, ConnectionError)):
+            return True
+        if not isinstance(error, HttpError):
+            return False
+        status = getattr(getattr(error, "resp", None), "status", None)
+        return status in RETRYABLE_HTTP_STATUSES or (
+            status == 403 and cls._http_error_reason(error) in RETRYABLE_DRIVE_REASONS
+        )
+
+    @staticmethod
+    def _retry_after_seconds(error):
+        response = getattr(error, "resp", None)
+        if response is None:
+            return 0
+        value = response.get("retry-after")
+        if not value:
+            return 0
+        try:
+            return max(0, int(value))
+        except (TypeError, ValueError):
+            try:
+                retry_at = parsedate_to_datetime(value)
+                if retry_at.tzinfo is None:
+                    retry_at = retry_at.replace(tzinfo=timezone.utc)
+                remaining = retry_at - datetime.now(timezone.utc)
+                return max(0, int(remaining.total_seconds()))
+            except (TypeError, ValueError, OverflowError):
+                return 0
+
+    def _execute_with_backoff(self, request, operation):
+        for attempt in range(API_MAX_RETRIES + 1):
+            try:
+                return request.execute()
+            except Exception as error:
+                if attempt >= API_MAX_RETRIES or not self._is_retryable_error(error):
+                    raise
+                retry_after = min(
+                    self._retry_after_seconds(error),
+                    API_MAX_RETRY_AFTER,
+                )
+                backoff = min((2**attempt) + uniform(0, 1), API_MAX_BACKOFF)
+                delay = max(retry_after, backoff)
+                reason = self._http_error_reason(error) or getattr(
+                    getattr(error, "resp", None),
+                    "status",
+                    type(error).__name__,
+                )
+                LOGGER.warning(
+                    "Drive purge %s throttled; retrying in %.2fs "
+                    "(attempt %s/%s, reason=%s)",
+                    operation,
+                    delay,
+                    attempt + 1,
+                    API_MAX_RETRIES,
+                    reason,
+                )
+                sleep(delay)
+
     def get_target_metadata(self, file_id):
-        return (
+        request = (
             self.service.files()
             .get(
                 fileId=file_id,
@@ -110,21 +190,15 @@ class GoogleDrivePurge(GoogleDriveHelper):
                     "capabilities(canListChildren, canDeleteChildren, canRemoveChildren)"
                 ),
             )
-            .execute()
         )
+        return self._execute_with_backoff(request, "target metadata request")
 
-    @retry(
-        wait=wait_exponential(multiplier=2, min=3, max=8),
-        stop=stop_after_attempt(3),
-        retry=retry_if_exception_type(Exception),
-        reraise=True,
-    )
     def get_children(self, folder_id):
         page_token = None
         files = []
         q = f"'{folder_id}' in parents and trashed = false"
         while True:
-            response = (
+            request = (
                 self.service.files()
                 .list(
                     supportsAllDrives=True,
@@ -140,8 +214,8 @@ class GoogleDrivePurge(GoogleDriveHelper):
                     orderBy="folder, createdTime",
                     pageToken=page_token,
                 )
-                .execute()
             )
+            response = self._execute_with_backoff(request, "folder listing")
             files.extend(response.get("files", []))
             page_token = response.get("nextPageToken")
             if page_token is None:
@@ -306,19 +380,13 @@ class GoogleDrivePurge(GoogleDriveHelper):
                 dates.append(datetime.fromisoformat(value.replace("Z", "+00:00")))
         return bool(dates) and max(dates) < cutoff
 
-    @retry(
-        wait=wait_exponential(multiplier=2, min=3, max=8),
-        stop=stop_after_attempt(3),
-        retry=retry_if_exception_type((HttpError, TimeoutError, ConnectionError)),
-        reraise=True,
-    )
     def delete_item(self, item_id):
         try:
-            return (
+            request = (
                 self.service.files()
                 .delete(fileId=item_id, supportsAllDrives=True)
-                .execute()
             )
+            return self._execute_with_backoff(request, "item deletion")
         except HttpError as err:
             if getattr(getattr(err, "resp", None), "status", None) == 404:
                 return {}
@@ -368,12 +436,6 @@ class GoogleDrivePurge(GoogleDriveHelper):
                 failed[item["id"]] = err
         return completed, failed
 
-    @retry(
-        wait=wait_exponential(multiplier=2, min=3, max=8),
-        stop=stop_after_attempt(3),
-        retry=retry_if_exception_type((HttpError, TimeoutError, ConnectionError)),
-        reraise=True,
-    )
     def move_file_to_target_root(self, item):
         parents = item.get("parents") or [item.get("parent_id")]
         remove_parents = ",".join(
@@ -383,7 +445,7 @@ class GoogleDrivePurge(GoogleDriveHelper):
         )
         if not remove_parents:
             return {"id": item["id"], "parents": [self.target_id]}
-        return (
+        request = (
             self.service.files()
             .update(
                 fileId=item["id"],
@@ -392,8 +454,8 @@ class GoogleDrivePurge(GoogleDriveHelper):
                 fields="id, parents",
                 supportsAllDrives=True,
             )
-            .execute()
         )
+        return self._execute_with_backoff(request, "item move")
 
     @staticmethod
     def log_operation(user, target, mode, deleted_files, deleted_folders, size, elapsed):
