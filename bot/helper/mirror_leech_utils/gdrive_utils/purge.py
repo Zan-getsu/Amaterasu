@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta, timezone
 from logging import getLogger
 from os.path import exists
+from re import fullmatch
 from time import time
 
 from googleapiclient.errors import HttpError
@@ -26,7 +27,7 @@ class GoogleDrivePurge(GoogleDriveHelper):
 
     def prepare(self, target, user_id):
         try:
-            self.target_id = self.get_id_from_url(target, user_id)
+            self.target_id = self.resolve_target_id(target, user_id)
         except (KeyError, IndexError):
             raise ValueError("Google Drive ID could not be found in the provided target")
         self.service = self.authorize()
@@ -44,6 +45,22 @@ class GoogleDrivePurge(GoogleDriveHelper):
                 self.service = self.authorize()
                 return self._validate_target()
             raise
+
+    def resolve_target_id(self, target, user_id=""):
+        target = str(target).strip()
+        if target.startswith("mtp:"):
+            self.use_sa = False
+            self.token_path = f"tokens/{user_id}.pickle"
+            target = target[4:]
+        elif target.startswith("sa:"):
+            self.use_sa = True
+            target = target[3:]
+        elif target.startswith("tp:"):
+            self.use_sa = False
+            target = target[3:]
+        if target == "root" or fullmatch(r"[A-Za-z0-9_-]{10,}", target):
+            return target
+        return self.get_id_from_url(target)
 
     def _validate_target(self):
         meta = self.get_target_metadata(self.target_id)
@@ -80,6 +97,7 @@ class GoogleDrivePurge(GoogleDriveHelper):
         wait=wait_exponential(multiplier=2, min=3, max=8),
         stop=stop_after_attempt(3),
         retry=retry_if_exception_type(Exception),
+        reraise=True,
     )
     def get_target_metadata(self, file_id):
         return (
@@ -99,6 +117,7 @@ class GoogleDrivePurge(GoogleDriveHelper):
         wait=wait_exponential(multiplier=2, min=3, max=8),
         stop=stop_after_attempt(3),
         retry=retry_if_exception_type(Exception),
+        reraise=True,
     )
     def get_children(self, folder_id):
         page_token = None
@@ -291,6 +310,7 @@ class GoogleDrivePurge(GoogleDriveHelper):
         wait=wait_exponential(multiplier=2, min=3, max=8),
         stop=stop_after_attempt(3),
         retry=retry_if_exception_type((HttpError, TimeoutError, ConnectionError)),
+        reraise=True,
     )
     def delete_item(self, item_id):
         try:
@@ -352,6 +372,7 @@ class GoogleDrivePurge(GoogleDriveHelper):
         wait=wait_exponential(multiplier=2, min=3, max=8),
         stop=stop_after_attempt(3),
         retry=retry_if_exception_type((HttpError, TimeoutError, ConnectionError)),
+        reraise=True,
     )
     def move_file_to_target_root(self, item):
         parents = item.get("parents") or [item.get("parent_id")]

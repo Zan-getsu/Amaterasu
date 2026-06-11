@@ -34,7 +34,7 @@ def _configured_root_id():
     if not Config.GDRIVE_ID:
         return ""
     try:
-        return GoogleDrivePurge().get_id_from_url(Config.GDRIVE_ID)
+        return GoogleDrivePurge().resolve_target_id(Config.GDRIVE_ID)
     except (KeyError, IndexError):
         return Config.GDRIVE_ID
 
@@ -52,7 +52,11 @@ def _mode_label(mode, value=None):
 
 
 def _session_expired(session):
-    return not session.get("running") and time() > session["expires_at"]
+    return (
+        not session.get("running")
+        and not session.get("transitioning")
+        and time() > session["expires_at"]
+    )
 
 
 def _touch_session(session):
@@ -75,11 +79,13 @@ async def _expire_session(token):
         if remaining > 0:
             await sleep(remaining)
             continue
+        message = session["message"]
+        session["expired"] = True
+        _release_session(token)
         await edit_message(
-            session["message"],
+            message,
             "Drive purge panel expired. Start a new purge command.",
         )
-        _release_session(token)
         return
 
 
@@ -131,6 +137,21 @@ def _confirm_buttons(token):
     buttons.data_button("✅ Confirm", f"gdp {token} confirm", style=ButtonStyle.DANGER)
     buttons.data_button("❌ Cancel", f"gdp {token} cancel", style=ButtonStyle.DANGER)
     return buttons.build_menu(2)
+
+
+def _final_confirm_buttons(token):
+    buttons = ButtonMaker()
+    buttons.data_button(
+        "🚨 Confirm Permanent Delete",
+        f"gdp {token} final_confirm",
+        style=ButtonStyle.DANGER,
+    )
+    buttons.data_button(
+        "❌ Cancel",
+        f"gdp {token} cancel",
+        style=ButtonStyle.DANGER,
+    )
+    return buttons.build_menu(1)
 
 
 def _stop_buttons(token):
@@ -258,8 +279,8 @@ async def _show_main(message, session):
 async def _show_plan(message, session, mode, value=None, dry=False):
     plan = session["helper"].build_plan(mode, value)
     session["plan"] = plan
-    session["final_confirmed"] = False
     if dry:
+        session["confirm_stage"] = "preview"
         GoogleDrivePurge.log_operation(
             session["user"],
             session["summary"],
@@ -275,6 +296,7 @@ async def _show_plan(message, session, mode, value=None, dry=False):
         await edit_message(message, _preview_text(session, plan, True), buttons.build_menu(2))
         return
     if plan["blocked_delete"] or plan["blocked_move"]:
+        session["confirm_stage"] = "blocked"
         buttons = ButtonMaker()
         buttons.data_button("↩ Back", f"gdp {session['token']} menu")
         buttons.data_button("❌ Cancel", f"gdp {session['token']} cancel", style=ButtonStyle.DANGER)
@@ -288,6 +310,7 @@ async def _show_plan(message, session, mode, value=None, dry=False):
         await edit_message(message, text, buttons.build_menu(2))
         return
     if plan["total"] == 0 and not plan["move_files"]:
+        session["confirm_stage"] = "empty"
         buttons = ButtonMaker()
         buttons.data_button("↩ Back", f"gdp {session['token']} menu")
         buttons.data_button("❌ Cancel", f"gdp {session['token']} cancel", style=ButtonStyle.DANGER)
@@ -297,41 +320,27 @@ async def _show_plan(message, session, mode, value=None, dry=False):
             buttons.build_menu(2),
         )
         return
+    session["confirm_stage"] = "primary"
     await edit_message(message, _preview_text(session, plan), _confirm_buttons(session["token"]))
 
 
-async def _wait_final_confirmation(client, query, session):
+async def _show_final_confirmation(message, session):
     plan = session["plan"]
+    session["confirm_stage"] = "final"
     text = (
         "🚨 <b>Final Confirmation</b>\n\n"
         "You are about to permanently delete:\n\n"
         f"<b>Files:</b> <code>{len(plan['files']):,}</code>\n"
         f"<b>Folders:</b> <code>{len(plan['folders']):,}</code>\n"
         f"<b>Size:</b> <code>{get_readable_file_size(plan['size'])}</code>\n\n"
-        "Type:\n\n<code>CONFIRM DELETE</code>\n\n"
-        "to continue."
+        "This action cannot be undone.\n\n"
+        "Press the confirmation button below to continue."
     )
-    await edit_message(query.message, text)
-
-    def validator(text_value):
-        return text_value if text_value == "CONFIRM DELETE" else None
-
-    value = await _wait_for_text(
-        client,
-        query,
-        validator,
-        "Invalid confirmation. Type exactly: <code>CONFIRM DELETE</code>",
-        session,
+    await edit_message(
+        message,
+        text,
+        _final_confirm_buttons(session["token"]),
     )
-    if value is None:
-        await edit_message(
-            query.message,
-            "Drive purge confirmation timed out. Operation cancelled.",
-        )
-        _release_session(session["token"])
-        return False
-    session["final_confirmed"] = True
-    return True
 
 
 async def _run_purge(message, session):
@@ -566,7 +575,15 @@ async def purge_callback(client, query):
         session["stop"] = True
         await query.answer("Stop requested. Current batch will finish safely.", show_alert=True)
         return
+    if session.get("running"):
+        await query.answer("Purge is already running. Use Stop Purge.", show_alert=True)
+        return
+    if session.get("transitioning"):
+        await query.answer("The purge panel is updating. Please try again.", show_alert=True)
+        return
     if action == "cancel":
+        session["cancelled"] = True
+        _release_session(token)
         await query.answer()
         await edit_message(query.message, "Drive purge cancelled.")
         GoogleDrivePurge.log_operation(
@@ -578,11 +595,48 @@ async def purge_callback(client, query):
             0,
             time() - session["created_at"],
         )
-        _release_session(token)
         return
-    if session.get("running"):
-        await query.answer("Purge is already running.", show_alert=True)
+
+    if action == "confirm":
+        plan = session.get("plan")
+        if (
+            session.get("cancelled")
+            or not plan
+            or session.get("confirm_stage") != "primary"
+        ):
+            await query.answer("This confirmation is no longer active.", show_alert=True)
+            return
+        if _critical_plan(session, plan):
+            session["confirm_stage"] = "final"
+            session["transitioning"] = True
+            try:
+                await query.answer()
+                await _show_final_confirmation(query.message, session)
+            finally:
+                session["transitioning"] = False
+            return
+        session["running"] = True
+        session["confirm_stage"] = "running"
+        await query.answer()
+        await _run_purge(query.message, session)
         return
+
+    if action == "final_confirm":
+        plan = session.get("plan")
+        if (
+            session.get("cancelled")
+            or not plan
+            or session.get("confirm_stage") != "final"
+            or not _critical_plan(session, plan)
+        ):
+            await query.answer("This confirmation is no longer active.", show_alert=True)
+            return
+        session["running"] = True
+        session["confirm_stage"] = "running"
+        await query.answer()
+        await _run_purge(query.message, session)
+        return
+
     await query.answer()
     if action == "menu":
         await _show_main(query.message, session)
@@ -653,12 +707,3 @@ async def purge_callback(client, query):
         await _show_plan(query.message, session, "all", dry=True)
     elif action == "mode" and len(data) > 3:
         await _show_plan(query.message, session, data[3])
-    elif action == "confirm":
-        plan = session.get("plan")
-        if not plan:
-            await query.answer("No purge plan is selected.", show_alert=True)
-            return
-        if _critical_plan(session, plan) and not session.get("final_confirmed"):
-            if not await _wait_final_confirmation(client, query, session):
-                return
-        await _run_purge(query.message, session)

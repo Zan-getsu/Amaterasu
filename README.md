@@ -68,6 +68,7 @@
   - [User Commands](#user-commands)
   - [Media & File Tools](#media--file-tools)
   - [Admin / Sudo Commands](#admin--sudo-commands)
+  - [Drive Purge Manager](#drive-purge-manager)
 - [🎞️ Encoding & Metadata](#encoding--metadata)
 - [🎭 Auto-Rename Engine](#auto-rename)
 - [🗂️ File Sorting Mode](#file-sorting-mode)
@@ -790,7 +791,54 @@ All limits are in **GB**. Set `0` to disable the limit.
 | `/aexec` | — | Sudo | Execute asynchronous Python code |
 | `/restart` | `/r` | Sudo | Restart the bot (pulls updates if `UPSTREAM_REPO` is set) |
 | `/restartses` | `/rses` | Sudo | Restart all user/helper sessions |
+| `/purge` | `/clear_drive` | Sudo | Scan and bulk-delete contents from a Google Drive folder |
 | `/rss` | — | Authorized | Open the RSS feed management panel |
+
+<a id="drive-purge-manager"></a>
+
+### 🧹 Drive Purge Manager
+
+The Drive Purge Manager provides Sudo users with an interactive cleanup panel
+for a Google Drive folder.
+
+```text
+/purge
+/clear_drive
+/purge DRIVE_ID
+/clear_drive DRIVE_ID
+```
+
+- Without a Drive ID, the command uses the configured `GDRIVE_ID`.
+- A supplied Drive ID or Google Drive folder link overrides `GDRIVE_ID`.
+- The target is scanned recursively before any destructive option is shown.
+- Service Account authentication follows the existing GDrive behavior and
+  falls back to `token.pickle` when the Service Account cannot access the target.
+
+| Mode | Behavior |
+|---|---|
+| **Delete All** | Permanently deletes every file and subfolder inside the target |
+| **Delete By Age** | Deletes items whose created and modified times are older than the selected duration |
+| **Delete By Range** | Deletes the first selected number of files in scan order |
+| **Delete Files Only** | Deletes files while preserving the folder structure |
+| **Delete Empty Folders** | Deletes folder trees that contain no files |
+| **Delete Only Folders** | Moves nested files to the target root, then deletes the folders |
+| **Dry Run Preview** | Shows the full Delete All plan without deleting anything |
+
+#### Safety and operation
+
+- Google Drive deletion is permanent; items are not moved to Trash.
+- Every destructive mode shows its exact file, folder, and size plan before
+  deletion.
+- Delete All, configured-root cleanup, operations over 1,000 files, and
+  operations over 100 GB require a second confirmation button.
+- The control panel expires after five minutes of inactivity. Custom age and
+  amount inputs expire after 60 seconds.
+- Only one purge panel or running purge can target the same Drive ID at a time.
+- Deletions use Drive API batches of 50 with retry and per-item fallback.
+- **Stop Purge** finishes the current batch, stops new batches, and returns a
+  partial completion report.
+- Actions and results are written to the bot log with the user, target, mode,
+  deleted totals, recovered size, execution time, and timestamp.
 
 ---
 
@@ -1317,6 +1365,10 @@ This auto-leeches new anime releases in 1080p (mkv or mp4), excluding batch pack
   - Make sure `token.pickle` is valid and not expired.
   - If using Service Accounts, verify the SA email has Editor access to your Drive folder.
   - Set `IS_TEAM_DRIVE = True` if your `GDRIVE_ID` is a Shared Drive.
+  - Drive purge requires delete permission for every selected item. Google
+    requires `organizer` permission on the parent folder for Shared Drive
+    deletion (normally granted through Manager access).
+  - Use **Dry Run Preview** first when validating a new Drive or Service Account.
 </details>
 
 <details>
