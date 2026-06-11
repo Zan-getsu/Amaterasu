@@ -21,6 +21,7 @@ class BotCommands:
         "Clone": ["clone", "cl"],
         "Count": "count",
         "Delete": "del",
+        "Purge": ["purge", "clear_drive"],
         "List": "list",
         "Search": "search",
         "Users": "users",

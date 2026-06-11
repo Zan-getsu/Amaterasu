@@ -19,6 +19,7 @@ from .filetolink import channel_media_handler, link_command_handler, private_med
 from .force_start import remove_from_queue
 from .gd_count import count_node
 from .gd_delete import delete_file
+from .gd_purge import purge_callback, purge_drive
 from .gd_search import gdrive_search, select_type
 from .gen_pyro_sess import gen_pyro_string
 from .help import arg_usage, bot_help
@@ -108,6 +109,8 @@ __all__ = [
     "pictures",
     "ping",
     "private_media_handler",
+    "purge_callback",
+    "purge_drive",
     "qb_leech",
     "qb_mirror",
     "remove_blacklist",

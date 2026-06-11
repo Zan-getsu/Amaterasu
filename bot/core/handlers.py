@@ -163,6 +163,15 @@ def add_handlers():
     )
     TgClient.bot.add_handler(
         MessageHandler(
+            purge_drive,
+            filters=command(BotCommands.PurgeCommand, case_sensitive=True),
+        )
+    )
+    TgClient.bot.add_handler(
+        CallbackQueryHandler(purge_callback, filters=regex("^gdp"))
+    )
+    TgClient.bot.add_handler(
+        MessageHandler(
             gdrive_search,
             filters=command(BotCommands.ListCommand, case_sensitive=True)
             & CustomFilters.authorized,

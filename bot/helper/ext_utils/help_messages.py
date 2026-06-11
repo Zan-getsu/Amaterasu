@@ -412,6 +412,7 @@ def get_bot_commands():
         "UserSet": "User personal settings",
         "ForceStart": "[gid/reply] Force start from queued task",
         "Count": "[link] Count no. of files/folders in GDrive",
+        "Purge": "[SUDO] Bulk cleanup/delete contents from Google Drive",
         "List": "[query] Search any Text which is available in GDrive",
         "Search": "[query] Search torrents via Qbit Plugins",
         "MediaInfo": "[reply/link] Get MediaInfo of the Target Media",
@@ -505,6 +506,10 @@ def get_help_string():
         elif key == "Delete":
             help_lines.append(
                 f"{cmd_str} [drive_url]: Delete file/folder from Google Drive (Only Owner & Sudo)."
+            )
+        elif key == "Purge":
+            help_lines.append(
+                f"{cmd_str} [drive_id]: Bulk delete Drive contents with confirmation (Only Owner & Sudo)."
             )
         elif key == "UserSet":
             help_lines.append(f"{cmd_str} [query]: Users settings.")
