@@ -50,7 +50,10 @@ def _load_config():
     except ModuleNotFoundError:
         cfg = None
     bot_token = environ.get("BOT_TOKEN", "") or (getattr(cfg, "BOT_TOKEN", "") if cfg else "")
-    return bot_token
+    access_pwd = environ.get("WEB_ACCESS_PASSWORD", "") or (
+        getattr(cfg, "WEB_ACCESS_PASSWORD", "") if cfg else ""
+    )
+    return bot_token, access_pwd
 
 
 def _resolve_bot_id(token):
@@ -62,13 +65,12 @@ def _resolve_bot_id(token):
     return (token.split(":", 1)[0] or "0").strip()
 
 
-_BOT_TOKEN = _load_config()
+_BOT_TOKEN, _ACCESS_PASSWORD = _load_config()
 _BOT_ID = _resolve_bot_id(_BOT_TOKEN)
 
 
 def _service_pwd(service):
     from bot.helper.ext_utils.bot_utils import derive_service_password
-
     return derive_service_password(_BOT_ID, service)
 
 
@@ -549,32 +551,24 @@ async def proxy_fetch(
             data=body,
             allow_redirects=False,
         ) as upstream:
-            if upstream.status in (301, 302, 303, 307, 308) and upstream.headers.get(
-                "Location"
-            ):
-                loc = upstream.headers["Location"]
-                new_loc = rewrite_location(loc, proxy_prefix)
-                return HTMLResponse(
-                    status_code=upstream.status, headers={"Location": new_loc}
-                )
-            content = await upstream.read()
-            media_type = upstream.headers.get("Content-Type", "text/html")
-            resp_headers = {
-                k: v
-                for k, v in upstream.headers.items()
-                if k.lower() not in ["content-length", "content-encoding"]
-            }
-            return HTMLResponse(
-                content=content,
-                status_code=upstream.status,
-                headers=resp_headers,
-                media_type=media_type,
-            )
+            raw = [(k.lower().encode("latin-1"), v.encode("latin-1")) for k, v in upstream.headers.items()
+                    if k.lower() not in ("content-length", "content-encoding")]
+            if upstream.status in (301, 302, 303, 307, 308):
+                loc = upstream.headers.get("Location")
+                if loc:
+                    new_loc = rewrite_location(loc, proxy_prefix)
+                    raw = [(k, new_loc.encode("latin-1") if k == b"location" else v) for k, v in raw]
+            body = await upstream.read() if upstream.status not in (301, 302, 303, 307, 308) else b""
+            response = Response(content=body, status_code=upstream.status)
+            response.raw_headers = raw
+            return response
 
 
 async def protected_proxy(
     service: str, path: str, request: Request, password: str = None
 ):
+    from hmac import compare_digest
+
     service_info = SERVICES.get(service)
     if not service_info:
         raise HTTPException(status_code=404, detail="Service not found")
@@ -583,15 +577,15 @@ async def protected_proxy(
             password = request.query_params.get("pass") or request.cookies.get(
                 f"{service}_pass"
             )
-        if password != service_info["password"]:
+        if not password or not compare_digest(password, service_info["password"]):
             raise HTTPException(status_code=403, detail="Unauthorized access")
     if path:
         if not _SAFE_PATH.match(path):
             raise HTTPException(status_code=400, detail="Invalid path")
         if ".." in path.split("/"):
             raise HTTPException(status_code=400, detail="Invalid path")
-    base = service_info["url"]
-    url = f"{base}/{path}" if path else base
+    base = service_info["url"].rstrip("/")
+    url = f"{base}/{path.lstrip('/')}" if path else f"{base}/"
     headers = {k: v for k, v in request.headers.items() if k.lower() != "host"}
     body = await request.body()
     params = {
@@ -599,16 +593,19 @@ async def protected_proxy(
         for key, value in request.query_params.items()
         if key != "pass"
     }
+    if "password" in service_info:
+        params["apikey"] = service_info["password"]
     response = await proxy_fetch(
         request.method, url, headers, params, body, f"/{service}"
     )
     if "pass" in request.query_params:
+        is_https = request.headers.get("x-forwarded-proto") == "https"
         response.set_cookie(
             f"{service}_pass",
             password,
             httponly=True,
             samesite="strict",
-            secure=False,
+            secure=is_https,
         )
     return response
 

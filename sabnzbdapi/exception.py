@@ -13,6 +13,9 @@ class APIConnectionError(RequestError, APIError):
 class APIResponseError(APIError, JSONDecodeError):
     """Base class for all errors from the API response."""
 
+    def __init__(self, msg, doc="", pos=0):
+        JSONDecodeError.__init__(self, msg, doc, pos)
+
 
 class LoginFailed(DecodingError, APIConnectionError, JSONDecodeError):
     """This can technically be raised with any request since log in may be attempted for

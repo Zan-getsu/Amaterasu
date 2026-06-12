@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 from asyncio import sleep
 from ast import literal_eval
 from functools import partial
@@ -14,7 +15,6 @@ from pyrogram.filters import create
 from pyrogram.handlers import MessageHandler
 from pyrogram.enums import ButtonStyle
 
-from bot.helper.ext_utils.status_utils import get_readable_file_size
 
 from .. import auth_chats, excluded_extensions, sudo_users, user_data
 from ..core.config_manager import Config
@@ -28,6 +28,7 @@ from ..helper.ext_utils.bot_utils import (
 from ..helper.ext_utils.db_handler import database
 from ..helper.ext_utils.mega_utils import get_mega_account_info
 from ..helper.ext_utils.media_utils import create_thumb
+from ..helper.ext_utils.status_utils import get_readable_file_size
 from ..helper.telegram_helper.button_build import ButtonMaker
 from ..helper.telegram_helper.message_utils import (
     delete_message,
@@ -77,7 +78,7 @@ uphoster_options = [
     "VIKINGFILE_FOLDER",
 ]
 rclone_options = ["RCLONE_CONFIG", "RCLONE_PATH", "RCLONE_FLAGS"]
-gdrive_options = ["TOKEN_PICKLE", "GDRIVE_ID", "INDEX_URL"]
+gdrive_options = ["TOKEN_PICKLE", "GDRIVE_ID", "INDEX_URL", "DRIVE_CAT"]
 ffset_options = [
     "FFMPEG_CMDS",
     "METADATA",
@@ -354,6 +355,11 @@ Here I will explain how to use mltb.* which is reference to files you want to wo
         "Your Mega.nz account password for per-user Mega downloads & uploads.",
         "<i>Send your Mega.nz account password.</i> \n┖ <b>Time Left :</b> <code>60 sec</code>",
     ),
+    "DRIVE_CAT": (
+        "Dict",
+        "User-defined GDrive categories (name → drive_id). Format: {\"name\": \"drive_id|index_link\"}.",
+        "<i>Send dict of user drive categories.\nExample: {\"Movies\": \"0Bxxxxxxxx\", \"TV\": \"1Ayyyyyyy|https://index.tv\"}\nEach value: drive_id or drive_id|index_link</i> \n┖ <b>Time Left :</b> <code>60 sec</code>",
+    ),
 }
 
 
@@ -440,7 +446,7 @@ async def get_user_settings(from_user, stype="main"):
             f"❖ Swap to {'OWNER' if not def_cookies else 'USER'}'s Cookie File",
             f"userset {user_id} tog USE_DEFAULT_COOKIE {'f' if def_cookies else 't'}",
         )
-        btns = buttons.build_menu(1)
+        btns = buttons.build_menu(2)
 
         text = f"""<b>❖ GENERAL SETTINGS</b>
 <code>├─ Name      : </code>{user_name}
@@ -599,6 +605,7 @@ async def get_user_settings(from_user, stype="main"):
         buttons.data_button(
             "Change Destination ⇋",
             f"userset {user_id} uphoster_destinations",
+            "header"
         )
         buttons.data_button("⚙ Gofile Tools", f"userset {user_id} gofile")
         buttons.data_button("⚙ BuzzHeavier Tools", f"userset {user_id} buzzheavier")
@@ -757,7 +764,7 @@ async def get_user_settings(from_user, stype="main"):
             rccpath = Config.RCLONE_PATH
         else:
             rccpath = "None"
-        btns = buttons.build_menu(1)
+        btns = buttons.build_menu(2)
 
         if user_dict.get("RCLONE_FLAGS", False):
             rcflags = user_dict["RCLONE_FLAGS"]
@@ -795,6 +802,7 @@ async def get_user_settings(from_user, stype="main"):
                 "l_body",
             )
             sd_msg = "Disabled"
+        buttons.data_button("❖ User Drive Categories", f"userset {user_id} menu DRIVE_CAT", "header")
         buttons.data_button("↩ BACK", f"userset {user_id} back mirror", "footer")
         buttons.data_button("✕ CLOSE", f"userset {user_id} close", "footer", style=ButtonStyle.DANGER)
 
@@ -809,14 +817,38 @@ async def get_user_settings(from_user, stype="main"):
         index = escape(
             str(user_dict["INDEX_URL"] if user_dict.get("INDEX_URL", False) else "None")
         )
+        upload_sa = user_dict.get("DRIVE_CATEGORY_SA") or Config.DRIVE_CATEGORY_SA
+        sa_display = escape(upload_sa) if upload_sa else "Not Set"
+        dc_status = "Enabled" if user_dict.get("drive_cat_mode", False) else "Disabled"
+        if not Config.DRIVE_CATEGORY_MODE:
+            dc_status = "Force Disabled (Global)"
+        drive_cat_val = user_dict.get("DRIVE_CAT")
+        lines = []
+        default_ilink_part = f" | {escape(index)}" if index != "None" else ""
+        lines.append(f"<code>├─ Default   : {escape(gdrive_id)}{default_ilink_part}</code>")
+        if drive_cat_val:
+            for k, v in drive_cat_val.items():
+                did = v.get("drive_id", "")
+                ilink = v.get("index_link", "")
+                ilink_part = f" | {escape(ilink)}" if ilink else ""
+                lines.append(f"<code>├─ {escape(k)[:10]:<10}: {escape(did)}{ilink_part}</code>")
+        if lines:
+            lines[-1] = lines[-1].replace("├─", "└─")
+        else:
+            lines.append("<code>└─ None</code>")
+        drive_cat_display = "\n".join(lines)
         btns = buttons.build_menu(2)
 
         text = f"""<b>❖ GDRIVE SETTINGS</b>
-<code>├─ Name     : </code>{user_name}
-<code>├─ Token    : {tokenmsg}</code>
-<code>├─ GDrive ID: {gdrive_id}</code>
-<code>├─ Index URL: {index}</code>
-<code>└─ Stop Dupe: {sd_msg}</code>
+<code>├─ Name      : </code>{user_name}
+<code>├─ Token     : {tokenmsg}</code>
+<code>├─ GDrive ID : {gdrive_id}</code>
+<code>├─ Index URL : {index}</code>
+<code>├─ Stop Dupe : {sd_msg}</code>
+<code>├─ Upload SA : {sa_display}</code>
+<code>├─ Drive Cat : {dc_status}</code>
+<code>├─ ─── CATEGORIES ────────────────</code>
+{drive_cat_display}
 """
     elif stype == "mirror":
         buttons.data_button("⚙ RClone Tools", f"userset {user_id} rclone")
@@ -853,6 +885,12 @@ async def get_user_settings(from_user, stype="main"):
 
         buttons.data_button("⚙ YT Up Tools", f"userset {user_id} yttools")
         buttons.data_button("⚙ Mega Tools", f"userset {user_id} mega")
+        if Config.DRIVE_CATEGORY_MODE:
+            dc_enabled = user_dict.get("drive_cat_mode", False)
+            buttons.data_button(
+                f"❖ Drive Cat: {'ON' if dc_enabled else 'OFF'}",
+                f"userset {user_id} tog drive_cat_mode {'f' if dc_enabled else 't'}",
+            )
         buttons.data_button("↩ BACK", f"userset {user_id} back", "footer")
         buttons.data_button("✕ CLOSE", f"userset {user_id} close", "footer", style=ButtonStyle.DANGER)
         btns = buttons.build_menu(1)
@@ -899,12 +937,12 @@ async def get_user_settings(from_user, stype="main"):
         email_display = _display_value(mega_email, "Not Set")
         pass_display = _display_value(masked_pass if mega_password else None, "Not Set")
         account_status = "✅ Configured" if has_creds else "❌ Not Configured"
-        text = f"""⌬ <b>Mega Tools :</b>
-┟ <b>Name</b> → {user_name}
-┃
-┠ <b>Mega Email</b> → <code>{email_display}</code>
-┠ <b>Mega Password</b> → <code>{pass_display}</code>
-┖ <b>Account</b> → {account_status}"""
+        text = f"""<b>❖ MEGA SETTINGS</b>
+<code>├─ Name    : </code>{user_name}
+<code>├─ Account : {account_status}</code>
+<code>├─ Email   : {email_display}</code>
+<code>└─ Password: {pass_display}</code>
+"""
 
     elif stype == "ffset":
         buttons.data_button(
@@ -972,7 +1010,7 @@ async def get_user_settings(from_user, stype="main"):
         buttons.data_button("✕ CLOSE", f"userset {user_id} close", "footer", style=ButtonStyle.DANGER)
         btns = buttons.build_menu(2)
 
-        text = f"""<b>❖ FF SETTINGS</b>
+        text = f"""<b>FF SETTINGS</b>
 <code>├─ Name       : </code>{user_name}
 <code>├─ FFmpeg CMDs: {ffc}</code>
 <code>├─ Def Meta   : {display_meta_val}</code>
@@ -1182,7 +1220,17 @@ async def add_one(_, message, option, rfunc):
             value = literal_eval(value)
             if not isinstance(value, dict):
                 raise ValueError("Expected a dict")
-            if user_dict[option]:
+            if option == "DRIVE_CAT":
+                parsed = {}
+                for k, v in value.items():
+                    if k.strip().casefold() == "default":
+                        raise ValueError('"Default" is reserved and cannot be used as a category name')
+                    parts = str(v).split("|", 1)
+                    did = parts[0].strip()
+                    ilink = parts[1].strip() if len(parts) > 1 else ""
+                    parsed[k.strip()] = {"drive_id": did, "index_link": ilink}
+                value = parsed
+            if user_dict.get(option):
                 user_dict[option].update(value)
             else:
                 update_user_ldata(user_id, option, value)
@@ -1290,12 +1338,22 @@ async def set_option(_, message, option, rfunc):
         else:
             value = {}
 
-    elif option in ["UPLOAD_PATHS", "FFMPEG_CMDS", "YT_DLP_OPTIONS"]:
+    elif option in ["UPLOAD_PATHS", "FFMPEG_CMDS", "YT_DLP_OPTIONS", "DRIVE_CAT"]:
         if value.startswith("{") and value.endswith("}"):
             try:
                 value = literal_eval(sub(r"\s+", " ", value))
                 if not isinstance(value, dict):
                     raise ValueError("Expected a dict")
+                if option == "DRIVE_CAT":
+                    parsed = {}
+                    for k, v in value.items():
+                        if k.strip().casefold() == "default":
+                            raise ValueError('"Default" is reserved and cannot be used as a category name')
+                        parts = str(v).split("|", 1)
+                        did = parts[0].strip()
+                        ilink = parts[1].strip() if len(parts) > 1 else ""
+                        parsed[k.strip()] = {"drive_id": did, "index_link": ilink}
+                    value = parsed
             except Exception as e:
                 await send_message(message, str(e))
                 return
@@ -1332,7 +1390,7 @@ async def get_menu(option, message, user_id):
             buttons.data_button(
                 "View Thumb", f"userset {user_id} view THUMBNAIL", "header"
             )
-        elif option in ["YT_DLP_OPTIONS", "FFMPEG_CMDS", "UPLOAD_PATHS"]:
+        elif option in ["YT_DLP_OPTIONS", "FFMPEG_CMDS", "UPLOAD_PATHS", "DRIVE_CAT"]:
             buttons.data_button(
                 "Add One", f"userset {user_id} addone {option}", "header"
             )
@@ -1382,6 +1440,22 @@ async def get_menu(option, message, user_id):
             val = "<b>Not Set</b>"
 
         if val is None:
+            val = "<b>Not Exists</b>"
+
+    elif option == "DRIVE_CAT":
+        default_id = user_dict.get("GDRIVE_ID") or Config.GDRIVE_ID
+        default_index = user_dict.get("INDEX_URL") or Config.INDEX_URL
+        lines = [f"  <b>Default</b>: <code>{escape(str(default_id))}</code>"]
+        if default_index:
+            lines[0] += f" | <code>{escape(default_index)}</code>"
+        if isinstance(val, dict):
+            for k, v in val.items():
+                did = v.get("drive_id", "")
+                ilink = v.get("index_link", "")
+                ilink_part = f" | <code>{escape(ilink)}</code>" if ilink else ""
+                lines.append(f"  <b>{escape(k)}</b>: <code>{escape(did)}</code>{ilink_part}")
+            val = "<br>".join(lines)
+        elif not val:
             val = "<b>Not Exists</b>"
 
     option_display = escape(str(option))
@@ -1617,6 +1691,8 @@ async def edit_user_settings(client, query):
         update_user_ldata(user_id, data[3], data[4] == "t")
         if data[3] == "STOP_DUPLICATE":
             back_to = "gdrive"
+        elif data[3] == "drive_cat_mode":
+            back_to = "mirror"
         elif data[3] in ["USER_TOKENS", "USE_DEFAULT_COOKIE"]:
             back_to = "general"
         elif data[3] == "AUTO_FILETOLINK":

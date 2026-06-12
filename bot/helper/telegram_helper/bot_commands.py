@@ -56,6 +56,7 @@ class BotCommands:
         "Select": ["select", "sel"],
         "NzbSearch": ["nzbsearch", "ns"],
         "GenPyroSess": "exportsession",
+        "CategorySelect": ["category", "ctsel"],
         "Plugins": "plugins",
         "SpeedTest": ["speedtest", "stest"],
         "Telegraph": ["tg", "telegraph"],

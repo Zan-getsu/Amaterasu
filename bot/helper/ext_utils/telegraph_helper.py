@@ -81,5 +81,3 @@ class TelegraphHelper:
 
 
 telegraph = TelegraphHelper(Config.AUTHOR_NAME, Config.AUTHOR_URL)
-
-print(__name__)

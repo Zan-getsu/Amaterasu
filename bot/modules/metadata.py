@@ -6,7 +6,7 @@ from os import path as ospath, walk
 from aiofiles.os import path as aiopath, remove
 from aioshutil import move
 
-from .. import LOGGER, cpu_eater_lock, task_dict, task_dict_lock
+from .. import LOGGER, ff_lock, task_dict, task_dict_lock
 from ..core.config_manager import BinConfig
 from ..helper.ext_utils.bot_utils import sync_to_async
 from ..helper.ext_utils.files_utils import get_path_size
@@ -58,7 +58,7 @@ async def apply_metadata_title(
     async with task_dict_lock:
         task_dict[self.mid] = MetadataStatus(self, ffmpeg, gid, "up")
     self.progress = False
-    await cpu_eater_lock.acquire()
+    await ff_lock.acquire()
     self.progress = True
 
     try:
@@ -83,7 +83,7 @@ async def apply_metadata_title(
             if not streams:
                 LOGGER.error(f"Error getting streams for {file_path}. Skipping.")
                 if is_file:
-                    cpu_eater_lock.release()
+                    ff_lock.release()
                     return dl_path
                 continue
 
@@ -184,5 +184,5 @@ async def apply_metadata_title(
                 if await aiopath.exists(temp_out):
                     await remove(temp_out)
     finally:
-        cpu_eater_lock.release()
+        ff_lock.release()
     return dl_path

@@ -157,7 +157,7 @@ async def get_stats(event, key="home"):
 ├─ {'Aiohttp':<11}: {ver.get("aiohttp", "N/A")}
 ├─ {'PyroTgFork':<11}: {ver.get("pyrotgfork", "N/A")}
 ├─ {'Google API':<11}: {ver.get("gapi", "N/A")}
-└─ {'Mega CMD':<11}: {ver.get("mega", "N/A")}
+└─ {'MegaSDK':<11}: {ver.get("mega", "N/A")}
 </pre>"""
     elif key == "tlimits":
         msg = f"""<b>❖ TASK LIMITS</b>

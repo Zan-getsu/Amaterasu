@@ -39,6 +39,8 @@ class MegaDownloadStatus:
             return MirrorStatus.STATUS_UPLOAD
         elif self._status == "dl":
             return MirrorStatus.STATUS_DOWNLOAD
+        elif self._status == "cl":
+            return MirrorStatus.STATUS_CLONE
 
     def processed_bytes(self):
         return get_readable_file_size(self._obj.downloaded_bytes)

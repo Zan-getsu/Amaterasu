@@ -149,6 +149,7 @@ class DbManager:
 
     async def update_config(self, dict_):
         if self._return:
+            LOGGER.warning("update_config skipped: DB not connected")
             return
         await self.db.settings.config.update_one(
             {"_id": _part()}, {"$set": dict_}, upsert=True

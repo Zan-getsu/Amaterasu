@@ -7,9 +7,14 @@ from tenacity import (
     retry,
     wait_exponential,
     stop_after_attempt,
-    retry_if_exception_type,
+    retry_if_exception,
     RetryError,
 )
+
+def retry_if_not_404(err):
+    if isinstance(err, HttpError) and err.resp.status == 404:
+        return False
+    return True
 
 from ....core.config_manager import Config
 from ...ext_utils.bot_utils import async_to_sync, SetInterval
@@ -50,6 +55,7 @@ class GoogleDriveUpload(GoogleDriveHelper):
         self.service = self.authorize()
         LOGGER.info(f"Uploading: {self._path}")
         self._updater = SetInterval(self.update_interval, self.progress)
+        dir_id = None
         try:
             if ospath.isfile(self._path):
                 mime_type = get_mime_type(self._path)
@@ -97,6 +103,17 @@ class GoogleDriveUpload(GoogleDriveHelper):
                 return
             elif self._is_errored:
                 return
+            if (
+                Config.DRIVE_CATEGORY_SA
+                and self.listener.up_dest != Config.GDRIVE_ID
+            ):
+                target_id = dir_id if mime_type == "Folder" else self.get_id_from_url(link)
+                if target_id:
+                    try:
+                        self.add_permission_user(target_id, Config.DRIVE_CATEGORY_SA)
+                        LOGGER.info(f"Added DRIVE_CATEGORY_SA permission on {target_id}")
+                    except Exception as e:
+                        LOGGER.error(f"Failed to add DRIVE_CATEGORY_SA permission: {e}")
             async_to_sync(
                 self.listener.on_upload_complete,
                 link,
@@ -131,7 +148,7 @@ class GoogleDriveUpload(GoogleDriveHelper):
     @retry(
         wait=wait_exponential(multiplier=2, min=3, max=6),
         stop=stop_after_attempt(3),
-        retry=retry_if_exception_type(Exception),
+        retry=retry_if_exception(retry_if_not_404),
     )
     def _upload_file(self, file_path, file_name, mime_type, dest_id, in_dir=True):
         file_metadata = {

@@ -7,7 +7,7 @@ from asyncio import (
 from ast import literal_eval
 from functools import partial
 from io import BytesIO
-from os import getcwd
+from os import getcwd, getenv
 from shlex import quote as shlex_quote
 from time import time
 
@@ -22,6 +22,7 @@ from pyrogram.enums import ButtonStyle
 from .. import (
     LOGGER,
     aria2_options,
+    categories_dict,
     drives_ids,
     drives_names,
     index_urls,
@@ -118,6 +119,7 @@ BOOL_VARS = [
     "SHOW_CLOUD_LINK",
     "STOP_DUPLICATE",
     "UPDATE_PKGS",
+    "USE_IMAGES",
     "USER_TRANSMISSION",
     "USE_SERVICE_ACCOUNTS",
     "WEB_PINCODE",
@@ -127,7 +129,6 @@ DEFAULT_DESP = {
     "AS_DOCUMENT": "Send files as document instead of media. Default: False.",
     "AUTHORIZED_CHATS": "User/Chat IDs authorized to use the bot. Space-separated. Supports thread IDs with | separator.",
     "BASE_URL": "Public URL for torrent web file selection. Format: http://ip or http://ip:port.",
-    "BASE_URL_PORT": "Port for BASE_URL. Default: 80.",
     "BOT_TOKEN": "Telegram Bot Token from @BotFather.",
     "HELPER_TOKENS": "Additional bot tokens for parallel task handling.",
     "BOT_MAX_TASKS": "Max tasks (including queued) the bot runs in parallel. 0 = unlimited.",
@@ -170,6 +171,7 @@ DEFAULT_DESP = {
     "IMG_SEARCH": "Comma-separated keywords to auto-fetch wallpaper images on startup. e.g. anime, nature, space",
     "IMG_PAGE": "Number of pages to search for each keyword in IMG_SEARCH. Each page has ~70 images. Default: 1",
     "USE_IMAGES": "Enable random photo backgrounds on bot messages. Requires IMAGES list. Default: False",
+    "IMG_SOURCES": "List of image sources to fetch from. Options: wallpaperflare, peapix, wallhaven. Default: wallpaperflare",
     "INC_TASK_RESUME": "Auto-resume incomplete tasks after restart. Default: False.",
     "INCOMPLETE_TASK_NOTIFIER": "Notify about incomplete tasks after restart. Default: False.",
     "INDEX_URL": "Google Drive Index URL for direct links.",
@@ -217,7 +219,7 @@ DEFAULT_DESP = {
     "SHOW_CLOUD_LINK": "Show cloud link button on leeched files. Default: True.",
     "RCLONE_SERVE_USER": "Username for rclone serve authentication.",
     "RCLONE_SERVE_PASS": "Password for rclone serve authentication.",
-    "RCLONE_SERVE_PORT": "Port for rclone serve. Default: 8080.",
+    "RCLONE_SERVE_PORT": "Port for rclone serve. Default: 8081.",
     "RSS_CHAT": "Chat ID for RSS feed notifications.",
     "RSS_DELAY": "RSS feed check interval in seconds. Default: 600.",
     "RSS_SIZE_LIMIT": "RSS download size limit in GB. 0 = unlimited.",
@@ -249,6 +251,7 @@ DEFAULT_DESP = {
     "USER_SESSION_STRING": "Pyrogram session string for user account tasks.",
     "USER_TRANSMISSION": "Use user account for transmission tasks. Default: True.",
     "USE_SERVICE_ACCOUNTS": "Use Google Service Accounts. Default: False.",
+    "WEB_ACCESS_PASSWORD": "Secret for deriving proxy passwords. Set once, use derived passwords in browser. Empty = auto-generated.",
     "WEB_PINCODE": "Ask for pincode in web file selection. Default: True.",
     "AMATERASU_WEB_SECRET": "Secret key for web interface authentication.",
     "YT_DLP_OPTIONS": "Default yt-dlp options. Format: key:value|key:value.",
@@ -424,6 +427,7 @@ async def get_buttons(key=None, edit_type=None, edit_mode=False):
                     "accounts.zip",
                     "list_drives.txt",
                     "shortener.txt",
+                    "categories.txt",
                     "cookies.txt",
                     ".netrc",
                 ]
@@ -487,24 +491,25 @@ async def get_buttons(key=None, edit_type=None, edit_mode=False):
             )
         msg = f"Sabnzbd Options | Page: {int(start / 10)} | State: {state}"
     elif key == "nzbserver":
-        if len(Config.USENET_SERVERS) > 0:
-            for index, k in enumerate(Config.USENET_SERVERS[start : 10 + start]):
+        servers = Config.USENET_SERVERS if isinstance(Config.USENET_SERVERS, list) else []
+        if len(servers) > 0:
+            for index, k in enumerate(servers[start : 10 + start]):
                 buttons.data_button(k["name"], f"botset nzbser{index}")
         buttons.data_button("Add New", "botset nzbsevar newser")
         buttons.data_button("↩ BACK", "botset nzb")
         buttons.data_button("✕ CLOSE", "botset close", style=ButtonStyle.DANGER)
-        if len(Config.USENET_SERVERS) > 10:
-            for x in range(0, len(Config.USENET_SERVERS), 10):
+        if len(servers) > 10:
+            for x in range(0, len(servers), 10):
                 buttons.data_button(
                     f"{int(x / 10)}", f"botset start nzbser {x}", position="footer"
                 )
         msg = f"Usenet Servers | Page: {int(start / 10)} | State: {state}"
     elif key.startswith("nzbser"):
+        servers = Config.USENET_SERVERS if isinstance(Config.USENET_SERVERS, list) else []
         index = int(key.replace("nzbser", ""))
-        LOGGER.info(f"Data: {key}, {index}")
-        if index >= len(Config.USENET_SERVERS):
+        if not servers or index >= len(servers):
             return await get_buttons("nzbserver")
-        for k in list(Config.USENET_SERVERS[index].keys())[start : 10 + start]:
+        for k in list(servers[index].keys())[start : 10 + start]:
             buttons.data_button(k, f"botset nzbsevar{index} {k}")
         if state == "view":
             buttons.data_button("Edit", f"botset edit {key}", style=ButtonStyle.PRIMARY)
@@ -513,12 +518,14 @@ async def get_buttons(key=None, edit_type=None, edit_mode=False):
         buttons.data_button("Remove Server", f"botset remser {index}")
         buttons.data_button("↩ BACK", "botset nzbserver")
         buttons.data_button("✕ CLOSE", "botset close", style=ButtonStyle.DANGER)
-        if len(Config.USENET_SERVERS[index].keys()) > 10:
-            for x in range(0, len(Config.USENET_SERVERS[index]), 10):
+        if len(servers[index].keys()) > 10:
+            for x in range(0, len(servers[index]), 10):
                 buttons.data_button(
                     f"{int(x / 10)}", f"botset start {key} {x}", position="footer"
                 )
         msg = f"Server Keys | Page: {int(start / 10)} | State: {state}"
+    else:
+        msg = "Unknown option"
 
     return msg, buttons.build_menu(1 if key is None else 2)
 
@@ -553,13 +560,6 @@ async def edit_variable(_, message, pre_message, key):
         value = int(value)
     elif key == "LEECH_SPLIT_SIZE":
         value = min(int(value), TgClient.MAX_SPLIT_SIZE)
-    elif key == "BASE_URL_PORT":
-        value = int(value)
-        if Config.BASE_URL:
-            await (await create_subprocess_exec("pkill", "-9", "-f", "gunicorn")).wait()
-            await create_subprocess_shell(
-                f"gunicorn -k uvicorn.workers.UvicornWorker -w 1 web.wserver:app --bind 0.0.0.0:{value}"
-            )
     elif key == "EXCLUDED_EXTENSIONS":
         fx = value.split()
         excluded_extensions.clear()
@@ -620,9 +620,31 @@ async def edit_variable(_, message, pre_message, key):
     elif value.isdigit():
         value = int(value)
     elif value.startswith("[") and value.endswith("]"):
-        value = literal_eval(value)
+        try:
+            value = literal_eval(value)
+        except Exception:
+            await send_message(message, "Invalid list/dict format!")
+            return
     elif value.startswith("{") and value.endswith("}"):
-        value = literal_eval(value)
+        try:
+            value = literal_eval(value)
+        except Exception:
+            await send_message(message, "Invalid dict format!")
+            return
+    if key == "USENET_SERVERS":
+        if not isinstance(value, list):
+            await send_message(message, "USENET_SERVERS must be a list of dicts!")
+            return
+        for s in value:
+            if not isinstance(s, dict):
+                await send_message(message, "Each USENET_SERVERS entry must be a dict!")
+                return
+            missing = [f for f in REQUIRED_SERVER_FIELDS if not s.get(f)]
+            if missing:
+                await send_message(
+                    message, f"Server missing required field(s): {', '.join(missing)}"
+                )
+                return
     if not isinstance(value, (str, int, float, bool, list, dict, type(None))):
         value = str(value)
     Config.set(key, value)
@@ -746,39 +768,81 @@ async def edit_nzb(_, message, pre_message, key):
     await database.update_nzb_config()
 
 
+REQUIRED_SERVER_FIELDS = ["name", "host", "username", "password"]
+
+
 @new_task
 async def edit_nzb_server(_, message, pre_message, key, index=0):
     handler_dict[message.chat.id] = False
-    value = message.text
+    value = message.text.strip()
     if key == "newser":
-        if value.startswith("{") and value.endswith("}"):
-            try:
-                value = literal_eval(value)
-            except Exception:
-                await send_message(message, "Invalid dict format!")
-                await update_buttons(pre_message, "nzbserver")
-                return
-            res = await sabnzbd_client.add_server(value)
-            if not res["config"]["servers"][0]["host"]:
-                await send_message(message, "Invalid server!")
-                await update_buttons(pre_message, "nzbserver")
-                return
-            Config.USENET_SERVERS.append(value)
-            await update_buttons(pre_message, "nzbserver")
-        else:
+        if not (value.startswith("{") and value.endswith("}")):
             await send_message(message, "Invalid dict format!")
             await update_buttons(pre_message, "nzbserver")
             return
+        try:
+            value = literal_eval(value)
+        except Exception:
+            await send_message(message, "Invalid dict format!")
+            await update_buttons(pre_message, "nzbserver")
+            return
+        if not isinstance(value, dict):
+            await send_message(message, "Must be a dict!")
+            await update_buttons(pre_message, "nzbserver")
+            return
+        missing = [f for f in REQUIRED_SERVER_FIELDS if not value.get(f)]
+        if missing:
+            await send_message(
+                message, f"Missing required field(s): {', '.join(missing)}"
+            )
+            await update_buttons(pre_message, "nzbserver")
+            return
+        if not isinstance(value.get("port"), int) or value["port"] < 0:
+            await send_message(message, "port must be a positive integer!")
+            await update_buttons(pre_message, "nzbserver")
+            return
+        if not isinstance(value.get("connections"), int) or value["connections"] < 0:
+            await send_message(message, "connections must be a positive integer!")
+            await update_buttons(pre_message, "nzbserver")
+            return
+        if value.get("port") <= 0:
+            await send_message(message, "port must be greater than 0!")
+            await update_buttons(pre_message, "nzbserver")
+            return
+        if value.get("connections") <= 0:
+            await send_message(message, "connections must be greater than 0!")
+            await update_buttons(pre_message, "nzbserver")
+            return
+        res = await sabnzbd_client.add_server(value)
+        if not isinstance(res, dict) or not res.get("config", {}).get("servers", [{}])[0].get("host"):
+            await send_message(message, "Invalid server!")
+            await update_buttons(pre_message, "nzbserver")
+            return
+        Config.USENET_SERVERS.append(value)
+        await update_buttons(pre_message, "nzbserver")
     else:
+        servers = Config.USENET_SERVERS if isinstance(Config.USENET_SERVERS, list) else []
+        if not servers or index >= len(servers) or not isinstance(servers[index], dict) or key not in servers[index]:
+            await send_message(message, "Invalid server or key!")
+            await update_buttons(pre_message, "nzbserver")
+            return
         if value.isdigit():
             value = int(value)
+        if key in ("port", "connections") and (not isinstance(value, int) or value <= 0):
+            await send_message(message, f"{key} must be a positive integer!")
+            await update_buttons(pre_message, f"nzbser{index}")
+            return
+        if key in ("timeout", "retention", "priority") and not isinstance(value, int):
+            await send_message(message, f"{key} must be an integer!")
+            await update_buttons(pre_message, f"nzbser{index}")
+            return
         res = await sabnzbd_client.add_server(
-            {"name": Config.USENET_SERVERS[index]["name"], key: value}
+            {"name": servers[index]["name"], key: value}
         )
-        if res["config"]["servers"][0][key] == "":
+        if not isinstance(res, dict) or not res.get("config", {}).get("servers", [{}])[0].get(key):
             await send_message(message, "Invalid value")
             return
-        Config.USENET_SERVERS[index][key] = value
+        servers[index][key] = value
         await update_buttons(pre_message, f"nzbser{index}")
     await delete_message(message)
     await database.update_config({"USENET_SERVERS": Config.USENET_SERVERS})
@@ -885,6 +949,23 @@ async def update_private_file(_, message, pre_message, key, new_file=False):
                 temp = line.strip().split()
                 if len(temp) == 2:
                     shortener_dict[temp[0]] = temp[1]
+    elif file_name == "categories.txt" and await aiopath.exists("categories.txt"):
+        categories_dict.clear()
+        if Config.GDRIVE_ID:
+            categories_dict["Root"] = {
+                "drive_id": Config.GDRIVE_ID,
+                "index_link": Config.INDEX_URL,
+            }
+        async with aiopen("categories.txt", "r+") as f:
+            lines = await f.readlines()
+            for line in lines:
+                sep = 2 if line.strip().split()[-1].startswith("http") else 1
+                temp = line.strip().rsplit(maxsplit=sep)
+                name = "Root Custom" if temp[0].casefold() == "Root" else temp[0]
+                categories_dict[name] = {
+                    "drive_id": temp[1],
+                    "index_link": (temp[2] if sep == 2 else ""),
+                }
     await update_buttons(pre_message, key)
     await database.update_private_file(file_name)
 
@@ -959,7 +1040,9 @@ async def edit_bot_settings(client, query):
     elif data[1] == "resetvar":
         await query.answer()
         value = ""
-        if data[2] in DEFAULT_VALUES:
+        if data[2] in ("IMAGES", "SEARCH_PLUGINS", "USENET_SERVERS", "YT_TAGS", "IMG_SOURCES"):
+            value = []
+        elif data[2] in DEFAULT_VALUES:
             value = DEFAULT_VALUES[data[2]]
             if (
                 data[2] == "STATUS_UPDATE_INTERVAL"
@@ -979,17 +1062,8 @@ async def edit_bot_settings(client, query):
         elif data[2] == "TORRENT_TIMEOUT":
             await TorrentManager.change_aria2_option("bt-stop-timeout", "0")
             await database.update_aria2("bt-stop-timeout", "0")
-        elif data[2] == "BASE_URL":
+        elif data[2] in ("BASE_URL","WEB_ACCESS_PASSWORD"):
             await (await create_subprocess_exec("pkill", "-9", "-f", "gunicorn")).wait()
-        elif data[2] == "BASE_URL_PORT":
-            value = 80
-            if Config.BASE_URL:
-                await (
-                    await create_subprocess_exec("pkill", "-9", "-f", "gunicorn")
-                ).wait()
-                await create_subprocess_shell(
-                    f"gunicorn -k uvicorn.workers.UvicornWorker -w 1 web.wserver:app --bind 0.0.0.0:{value}"
-                )
         elif data[2] == "GDRIVE_ID":
             if drives_names and drives_names[0] == "Main":
                 drives_names.pop(0)
@@ -1000,11 +1074,12 @@ async def edit_bot_settings(client, query):
                 index_urls[0] = ""
         elif data[2] in ("INCOMPLETE_TASK_NOTIFIER", "INC_TASK_RESUME"):
             await database.trunc_table("tasks")
-        elif data[2] in ["JD_EMAIL", "JD_PASS"]:
+        elif data[2] in ("JD_EMAIL", "JD_PASS"):
             await create_subprocess_exec("pkill", "-9", "-f", "java")
         elif data[2] == "USENET_SERVERS":
-            for s in Config.USENET_SERVERS:
-                await sabnzbd_client.delete_config("servers", s["name"])
+            for s in (Config.USENET_SERVERS if isinstance(Config.USENET_SERVERS, list) else []):
+                if isinstance(s, dict):
+                    await sabnzbd_client.delete_config("servers", s.get("name", ""))
         elif data[2] == "AUTHORIZED_CHATS":
             auth_chats.clear()
         elif data[2] == "SUDO_USERS":
@@ -1014,16 +1089,16 @@ async def edit_bot_settings(client, query):
         if data[2] == "DATABASE_URL":
             await database.disconnect()
         await database.update_config({data[2]: value})
-        if data[2] in ["SEARCH_PLUGINS", "SEARCH_API_LINK"]:
+        if data[2] in ("SEARCH_PLUGINS", "SEARCH_API_LINK"):
             await initiate_search_tools()
-        elif data[2] in ["QUEUE_ALL", "QUEUE_DOWNLOAD", "QUEUE_UPLOAD"]:
+        elif data[2] in ("QUEUE_ALL", "QUEUE_DOWNLOAD", "QUEUE_UPLOAD"):
             await start_from_queued()
-        elif data[2] in [
+        elif data[2] in (
             "RCLONE_SERVE_URL",
             "RCLONE_SERVE_PORT",
             "RCLONE_SERVE_USER",
             "RCLONE_SERVE_PASS",
-        ]:
+        ):
             await rclone_serve_booter()
     elif data[1] == "resetnzb":
         await query.answer()
@@ -1069,8 +1144,12 @@ async def edit_bot_settings(client, query):
         await database.update_nzb_config()
     elif data[1] == "remser":
         index = int(data[2])
+        servers = Config.USENET_SERVERS if isinstance(Config.USENET_SERVERS, list) else []
+        if index >= len(servers) or not isinstance(servers[index], dict):
+            await query.answer("Invalid server!", show_alert=True)
+            return
         await sabnzbd_client.delete_config(
-            "servers", Config.USENET_SERVERS[index]["name"]
+            "servers", servers[index].get("name", "")
         )
         del Config.USENET_SERVERS[index]
         await update_buttons(message, "nzbserver")
@@ -1191,22 +1270,29 @@ async def edit_bot_settings(client, query):
         await query.answer()
         await update_buttons(message, f"nzbser{data[2]}")
         index = int(data[2])
+        servers = Config.USENET_SERVERS if isinstance(Config.USENET_SERVERS, list) else []
+        if index >= len(servers) or not isinstance(servers[index], dict):
+            return
         res = await sabnzbd_client.add_server(
-            {"name": Config.USENET_SERVERS[index]["name"], data[3]: ""}
+            {"name": servers[index].get("name", ""), data[3]: ""}
         )
-        Config.USENET_SERVERS[index][data[3]] = res["config"]["servers"][0][data[3]]
-        await database.update_config({"USENET_SERVERS": Config.USENET_SERVERS})
+        if isinstance(res, dict) and res.get("config", {}).get("servers", [{}])[0].get(data[3]) is not None:
+            Config.USENET_SERVERS[index][data[3]] = res["config"]["servers"][0][data[3]]
+            await database.update_config({"USENET_SERVERS": Config.USENET_SERVERS})
     elif data[1].startswith("nzbsevar") and (state == "edit" or data[2] == "newser"):
         index = 0 if data[2] == "newser" else int(data[1].replace("nzbsevar", ""))
         await query.answer()
         await update_buttons(message, data[2], data[1])
         pfunc = partial(edit_nzb_server, pre_message=message, key=data[2], index=index)
-        LOGGER.info(f"Query Data: {data[1]}")
-        rfunc = partial(update_buttons, message, data[1])
+        rfunc = partial(update_buttons, message, "nzbserver" if data[2] == "newser" else f"nzbser{index}")
         await event_handler(client, query, pfunc, rfunc)
     elif data[1].startswith("nzbsevar") and state == "view":
         index = int(data[1].replace("nzbsevar", ""))
-        value = f"{Config.USENET_SERVERS[index][data[2]]}"
+        servers = Config.USENET_SERVERS if isinstance(Config.USENET_SERVERS, list) else []
+        if index >= len(servers) or not isinstance(servers[index], dict) or data[2] not in servers[index]:
+            await query.answer("Invalid server or key!", show_alert=True)
+            return
+        value = f"{servers[index][data[2]]}"
         if len(value) > 200:
             await query.answer()
             with BytesIO(str.encode(value)) as out_file:
@@ -1290,8 +1376,15 @@ async def load_config():
 
     await (await create_subprocess_exec("pkill", "-9", "-f", "gunicorn")).wait()
     if Config.BASE_URL:
+        port = getenv("PORT", "") or "8080"
+        access_pwd = getenv("WEB_ACCESS_PASSWORD", "") or Config.WEB_ACCESS_PASSWORD
+        if not access_pwd:
+            from secrets import token_bytes
+            access_pwd = token_bytes(32).hex()
+            Config.WEB_ACCESS_PASSWORD = access_pwd
+        env = f"WEB_ACCESS_PASSWORD={access_pwd} "
         await create_subprocess_shell(
-            f"gunicorn -k uvicorn.workers.UvicornWorker -w 1 web.wserver:app --bind 0.0.0.0:{Config.BASE_URL_PORT}"
+            f"{env}gunicorn -k uvicorn.workers.UvicornWorker -w 1 web.wserver:app --bind 0.0.0.0:{port}"
         )
 
     if Config.DATABASE_URL:

@@ -6,6 +6,7 @@ credentials.json
 rclone.conf
 .netrc
 log.txt
+rlog.txt
 cfg.zip
 accounts/*
 thumbnails/*
@@ -16,6 +17,11 @@ mediainfo/*
 sabnzbd/*
 list_drives.txt
 shortener.txt
+<<<<<<< HEAD
+=======
+categories.txt
+cookies.txt
+>>>>>>> 8af04aa (feat: add Mega upload/clone support, Drive Categories, and infrastructure improvements)
 downloads/*
 <<<<<<< HEAD
 =======

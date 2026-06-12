@@ -1,3 +1,4 @@
+from json import JSONDecodeError
 from functools import wraps
 
 from httpx import AsyncClient, AsyncHTTPTransport, Timeout
@@ -77,7 +78,7 @@ class SabnzbdClient(JobFunctions):
                 )
                 response = res.json()
                 break
-            except APIResponseError as err:
+            except JSONDecodeError as err:
                 raise APIResponseError(
                     f"Failed to decode response!: {res.text}"
                 ) from err

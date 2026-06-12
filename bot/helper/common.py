@@ -2,6 +2,7 @@ import re
 from asyncio import gather, sleep
 from contextlib import suppress
 from os import path as ospath, walk
+from pyrogram.types import Message
 from re import sub
 from secrets import token_hex
 from shlex import split
@@ -13,8 +14,9 @@ from pyrogram.enums import ChatAction
 from .. import (
     DOWNLOAD_DIR,
     LOGGER,
+    categories_dict,
     cores,
-    cpu_eater_lock,
+    ff_lock,
     excluded_extensions,
     intervals,
     multi_tags,
@@ -24,7 +26,12 @@ from .. import (
 )
 from ..core.config_manager import Config, BinConfig
 from ..core.tg_client import TgClient
-from .ext_utils.bot_utils import get_size_bytes, new_task, sync_to_async
+from .ext_utils.bot_utils import (
+    fetch_drive_cat,
+    get_size_bytes,
+    new_task,
+    sync_to_async,
+)
 from .ext_utils.bulk_links import extract_bulk_links
 from .ext_utils.files_utils import (
     SevenZ,
@@ -58,6 +65,7 @@ from .mirror_leech_utils.status_utils.sevenz_status import SevenZStatus
 from .telegram_helper.bot_commands import BotCommands
 from .telegram_helper.message_utils import (
     get_tg_link_message,
+    open_category_btns,
     send_message,
     send_status_message,
 )
@@ -86,11 +94,14 @@ class TaskConfig:
         self.up_dir = ""
         self.link = ""
         self.up_dest = ""
+        self.drive_id = ""
         self.leech_dest = ""
         self.rc_flags = ""
         self.tag = ""
         self.name = ""
         self.subname = ""
+        self.category = ""
+        self.index_link = ""
         self.name_swap = ""
         self.autorename_template = ""
         self.thumbnail_layout = ""
@@ -275,6 +286,41 @@ class TaskConfig:
             if self.up_dest in Config.UPLOAD_PATHS:
                 self.up_dest = Config.UPLOAD_PATHS[self.up_dest]
 
+        if self.category and not self.is_leech:
+            dcats = fetch_drive_cat(self.user_id)
+            default_id = self.user_dict.get("GDRIVE_ID") or Config.GDRIVE_ID
+            default_index = self.user_dict.get("INDEX_URL") or Config.INDEX_URL
+            merged_cats = {
+                "Default": {"drive_id": default_id, "index_link": default_index},
+                **dcats,
+                **categories_dict,
+            }
+            if self.category == "gdl":
+                self.up_dest = "gdl"
+            elif self.category == "gd":
+                self.up_dest = default_id
+                self.index_link = default_index
+            elif "|" in self.category:
+                parts = self.category.split("|", 1)
+                self.up_dest = parts[0]
+                self.index_link = parts[1] if len(parts) > 1 else ""
+            elif is_gdrive_id(self.category):
+                self.up_dest = self.category
+            elif self.category in merged_cats:
+                self.up_dest = merged_cats[self.category]["drive_id"]
+                self.index_link = merged_cats[self.category].get("index_link", "")
+            else:
+                drive_id, index_link, is_cancelled = await open_category_btns(self.message)
+                if is_cancelled:
+                    self.is_cancelled = True
+                    return
+                if drive_id:
+                    self.up_dest = drive_id
+                    self.index_link = index_link or ""
+            gc_used = True
+        else:
+            gc_used = False
+
         if self.ffmpeg_cmds and not isinstance(self.ffmpeg_cmds, list):
             if self.user_dict.get("FFMPEG_CMDS", None):
                 ffmpeg_dict = self.user_dict["FFMPEG_CMDS"]
@@ -303,42 +349,43 @@ class TaskConfig:
                 or "STOP_DUPLICATE" not in self.user_dict
                 and Config.STOP_DUPLICATE
             )
-            default_upload = (
-                self.user_dict.get("DEFAULT_UPLOAD", "") or Config.DEFAULT_UPLOAD
-            )
-            if not self.is_uphoster and (
-                (not self.up_dest and default_upload == "rc") or self.up_dest == "rc"
-            ):
-                self.up_dest = self.user_dict.get("RCLONE_PATH") or Config.RCLONE_PATH
-            elif not self.is_uphoster and (
-                (not self.up_dest and default_upload == "gd") or self.up_dest == "gd"
-            ):
-                self.up_dest = self.user_dict.get("GDRIVE_ID") or Config.GDRIVE_ID
-            elif (not self.up_dest and default_upload == "mega") or self.up_dest == "mega":
-                self.up_dest = "mega:"
+            if not gc_used:
+                default_upload = (
+                    self.user_dict.get("DEFAULT_UPLOAD", "") or Config.DEFAULT_UPLOAD
+                )
+                if not self.is_uphoster and (
+                    (not self.up_dest and default_upload == "rc") or self.up_dest == "rc"
+                ):
+                    self.up_dest = self.user_dict.get("RCLONE_PATH") or Config.RCLONE_PATH
+                elif not self.is_uphoster and (
+                    (not self.up_dest and default_upload == "gd") or self.up_dest == "gd"
+                ):
+                    self.up_dest = self.user_dict.get("GDRIVE_ID") or Config.GDRIVE_ID
+                elif (not self.up_dest and default_upload == "mega") or self.up_dest == "mega":
+                    self.up_dest = "mega:"
 
-            if self.is_uphoster and not self.up_dest:
-                uphoster_service = self.user_dict.get("UPHOSTER_SERVICE", "gofile")
-                services = uphoster_service.split(",")
-                for service in services:
-                    if service == "gofile":
-                        if not (
-                            self.user_dict.get("GOFILE_TOKEN") or Config.GOFILE_API
-                        ):
-                            raise ValueError("No Gofile Token Found!")
-                    elif service == "buzzheavier":
-                        if not (
-                            self.user_dict.get("BUZZHEAVIER_TOKEN")
-                            or Config.BUZZHEAVIER_API
-                        ):
-                            raise ValueError("No BuzzHeavier Token Found!")
-                    elif service == "pixeldrain":
-                        if not (
-                            self.user_dict.get("PIXELDRAIN_KEY")
-                            or Config.PIXELDRAIN_KEY
-                        ):
-                            raise ValueError("No PixelDrain Key Found!")
-                self.up_dest = "Uphoster"
+                if self.is_uphoster and not self.up_dest:
+                    uphoster_service = self.user_dict.get("UPHOSTER_SERVICE", "gofile")
+                    services = uphoster_service.split(",")
+                    for service in services:
+                        if service == "gofile":
+                            if not (
+                                self.user_dict.get("GOFILE_TOKEN") or Config.GOFILE_API
+                            ):
+                                raise ValueError("No Gofile Token Found!")
+                        elif service == "buzzheavier":
+                            if not (
+                                self.user_dict.get("BUZZHEAVIER_TOKEN")
+                                or Config.BUZZHEAVIER_API
+                            ):
+                                raise ValueError("No BuzzHeavier Token Found!")
+                        elif service == "pixeldrain":
+                            if not (
+                                self.user_dict.get("PIXELDRAIN_KEY")
+                                or Config.PIXELDRAIN_KEY
+                            ):
+                                raise ValueError("No PixelDrain Key Found!")
+                    self.up_dest = "Uphoster"
 
             if not self.up_dest:
                 raise ValueError("No Upload Destination!")
@@ -356,6 +403,8 @@ class TaskConfig:
                 ):
                     self.up_dest = f"mrcc:{self.up_dest}"
                 self.up_dest = self.up_dest.strip("/")
+            elif self.up_dest in ("gdl", "rcl"):
+                pass
             elif self.is_uphoster:
                 pass
             else:
@@ -612,10 +661,14 @@ class TaskConfig:
                 chat_id=self.message.chat.id,
                 message_ids=self.message.reply_to_message_id + 1,
             )
+            if not isinstance(nextmsg, Message):
+                nextmsg = self.message
             msgts = " ".join(msg)
             if self.multi > 2:
                 msgts += f"\n• <b>Cancel Multi:</b> <i>/{BotCommands.CancelTaskCommand[1]}_{self.multi_tag}</i>"
             nextmsg = await send_message(nextmsg, msgts)
+        if not isinstance(nextmsg, Message):
+            return
         nextmsg = await self.client.get_messages(
             chat_id=self.message.chat.id, message_ids=nextmsg.id
         )
@@ -662,6 +715,8 @@ class TaskConfig:
                 multi_tags.add(self.multi_tag)
                 msg += f"\n• <b>Cancel Multi:</b> <i>/{BotCommands.CancelTaskCommand[1]}_{self.multi_tag}</i>"
             nextmsg = await send_message(self.message, msg)
+            if not isinstance(nextmsg, Message):
+                return
             nextmsg = await self.client.get_messages(
                 chat_id=self.message.chat.id, message_ids=nextmsg.id
             )
@@ -805,7 +860,7 @@ class TaskConfig:
                                 self, ffmpeg, gid, "FFmpeg"
                             )
                         self.progress = False
-                        await cpu_eater_lock.acquire()
+                        await ff_lock.acquire()
                         self.progress = True
                     LOGGER.info(f"Running ffmpeg cmd for: {file_path}")
                     var_cmd = cmd.copy()
@@ -863,7 +918,7 @@ class TaskConfig:
                                         self, ffmpeg, gid, "FFmpeg"
                                     )
                                 self.progress = False
-                                await cpu_eater_lock.acquire()
+                                await ff_lock.acquire()
                                 self.progress = True
                             LOGGER.info(f"Running ffmpeg cmd for: {f_path}")
                             self.subsize = await get_path_size(f_path)
@@ -879,7 +934,7 @@ class TaskConfig:
                                         await move(res[0], newres)
         finally:
             if checked:
-                cpu_eater_lock.release()
+                ff_lock.release()
         return dl_path
 
     async def substitute(self, dl_path):
@@ -1038,7 +1093,7 @@ class TaskConfig:
             async with task_dict_lock:
                 task_dict[self.mid] = FFmpegStatus(self, ffmpeg, gid, "Convert")
             self.progress = False
-            async with cpu_eater_lock:
+            async with ff_lock:
                 self.progress = True
                 for f_path, f_type in self.files_to_proceed.items():
                     self.proceed_count += 1
@@ -1127,7 +1182,7 @@ class TaskConfig:
             async with task_dict_lock:
                 task_dict[self.mid] = FFmpegStatus(self, ffmpeg, gid, "Sample Video")
             self.progress = False
-            async with cpu_eater_lock:
+            async with ff_lock:
                 self.progress = True
                 LOGGER.info(f"Creating Sample video: {self.name}")
                 for f_path, file_ in self.files_to_proceed.items():

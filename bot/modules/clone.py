@@ -16,6 +16,8 @@ from ..helper.ext_utils.exceptions import DirectDownloadLinkException
 from ..helper.ext_utils.links_utils import (
     is_gdrive_id,
     is_gdrive_link,
+    is_mega_link,
+    is_mega_folder_link,
     is_rclone_path,
     is_share_link,
 )
@@ -32,6 +34,7 @@ from ..helper.mirror_leech_utils.download_utils.direct_link_generator import (
 from ..helper.mirror_leech_utils.gdrive_utils.clone import GoogleDriveClone
 from ..helper.mirror_leech_utils.gdrive_utils.count import GoogleDriveCount
 from ..helper.mirror_leech_utils.rclone_utils.transfer import RcloneTransferHelper
+from ..helper.mirror_leech_utils.upload_utils.mega_clone import add_mega_clone
 from ..helper.mirror_leech_utils.status_utils.gdrive_status import GoogleDriveStatus
 from ..helper.mirror_leech_utils.status_utils.rclone_status import RcloneStatus
 from ..helper.telegram_helper.message_utils import (
@@ -82,6 +85,7 @@ class Clone(TaskListener):
             "-b": False,
             "-n": "",
             "-up": "",
+            "-gc": "",
             "-rcf": "",
             "-sync": False,
         }
@@ -94,6 +98,7 @@ class Clone(TaskListener):
             self.multi = 0
 
         self.up_dest = args["-up"]
+        self.category = args["-gc"]
         self.rc_flags = args["-rcf"]
         self.link = args["link"]
         self.name = args["-n"]
@@ -127,6 +132,8 @@ class Clone(TaskListener):
             )
             await delete_links(self.message)
             return
+        if is_mega_link(self.link) and self.up_dest not in ("mega", "mega:"):
+            self.up_dest = "mega:"
         LOGGER.info(self.link)
         try:
             await self.before_start()
@@ -316,6 +323,44 @@ class Clone(TaskListener):
                 await self.on_upload_complete(
                     flink, files, folders, mime_type, destination
                 )
+        elif is_mega_link(self.link):
+            if is_mega_folder_link(self.link):
+                await send_message(
+                    self.message,
+                    "Mega folder clone is not supported. Only file links can be cloned."
+                )
+                return
+
+            mega_email = self.user_dict.get("MEGA_EMAIL") or ""
+            mega_password = self.user_dict.get("MEGA_PASSWORD") or ""
+            if not mega_email or not mega_password:
+                await send_message(
+                    self.message,
+                    "Mega credentials not configured for this user."
+                )
+                return
+
+            if not self.name:
+                self.name = f"mega_file_{token_hex(4)}"
+
+            self.size = 0
+            await self.on_download_start()
+
+            gid = token_hex(5)
+            LOGGER.info(
+                f"Clone Started: Name: {self.name} - Source: {self.link}"
+            )
+
+            flink, files, folders = await add_mega_clone(
+                self, self.link, mega_email, mega_password, gid
+            )
+            if not flink:
+                return
+            mime_type = "Folder" if folders else "application/octet-stream"
+            await self.on_upload_complete(
+                flink, files, folders, mime_type, dir_id=None
+            )
+            LOGGER.info(f"Cloning Done: {self.name}")
         else:
             await send_message(
                 self.message, COMMAND_USAGE["clone"][0], COMMAND_USAGE["clone"][1]

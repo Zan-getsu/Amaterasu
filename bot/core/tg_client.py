@@ -1,5 +1,6 @@
 from pyrogram import Client, enums
-from asyncio import Lock, gather
+from pyrogram.errors import FloodWait
+from asyncio import Lock, gather, get_event_loop, sleep
 from hashlib import sha256
 from inspect import signature
 
@@ -17,6 +18,7 @@ def db_partition_id(bot_id):
 class TgClient:
     _lock = Lock()
     _hlock = Lock()
+    _ulock = Lock()
 
     bot = None
     user = None
@@ -24,6 +26,8 @@ class TgClient:
     helper_loads = {}
     stream_clients = {}
     stream_loads = {}
+    helper_users = {}
+    helper_user_loads = {}
 
     BNAME = ""
     ID = 0
@@ -47,15 +51,41 @@ class TgClient:
         return Client(*args, **kwargs)
 
     @classmethod
-    async def start_hclient(cls, no, b_token):
+    async def _retry_hclient(cls, no, b_token, delay):
+        await sleep(delay)
         try:
-            hbot = await cls.tgClient(
+            hbot = cls.tgClient(
                 f"Amaterasu-HBot{no}",
                 bot_token=b_token,
                 no_updates=True,
-            ).start()
+            )
+            await hbot.start()
             LOGGER.info(f"Helper Bot [@{hbot.me.username}] Started!")
             cls.helper_bots[no], cls.helper_loads[no] = hbot, 0
+        except FloodWait as e:
+            LOGGER.warning(
+                f"Helper Bot{no} FloodWait: Retrying in {e.value}s..."
+            )
+            get_event_loop().create_task(cls._retry_hclient(no, b_token, e.value))
+        except Exception as e:
+            LOGGER.error(f"Failed to start helper bot {no} from HELPER_TOKENS. {e}")
+
+    @classmethod
+    async def start_hclient(cls, no, b_token):
+        try:
+            hbot = cls.tgClient(
+                f"Amaterasu-HBot{no}",
+                bot_token=b_token,
+                no_updates=True,
+            )
+            await hbot.start()
+            LOGGER.info(f"Helper Bot [@{hbot.me.username}] Started!")
+            cls.helper_bots[no], cls.helper_loads[no] = hbot, 0
+        except FloodWait as e:
+            LOGGER.warning(
+                f"Helper Bot{no} FloodWait: Retrying in {e.value}s (non-blocking)..."
+            )
+            get_event_loop().create_task(cls._retry_hclient(no, b_token, e.value))
         except Exception as e:
             LOGGER.error(f"Failed to start helper bot {no} from HELPER_TOKENS. {e}")
             cls.helper_bots.pop(no, None)
@@ -115,6 +145,63 @@ class TgClient:
         LOGGER.info(f"Total Stream Clients: {len(cls.stream_clients)}")
 
     @classmethod
+    async def _retry_huser(cls, no, session_string, delay):
+        await sleep(delay)
+        try:
+            huser = cls.tgClient(
+                f"Amaterasu-HUser{no}",
+                session_string=session_string,
+                sleep_threshold=60,
+                no_updates=True,
+            )
+            await huser.start()
+            uname = huser.me.username or huser.me.first_name
+            LOGGER.info(f"Helper User [{uname}] Started!")
+            cls.helper_users[no], cls.helper_user_loads[no] = huser, 0
+        except FloodWait as e:
+            LOGGER.warning(f"Helper User{no} FloodWait: Retrying in {e.value}s...")
+            get_event_loop().create_task(cls._retry_huser(no, session_string, e.value))
+        except Exception as e:
+            LOGGER.error(f"Failed to start helper user {no} from HELPER_STRINGS. {e}")
+
+    @classmethod
+    async def start_huser(cls, no, session_string):
+        try:
+            huser = cls.tgClient(
+                f"Amaterasu-HUser{no}",
+                session_string=session_string,
+                sleep_threshold=60,
+                no_updates=True,
+            )
+            await huser.start()
+            uname = huser.me.username or huser.me.first_name
+            LOGGER.info(f"Helper User [{uname}] Started!")
+            cls.helper_users[no], cls.helper_user_loads[no] = huser, 0
+        except FloodWait as e:
+            LOGGER.warning(
+                f"Helper User{no} FloodWait: Retrying in {e.value}s (non-blocking)..."
+            )
+            get_event_loop().create_task(cls._retry_huser(no, session_string, e.value))
+        except Exception as e:
+            LOGGER.error(f"Failed to start helper user {no} from HELPER_STRINGS. {e}")
+            cls.helper_users.pop(no, None)
+
+    @classmethod
+    async def start_helper_users(cls):
+        if not Config.HELPER_STRINGS:
+            return
+        LOGGER.info("Generating helper client from HELPER_STRINGS")
+        async with cls._ulock:
+            await gather(
+                *(
+                    cls.start_huser(no, session_string)
+                    for no, session_string in enumerate(
+                        Config.HELPER_STRINGS.split(), start=1
+                    )
+                )
+            )
+
+    @classmethod
     async def start_bot(cls):
         LOGGER.info("Generating client from BOT_TOKEN")
         cls.ID = Config.BOT_TOKEN.split(":", 1)[0]
@@ -124,10 +211,40 @@ class TgClient:
             bot_token=Config.BOT_TOKEN,
             workdir="/usr/src/app",
         )
-        await cls.bot.start()
+        while True:
+            try:
+                await cls.bot.start()
+                break
+            except FloodWait as e:
+                LOGGER.warning(f"FloodWait: Sleeping for {e.value} seconds...")
+                await sleep(e.value)
         cls.BNAME = cls.bot.me.username
         cls.ID = Config.BOT_TOKEN.split(":", 1)[0]
         LOGGER.info(f"Amaterasu Bot : [@{cls.BNAME}] Started!")
+
+    @classmethod
+    async def _retry_user(cls, delay):
+        await sleep(delay)
+        try:
+            cls.user = cls.tgClient(
+                "Amaterasu-User",
+                session_string=Config.USER_SESSION_STRING,
+                sleep_threshold=60,
+                no_updates=True,
+            )
+            await cls.user.start()
+            cls.IS_PREMIUM_USER = cls.user.me.is_premium
+            if cls.IS_PREMIUM_USER:
+                cls.MAX_SPLIT_SIZE = 4194304000
+            uname = cls.user.me.username or cls.user.me.first_name
+            LOGGER.info(f"WZ User : [{uname}] Started!")
+        except FloodWait as e:
+            LOGGER.warning(f"User client FloodWait: Retrying in {e.value}s...")
+            get_event_loop().create_task(cls._retry_user(e.value))
+        except Exception as e:
+            LOGGER.error(f"Failed to start client from USER_SESSION_STRING. {e}")
+            cls.IS_PREMIUM_USER = False
+            cls.user = None
 
     @classmethod
     async def start_user(cls):
@@ -146,6 +263,11 @@ class TgClient:
                     cls.MAX_SPLIT_SIZE = 4194304000
                 uname = cls.user.me.username or cls.user.me.first_name
                 LOGGER.info(f"Amaterasu User : [{uname}] Started!")
+            except FloodWait as e:
+                LOGGER.warning(
+                    f"User client FloodWait: Retrying in {e.value}s (non-blocking)..."
+                )
+                get_event_loop().create_task(cls._retry_user(e.value))
             except Exception as e:
                 LOGGER.error(f"Failed to start client from USER_SESSION_STRING. {e}")
                 cls.IS_PREMIUM_USER = False
@@ -173,6 +295,9 @@ class TgClient:
                     await gather(*stop_tasks)
                 cls.stream_clients = {}
                 cls.stream_loads = {}
+            if cls.helper_users:
+                await gather(*[h_user.stop() for h_user in cls.helper_users.values()])
+                cls.helper_users = {}
             LOGGER.info("All Client(s) stopped")
 
     @classmethod
@@ -191,4 +316,8 @@ class TgClient:
                 ]
                 if restart_tasks:
                     await gather(*restart_tasks)
+            if cls.helper_users:
+                await gather(
+                    *[h_user.restart() for h_user in cls.helper_users.values()]
+                )
             LOGGER.info("All Client(s) restarted")

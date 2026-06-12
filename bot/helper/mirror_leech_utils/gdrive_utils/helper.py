@@ -143,6 +143,23 @@ class GoogleDriveHelper:
         stop=stop_after_attempt(3),
         retry=retry_if_exception_type(Exception),
     )
+    def add_permission_user(self, file_id, email):
+        permissions = {
+            "role": "reader",
+            "type": "user",
+            "emailAddress": email,
+        }
+        return (
+            self.service.permissions()
+            .create(fileId=file_id, body=permissions, supportsAllDrives=True, sendNotificationEmail=False)
+            .execute()
+        )
+
+    @retry(
+        wait=wait_exponential(multiplier=2, min=3, max=6),
+        stop=stop_after_attempt(3),
+        retry=retry_if_exception_type(Exception),
+    )
     def get_file_metadata(self, file_id):
         return (
             self.service.files()

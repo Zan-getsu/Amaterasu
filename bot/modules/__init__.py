@@ -2,6 +2,7 @@ from .autorename import auto_rename_handler, autorename_command
 from .bot_settings import edit_bot_settings, send_bot_settings
 from .broadcast import broadcast
 from .cancel_task import cancel, cancel_all_buttons, cancel_all_update, cancel_multi
+from .category_select import change_category, confirm_category
 from .chat_permission import (
     add_blacklist,
     add_sudo,
@@ -62,9 +63,9 @@ __all__ = [
     "add_sudo",
     "aioexecute",
     "arg_usage",
-    "authorize",
     "auto_rename_handler",
     "autorename_command",
+    "authorize",
     "black_listed",
     "bot_help",
     "bot_stats",
@@ -73,10 +74,12 @@ __all__ = [
     "cancel_all_buttons",
     "cancel_all_update",
     "cancel_multi",
+    "change_category",
     "channel_media_handler",
     "clear",
     "clear_incomplete_tasks",
     "clone_node",
+    "confirm_category",
     "confirm_restart",
     "confirm_selection",
     "count_node",
@@ -84,11 +87,11 @@ __all__ = [
     "edit_bot_settings",
     "edit_user_settings",
     "execute",
+    "gdrive_search",
+    "gen_pyro_string",
     "get_packages_version",
     "get_rss_menu",
     "get_users_settings",
-    "gen_pyro_string",
-    "gdrive_search",
     "hydra_search",
     "imdb_callback",
     "imdb_search",

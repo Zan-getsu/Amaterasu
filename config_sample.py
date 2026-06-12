@@ -68,6 +68,13 @@ IS_TEAM_DRIVE = False
 STOP_DUPLICATE = False
 INDEX_URL = ""
 USE_SERVICE_ACCOUNTS = False
+<<<<<<< HEAD
+=======
+NAME_SWAP = ""
+FFMPEG_CMDS = {}
+UPLOAD_PATHS = {}
+WEB_ACCESS_PASSWORD=""  # Secret for deriving proxy passwords. Logs derived passwords at startup.
+>>>>>>> 8af04aa (feat: add Mega upload/clone support, Drive Categories, and infrastructure improvements)
 
 # ==========================================
 # 6. RCLONE OPTIONS
@@ -98,6 +105,7 @@ EXTRACT_LIMIT = 0
 ARCHIVE_LIMIT = 0
 STORAGE_LIMIT = 0
 
+<<<<<<< HEAD
 # ==========================================
 # 8. TORRENTS & ARIA2C / QBITTORRENT
 # ==========================================
@@ -108,6 +116,130 @@ BASE_URL = ""
 BASE_URL_PORT = 0
 WEB_PINCODE = False
 AMATERASU_WEB_SECRET = ""
+=======
+# Image Search
+USE_IMAGES = False
+IMG_SEARCH = ""
+IMG_PAGE = 1
+IMG_SOURCES = ["wallpaperflare"]
+
+# Insta video downloader api
+INSTADL_API = ""
+
+# Nzb search
+HYDRA_IP = ""
+HYDRA_API_KEY = ""
+
+# Media Search
+IMDB_TEMPLATE = """<b>Title: </b> {title} [{year}]
+<b>Also Known As:</b> {aka}
+<b>Rating ⭐️:</b> <i>{rating}</i>
+<b>Release Info: </b> <a href="{url_releaseinfo}">{release_date}</a>
+<b>Genre: </b>{genres}
+<b>IMDb URL:</b> {url}
+<b>Language: </b>{languages}
+<b>Country of Origin : </b> {countries}
+
+<b>Story Line: </b><code>{plot}</code>
+
+<a href="{url_cast}">Read More ...</a>"""
+
+# Task Tools
+FORCE_SUB_IDS = ""
+MEDIA_STORE = True
+DELETE_LINKS = False
+CLEAN_LOG_MSG = False
+
+# Limiters
+BOT_MAX_TASKS = 0
+USER_MAX_TASKS = 0
+USER_TIME_INTERVAL = 0
+VERIFY_TIMEOUT = 0
+LOGIN_PASS = ""
+
+# Bot Settings
+BOT_PM = False
+SET_COMMANDS = True
+TIMEZONE = "Asia/Kolkata"
+
+# GDrive Tools
+GDRIVE_ID = ""
+GD_DESP = "Uploaded with WZ Bot"
+IS_TEAM_DRIVE = False
+STOP_DUPLICATE = False
+INDEX_URL = ""
+
+# YT Tools
+YT_DESP = "Uploaded to YouTube by WZML-X bot"
+YT_TAGS = ["telegram", "bot", "youtube"]  # or as a comma-separated string
+YT_CATEGORY_ID = 22
+YT_PRIVACY_STATUS = "unlisted"
+
+# Rclone
+RCLONE_PATH = ""
+RCLONE_FLAGS = ""
+RCLONE_SERVE_URL = ""
+SHOW_CLOUD_LINK = True
+RCLONE_SERVE_PORT = 0
+RCLONE_SERVE_USER = ""
+RCLONE_SERVE_PASS = ""
+
+# JDownloader
+JD_EMAIL = ""
+JD_PASS = ""
+
+# Sabnzbd
+USENET_SERVERS = [
+    {
+        "name": "main",
+        "host": "",
+        "port": 563,
+        "timeout": 60,
+        "username": "",
+        "password": "",
+        "connections": 8,
+        "ssl": 1,
+        "ssl_verify": 2,
+        "ssl_ciphers": "",
+        "enable": 1,
+        "required": 0,
+        "optional": 0,
+        "retention": 0,
+        "send_group": 0,
+        "priority": 0,
+    }
+]
+
+# Update
+UPSTREAM_REPO = ""
+UPSTREAM_BRANCH = "master"
+UPDATE_PKGS = True
+
+# Leech
+LEECH_SPLIT_SIZE = 0
+AS_DOCUMENT = False
+EQUAL_SPLITS = False
+MEDIA_GROUP = False
+USER_TRANSMISSION = True
+HYBRID_LEECH = True
+LEECH_PREFIX = ""
+LEECH_SUFFIX = ""
+LEECH_FONT = ""
+LEECH_CAPTION = ""
+THUMBNAIL_LAYOUT = ""
+
+# Log Channels
+LEECH_DUMP_CHAT = ""
+LINKS_LOG_ID = ""
+MIRROR_LOG_ID = ""
+
+# qBittorrent/Aria2c
+TORRENT_TIMEOUT = 0
+BASE_URL = ""
+WEB_PINCODE = True
+
+# Queueing system
+>>>>>>> 8af04aa (feat: add Mega upload/clone support, Drive Categories, and infrastructure improvements)
 QUEUE_ALL = 0
 QUEUE_DOWNLOAD = 0
 QUEUE_UPLOAD = 0

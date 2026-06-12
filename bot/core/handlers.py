@@ -460,6 +460,16 @@ def add_handlers():
         )
     )
 
+    TgClient.bot.add_handler(
+        MessageHandler(
+            change_category,
+            filters=command(BotCommands.CategorySelectCommand) & CustomFilters.authorized,
+        )
+    )
+    TgClient.bot.add_handler(
+        CallbackQueryHandler(confirm_category, filters=regex("^scat"))
+    )
+
     # Catch-all handlers go in group 1 so they don't swallow commands
     TgClient.bot.add_handler(
         MessageHandler(
@@ -475,8 +485,6 @@ def add_handlers():
         ),
         group=1,
     )
-
-
     if Config.SET_COMMANDS:
         global BOT_COMMANDS
 

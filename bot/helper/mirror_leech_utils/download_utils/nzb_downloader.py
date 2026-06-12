@@ -26,11 +26,10 @@ async def add_servers():
     if res and (servers := res["servers"]):
         sabnzbd_client.LOGGED_IN = True
         tasks = []
-        servers_hosts = [x["host"] for x in servers]
-        for server in list(Config.USENET_SERVERS):
-            if server["host"] not in servers_hosts:
+        servers_hosts = [x.get("host", "") for x in servers]
+        for server in (Config.USENET_SERVERS if isinstance(Config.USENET_SERVERS, list) else []):
+            if isinstance(server, dict) and server.get("host") not in servers_hosts:
                 tasks.append(sabnzbd_client.add_server(server))
-                Config.USENET_SERVERS.append(server)
         if Config.DATABASE_URL:
             tasks.append(
                 database.update_config({"USENET_SERVERS": Config.USENET_SERVERS})
@@ -41,19 +40,23 @@ async def add_servers():
             except LoginFailed as e:
                 raise e
     elif not res and (
-        Config.USENET_SERVERS
+        isinstance(Config.USENET_SERVERS, list)
+        and Config.USENET_SERVERS
+        and isinstance(Config.USENET_SERVERS[0], dict)
         and (
-            not Config.USENET_SERVERS[0]["host"]
-            or not Config.USENET_SERVERS[0]["username"]
-            or not Config.USENET_SERVERS[0]["password"]
+            not Config.USENET_SERVERS[0].get("host")
+            or not Config.USENET_SERVERS[0].get("username")
+            or not Config.USENET_SERVERS[0].get("password")
         )
+        or not isinstance(Config.USENET_SERVERS, list)
         or not Config.USENET_SERVERS
     ):
         sabnzbd_client.LOGGED_IN = False
         raise NotLoggedIn("Set USENET_SERVERS in bsetting or config!")
     else:
+        servers = Config.USENET_SERVERS if isinstance(Config.USENET_SERVERS, list) else []
         if tasks := [
-            sabnzbd_client.add_server(server) for server in Config.USENET_SERVERS
+            sabnzbd_client.add_server(server) for server in servers if isinstance(server, dict)
         ]:
             try:
                 await gather(*tasks)

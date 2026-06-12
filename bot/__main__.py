@@ -1,5 +1,11 @@
 # ruff: noqa: E402
 
+import faulthandler
+from sys import stderr
+from logging import FileHandler, getLogger
+
+faulthandler.enable(file=stderr, all_threads=True)
+
 from .core.config_manager import Config
 
 Config.load()
@@ -11,6 +17,14 @@ from time import localtime
 from pytz import timezone
 
 from . import LOGGER, bot_loop
+
+for _h in getLogger().handlers:
+    if isinstance(_h, FileHandler):
+        try:
+            faulthandler.enable(file=_h.stream.fileno(), all_threads=True)
+        except Exception:
+            pass
+        break
 from .core.tg_client import TgClient
 
 
@@ -28,6 +42,13 @@ async def main():
     )
 
     await load_settings()
+
+    from bot import _sabnzbd_key, _update_sabnzbd_ini, sabnzbd_client
+    derived_key = _sabnzbd_key()
+    _update_sabnzbd_ini(derived_key)
+    sabnzbd_client._default_params["apikey"] = derived_key
+    from .helper.ext_utils.db_handler import database
+    await database.update_nzb_config()
 
     from .helper.telegram_helper.bot_commands import BotCommands
 
@@ -49,7 +70,10 @@ async def main():
     Formatter.converter = changetz
 
     await gather(
-        TgClient.start_bot(), TgClient.start_user(), TgClient.start_helper_bots()
+        TgClient.start_bot(),
+        TgClient.start_user(),
+        TgClient.start_helper_bots(),
+        TgClient.start_helper_users(),
     )
     await TgClient.start_stream_clients()
     await gather(load_configurations(), update_variables())
@@ -80,11 +104,25 @@ async def main():
         get_packages_version(),
         telegraph.create_account(),
         rclone_serve_booter(),
-        search_images(),
     )
+    bot_loop.create_task(search_images())
 
 
 bot_loop.run_until_complete(main())
+
+
+def _handle_asyncio_exception(loop, context):
+    exc = context.get("exception")
+    if exc and isinstance(exc, (KeyError, ValueError)):
+        msg = str(exc)
+        msg_lower = msg.lower()
+        if "unknown constructor" in msg_lower or "server sent an unknown" in msg_lower:
+            LOGGER.warning(f"Pyrogram schema mismatch (tg side): {msg}")
+            return
+    loop.default_exception_handler(context)
+
+
+bot_loop.set_exception_handler(_handle_asyncio_exception)
 
 from .core.handlers import add_handlers
 from .helper.ext_utils.bot_utils import create_help_buttons
@@ -145,6 +183,14 @@ TgClient.bot.add_handler(
         filters=regex("^sessionrestart") & CustomFilters.sudo,
     )
 )
+
+from .helper.ext_utils.bot_utils import derive_service_password
+
+_bot_id = (Config.BOT_TOKEN or "").split(":", 1)[0] or "0"
+qbit_pwd = derive_service_password(_bot_id, "qbit")
+nzb_pwd = derive_service_password(_bot_id, "sabnzbd")
+LOGGER.info(f"Web UI: qBittorrent: /qbit/?pass={qbit_pwd}")
+LOGGER.info(f"Web UI: SABnzbd: /nzb/?pass={nzb_pwd}")
 
 LOGGER.info("Amaterasu Client(s) & Services Started !")
 bot_loop.run_forever()
