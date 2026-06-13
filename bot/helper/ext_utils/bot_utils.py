@@ -42,6 +42,10 @@ _PIN_RATE_WINDOW = 60
 _cached_secret_bytes = None
 
 
+def get_web_secret():
+    return Config.AMATERASU_WEB_SECRET or Config.LOGIN_PASS or Config.BOT_TOKEN
+
+
 def _shared_secret():
     global _cached_secret_bytes
     secret = Config.AMATERASU_WEB_SECRET
@@ -182,7 +186,7 @@ def compare_versions(v1, v2):
 
 def bt_selection_buttons(id_):
     gid = id_[:12] if len(id_) > 25 else id_
-    token = make_short_token(Config.BOT_TOKEN, "torrent-select", id_)
+    token = make_short_token(get_web_secret(), "torrent-select", id_)
     buttons = ButtonMaker()
     if Config.WEB_PINCODE:
         buttons.url_button(

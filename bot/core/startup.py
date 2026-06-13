@@ -54,6 +54,12 @@ async def update_qb_options():
             if k.startswith("rss"):
                 del qbit_options[k]
         qbit_options["web_ui_password"] = pwd
+        qbit_options["max_active_downloads"] = 20
+        qbit_options["max_active_uploads"] = 20
+        qbit_options["max_active_torrents"] = 40
+        qbit_options["max_connec"] = 500
+        qbit_options["max_connec_per_torrent"] = 100
+        qbit_options["max_uploads_per_torrent"] = 10
         await TorrentManager.qbittorrent.app.set_preferences(
             {"web_ui_password": pwd}
         )
@@ -61,7 +67,6 @@ async def update_qb_options():
         if qbit_options.get("web_ui_password") in ("admin", "admin1", ""):
             qbit_options["web_ui_password"] = pwd
         await TorrentManager.qbittorrent.app.set_preferences(qbit_options)
-
 
 async def update_aria2_options():
     LOGGER.info("Get aria2 options from server")
@@ -311,7 +316,7 @@ async def update_variables():
         Config.IMDB_TEMPLATE = """
 <b>Title: </b> {title} [{year}]
 <b>Also Known As:</b> {aka}
-<b>Rating ⭐️:</b> <i>{rating}</i>
+<b>Rating Γ¡É∩╕Å:</b> <i>{rating}</i>
 <b>Release Info: </b> <a href="{url_releaseinfo}">{release_date}</a>
 <b>Genre: </b>{genres}
 <b>IMDb URL:</b> {url}

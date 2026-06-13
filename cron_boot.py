@@ -15,7 +15,7 @@ PORT = getenv("PORT", None)
 if PORT is not None and BASE_URL is not None:
     while True:
         try:
-            rget(BASE_URL).status_code
+            rget(BASE_URL, timeout=30).status_code
             sleep(600)
         except Exception as e:
             logerror(f"cron_boot.py: {e}")

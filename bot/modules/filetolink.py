@@ -8,6 +8,7 @@ from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 from bot import LOGGER
 from bot.core.config_manager import Config
+from bot.helper.ext_utils.bot_utils import get_web_secret
 from bot.helper.ext_utils.status_utils import get_readable_file_size
 from bot.helper.ext_utils.shortener_utils import short_url
 from bot.helper.telegram_helper.message_utils import edit_message, send_message
@@ -105,13 +106,9 @@ async def generate_link_markup(chat_id, message_id, filename, secure_hash=""):
     return InlineKeyboardMarkup(buttons), stream_link, download_link
 
 
-def _web_secret():
-    return Config.AMATERASU_WEB_SECRET or Config.LOGIN_PASS or Config.BOT_TOKEN
-
-
 def _stream_token(chat_id, message_id, unique_id):
     return make_route_token(
-        _web_secret(),
+        get_web_secret(),
         "stream",
         int(chat_id),
         int(message_id),

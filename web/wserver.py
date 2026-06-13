@@ -37,15 +37,12 @@ LOGGER = getLogger(__name__)
 _SAFE_PATH = re_compile(r"^[A-Za-z0-9_./-]+$")
 _SAFE_GID = re_compile(r"^[A-Za-z0-9_-]{1,64}$")
 _SAFE_PIN = re_compile(r"^\d{4}$")
-_SERVICE_PWD_SALT = b"wzmlx_v3_service_pwd_salt"
+_SAFE_PROFILE_ID = re_compile(r"^[A-Za-z0-9_-]{1,64}$")
 _PIN_SALT = b"wzmlx_v3_pin_salt"
 _PIN_LEN = 4
 _PIN_RATE_LIMIT = 5
 _PIN_RATE_WINDOW = 60
 _pin_attempts: dict = {}
-
-_cached_secret_bytes = None
-
 
 def _load_config():
     try:
@@ -53,10 +50,7 @@ def _load_config():
     except ModuleNotFoundError:
         cfg = None
     bot_token = environ.get("BOT_TOKEN", "") or (getattr(cfg, "BOT_TOKEN", "") if cfg else "")
-    secret = environ.get("AMATERASU_WEB_SECRET", "") or (
-        getattr(cfg, "AMATERASU_WEB_SECRET", "") if cfg else ""
-    )
-    return bot_token, secret
+    return bot_token
 
 
 def _resolve_bot_id(token):
@@ -68,28 +62,14 @@ def _resolve_bot_id(token):
     return (token.split(":", 1)[0] or "0").strip()
 
 
-_BOT_TOKEN, _WEB_SECRET = _load_config()
+_BOT_TOKEN = _load_config()
 _BOT_ID = _resolve_bot_id(_BOT_TOKEN)
 
 
 def _service_pwd(service):
-    from hashlib import sha256
-    from hmac import new as hmac_new
-    from secrets import token_bytes
-    global _cached_secret_bytes
-    if not _WEB_SECRET:
-        if _cached_secret_bytes is None:
-            _cached_secret_bytes = token_bytes(32)
-        secret = _cached_secret_bytes
-    elif isinstance(_WEB_SECRET, str):
-        secret = _WEB_SECRET.encode("utf-8")
-    else:
-        secret = _WEB_SECRET
-    msg = f"{_BOT_ID}:{service}".encode("utf-8")
-    digest = hmac_new(_SERVICE_PWD_SALT, msg, sha256)
-    digest.update(secret)
-    raw = digest.hexdigest()
-    return raw[:20] + raw[-4:]
+    from bot.helper.ext_utils.bot_utils import derive_service_password
+
+    return derive_service_password(_BOT_ID, service)
 
 
 def _derive_pin(gid):
@@ -241,6 +221,29 @@ def _require_profile_user(request: Request) -> int:
     return user_id
 
 
+def _require_profile_database(database) -> None:
+    if database.db is None:
+        raise HTTPException(status_code=503, detail="Profile database is unavailable")
+
+
+def _validate_profile_id(pid: str) -> str:
+    if not _SAFE_PROFILE_ID.fullmatch(pid):
+        raise HTTPException(status_code=400, detail="Invalid profile id")
+    return pid
+
+
+async def _read_profile_data(request: Request) -> dict:
+    try:
+        data = await request.json()
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Invalid JSON body") from exc
+    if not isinstance(data, dict):
+        raise HTTPException(status_code=400, detail="Profile must be an object")
+    if not isinstance(data.get("name"), str) or not data["name"].strip():
+        raise HTTPException(status_code=400, detail="Profile name is required")
+    return data
+
+
 async def re_verify(paused, resumed, hash_id):
     k = 0
     while True:
@@ -296,6 +299,7 @@ async def list_profiles(request: Request):
     from bot.helper.ext_utils.db_handler import database
 
     user_id = _require_profile_user(request)
+    _require_profile_database(database)
     profiles = await database.get_encode_profiles(user_id)
     if profiles and "_id" in profiles:
         del profiles["_id"]
@@ -307,7 +311,8 @@ async def create_profile(request: Request):
     import uuid
 
     user_id = _require_profile_user(request)
-    data = await request.json()
+    _require_profile_database(database)
+    data = await _read_profile_data(request)
     pid = uuid.uuid4().hex[:8]
     await database.save_encode_profile(user_id, pid, data)
     return JSONResponse({"id": pid, "status": "created"})
@@ -317,7 +322,9 @@ async def update_profile(pid: str, request: Request):
     from bot.helper.ext_utils.db_handler import database
 
     user_id = _require_profile_user(request)
-    data = await request.json()
+    _require_profile_database(database)
+    pid = _validate_profile_id(pid)
+    data = await _read_profile_data(request)
     await database.save_encode_profile(user_id, pid, data)
     return JSONResponse({"status": "updated"})
 
@@ -326,6 +333,8 @@ async def delete_profile(pid: str, request: Request):
     from bot.helper.ext_utils.db_handler import database
 
     user_id = _require_profile_user(request)
+    _require_profile_database(database)
+    pid = _validate_profile_id(pid)
     await database.delete_encode_profile(user_id, pid)
     return JSONResponse({"status": "deleted"})
 
@@ -334,6 +343,8 @@ async def set_default_profile(pid: str, request: Request):
     from bot.helper.ext_utils.db_handler import database
 
     user_id = _require_profile_user(request)
+    _require_profile_database(database)
+    pid = _validate_profile_id(pid)
     await database.set_default_encode_profile(user_id, pid)
     return JSONResponse({"status": "default_set"})
 
@@ -583,8 +594,13 @@ async def protected_proxy(
     url = f"{base}/{path}" if path else base
     headers = {k: v for k, v in request.headers.items() if k.lower() != "host"}
     body = await request.body()
+    params = {
+        key: value
+        for key, value in request.query_params.items()
+        if key != "pass"
+    }
     response = await proxy_fetch(
-        request.method, url, headers, dict(request.query_params), body, f"/{service}"
+        request.method, url, headers, params, body, f"/{service}"
     )
     if "pass" in request.query_params:
         response.set_cookie(

@@ -201,40 +201,36 @@ class Config:
     def load(cls):
         cls.load_config()
         cls.load_env()
+        cls._validate_required()
         cls.construct_base_url()
 
     @classmethod
+    def _validate_required(cls):
+        for key in ["BOT_TOKEN", "OWNER_ID", "TELEGRAM_API", "TELEGRAM_HASH"]:
+            value = getattr(cls, key)
+            if isinstance(value, str):
+                value = value.strip()
+            if not value:
+                raise ValueError(f"{key} variable is missing!")
+
+    @classmethod
     def construct_base_url(cls):
-        # Synchronize and robustly resolve PORT and BASE_URL_PORT
         env_port = getenv("PORT", "")
-        if env_port:
-            try:
-                resolved_port = int(env_port)
-            except ValueError:
-                resolved_port = 80
+        if env_port and str(env_port).isdigit():
+            resolved_port = int(env_port)
         else:
-            # If PORT and BASE_URL_PORT are defined, choose the first non-zero/valid one. Otherwise default to 80.
             port_val = getattr(cls, "PORT", 0)
             base_port_val = getattr(cls, "BASE_URL_PORT", 0)
-            
-            try:
-                p_val = int(port_val) if port_val else 0
-            except ValueError:
-                p_val = 0
-                
-            try:
-                bp_val = int(base_port_val) if base_port_val else 0
-            except ValueError:
-                bp_val = 0
-                
-            resolved_port = p_val or bp_val
+            p_val = int(port_val) if str(port_val).isdigit() else 0
+            bp_val = int(base_port_val) if str(base_port_val).isdigit() else 0
+            resolved_port = p_val or bp_val or 80
             
         cls.PORT = resolved_port
         cls.BASE_URL_PORT = resolved_port
 
         if cls.FQDN:
             protocol = "https" if cls.HAS_SSL else "http"
-            if cls.NO_PORT or not cls.PORT or cls.PORT in [80, 443]:
+            if cls.NO_PORT or cls.PORT in [80, 443]:
                 cls.BASE_URL = f"{protocol}://{cls.FQDN}"
             else:
                 cls.BASE_URL = f"{protocol}://{cls.FQDN}:{cls.PORT}"
@@ -275,13 +271,6 @@ class Config:
                 value = getattr(settings, attr)
                 if value:
                     cls.MULTI_TOKENS[attr] = value.strip() if isinstance(value, str) else str(value)
-        for key in ["BOT_TOKEN", "OWNER_ID", "TELEGRAM_API", "TELEGRAM_HASH"]:
-            value = getattr(cls, key)
-            if isinstance(value, str):
-                value = value.strip()
-            if not value:
-                raise ValueError(f"{key} variable is missing!")
-
     @classmethod
     def load_env(cls):
         config_vars = cls.get_all()
@@ -304,12 +293,12 @@ class Config:
         if key == "CMD_SUFFIX":
             return str(value).strip() if value is not None else ""
         original_value = getattr(cls, key, None)
-        if original_value is None:
+        if original_value is None or value == "":
             return value
-        elif isinstance(original_value, bool):
+        if isinstance(original_value, bool):
             if isinstance(value, bool):
                 return value
-            return str(value).lower() in ("true", "1", "yes")
+            return str(value).lower() in ["true", "1", "t", "y", "yes"]
         elif isinstance(original_value, int):
             if isinstance(value, int):
                 return value
@@ -350,12 +339,7 @@ class Config:
                 setattr(cls, key, value)
             elif key.startswith("MULTI_TOKEN") and value:
                 cls.MULTI_TOKENS[key] = value.strip() if isinstance(value, str) else str(value)
-        for key in ["BOT_TOKEN", "OWNER_ID", "TELEGRAM_API", "TELEGRAM_HASH"]:
-            value = getattr(cls, key)
-            if isinstance(value, str):
-                value = value.strip()
-            if not value:
-                raise ValueError(f"{key} variable is missing!")
+        cls._validate_required()
         cls.construct_base_url()
 
 

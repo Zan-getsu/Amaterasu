@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from pyrogram import Client
+from pyrogram import Client, filters as pyrogram_filters
 from pyrogram.handlers import CallbackQueryHandler, MessageHandler
 
 from .. import LOGGER
@@ -42,12 +42,18 @@ class PluginBase:
     def register_command(self, command: str, handler_func, filters=None):
         if filters is None:
             filters = CustomFilters.authorized
-        return MessageHandler(handler_func, filters=command & filters)
+        return MessageHandler(
+            handler_func,
+            filters=pyrogram_filters.command(command, case_sensitive=True) & filters,
+        )
 
     def register_callback(self, pattern: str, callback_func, filters=None):
         if filters is None:
             filters = CustomFilters.authorized
-        return CallbackQueryHandler(callback_func, filters=pattern & filters)
+        return CallbackQueryHandler(
+            callback_func,
+            filters=pyrogram_filters.regex(pattern) & filters,
+        )
 
 
 class PluginManager:
@@ -126,7 +132,8 @@ class PluginManager:
             if await plugin_instance.on_load():
                 self.plugins[plugin_name] = plugin_info
                 self.loaded_modules[plugin_name] = plugin_instance
-                self._register_handlers(plugin_instance, plugin_info)
+                if plugin_info.enabled:
+                    self._register_handlers(plugin_instance, plugin_info)
                 self._refresh_commands()
                 LOGGER.info(f"Plugin {plugin_name} loaded successfully")
                 return True
@@ -180,6 +187,7 @@ class PluginManager:
 
             plugin_instance = self.loaded_modules[plugin_name]
             if await plugin_instance.on_enable():
+                self._enable_handlers(self.plugins[plugin_name])
                 self.plugins[plugin_name].enabled = True
                 self._refresh_commands()
                 LOGGER.info(f"Plugin {plugin_name} enabled")
@@ -200,6 +208,7 @@ class PluginManager:
 
             plugin_instance = self.loaded_modules[plugin_name]
             if await plugin_instance.on_disable():
+                self._unregister_handlers(self.plugins[plugin_name])
                 self.plugins[plugin_name].enabled = False
                 self._refresh_commands()
                 LOGGER.info(f"Plugin {plugin_name} disabled")
@@ -226,7 +235,7 @@ class PluginManager:
         for handler in plugin_info.handlers:
             self.bot.add_handler(handler)
 
-        module = sys.modules.get(plugin_info.name)
+        module = sys.modules.get(plugin_instance.__class__.__module__)
         if module:
             for attr_name in dir(module):
                 attr = getattr(module, attr_name)
@@ -243,6 +252,10 @@ class PluginManager:
                         LOGGER.info(
                             f"Registered command /{cmd_name} for plugin {plugin_info.name}"
                         )
+
+    def _enable_handlers(self, plugin_info: PluginInfo):
+        for handler in plugin_info.handlers:
+            self.bot.add_handler(handler)
 
     def _unregister_handlers(self, plugin_info: PluginInfo):
         for handler in plugin_info.handlers:

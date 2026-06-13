@@ -16,7 +16,7 @@ from shutil import rmtree
 from pymongo.mongo_client import MongoClient
 from pymongo.server_api import ServerApi
 from re import compile as re_compile
-from subprocess import run as srun, call as scall
+from subprocess import run as srun, call as scall, PIPE
 
 getLogger("pymongo").setLevel(ERROR)
 
@@ -95,12 +95,20 @@ if DATABASE_URL := config_file.get("DATABASE_URL", "").strip():
     try:
         conn = MongoClient(DATABASE_URL, server_api=ServerApi("1"))
         db = conn.amaterasu
-        old_config = db.settings.deployConfig.find_one({"_id": BOT_ID}, {"_id": 0})
-        config_dict = db.settings.config.find_one({"_id": BOT_ID})
+        old_config = db.settings.deployConfig.find_one({"_id": _DB_PART}, {"_id": 0})
+        config_dict = db.settings.config.find_one({"_id": _DB_PART})
+        if old_config is None:
+            old_config = db.settings.deployConfig.find_one(
+                {"_id": BOT_ID}, {"_id": 0}
+            )
+        if config_dict is None:
+            config_dict = db.settings.config.find_one({"_id": BOT_ID})
         if (
             old_config is not None and old_config == config_file or old_config is None
         ) and config_dict is not None:
-            config_file["UPSTREAM_REPO"] = config_dict["UPSTREAM_REPO"]
+            config_file["UPSTREAM_REPO"] = config_dict.get(
+                "UPSTREAM_REPO", config_file.get("UPSTREAM_REPO", "")
+            )
             config_file["UPSTREAM_BRANCH"] = config_dict.get("UPSTREAM_BRANCH", "main")
             config_file["UPDATE_PKGS"] = config_dict.get("UPDATE_PKGS", "True")
         conn.close()
@@ -137,9 +145,10 @@ if UPSTREAM_REPO:
     ]
     update_code = 0
     for command in commands:
-        update = srun(command)
+        update = srun(command, stdout=PIPE, stderr=PIPE, text=True)
         update_code = update.returncode
         if update_code != 0:
+            log_error(f"Command '{' '.join(command)}' failed with error:\n{update.stderr}")
             break
 
     if update_code == 0:
@@ -151,5 +160,9 @@ if UPSTREAM_REPO:
 
 UPDATE_PKGS = config_file.get("UPDATE_PKGS", "True")
 if as_bool(UPDATE_PKGS):
-    scall(["uv", "pip", "install", "--system", "-U", "-r", "requirements.txt"])
-    log_info("Successfully Updated all the Packages !")
+    log_info("Updating Packages...")
+    pkg_update = srun(["uv", "pip", "install", "--system", "-U", "-r", "requirements.txt"], stdout=PIPE, stderr=PIPE, text=True)
+    if pkg_update.returncode == 0:
+        log_info("Successfully Updated all the Packages !")
+    else:
+        log_error(f"Failed to update packages: {pkg_update.stderr}")

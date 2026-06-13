@@ -650,11 +650,11 @@ All limits are in **GB**. Set `0` to disable the limit.
 | `MAX_BATCH_FILES` | `int` | `0` | Max files per batch operation |
 | `CHANNEL` | `bool` | `False` | Enable channel mode |
 | `MULTI_TOKEN1..3` | `str` | `""` | Additional bot tokens for load balancing |
-| `TOKEN_ENABLED` | `bool` | `False` | Enable token-based access for stream links |
-| `TOKEN_TTL_HOURS` | `int` | `0` | Token expiry time in hours |
+| `TOKEN_ENABLED` | `bool` | `False` | Reserved legacy setting; FileToLink URLs are always signed |
+| `TOKEN_TTL_HOURS` | `int` | `0` | Reserved legacy setting; route tokens currently do not expire |
 | `SHORTEN_ENABLED` | `bool` | `False` | Enable URL shortening for stream links |
-| `GLOBAL_RATE_LIMIT` | `bool` | `False` | Enable global rate limiting |
-| `RATE_LIMIT_ENABLED` | `bool` | `False` | Enable per-session rate limiting |
+| `GLOBAL_RATE_LIMIT` | `bool` | `False` | Reserved legacy setting; not currently enforced |
+| `RATE_LIMIT_ENABLED` | `bool` | `False` | Reserved legacy setting; not currently enforced |
 
 ### 14. Web Server
 
@@ -1003,13 +1003,11 @@ Sort mode supports common Telegram media messages, including documents, videos, 
 
 Amaterasu ships with a **built-in visual web application** for creating, editing, and managing Encode Profiles — without writing a single line of JSON by hand.
 
-Access it at:
-```
-http://your-server:PORT/app/encode-profiles?user_id=YOUR_TELEGRAM_ID
-```
+Open User Settings in Telegram, choose **Encode Profiles**, then select
+**Open Web Creator**. The bot generates the required signed URL automatically.
 
-> [!TIP]
-> Replace `your-server:PORT` with your actual server address and the port set in `config.py`, and `YOUR_TELEGRAM_ID` with your numeric Telegram User ID.
+Opening `/app/encode-profiles` directly without the signed `user_id` and `token`
+parameters intentionally uses browser-local offline storage and does not sync to MongoDB.
 
 ### Why Use the Web UI?
 
@@ -1294,12 +1292,12 @@ Configure `MULTI_TOKEN1`, `MULTI_TOKEN2`, `MULTI_TOKEN3` with additional bot tok
 ### Access Control
 | Feature | Variable | Description |
 |---|---|---|
-| Web Token Signing | `AMATERASU_WEB_SECRET` | Signs web interface tokens for file selection and web auth. If empty, Amaterasu uses a temporary in-memory secret that changes after restart |
-| Token Authentication | `TOKEN_ENABLED` | Require a token parameter in stream URLs |
-| Token Expiry | `TOKEN_TTL_HOURS` | Auto-expire tokens after N hours |
+| Web Token Signing | `AMATERASU_WEB_SECRET` | Signs web interface tokens for file selection and web auth. If empty, Amaterasu falls back to `LOGIN_PASS`, then `BOT_TOKEN` |
+| Token Authentication | Always enabled | Generated stream URLs always contain a signed route token |
+| Token Expiry | `TOKEN_TTL_HOURS` | Reserved for compatibility; route tokens currently do not expire |
 | URL Shortening | `SHORTEN_ENABLED` | Shorten generated links via a URL shortener |
-| Global Rate Limit | `GLOBAL_RATE_LIMIT` | Cap total requests per minute |
-| Session Rate Limit | `RATE_LIMIT_ENABLED` | Cap requests per user session |
+| Global Rate Limit | `GLOBAL_RATE_LIMIT` | Reserved for compatibility; not currently enforced |
+| Session Rate Limit | `RATE_LIMIT_ENABLED` | Reserved for compatibility; not currently enforced |
 
 ---
 

@@ -250,13 +250,13 @@ class Mirror(TaskListener):
         if Config.DISABLE_FF_MODE and args.get("-ff"):
             await send_message(self.message, "FFmpeg commands are currently disabled.")
             return
-
         if Config.DISABLE_ENCODE and args.get("-en"):
             await send_message(self.message, "Encoding is currently disabled.")
             return
 
         from .. import sudo_users, user_data
-        is_sudo = self.message.from_user.id == Config.OWNER_ID or self.message.from_user.id in sudo_users or user_data.get(self.message.from_user.id, {}).get("SUDO")
+        user = self.message.from_user or self.message.sender_chat
+        is_sudo = user.id == Config.OWNER_ID or user.id in sudo_users or user_data.get(user.id, {}).get("SUDO")
         if args.get("-en") and not is_sudo:
             await send_message(self.message, "Encoding is restricted to sudo users only.")
             return

@@ -21,6 +21,7 @@ from ..core.config_manager import Config
 from ..core.tg_client import TgClient
 from ..helper.ext_utils.bot_utils import (
     get_size_bytes,
+    get_web_secret,
     new_task,
     update_user_ldata,
 )
@@ -37,10 +38,6 @@ from ..helper.telegram_helper.message_utils import (
 from web.security import make_signed_token
 
 handler_dict = {}
-
-
-def _web_secret():
-    return Config.PROTECTED_API or Config.LOGIN_PASS or Config.BOT_TOKEN
 
 
 def _clean_setting_markup(text):
@@ -1555,7 +1552,7 @@ async def edit_user_settings(client, query):
         await query.answer()
         buttons = ButtonMaker()
         if Config.BASE_URL:
-            token = make_signed_token(_web_secret(), "encode-profile", user_id)
+            token = make_signed_token(get_web_secret(), "encode-profile", user_id)
             web_url = (
                 f"{Config.BASE_URL}/app/encode-profiles"
                 f"?user_id={user_id}&token={token}"

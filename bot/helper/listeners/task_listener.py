@@ -29,7 +29,7 @@ from ..common import TaskConfig
 from ...core.tg_client import TgClient
 from ...core.config_manager import Config
 from ...core.torrent_manager import TorrentManager
-from ..ext_utils.bot_utils import sync_to_async
+from ..ext_utils.bot_utils import get_web_secret, sync_to_async
 from ..ext_utils.links_utils import encode_slink
 from ..ext_utils.db_handler import database
 from ..ext_utils.files_utils import (
@@ -73,6 +73,16 @@ from ..telegram_helper.message_utils import (
     send_message,
     update_status_message,
 )
+from web.security import make_route_token
+
+
+def _stream_route_token(chat_id, message_id):
+    return make_route_token(
+        get_web_secret(),
+        "stream",
+        int(chat_id),
+        int(message_id),
+    )
 
 
 class TaskListener(TaskConfig):
@@ -155,6 +165,9 @@ class TaskListener(TaskConfig):
         self.encode_event.set()
 
     async def _profile_callback_cb(self, _, query):
+        if query.from_user.id != self.user_id:
+            await query.answer("Not yours!", show_alert=True)
+            return
         data = query.data.split()
         await query.answer()
         if data[2] == "cancel":
@@ -604,11 +617,24 @@ class TaskListener(TaskConfig):
                     c_id = chat_id if is_pm else (f"-100{chat_id}" if chat_id.isdigit() else chat_id)
                     
                     if Config.BASE_URL:
-                        from urllib.parse import quote
-                        encoded_name = quote(name)
-                        stream_link = f"{Config.BASE_URL}/stream/{c_id}/{msg_id}/{encoded_name}"
-                        download_link = f"{Config.BASE_URL}/stream/{c_id}/{msg_id}/{encoded_name}?disposition=attachment"
-                        fmsg += f"\n┠ <b>Stream</b> → <a href='{stream_link}'>Online</a> | <a href='{download_link}'>Download</a>"
+                        try:
+                            stream_token = _stream_route_token(c_id, msg_id)
+                        except (TypeError, ValueError):
+                            LOGGER.warning(
+                                "Skipping FileToLink URL for non-numeric chat/message "
+                                f"reference: {c_id}/{msg_id}"
+                            )
+                        else:
+                            base_url = Config.BASE_URL.rstrip("/")
+                            stream_link = f"{base_url}/watch/{stream_token}"
+                            download_link = (
+                                f"{base_url}/stream/{stream_token}"
+                                "?disposition=attachment"
+                            )
+                            fmsg += (
+                                f"\n┠ <b>Stream</b> → <a href='{stream_link}'>Online</a>"
+                                f" | <a href='{download_link}'>Download</a>"
+                            )
                         
                     if Config.MEDIA_STORE and (
                         self.is_super_chat or Config.LEECH_DUMP_CHAT
