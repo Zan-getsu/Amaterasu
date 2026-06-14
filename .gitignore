@@ -17,20 +17,14 @@ mediainfo/*
 sabnzbd/*
 list_drives.txt
 shortener.txt
-<<<<<<< HEAD
-=======
 categories.txt
 cookies.txt
->>>>>>> 8af04aa (feat: add Mega upload/clone support, Drive Categories, and infrastructure improvements)
 downloads/*
-<<<<<<< HEAD
-=======
 .github/instructions/*
 .github/skills/*
 .github/agents/*
 graphify-out/*
 .graphify_*
 .agent*
->>>>>>> 5e3455e (feat: harden security across deployment and runtime)
 __pycache__/
 *.pyc

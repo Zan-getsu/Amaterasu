@@ -230,7 +230,7 @@ class YtSelection:
             audio_format = f"{format}{qual}"
             buttons.data_button(f"❖ {qual}", f"ytq {audio_format}")
         buttons.data_button("↩ BACK", "ytq aq back")
-        buttons.data_button("✕ CANCEL", "ytq aq cancel")
+        buttons.data_button("✕ CANCEL", "ytq cancel")
         subbuttons = buttons.build_menu(5)
         msg = f"<b>❖ AUDIO QUALITY</b>\n┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄\n├ Info   : <code>0 (Best) - 10 (Worst)</code>\n└ Timeout: <i>◷ {get_readable_time(self._timeout - (time() - self._time))}</i>"
         await edit_message(self._reply_to, msg, subbuttons)
@@ -464,7 +464,8 @@ class YtDlp(TaskListener):
         opt = opt or self.user_dict.get("YT_DLP_OPTIONS") or Config.YT_DLP_OPTIONS
 
         if not self.link and (reply_to := self.message.reply_to_message):
-            self.link = reply_to.text.split("\n", 1)[0].strip()
+            if reply_to.text:
+                self.link = reply_to.text.split("\n", 1)[0].strip()
 
         if not is_url(self.link):
             await send_message(
