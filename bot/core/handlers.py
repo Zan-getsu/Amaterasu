@@ -5,6 +5,7 @@ from pyrogram.handlers import CallbackQueryHandler, EditedMessageHandler, Messag
 from pyrogram.types import BotCommand
 
 from ..core.config_manager import Config
+from ..helper.ext_utils.help_messages import BOT_COMMANDS
 from ..helper.telegram_helper.bot_commands import BotCommands
 from ..helper.telegram_helper.filters import CustomFilters
 from ..modules import *
