@@ -5,7 +5,6 @@ from mimetypes import guess_type
 from secrets import token_hex
 
 from aiofiles.os import makedirs, path as aiopath
-from aioshutil import rmtree
 from .... import LOGGER, task_dict, task_dict_lock
 from ...ext_utils.bot_utils import sync_to_async
 from ...ext_utils.files_utils import clean_download
@@ -15,7 +14,6 @@ from ...ext_utils.mega_sdk import (
     MegaCancelToken,
     mega_sdk_missing_message,
 )
-from ...ext_utils.status_utils import get_readable_file_size
 from ...listeners.mega_listener import AsyncMega, MegaAppListener, _mega_error_format
 from ...mirror_leech_utils.status_utils.mega_status import MegaDownloadStatus
 from ...telegram_helper.message_utils import update_status_message

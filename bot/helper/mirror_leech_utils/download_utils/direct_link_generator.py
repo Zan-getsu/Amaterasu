@@ -8,7 +8,7 @@ from re import findall, match, search
 from requests import Session, post, get
 from requests.adapters import HTTPAdapter
 from time import sleep, time
-from urllib.parse import parse_qs, urlparse, quote, unquote
+from urllib.parse import parse_qs, urlparse, unquote
 from urllib3.util.retry import Retry
 from uuid import uuid4
 from base64 import b64decode, b64encode

@@ -1,5 +1,5 @@
 import re
-from ast import literal_eval
+
 from contextlib import suppress
 from fractions import Fraction
 from PIL import Image

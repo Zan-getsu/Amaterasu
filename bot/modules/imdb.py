@@ -2,7 +2,6 @@ from contextlib import suppress
 from pyrogram.enums import ButtonStyle
 from re import IGNORECASE, findall, search
 
-import cloudscraper
 from imdbinfo import search_title, get_movie
 from pycountry import countries as conn
 from pyrogram.errors import MediaEmpty, PhotoInvalidDimensions, WebpageMediaEmpty

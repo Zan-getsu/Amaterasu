@@ -1133,7 +1133,7 @@ class TaskConfig:
             async with task_dict_lock:
                 task_dict[self.mid] = FFmpegStatus(self, ffmpeg, gid, "Encode")
             self.progress = False
-            async with cpu_eater_lock:
+            async with ff_lock:
                 self.progress = True
                 for f_path, file_ in self.files_to_proceed.items():
                     self.proceed_count += 1

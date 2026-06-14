@@ -1,11 +1,8 @@
 import os
 import time
-import logging
-
 from pyrogram import ContinuePropagation
 from pyrogram.handlers import MessageHandler
 from pyrogram.filters import command, private, document, video, audio
-from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 from bot import user_data, LOGGER
 from bot.core.tg_client import TgClient

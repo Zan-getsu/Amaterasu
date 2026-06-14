@@ -1,6 +1,4 @@
 import re
-import logging
-from bot import LOGGER
 
 # Enhanced regex patterns for season and episode extraction
 SEASON_EPISODE_PATTERNS = [

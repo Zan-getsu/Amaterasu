@@ -8,8 +8,8 @@ from pyrogram.enums import ButtonStyle
 
 from aiofiles.os import listdir, remove, path as aiopath
 from requests import utils as rutils
-from pyrogram.handlers import MessageHandler, CallbackQueryHandler
-from pyrogram.filters import text, regex, user
+from pyrogram.handlers import CallbackQueryHandler
+from pyrogram.filters import regex
 
 from ... import (
     intervals,
@@ -45,13 +45,6 @@ from ..ext_utils.links_utils import is_gdrive_id
 from ..ext_utils.media_utils import download_custom_thumb
 from ..ext_utils.status_utils import get_readable_file_size, get_readable_time
 from ..ext_utils.task_manager import check_running_tasks, start_from_queued
-from ..mirror_leech_utils.uphoster_utils.gofile_utils.upload import GoFileUpload
-from ..mirror_leech_utils.uphoster_utils.buzzheavier_utils.upload import (
-    BuzzHeavierUpload,
-)
-from ..mirror_leech_utils.uphoster_utils.pixeldrain_utils.upload import (
-    PixelDrainUpload,
-)
 from ..mirror_leech_utils.uphoster_utils.multi_upload import MultiUphosterUpload
 from ..mirror_leech_utils.gdrive_utils.upload import GoogleDriveUpload
 from ..mirror_leech_utils.rclone_utils.transfer import RcloneTransferHelper

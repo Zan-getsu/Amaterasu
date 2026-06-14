@@ -3,8 +3,7 @@ from asyncio import Lock as AsyncLock, sleep as asleep
 from contextlib import suppress
 from secrets import token_hex
 
-from aiofiles.os import makedirs, path as aiopath
-from aioshutil import rmtree
+from aiofiles.os import makedirs
 from .... import LOGGER, task_dict, task_dict_lock, user_data
 from ....core.config_manager import Config
 from ...telegram_helper.message_utils import send_status_message
