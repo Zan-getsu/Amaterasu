@@ -14,7 +14,7 @@ from shutil import rmtree
 from pymongo import AsyncMongoClient
 from pymongo.errors import PyMongoError
 from pymongo.server_api import ServerApi
-from subprocess import run as srun, call as scall, PIPE
+from subprocess import run as srun, PIPE
 from sys import exit
 from re import compile as re_compile
 

@@ -93,7 +93,6 @@ def _get_projects(service):
 
 def _def_batch_resp(id, resp, exception):
     """Handle batch responses."""
-    global sleep_time
     if exception is not None:
         if str(exception).startswith("<HttpError 429"):
             sleep(sleep_time / 100)
@@ -103,7 +102,6 @@ def _def_batch_resp(id, resp, exception):
 
 def _pc_resp(id, resp, exception):
     """Handle project creation responses."""
-    global project_create_ops
     if exception is not None:
         print("Project creation error:", exception)
     else:
@@ -113,7 +111,6 @@ def _pc_resp(id, resp, exception):
 
 def _create_projects(cloud, count):
     """Create new Google Cloud projects."""
-    global project_create_ops
     batch = cloud.new_batch_http_request(callback=_pc_resp)
     new_projs = []
     for _ in range(count):
