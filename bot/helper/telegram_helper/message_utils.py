@@ -16,6 +16,8 @@ from pyrogram.errors import (
     MediaEmpty,
     MediaCaptionTooLong,
     EntityBoundsInvalid,
+    MessageIdInvalid,
+    MessageDeleted,
 )
 
 try:
@@ -197,7 +199,7 @@ async def edit_message(message, text, buttons=None, block=True, photo=None):
             disable_web_page_preview=True,
             reply_markup=buttons,
         )
-    except (MessageNotModified, MessageEmpty):
+    except (MessageNotModified, MessageEmpty, MessageIdInvalid, MessageDeleted):
         pass
     except EntityBoundsInvalid:
         if message.media:
@@ -255,7 +257,7 @@ async def edit_message(message, text, buttons=None, block=True, photo=None):
 async def edit_reply_markup(message, buttons):
     try:
         return await message.edit_reply_markup(reply_markup=buttons)
-    except MessageNotModified:
+    except (MessageNotModified, MessageIdInvalid, MessageDeleted):
         pass
     except FloodWait as f:
         LOGGER.warning(str(f))
