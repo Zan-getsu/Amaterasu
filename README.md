@@ -130,7 +130,6 @@ It converges five industrial download engines (Aria2c, qBittorrent, JDownloader,
 
 | Category | Features |
 |---|---|
-<<<<<<< HEAD
 | **Download Sources** | Direct links, Torrents (magnet & .torrent), Mega, Google Drive, Rclone remotes, Usenet (NZB), JDownloader, YouTube & 1800+ yt-dlp sites, Telegram files & links |
 | **Upload Destinations** | Google Drive, Rclone remotes (OneDrive, Dropbox, S3, etc.), Telegram (as document or media), DDL hosters (GoFile, BuzzHeavier, PixelDrain, DevUploads, VikingFile) |
 | **Leech Features** | Custom prefixes & suffixes, captions, auto-split for large files, hybrid leech (bot + user session), equal splits, media grouping, thumbnail layouts |
@@ -140,12 +139,10 @@ It converges five industrial download engines (Aria2c, qBittorrent, JDownloader,
 | **Automation** | RSS feed monitoring with include/exclude filters, bulk download from text files, multi-link batch processing |
 | **Streaming** | Built-in FileToLink web server with token-based access control, URL shortening, rate limiting, and multi-bot load balancing |
 | **Admin Tools** | Shell access, async/sync Python exec, log retrieval, broadcast messaging, session restart, user management |
-=======
-| Runtime | Python Telegram bot + web UI |
-| Deployment | Docker & Docker Compose (buildx) |
-| Required config | `BOT_TOKEN`, `TELEGRAM_API`, `TELEGRAM_HASH`, `OWNER_ID`, `DATABASE_URL` |
-| License | [LICENSE](LICENSE) |
->>>>>>> 8af04aa (feat: add Mega upload/clone support, Drive Categories, and infrastructure improvements)
+| **Runtime** | Python Telegram bot + web UI |
+| **Deployment** | Docker & Docker Compose (buildx) |
+| **Required config** | `BOT_TOKEN`, `TELEGRAM_API`, `TELEGRAM_HASH`, `OWNER_ID`, `DATABASE_URL` |
+| **License** | [LICENSE](LICENSE) |
 
 ---
 
@@ -241,7 +238,6 @@ Connect to your VPS and install the container runtime of your choice:
   # Install Docker
   curl -fsSL https://get.docker.com | sh
 
-<<<<<<< HEAD
   # Install Docker Compose plugin
   sudo apt install docker-compose-plugin -y
 
@@ -262,96 +258,16 @@ Connect to your VPS and install the container runtime of your choice:
   # Verify installation
   podman --version
   ```
-=======
-<details open>
-   <summary>VPS / Dedicated Server (Recommended)</summary>
-
-   ```bash
-   git clone https://github.com/SilentDemonSD/WZML-X.git
-   cd WZML-X
-   cp config_sample.py config.py
-   # Edit config.py with your values
-   docker buildx compose up -d
-   ```
-
-   The bot runs behind a Cloudflare quick tunnel by default. Check the tunnel URL:
-
-   ```bash
-   docker compose logs tunnel
-   ```
-
-   You'll see a `https://*.trycloudflare.com` URL — that's your bot's web UI.
-
-   To stop:
-
-   ```bash
-   docker buildx compose down
-   ```
-</details>
-
-<details>
-   <summary>VPS with VPN (Gluetun)</summary>
-
-   1. Uncomment the `gluetun` service in `docker-compose.yml`
-   2. Fill in your VPN provider credentials
-   3. Set `network_mode: "service:gluetun"` on the `app` service
-   4. Start:
-
-   ```bash
-   docker buildx compose up -d
-   ```
-
-   All traffic (including the cloudflared tunnel) routes through the VPN.
-</details>
-
-<details>
-   <summary>Multi-Instance (Multiple Bots)</summary>
-
-   Each bot needs its own `config.py` and data volumes. Example for a second bot:
-
-   1. Create `config2.py` with different `BOT_TOKEN`, `OWNER_ID`, etc.
-   2. Uncomment `app2` and `tunnel2` in `docker-compose.yml`
-   3. Edit volume mounts to use `config2.py` and separate data dirs
-   4. Start:
-
-   ```bash
-   docker buildx compose up -d
-   ```
-
-   Each bot gets its own cloudflared tunnel URL. Admin ports (qBittorrent, SABnzbd) are mapped to different host ports (`127.0.0.1:8091`, etc.).
-</details>
-
-<details>
-   <summary>Single Container (Manual)</summary>
-
-   ```bash
-   git clone https://github.com/SilentDemonSD/WZML-X.git
-   cd WZML-X
-   docker build -t wzmlx .
-   docker run -p 8080:8080 wzmlx
-   ```
->>>>>>> 8af04aa (feat: add Mega upload/clone support, Drive Categories, and infrastructure improvements)
 </details>
 
 ---
 
-<<<<<<< HEAD
 ### Step 2: Clone & Configure
 
 ```bash
 # Clone the repository
 git clone https://github.com/its-niloy/Amaterasu.git && cd Amaterasu
-=======
-   1. If you use qBittorrent, tune `AsyncIOThreadsCount` to your machine size.
-   2. Stop the container before removing it, and remove the container before pruning images.
-   3. Useful cleanup commands:
 
-   ```bash
-   docker container prune
-   docker image prune -a
-   ```
-</details>
->>>>>>> 8af04aa (feat: add Mega upload/clone support, Drive Categories, and infrastructure improvements)
 
 # Create your config file from the sample
 cp config_sample.py config.py

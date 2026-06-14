@@ -10,15 +10,17 @@ from logging import (
     ERROR,
 )
 from os import path, remove, environ
-<<<<<<< HEAD
 from shutil import rmtree
-from pymongo.mongo_client import MongoClient
+from pymongo import AsyncMongoClient
+from pymongo.errors import PyMongoError
 from pymongo.server_api import ServerApi
-from re import compile as re_compile
 from subprocess import run as srun, call as scall, PIPE
+from sys import exit
+from re import compile as re_compile
 
 getLogger("pymongo").setLevel(ERROR)
 
+_LOGGER = getLogger("update")
 
 def as_bool(value):
     if isinstance(value, bool):
@@ -36,19 +38,7 @@ _ALLOWED_UPSTREAM = re_compile(
     r")$"
 )
 _BRANCH_RE = re_compile(r"^[\w./-]+$")
-=======
-from pymongo import AsyncMongoClient
-from pymongo.errors import PyMongoError
-from pymongo.server_api import ServerApi
-from subprocess import run as srun, call as scall
-from sys import exit
 
-getLogger("pymongo").setLevel(ERROR)
-
-_LOGGER = getLogger("update")
->>>>>>> 8af04aa (feat: add Mega upload/clone support, Drive Categories, and infrastructure improvements)
-
-_DB_PARTITION_SALT = b"wzmlx_v3_db_partition_salt"
 _VAR_LIST = [
     "BOT_TOKEN",
     "TELEGRAM_API",
@@ -114,40 +104,7 @@ def _db_partition_id(bot_id):
 async def _fetch_db_config(database_url, db_part):
     conn = AsyncMongoClient(database_url, server_api=ServerApi("1"))
     try:
-<<<<<<< HEAD
-        conn = MongoClient(DATABASE_URL, server_api=ServerApi("1"))
         db = conn.amaterasu
-        old_config = db.settings.deployConfig.find_one({"_id": _DB_PART}, {"_id": 0})
-        config_dict = db.settings.config.find_one({"_id": _DB_PART})
-        if old_config is None:
-            old_config = db.settings.deployConfig.find_one(
-                {"_id": BOT_ID}, {"_id": 0}
-            )
-        if config_dict is None:
-            config_dict = db.settings.config.find_one({"_id": BOT_ID})
-        if (
-            old_config is not None and old_config == config_file or old_config is None
-        ) and config_dict is not None:
-            config_file["UPSTREAM_REPO"] = config_dict.get(
-                "UPSTREAM_REPO", config_file.get("UPSTREAM_REPO", "")
-            )
-            config_file["UPSTREAM_BRANCH"] = config_dict.get("UPSTREAM_BRANCH", "main")
-            config_file["UPDATE_PKGS"] = config_dict.get("UPDATE_PKGS", "True")
-        conn.close()
-    except Exception as e:
-        log_error(f"Database ERROR: {e}")
-
-UPSTREAM_REPO = config_file.get("UPSTREAM_REPO", "").strip() or "https://github.com/its-niloy/Amaterasu"
-UPSTREAM_BRANCH = config_file.get("UPSTREAM_BRANCH", "").strip() or "main"
-
-if UPSTREAM_REPO and not _ALLOWED_UPSTREAM.match(UPSTREAM_REPO):
-    log_error(
-        "UPSTREAM_REPO rejected (must be github.com, raw.githubusercontent.com, "
-        f"or git.nbmirror.qzz.io): {UPSTREAM_REPO}"
-    )
-    exit(1)
-=======
-        db = conn.wzmlx
         return await db.settings.config.find_one({"_id": db_part}, {"_id": 0})
     except PyMongoError as e:
         _LOGGER.error(f"Database ERROR: {e}")
@@ -168,7 +125,6 @@ def _fetch_config_from_db(config_file, db_part):
         _LOGGER.info("Config imported from MongoDB")
     else:
         _LOGGER.warning("No saved config found in MongoDB, using defaults")
->>>>>>> 8af04aa (feat: add Mega upload/clone support, Drive Categories, and infrastructure improvements)
 
 
 def _run_update(upstream_repo, upstream_branch, version):
@@ -176,69 +132,49 @@ def _run_update(upstream_repo, upstream_branch, version):
         _LOGGER.info("No UPSTREAM_REPO set, skipping git update")
         return
 
+    if not _ALLOWED_UPSTREAM.match(upstream_repo):
+        _LOGGER.error(
+            "UPSTREAM_REPO rejected (must be github.com, raw.githubusercontent.com, "
+            f"or git.nbmirror.qzz.io): {upstream_repo}"
+        )
+        exit(1)
+
     if path.exists(".git"):
         rmtree(".git", ignore_errors=True)
 
-<<<<<<< HEAD
     commands = [
         ["git", "init", "-q"],
         ["git", "config", "--global", "user.email", "AmaterasuBot@users.noreply.github.com"],
         ["git", "config", "--global", "user.name", "Amaterasu"],
         ["git", "add", "."],
         ["git", "commit", "-sm", "update", "-q"],
-        ["git", "remote", "add", "origin", UPSTREAM_REPO],
+        ["git", "remote", "add", "origin", upstream_repo],
         ["git", "fetch", "origin", "-q"],
-        ["git", "reset", "--hard", f"origin/{UPSTREAM_BRANCH}", "-q"],
+        ["git", "reset", "--hard", f"origin/{upstream_branch}", "-q"],
     ]
     update_code = 0
     for command in commands:
         update = srun(command, stdout=PIPE, stderr=PIPE, text=True)
         update_code = update.returncode
         if update_code != 0:
-            log_error(f"Command '{' '.join(command)}' failed with error:\n{update.stderr}")
+            _LOGGER.error(f"Command '{' '.join(command)}' failed with error:\n{update.stderr}")
             break
 
-    if update_code == 0:
-        log_info("Successfully updated with Latest Updates !")
-=======
-    result = srun(
-        [
-            "bash",
-            "-c",
-            f"git init -q"
-            f" && git config --global user.email 105407900+SilentDemonSD@users.noreply.github.com"
-            f" && git config --global user.name SilentDemonSD"
-            f" && git add ."
-            f" && git commit -sm update -q"
-            f" && git remote add origin {upstream_repo}"
-            f" && git fetch origin -q"
-            f" && git reset --hard origin/{upstream_branch} -q",
-        ],
-    )
-
     display_repo = "/".join(upstream_repo.split("/")[-2:])
-    if result.returncode == 0:
-        _LOGGER.info("Successfully updated with Latest Updates!")
->>>>>>> 8af04aa (feat: add Mega upload/clone support, Drive Categories, and infrastructure improvements)
+    if update_code == 0:
+        _LOGGER.info("Successfully updated with Latest Updates !")
     else:
         _LOGGER.error("Something went Wrong! Recheck your details or Ask Support!")
     _LOGGER.info(f"UPSTREAM_REPO: {display_repo} | UPSTREAM_BRANCH: {upstream_branch} | VERSION: {version}")
 
-
-<<<<<<< HEAD
-UPDATE_PKGS = config_file.get("UPDATE_PKGS", "True")
-if as_bool(UPDATE_PKGS):
-    log_info("Updating Packages...")
-    pkg_update = srun(["uv", "pip", "install", "--system", "-U", "-r", "requirements.txt"], stdout=PIPE, stderr=PIPE, text=True)
-    if pkg_update.returncode == 0:
-        log_info("Successfully Updated all the Packages !")
-    else:
-        log_error(f"Failed to update packages: {pkg_update.stderr}")
-=======
 def _update_packages(update_pkgs):
-    if (isinstance(update_pkgs, str) and update_pkgs.lower() == "true") or update_pkgs:
-        scall("uv pip install -U -r requirements.txt", shell=True)
-        _LOGGER.info("Successfully Updated all the Packages!")
+    if as_bool(update_pkgs):
+        _LOGGER.info("Updating Packages...")
+        pkg_update = srun(["uv", "pip", "install", "--system", "-U", "-r", "requirements.txt"], stdout=PIPE, stderr=PIPE, text=True)
+        if pkg_update.returncode == 0:
+            _LOGGER.info("Successfully Updated all the Packages !")
+        else:
+            _LOGGER.error(f"Failed to update packages: {pkg_update.stderr}")
 
 
 def main():
@@ -256,8 +192,8 @@ def main():
 
     _fetch_config_from_db(config_file, db_part)
 
-    upstream_repo = config_file.get("UPSTREAM_REPO", "").strip()
-    upstream_branch = config_file.get("UPSTREAM_BRANCH", "").strip() or "wzv3"
+    upstream_repo = config_file.get("UPSTREAM_REPO", "").strip() or "https://github.com/its-niloy/Amaterasu"
+    upstream_branch = config_file.get("UPSTREAM_BRANCH", "").strip() or "main"
 
     _run_update(upstream_repo, upstream_branch, version)
 
@@ -267,4 +203,3 @@ def main():
 
 if __name__ == "__main__":
     main()
->>>>>>> 8af04aa (feat: add Mega upload/clone support, Drive Categories, and infrastructure improvements)
