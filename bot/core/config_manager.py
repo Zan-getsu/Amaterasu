@@ -52,7 +52,6 @@ class Config:
     USE_IMAGES = False
     INCOMPLETE_TASK_NOTIFIER = False
     IMG_SOURCES = ["wallpaperflare"]
-    INC_TASK_NOTIFY = False
     INC_TASK_RESUME = False
     INDEX_URL = ""
     IS_TEAM_DRIVE = False
