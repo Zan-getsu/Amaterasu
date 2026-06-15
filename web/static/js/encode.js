@@ -1,5 +1,5 @@
 // Encoding Profile Creator — Full Feature Implementation
-document.addEventListener("DOMContentLoaded", () => {
+(function() {
   const previewCode = document.getElementById('preview-code');
   const previewLang = document.getElementById('preview-lang');
   const tabJson = document.getElementById('tab-json');
@@ -1261,4 +1261,5 @@ document.addEventListener("DOMContentLoaded", () => {
   updateConditionalVisibility();
   renderAllTagBuilders();
   generatePreview();
-});
+  refreshIcons();
+})();
