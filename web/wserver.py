@@ -311,7 +311,11 @@ async def files(request: Request):
 
 @app.get("/app/encode-profiles", response_class=HTMLResponse)
 async def encode_profiles_page(request: Request):
-    return templates.TemplateResponse(request, "encode_profiles.html")
+    response = templates.TemplateResponse(request, "encode_profiles.html")
+    response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
+    return response
 
 @app.get("/api/profiles")
 async def list_profiles(request: Request):
