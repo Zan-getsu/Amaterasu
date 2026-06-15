@@ -793,6 +793,7 @@ class TaskListener(TaskConfig):
         if (
             (Config.INCOMPLETE_TASK_NOTIFIER or Config.INC_TASK_RESUME)
             and Config.DATABASE_URL
+            and not intervals.get("stopAll")
         ):
             await database.rm_complete_task(
                 self.message.link or f"pm:{self.user_id}:{self.message.id}"
@@ -832,6 +833,7 @@ class TaskListener(TaskConfig):
         if (
             (Config.INCOMPLETE_TASK_NOTIFIER or Config.INC_TASK_RESUME)
             and Config.DATABASE_URL
+            and not intervals.get("stopAll")
         ):
             await database.rm_complete_task(
                 self.message.link or f"pm:{self.user_id}:{self.message.id}"
