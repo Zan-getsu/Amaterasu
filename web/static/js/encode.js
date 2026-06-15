@@ -401,6 +401,15 @@
     updateConditionalVisibility();
     generatePreview();
   });
+  
+  // Listen for channel changes
+  document.getElementById('a-channels')?.addEventListener('change', (e) => {
+    if (e.target.value === '0') {
+      const vbrEl = document.getElementById('a-vbr');
+      if (vbrEl) vbrEl.checked = false;
+    }
+    generatePreview();
+  });
 
   // ========================================================================
   //  TRACK SELECTOR DROPDOWNS
