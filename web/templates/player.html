@@ -2,3449 +2,550 @@
 <html lang="en">
 
 <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <title>Amaterasu Stream | {{ file_name }}</title>
-
-    <!-- Google Fonts -->
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-        href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&family=Outfit:wght@300;400;500;600;700;900&display=swap"
-        rel="stylesheet" />
-
-    <!-- Font Awesome 6 -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css"
-        crossorigin="anonymous" />
-
-    <!-- Tailwind CSS v4 CDN -->
-    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
-
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Amaterasu Stream | {{file_name}}</title>
+    
+    <!-- Plyr CSS -->
+    <link rel="stylesheet" href="https://cdn.plyr.io/3.6.9/plyr.css" />
+    
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <!-- FontAwesome 6 -->
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" rel="stylesheet">
+    
     <style>
-        /* ═══════════════════════════════════════════════════
-       CSS CUSTOM PROPERTIES & THEME
-    ═══════════════════════════════════════════════════ */
         :root {
-            --color-primary: #ff3e3e;
-            --color-secondary: #ff7a00;
             --color-bg: #050505;
+            --color-bg-rgb: 5, 5, 5;
             --color-fg: #f3f4f6;
-            --color-glass: #ffffff08;
-            --color-glass-border: #ffffff14;
-            --color-glass-hover: #ffffff12;
-            --sub-font-size: 1.1rem;
-            --player-brightness: 1;
-            --ease-smooth: cubic-bezier(0.4, 0, 0.2, 1);
+            --color-glass: rgba(255, 255, 255, 0.03);
+            --color-glass-hover: rgba(255, 255, 255, 0.08);
+            --color-glass-border: rgba(255, 255, 255, 0.08);
+            --color-primary: #ff3e3e;      /* Premium Red */
+            --color-primary-rgb: 255, 62, 62;
+            --color-secondary: #ff7a00;    /* Premium Orange */
+            --color-secondary-rgb: 255, 122, 0;
+            --color-muted: #9ca3af;
+            --color-card-bg: rgba(10, 10, 10, 0.6);
+            --color-text-main: #f8fafc;
+            --color-text-muted: #94a3b8;
         }
 
-        /* ═══════════════════════════════════════════════════
-       BASE RESET & FONTS
-    ═══════════════════════════════════════════════════ */
-        *,
-        *::before,
-        *::after {
+        * {
             box-sizing: border-box;
             margin: 0;
             padding: 0;
         }
 
-        html,
         body {
-            height: 100%;
-            background: var(--color-bg);
-            color: var(--color-fg);
             font-family: 'Plus Jakarta Sans', sans-serif;
+            background-color: var(--color-bg);
+            color: var(--color-fg);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            position: relative;
             overflow-x: hidden;
-            scroll-behavior: smooth;
+            background-image:
+                radial-gradient(circle at 50% 0%, rgba(var(--color-primary-rgb), 0.04) 0%, transparent 50%),
+                radial-gradient(circle at 80% 10%, rgba(var(--color-secondary-rgb), 0.04) 0%, transparent 40%);
+            background-attachment: fixed;
+            touch-action: manipulation;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        /* Ambient background glows */
+        .grid-background {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-image:
+                linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+            background-size: 30px 30px;
+            mask-image: radial-gradient(circle at center, black 40%, transparent 100%);
+            -webkit-mask-image: radial-gradient(circle at center, black 40%, transparent 100%);
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        .radial-glow {
+            position: fixed;
+            width: 600px;
+            height: 600px;
+            border-radius: 50%;
+            filter: blur(140px);
+            opacity: 0.16;
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        .glow-1 {
+            top: -250px;
+            left: 15%;
+            background: radial-gradient(circle, var(--color-primary) 0%, transparent 70%);
+        }
+
+        .glow-2 {
+            bottom: -250px;
+            right: 15%;
+            background: radial-gradient(circle, var(--color-secondary) 0%, transparent 70%);
+        }
+
+        /* Navbar */
+        nav {
+            background: rgba(var(--color-bg-rgb), 0.7);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border-bottom: 1px solid var(--color-glass-border);
+            padding: 1.25rem 5%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            position: sticky;
+            top: 0;
+            z-index: 50;
+        }
+
+        .brand {
+            font-size: 1.5rem;
+            font-weight: 900;
+            color: var(--color-text-main);
+            text-decoration: none;
+            letter-spacing: 3px;
+            text-transform: uppercase;
+            background: linear-gradient(135deg, var(--color-primary), var(--color-secondary));
+            -webkit-background-clip: text;
+            background-clip: text;
+            color: transparent;
+            text-shadow: 0 0 30px rgba(var(--color-primary-rgb), 0.2);
+        }
+
+        .container {
+            max-width: 1100px;
+            margin: 0 auto;
+            padding: 3rem 1.5rem;
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 2.5rem;
+            width: 100%;
+            position: relative;
+            z-index: 10;
+        }
+
+        /* Player Section */
+        .player-wrapper {
+            border-radius: 1.5rem;
+            overflow: hidden;
+            background: #000000;
+            border: 1px solid rgba(var(--color-primary-rgb), 0.25);
+            box-shadow: 0 30px 70px rgba(0, 0, 0, 0.9), 
+                        0 0 50px rgba(var(--color-primary-rgb), 0.12),
+                        0 0 100px rgba(var(--color-secondary-rgb), 0.05);
+            transition: all 0.3s ease;
+            position: relative;
+            width: 100%;
+        }
+
+        /* File Info Card */
+        .info-card {
+            background: var(--color-card-bg);
+            border: 1px solid var(--color-glass-border);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border-radius: 1rem;
+            padding: 2.5rem;
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            transform: translateZ(0);
+            will-change: backdrop-filter, transform;
+        }
+
+        .info-card:hover {
+            background-color: var(--color-glass-hover);
+            border-color: rgba(255, 255, 255, 0.15);
+            box-shadow: 0 0 30px -10px rgba(var(--color-primary-rgb), 0.15);
+            transform: translateY(-2px) translateZ(0);
+        }
+
+        .file-title {
+            font-size: 1.5rem;
+            font-weight: 800;
+            line-height: 1.4;
+            word-break: break-all;
+            color: #ffffff;
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            letter-spacing: -0.02em;
+        }
+
+        .file-meta {
+            color: var(--color-text-muted);
+            font-size: 0.95rem;
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .badge {
+            background: rgba(var(--color-primary-rgb), 0.08);
+            color: #fca5a5;
+            padding: 0.35rem 0.95rem;
+            border-radius: 9999px;
+            font-size: 0.85rem;
+            font-weight: 700;
+            border: 1px solid rgba(var(--color-primary-rgb), 0.2);
+            font-family: 'Outfit', sans-serif;
+            letter-spacing: 0.5px;
+        }
+
+        /* Action Cards Grid */
+        .action-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+            gap: 1.25rem;
+            margin-top: 1.5rem;
+        }
+
+        /* Action Cards style */
+        .action-card {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            padding: 1.25rem;
+            border-radius: 1.25rem;
+            text-decoration: none;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            border: 1px solid var(--color-glass-border);
+            text-align: left;
+            cursor: pointer;
+            outline: none;
+            user-select: none;
+        }
+
+        .action-card:active {
+            transform: scale(0.97);
+        }
+
+        .action-card.primary-card {
+            background: linear-gradient(135deg, var(--color-primary), var(--color-secondary));
+            border-color: transparent;
+        }
+
+        .action-card.primary-card:hover {
+            filter: brightness(1.1);
+            box-shadow: 0 0 20px rgba(var(--color-primary-rgb), 0.3);
+            transform: translateY(-2px);
+        }
+        
+        .action-card.primary-card .card-title,
+        .action-card.primary-card .card-desc,
+        .action-card.primary-card .card-icon i {
+            color: #ffffff !important;
+        }
+        
+        .action-card.primary-card .card-desc {
+            opacity: 0.8;
+        }
+
+        .action-card.glass-card {
+            background: var(--color-glass);
+        }
+
+        .action-card.glass-card:hover {
+            background: var(--color-glass-hover);
+            border-color: rgba(255, 255, 255, 0.2);
+            transform: translateY(-2px);
+            box-shadow: 0 0 15px rgba(255, 255, 255, 0.05);
+        }
+
+        .card-icon {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 46px;
+            height: 46px;
+            border-radius: 0.85rem;
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid var(--color-glass-border);
+            flex-shrink: 0;
+            transition: all 0.3s ease;
+            font-size: 1.25rem;
+        }
+
+        .action-card:hover .card-icon {
+            transform: scale(1.1);
+            background: rgba(255, 255, 255, 0.08);
+            border-color: rgba(var(--color-primary-rgb), 0.3);
+        }
+
+        .card-content {
+            display: flex;
+            flex-direction: column;
+            min-width: 0;
+        }
+
+        .card-title {
+            font-size: 0.95rem;
+            font-weight: 750;
+            color: #ffffff;
+            font-family: 'Outfit', sans-serif;
+            letter-spacing: 0.2px;
+        }
+
+        .card-desc {
+            font-size: 0.75rem;
+            color: var(--color-text-muted);
+            margin-top: 0.15rem;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        @media (max-width: 768px) {
+            .container {
+                padding: 1.5rem 1rem;
+                gap: 2rem;
+            }
+            .action-grid {
+                grid-template-columns: 1fr 1fr;
+            }
+            .brand {
+                font-size: 1.3rem;
+            }
+        }
+        @media (max-width: 520px) {
+            .action-grid {
+                grid-template-columns: 1fr;
+            }
         }
 
         /* Custom scrollbar */
         ::-webkit-scrollbar {
-            width: 4px;
-            height: 4px;
-        }
-
-        ::-webkit-scrollbar-track {
-            background: rgba(255, 255, 255, 0.05);
-        }
-
-        ::-webkit-scrollbar-thumb {
-            background: var(--color-primary);
-            border-radius: 2px;
-        }
-
-        ::-webkit-scrollbar-thumb:hover {
-            background: var(--color-secondary);
-        }
-
-        /* iOS safe area / notch support */
-        @supports (padding: env(safe-area-inset-bottom)) {
-            #controls {
-                padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
-                padding-left: max(0.75rem, env(safe-area-inset-left));
-                padding-right: max(0.75rem, env(safe-area-inset-right));
-            }
-
-            body:fullscreen #controls,
-            body:-webkit-full-screen #controls {
-                padding-bottom: max(1rem, env(safe-area-inset-bottom));
-            }
-        }
-
-        /* Custom subtitle cue styling */
-        ::cue {
-            font-family: 'Plus Jakarta Sans', sans-serif;
-            font-size: var(--sub-font-size);
-            background: rgba(0, 0, 0, 0.75);
-            color: #fff;
-            border-radius: 4px;
-            padding: 2px 8px;
-            text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.9);
-        }
-
-        /* ═══════════════════════════════════════════════════
-       BACKGROUND EFFECTS
-    ═══════════════════════════════════════════════════ */
-        .bg-scene {
-            position: fixed;
-            inset: 0;
-            z-index: 0;
-            pointer-events: none;
-            overflow: hidden;
-        }
-
-        .bg-glow-red {
-            position: absolute;
-            top: -20%;
-            left: -10%;
-            width: 60vw;
-            height: 60vw;
-            background: radial-gradient(circle, rgba(255, 62, 62, 0.12) 0%, transparent 70%);
-            border-radius: 50%;
-            animation: glowPulse 8s ease-in-out infinite alternate;
-        }
-
-        .bg-glow-orange {
-            position: absolute;
-            bottom: -20%;
-            right: -10%;
-            width: 55vw;
-            height: 55vw;
-            background: radial-gradient(circle, rgba(255, 122, 0, 0.10) 0%, transparent 70%);
-            border-radius: 50%;
-            animation: glowPulse 10s ease-in-out infinite alternate-reverse;
-        }
-
-        .bg-grid {
-            position: absolute;
-            inset: 0;
-            background-image:
-                linear-gradient(rgba(255, 255, 255, 0.025) 1px, transparent 1px),
-                linear-gradient(90deg, rgba(255, 255, 255, 0.025) 1px, transparent 1px);
-            background-size: 48px 48px;
-        }
-
-        @keyframes glowPulse {
-            from {
-                transform: scale(1) translate(0, 0);
-                opacity: 0.7;
-            }
-
-            to {
-                transform: scale(1.15) translate(2%, 2%);
-                opacity: 1;
-            }
-        }
-
-        /* ═══════════════════════════════════════════════════
-       MINI PROGRESS BAR (page-level)
-    ═══════════════════════════════════════════════════ */
-        #mini-progress {
-            position: fixed;
-            top: 0;
-            left: 0;
-            height: 2px;
-            width: 0%;
-            background: linear-gradient(90deg, var(--color-primary), var(--color-secondary));
-            z-index: 9999;
-            transition: height 0.2s var(--ease-smooth);
-            pointer-events: none;
-        }
-
-        #mini-progress:hover {
-            height: 4px;
-        }
-
-        /* ═══════════════════════════════════════════════════
-       LAYOUT
-    ═══════════════════════════════════════════════════ */
-        #app {
-            position: relative;
-            z-index: 1;
-            min-height: 100vh;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            padding: 0 0 3rem 0;
-        }
-
-        /* Theatre mode */
-        body.theatre-mode #app {
-            padding: 0;
-        }
-
-        body.theatre-mode .page-header,
-        body.theatre-mode .file-info-strip,
-        body.theatre-mode .action-row,
-        body.theatre-mode .external-players-card,
-        body.theatre-mode .shortcuts-card {
-            display: none !important;
-        }
-
-        body.theatre-mode #player-section {
-            max-width: 100vw !important;
-            width: 100vw !important;
-            border-radius: 0 !important;
-            padding: 0 !important;
-        }
-
-        body.theatre-mode #player-wrapper {
-            border-radius: 0 !important;
-        }
-
-        body.theatre-mode #player-container {
-            border-radius: 0 !important;
-        }
-
-        /* ═══════════════════════════════════════════════════
-       PAGE HEADER
-    ═══════════════════════════════════════════════════ */
-        .page-header {
-            width: 100%;
-            max-width: 960px;
-            display: flex;
-            align-items: center;
-            gap: 0.75rem;
-            padding: 1.25rem 1rem 0.75rem;
-        }
-
-        .header-logo {
-            width: 36px;
-            height: 36px;
-            background: linear-gradient(135deg, var(--color-primary), var(--color-secondary));
-            border-radius: 10px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 1rem;
-            flex-shrink: 0;
-            box-shadow: 0 0 16px rgba(255, 62, 62, 0.35);
-        }
-
-        .header-title {
-            font-family: 'Outfit', sans-serif;
-            font-size: 0.95rem;
-            font-weight: 600;
-            color: var(--color-fg);
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            max-width: calc(100% - 60px);
-            opacity: 0.9;
-        }
-
-        .header-badge {
-            margin-left: auto;
-            flex-shrink: 0;
-            font-family: 'Outfit', sans-serif;
-            font-size: 0.7rem;
-            font-weight: 700;
-            letter-spacing: 0.08em;
-            text-transform: uppercase;
-            padding: 0.2rem 0.6rem;
-            border-radius: 99px;
-            background: var(--color-glass);
-            border: 1px solid var(--color-glass-border);
-            color: var(--color-primary);
-        }
-
-        /* ═══════════════════════════════════════════════════
-       PLAYER SECTION WRAPPER
-    ═══════════════════════════════════════════════════ */
-        #player-section {
-            width: 100%;
-            max-width: 960px;
-            padding: 0 1rem;
-        }
-
-        #player-wrapper {
-            position: relative;
-            border-radius: 16px;
-            overflow: hidden;
-            border: 1px solid var(--color-glass-border);
-            background: #000;
-            box-shadow:
-                0 0 0 1px rgba(255, 62, 62, 0.08),
-                0 24px 60px rgba(0, 0, 0, 0.7),
-                0 0 80px rgba(255, 62, 62, 0.05);
-        }
-
-        /* 16:9 aspect ratio container */
-        #player-container {
-            position: relative;
-            width: 100%;
-            aspect-ratio: 16 / 9;
-            background: #000;
-            overflow: hidden;
-            cursor: default;
-            border-radius: 16px;
-        }
-
-        #player-container.hide-cursor {
-            cursor: none;
-        }
-
-        /* The actual <video> element */
-        #player {
-            width: 100%;
-            height: 100%;
-            object-fit: contain;
-            display: block;
-            filter: brightness(var(--player-brightness));
-            transition: filter 0.1s linear;
-        }
-
-        /* ═══════════════════════════════════════════════════
-       GESTURE ZONES (invisible overlays for tap/swipe)
-    ═══════════════════════════════════════════════════ */
-        #gesture-overlay {
-            position: absolute;
-            inset: 0;
-            z-index: 10;
-            display: flex;
-            user-select: none;
-            -webkit-user-select: none;
-        }
-
-        .gesture-zone {
-            flex: 1;
-            height: 100%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
-
-        .gesture-zone.center {
-            flex: 1.02;
-        }
-
-        /* ═══════════════════════════════════════════════════
-       RIPPLE ANIMATION (double-tap)
-    ═══════════════════════════════════════════════════ */
-        .tap-ripple {
-            position: absolute;
-            pointer-events: none;
-            z-index: 20;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            animation: tapRippleAnim 0.6s ease-out forwards;
-            border-radius: 50%;
-            width: 120px;
-            height: 120px;
-            top: 50%;
-            transform: translateY(-50%);
-        }
-
-        .tap-ripple.left {
-            left: 10%;
-            background: rgba(59, 130, 246, 0.18);
-        }
-
-        .tap-ripple.right {
-            right: 10%;
-            background: rgba(255, 122, 0, 0.18);
-        }
-
-        .tap-ripple.center {
-            left: 50%;
-            top: 50%;
-            transform: translate(-50%, -50%);
-            background: rgba(255, 255, 255, 0.12);
-        }
-
-        .tap-ripple-text {
-            font-family: 'Outfit', sans-serif;
-            font-size: 0.85rem;
-            font-weight: 700;
-            color: #fff;
-            text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8);
-        }
-
-        .tap-ripple-icon {
-            font-size: 1.6rem;
-            margin-bottom: 2px;
-        }
-
-        @keyframes tapRippleAnim {
-            0% {
-                opacity: 0;
-                transform: translateY(-50%) scale(0.5);
-            }
-
-            30% {
-                opacity: 1;
-                transform: translateY(-50%) scale(1.1);
-            }
-
-            70% {
-                opacity: 1;
-                transform: translateY(-50%) scale(1);
-            }
-
-            100% {
-                opacity: 0;
-                transform: translateY(-50%) scale(1.2);
-            }
-        }
-
-        .tap-ripple.center {
-            animation: tapRippleCenter 0.6s ease-out forwards;
-        }
-
-        @keyframes tapRippleCenter {
-            0% {
-                opacity: 0;
-                transform: translate(-50%, -50%) scale(0.5);
-            }
-
-            30% {
-                opacity: 1;
-                transform: translate(-50%, -50%) scale(1.1);
-            }
-
-            70% {
-                opacity: 1;
-                transform: translate(-50%, -50%) scale(1);
-            }
-
-            100% {
-                opacity: 0;
-                transform: translate(-50%, -50%) scale(1.2);
-            }
-        }
-
-        /* ═══════════════════════════════════════════════════
-       SWIPE INDICATORS (brightness / volume / seek)
-    ═══════════════════════════════════════════════════ */
-        .swipe-indicator {
-            position: absolute;
-            top: 50%;
-            transform: translateY(-50%);
-            z-index: 30;
-            background: rgba(0, 0, 0, 0.65);
-            border: 1px solid rgba(255, 255, 255, 0.15);
-            border-radius: 12px;
-            padding: 0.6rem 0.75rem;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            gap: 0.4rem;
-            min-width: 70px;
-            pointer-events: none;
-            transition: opacity 0.3s var(--ease-smooth);
-            opacity: 0;
-            font-family: 'Outfit', sans-serif;
-        }
-
-        .swipe-indicator.visible {
-            opacity: 1;
-        }
-
-        #brightness-indicator {
-            left: 12px;
-        }
-
-        #volume-indicator {
-            right: 12px;
-        }
-
-        #seek-indicator {
-            left: 50%;
-            top: 50%;
-            transform: translate(-50%, -50%);
-            min-width: 140px;
-            padding: 0.75rem 1.25rem;
-        }
-
-        .swipe-indicator .si-icon {
-            font-size: 1.25rem;
-        }
-
-        .swipe-indicator .si-label {
-            font-size: 0.8rem;
-            font-weight: 600;
-            color: var(--color-fg);
-        }
-
-        .swipe-bar-track {
             width: 6px;
-            height: 60px;
+        }
+        ::-webkit-scrollbar-track {
+            background: var(--color-bg);
+        }
+        ::-webkit-scrollbar-thumb {
             background: rgba(255, 255, 255, 0.15);
-            border-radius: 3px;
-            overflow: hidden;
-            position: relative;
-        }
-
-        .swipe-bar-fill {
-            position: absolute;
-            bottom: 0;
-            left: 0;
-            right: 0;
-            background: linear-gradient(0deg, var(--color-primary), var(--color-secondary));
-            border-radius: 3px;
-            transition: height 0.05s linear;
-        }
-
-        .seek-indicator-time {
-            font-size: 1.5rem;
-            font-weight: 700;
-            color: #fff;
-        }
-
-        .seek-indicator-delta {
-            font-size: 0.8rem;
-            font-weight: 600;
-            color: var(--color-secondary);
-        }
-
-        /* ═══════════════════════════════════════════════════
-       BUFFERING SPINNER
-    ═══════════════════════════════════════════════════ */
-        #buffering-overlay {
-            position: absolute;
-            inset: 0;
-            z-index: 25;
-            display: none;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            gap: 0.75rem;
-            background: rgba(0, 0, 0, 0.35);
-        }
-
-        #buffering-overlay.visible {
-            display: flex;
-        }
-
-        .spinner-ring {
-            width: 52px;
-            height: 52px;
-            border-radius: 50%;
-            border: 3px solid rgba(255, 255, 255, 0.1);
-            border-top-color: var(--color-primary);
-            border-right-color: var(--color-secondary);
-            animation: spinRing 0.9s linear infinite;
-        }
-
-        @keyframes spinRing {
-            to {
-                transform: rotate(360deg);
-            }
-        }
-
-        .buffering-label {
-            font-family: 'Outfit', sans-serif;
-            font-size: 0.8rem;
-            color: rgba(255, 255, 255, 0.7);
-            letter-spacing: 0.05em;
-        }
-
-        /* ═══════════════════════════════════════════════════
-       ERROR OVERLAY
-    ═══════════════════════════════════════════════════ */
-        #error-overlay {
-            position: absolute;
-            inset: 0;
-            z-index: 40;
-            display: none;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            gap: 1rem;
-            background: rgba(0, 0, 0, 0.8);
-            text-align: center;
-            padding: 2rem;
-        }
-
-        #error-overlay.visible {
-            display: flex;
-        }
-
-        .error-icon {
-            font-size: 3rem;
-            color: var(--color-primary);
-            animation: errorPulse 2s ease-in-out infinite;
-        }
-
-        @keyframes errorPulse {
-
-            0%,
-            100% {
-                opacity: 1;
-                transform: scale(1);
-            }
-
-            50% {
-                opacity: 0.6;
-                transform: scale(0.95);
-            }
-        }
-
-        .error-title {
-            font-family: 'Outfit', sans-serif;
-            font-size: 1.1rem;
-            font-weight: 700;
-            color: #fff;
-        }
-
-        .error-sub {
-            font-size: 0.85rem;
-            color: rgba(255, 255, 255, 0.55);
-            max-width: 280px;
-        }
-
-        .error-retry-btn {
-            padding: 0.5rem 1.5rem;
-            background: linear-gradient(135deg, var(--color-primary), var(--color-secondary));
-            border: none;
-            border-radius: 8px;
-            color: #fff;
-            font-family: 'Outfit', sans-serif;
-            font-weight: 700;
-            font-size: 0.9rem;
-            cursor: pointer;
-            transition: transform 0.15s var(--ease-smooth), box-shadow 0.15s var(--ease-smooth);
-        }
-
-        .error-retry-btn:hover {
-            transform: scale(1.04);
-            box-shadow: 0 0 18px rgba(255, 62, 62, 0.5);
-        }
-
-        .error-retry-btn:active {
-            transform: scale(0.97);
-        }
-
-        /* ═══════════════════════════════════════════════════
-       CENTER PLAY BUTTON (big overlay play icon)
-    ═══════════════════════════════════════════════════ */
-        #center-play-btn {
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%) scale(1);
-            z-index: 15;
-            width: 72px;
-            height: 72px;
-            background: rgba(255, 62, 62, 0.18);
-            border: 2px solid rgba(255, 62, 62, 0.5);
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            cursor: pointer;
-            transition: all 0.25s var(--ease-smooth);
-            backdrop-filter: blur(4px);
-            -webkit-backdrop-filter: blur(4px);
-            pointer-events: none;
-            opacity: 1;
-        }
-
-        #center-play-btn.playing {
-            opacity: 0;
-            pointer-events: none;
-        }
-
-        #center-play-btn:hover {
-            transform: translate(-50%, -50%) scale(1.08);
-            background: rgba(255, 62, 62, 0.28);
-        }
-
-        #center-play-btn i {
-            font-size: 1.8rem;
-            color: #fff;
-            margin-left: 4px;
-        }
-
-        /* ═══════════════════════════════════════════════════
-       SKIP INTRO BUTTON
-    ═══════════════════════════════════════════════════ */
-        #skip-intro-btn {
-            position: absolute;
-            bottom: 70px;
-            right: 16px;
-            z-index: 35;
-            display: none;
-            padding: 0.4rem 1rem;
-            background: rgba(0, 0, 0, 0.75);
-            border: 1px solid rgba(255, 255, 255, 0.25);
-            border-radius: 6px;
-            color: #fff;
-            font-family: 'Outfit', sans-serif;
-            font-size: 0.85rem;
-            font-weight: 600;
-            cursor: pointer;
-            transition: background 0.2s var(--ease-smooth), transform 0.15s;
-        }
-
-        #skip-intro-btn:hover {
-            background: rgba(255, 62, 62, 0.4);
-            transform: scale(1.04);
-        }
-
-        #skip-intro-btn.visible {
-            display: block;
-        }
-
-        /* ═══════════════════════════════════════════════════
-       RESUME TOAST (positioned inside player)
-    ═══════════════════════════════════════════════════ */
-        #resume-prompt {
-            position: absolute;
-            top: 16px;
-            left: 50%;
-            transform: translateX(-50%) translateY(-80px);
-            z-index: 50;
-            background: rgba(0, 0, 0, 0.85);
-            border: 1px solid rgba(255, 255, 255, 0.15);
-            border-radius: 10px;
-            padding: 0.6rem 1rem;
-            display: flex;
-            align-items: center;
-            gap: 0.75rem;
-            white-space: nowrap;
-            transition: transform 0.35s var(--ease-smooth);
-            pointer-events: none;
-        }
-
-        #resume-prompt.visible {
-            transform: translateX(-50%) translateY(0);
-            pointer-events: auto;
-        }
-
-        .resume-text {
-            font-family: 'Outfit', sans-serif;
-            font-size: 0.85rem;
-            color: var(--color-fg);
-        }
-
-        .resume-btn {
-            padding: 0.25rem 0.65rem;
-            border-radius: 6px;
-            font-family: 'Outfit', sans-serif;
-            font-size: 0.8rem;
-            font-weight: 700;
-            cursor: pointer;
-            border: none;
-            transition: transform 0.15s, opacity 0.15s;
-        }
-
-        .resume-btn:active {
-            transform: scale(0.96);
-        }
-
-        .resume-btn.primary {
-            background: linear-gradient(135deg, var(--color-primary), var(--color-secondary));
-            color: #fff;
-        }
-
-        .resume-btn.secondary {
-            background: rgba(255, 255, 255, 0.1);
-            color: var(--color-fg);
-        }
-
-        /* ═══════════════════════════════════════════════════
-       VIDEO CONTROLS BAR
-    ═══════════════════════════════════════════════════ */
-        #controls {
-            position: absolute;
-            bottom: 0;
-            left: 0;
-            right: 0;
-            z-index: 30;
-            padding: 0.5rem 0.75rem 0.75rem;
-            background: linear-gradient(to top, rgba(0, 0, 0, 0.92) 0%, rgba(0, 0, 0, 0.5) 55%, transparent 100%);
-            transition: opacity 0.35s var(--ease-smooth);
-        }
-
-        #controls.hidden {
-            opacity: 0;
-            pointer-events: none;
-        }
-
-        /* Seek bar row */
-        .seek-row {
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
-            margin-bottom: 0.5rem;
-        }
-
-        .time-display {
-            font-family: 'Outfit', sans-serif;
-            font-size: 0.78rem;
-            font-weight: 600;
-            color: rgba(255, 255, 255, 0.9);
-            white-space: nowrap;
-            min-width: 85px;
-            letter-spacing: 0.02em;
-        }
-
-        /* Seek bar wrapper */
-        .seekbar-wrapper {
-            flex: 1;
-            position: relative;
-            height: 16px;
-            display: flex;
-            align-items: center;
-            cursor: pointer;
-        }
-
-        .seekbar-track {
-            position: absolute;
-            left: 0;
-            right: 0;
-            height: 4px;
-            background: rgba(255, 255, 255, 0.15);
-            border-radius: 2px;
-            overflow: visible;
-            transition: height 0.15s var(--ease-smooth);
-        }
-
-        .seekbar-wrapper:hover .seekbar-track {
-            height: 5px;
-        }
-
-        .seekbar-buffered {
-            position: absolute;
-            left: 0;
-            top: 0;
-            bottom: 0;
-            background: rgba(255, 255, 255, 0.22);
-            border-radius: 2px;
-            width: 0%;
-            pointer-events: none;
-        }
-
-        .seekbar-progress {
-            position: absolute;
-            left: 0;
-            top: 0;
-            bottom: 0;
-            background: linear-gradient(90deg, var(--color-primary), var(--color-secondary));
-            border-radius: 2px;
-            width: 0%;
-            pointer-events: none;
-        }
-
-        .seekbar-thumb {
-            position: absolute;
-            top: 50%;
-            width: 14px;
-            height: 14px;
-            background: #fff;
-            border-radius: 50%;
-            transform: translate(-50%, -50%) scale(0);
-            box-shadow: 0 0 8px rgba(255, 62, 62, 0.7);
-            pointer-events: none;
-            transition: transform 0.15s var(--ease-smooth), box-shadow 0.15s;
-        }
-
-        .seekbar-wrapper:hover .seekbar-thumb,
-        .seekbar-wrapper.dragging .seekbar-thumb {
-            transform: translate(-50%, -50%) scale(1);
-        }
-
-        /* Hover tooltip */
-        .seekbar-tooltip {
-            position: absolute;
-            bottom: 20px;
-            transform: translateX(-50%);
-            background: rgba(0, 0, 0, 0.85);
-            border: 1px solid rgba(255, 255, 255, 0.12);
-            border-radius: 5px;
-            padding: 2px 8px;
-            font-family: 'Outfit', sans-serif;
-            font-size: 0.7rem;
-            color: #fff;
-            pointer-events: none;
-            white-space: nowrap;
-            opacity: 0;
-            transition: opacity 0.15s;
-        }
-
-        .seekbar-wrapper:hover .seekbar-tooltip {
-            opacity: 1;
-        }
-
-        /* Chapter markers */
-        .chapter-marker {
-            position: absolute;
-            top: 50%;
-            transform: translate(-50%, -50%);
-            width: 2px;
-            height: 8px;
-            background: rgba(255, 255, 255, 0.55);
-            border-radius: 1px;
-            pointer-events: none;
-        }
-
-        /* Controls main row */
-        .controls-row {
-            display: flex;
-            align-items: center;
-            gap: 0.35rem;
-        }
-
-        .ctrl-spacer {
-            flex: 1;
-        }
-
-        /* Control buttons */
-        .ctrl-btn {
-            width: 36px;
-            height: 36px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            background: rgba(255, 255, 255, 0.06);
-            border: 1px solid rgba(255, 255, 255, 0.08);
-            border-radius: 8px;
-            color: rgba(255, 255, 255, 0.85);
-            cursor: pointer;
-            transition: all 0.18s var(--ease-smooth);
-            font-size: 0.9rem;
-            flex-shrink: 0;
-            position: relative;
-        }
-
-        .ctrl-btn:hover {
-            background: rgba(255, 255, 255, 0.12);
-            border-color: rgba(255, 255, 255, 0.18);
-            color: #fff;
-            transform: scale(1.06);
-        }
-
-        .ctrl-btn:active {
-            transform: scale(0.94);
-        }
-
-        .ctrl-btn.active {
-            background: rgba(255, 62, 62, 0.2);
-            border-color: rgba(255, 62, 62, 0.4);
-            color: var(--color-primary);
-            box-shadow: 0 0 12px rgba(255, 62, 62, 0.25);
-        }
-
-        .ctrl-btn.pip-active {
-            background: rgba(255, 122, 0, 0.2);
-            border-color: rgba(255, 122, 0, 0.4);
-            color: var(--color-secondary);
-            box-shadow: 0 0 12px rgba(255, 122, 0, 0.25);
-        }
-
-        .ctrl-btn-play {
-            width: 40px;
-            height: 40px;
-            background: linear-gradient(135deg, var(--color-primary), var(--color-secondary));
-            border: none;
-            color: #fff;
-            font-size: 1rem;
-            box-shadow: 0 0 16px rgba(255, 62, 62, 0.35);
-        }
-
-        .ctrl-btn-play:hover {
-            background: linear-gradient(135deg, #ff5555, #ffaa33);
-            transform: scale(1.08);
-            box-shadow: 0 0 22px rgba(255, 62, 62, 0.5);
-        }
-
-        /* Skip buttons SVG */
-        .skip-svg-btn {
-            width: 34px;
-            height: 34px;
-        }
-
-        /* Volume row */
-        .vol-wrapper {
-            display: flex;
-            align-items: center;
-            gap: 0.3rem;
-        }
-
-        .vol-slider-wrap {
-            overflow: hidden;
-            width: 0;
-            transition: width 0.25s var(--ease-smooth);
-        }
-
-        .vol-wrapper:hover .vol-slider-wrap,
-        .vol-wrapper:focus-within .vol-slider-wrap {
-            width: 70px;
-        }
-
-        @media (max-width: 639px) {
-            .vol-slider-wrap {
-                display: none !important;
-            }
-        }
-
-        .vol-slider {
-            -webkit-appearance: none;
-            appearance: none;
-            width: 68px;
-            height: 4px;
-            background: rgba(255, 255, 255, 0.15);
-            border-radius: 2px;
-            outline: none;
-            cursor: pointer;
-            accent-color: var(--color-primary);
-        }
-
-        .vol-slider::-webkit-slider-thumb {
-            -webkit-appearance: none;
-            width: 12px;
-            height: 12px;
-            border-radius: 50%;
-            background: #fff;
-            cursor: pointer;
-            box-shadow: 0 0 6px rgba(255, 62, 62, 0.6);
-        }
-
-        /* Speed / Audio / Sub dropdowns */
-        .ctrl-popup-wrap {
-            position: relative;
-        }
-
-        .ctrl-popup {
-            position: absolute;
-            bottom: calc(100% + 10px);
-            left: 50%;
-            transform: translateX(-50%);
-            background: rgba(10, 10, 10, 0.95);
-            border: 1px solid rgba(255, 255, 255, 0.12);
-            border-radius: 10px;
-            padding: 0.4rem;
-            min-width: 120px;
-            backdrop-filter: blur(16px);
-            -webkit-backdrop-filter: blur(16px);
-            opacity: 0;
-            pointer-events: none;
-            transform-origin: bottom center;
-            transform: translateX(-50%) scaleY(0.85);
-            transition: opacity 0.2s var(--ease-smooth), transform 0.2s var(--ease-smooth);
-            z-index: 60;
-        }
-
-        .ctrl-popup.open {
-            opacity: 1;
-            pointer-events: auto;
-            transform: translateX(-50%) scaleY(1);
-        }
-
-        .ctrl-popup-item {
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
-            padding: 0.35rem 0.6rem;
-            border-radius: 7px;
-            font-family: 'Outfit', sans-serif;
-            font-size: 0.8rem;
-            color: rgba(255, 255, 255, 0.75);
-            cursor: pointer;
-            transition: background 0.15s, color 0.15s;
-            white-space: nowrap;
-        }
-
-        .ctrl-popup-item:hover {
-            background: rgba(255, 255, 255, 0.08);
-            color: #fff;
-        }
-
-        .ctrl-popup-item.active {
-            background: rgba(255, 62, 62, 0.18);
-            color: var(--color-primary);
-            font-weight: 700;
-        }
-
-        .ctrl-popup-title {
-            font-family: 'Outfit', sans-serif;
-            font-size: 0.7rem;
-            font-weight: 600;
-            color: rgba(255, 255, 255, 0.35);
-            text-transform: uppercase;
-            letter-spacing: 0.07em;
-            padding: 0.2rem 0.6rem 0.1rem;
-        }
-
-        .popup-divider {
-            height: 1px;
-            background: rgba(255, 255, 255, 0.07);
-            margin: 0.25rem 0;
-        }
-
-        /* Quality badge */
-        #quality-badge {
-            font-family: 'Outfit', sans-serif;
-            font-size: 0.65rem;
-            font-weight: 700;
-            padding: 0.15rem 0.4rem;
-            background: rgba(255, 255, 255, 0.07);
-            border: 1px solid rgba(255, 255, 255, 0.12);
-            border-radius: 4px;
-            color: rgba(255, 255, 255, 0.6);
-            white-space: nowrap;
-            display: none;
-        }
-
-        /* Settings panel */
-        #settings-panel {
-            position: absolute;
-            bottom: calc(100% + 12px);
-            right: 0;
-            width: 240px;
-            background: rgba(8, 8, 8, 0.96);
-            border: 1px solid rgba(255, 255, 255, 0.12);
-            border-radius: 12px;
-            padding: 0.75rem;
-            backdrop-filter: blur(20px);
-            -webkit-backdrop-filter: blur(20px);
-            opacity: 0;
-            pointer-events: none;
-            transform-origin: bottom right;
-            transform: scaleY(0.85);
-            transition: opacity 0.2s var(--ease-smooth), transform 0.2s var(--ease-smooth);
-            z-index: 60;
-        }
-
-        #settings-panel.open {
-            opacity: 1;
-            pointer-events: auto;
-            transform: scaleY(1);
-        }
-
-        .settings-section-title {
-            font-family: 'Outfit', sans-serif;
-            font-size: 0.68rem;
-            font-weight: 700;
-            color: rgba(255, 255, 255, 0.35);
-            text-transform: uppercase;
-            letter-spacing: 0.08em;
-            margin-bottom: 0.35rem;
-            margin-top: 0.5rem;
-        }
-
-        .settings-section-title:first-child {
-            margin-top: 0;
-        }
-
-        .settings-row {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding: 0.35rem 0.25rem;
-            font-family: 'Outfit', sans-serif;
-            font-size: 0.82rem;
-            color: rgba(255, 255, 255, 0.75);
-        }
-
-        .settings-toggle {
-            width: 36px;
-            height: 20px;
-            background: rgba(255, 255, 255, 0.1);
-            border-radius: 10px;
-            position: relative;
-            cursor: pointer;
-            transition: background 0.2s;
-            flex-shrink: 0;
-        }
-
-        .settings-toggle.on {
-            background: var(--color-primary);
-        }
-
-        .settings-toggle::after {
-            content: '';
-            position: absolute;
-            top: 2px;
-            left: 2px;
-            width: 16px;
-            height: 16px;
-            background: #fff;
-            border-radius: 50%;
-            transition: transform 0.2s var(--ease-smooth);
-        }
-
-        .settings-toggle.on::after {
-            transform: translateX(16px);
-        }
-
-        .sub-size-btns {
-            display: flex;
-            gap: 0.25rem;
-        }
-
-        .sub-size-btn {
-            padding: 0.15rem 0.4rem;
-            border-radius: 5px;
-            font-family: 'Outfit', sans-serif;
-            font-size: 0.7rem;
-            font-weight: 600;
-            cursor: pointer;
-            background: rgba(255, 255, 255, 0.08);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            color: rgba(255, 255, 255, 0.6);
-            transition: all 0.15s;
-        }
-
-        .sub-size-btn.active {
-            background: rgba(255, 62, 62, 0.2);
-            border-color: var(--color-primary);
-            color: var(--color-primary);
-        }
-
-        .sub-pos-btn {
-            padding: 0.2rem 0.5rem;
-            border-radius: 5px;
-            font-family: 'Outfit', sans-serif;
-            font-size: 0.72rem;
-            cursor: pointer;
-            background: rgba(255, 255, 255, 0.07);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            color: rgba(255, 255, 255, 0.6);
-            transition: all 0.15s;
-        }
-
-        .sub-pos-btn.active {
-            background: rgba(255, 62, 62, 0.2);
-            border-color: var(--color-primary);
-            color: var(--color-primary);
-        }
-
-        /* ═══════════════════════════════════════════════════
-       TOAST NOTIFICATION SYSTEM
-    ═══════════════════════════════════════════════════ */
-        #toast-container {
-            position: absolute;
-            top: 14px;
-            left: 50%;
-            transform: translateX(-50%);
-            z-index: 100;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            gap: 0.4rem;
-            pointer-events: none;
-        }
-
-        .toast-item {
-            padding: 0.4rem 1rem;
-            border-radius: 8px;
-            font-family: 'Outfit', sans-serif;
-            font-size: 0.82rem;
-            font-weight: 600;
-            color: #fff;
-            white-space: nowrap;
-            pointer-events: auto;
-            cursor: pointer;
-            animation: toastIn 0.3s var(--ease-smooth) forwards;
-            backdrop-filter: blur(10px);
-            -webkit-backdrop-filter: blur(10px);
-        }
-
-        .toast-item.toast-out {
-            animation: toastOut 0.3s var(--ease-smooth) forwards;
-        }
-
-        .toast-item.info {
-            background: rgba(30, 30, 40, 0.92);
-            border: 1px solid rgba(255, 255, 255, 0.15);
-        }
-
-        .toast-item.success {
-            background: rgba(16, 185, 129, 0.22);
-            border: 1px solid rgba(16, 185, 129, 0.4);
-            color: #6ee7b7;
-        }
-
-        .toast-item.seek {
-            background: rgba(255, 122, 0, 0.2);
-            border: 1px solid rgba(255, 122, 0, 0.4);
-            color: #ffbb66;
-        }
-
-        .toast-item.error {
-            background: rgba(255, 62, 62, 0.2);
-            border: 1px solid rgba(255, 62, 62, 0.4);
-            color: #ffa0a0;
-        }
-
-        @keyframes toastIn {
-            from {
-                opacity: 0;
-                transform: translateY(-10px);
-            }
-
-            to {
-                opacity: 1;
-                transform: translateY(0);
-            }
-        }
-
-        @keyframes toastOut {
-            from {
-                opacity: 1;
-                transform: translateY(0);
-            }
-
-            to {
-                opacity: 0;
-                transform: translateY(-10px);
-            }
-        }
-
-        /* Center seek toast (flash in middle of player) */
-        .seek-flash {
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            font-family: 'Outfit', sans-serif;
-            font-size: 1.4rem;
-            font-weight: 900;
-            color: #fff;
-            text-shadow: 0 2px 8px rgba(0, 0, 0, 0.8);
-            pointer-events: none;
-            z-index: 45;
-            animation: seekFlash 0.7s ease-out forwards;
-        }
-
-        @keyframes seekFlash {
-            0% {
-                opacity: 0;
-                transform: translate(-50%, -50%) scale(0.7);
-            }
-
-            25% {
-                opacity: 1;
-                transform: translate(-50%, -50%) scale(1.15);
-            }
-
-            60% {
-                opacity: 1;
-                transform: translate(-50%, -50%) scale(1);
-            }
-
-            100% {
-                opacity: 0;
-                transform: translate(-50%, -50%) scale(0.8);
-            }
-        }
-
-        /* ═══════════════════════════════════════════════════
-       FILE INFO STRIP
-    ═══════════════════════════════════════════════════ */
-        .file-info-strip {
-            width: 100%;
-            max-width: 960px;
-            display: flex;
-            align-items: center;
-            gap: 0.75rem;
-            padding: 0.75rem 1rem;
-            background: var(--color-glass);
-            border: 1px solid var(--color-glass-border);
-            border-radius: 12px;
-            margin: 0.75rem 1rem 0;
-            flex-wrap: wrap;
-        }
-
-        .file-info-name {
-            font-family: 'Plus Jakarta Sans', sans-serif;
-            font-size: 0.88rem;
-            font-weight: 600;
-            color: var(--color-fg);
-            flex: 1;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-            min-width: 0;
-        }
-
-        .file-info-meta {
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
-            flex-shrink: 0;
-            flex-wrap: wrap;
-        }
-
-        .meta-pill {
-            font-family: 'Outfit', sans-serif;
-            font-size: 0.7rem;
-            font-weight: 700;
-            padding: 0.2rem 0.55rem;
             border-radius: 99px;
-            background: rgba(255, 255, 255, 0.06);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            color: rgba(255, 255, 255, 0.6);
-            white-space: nowrap;
+            transition: background 0.2s;
         }
-
-        .meta-pill.type-video {
-            color: var(--color-primary);
-            border-color: rgba(255, 62, 62, 0.3);
-            background: rgba(255, 62, 62, 0.1);
+        ::-webkit-scrollbar-thumb:hover {
+            background: rgba(255, 255, 255, 0.3);
         }
-
-        .meta-pill.type-audio {
-            color: #a78bfa;
-            border-color: rgba(167, 139, 250, 0.3);
-            background: rgba(167, 139, 250, 0.1);
+        
+        /* Plyr Customizations for Premium Red Theme */
+        .plyr--video .plyr__control.plyr__tab-focus,
+        .plyr--video .plyr__control:hover,
+        .plyr--video .plyr__control[aria-expanded=true] {
+            background: var(--color-primary) !important;
         }
-
-        .meta-pill.type-image {
-            color: #34d399;
-            border-color: rgba(52, 211, 153, 0.3);
-            background: rgba(52, 211, 153, 0.1);
+        .plyr--full-ui input[type=range] {
+            color: var(--color-primary) !important;
         }
-
-        .meta-pill.type-pdf {
-            color: #fb923c;
-            border-color: rgba(251, 146, 60, 0.3);
-            background: rgba(251, 146, 60, 0.1);
-        }
-
-        .meta-pill.type-doc {
-            color: #60a5fa;
-            border-color: rgba(96, 165, 250, 0.3);
-            background: rgba(96, 165, 250, 0.1);
-        }
-
-        .meta-pill.res {
-            color: rgba(255, 255, 255, 0.5);
-        }
-
-        #meta-duration,
-        #meta-res,
-        #meta-fps {
-            display: none;
-        }
-
-        /* ═══════════════════════════════════════════════════
-       ACTION ROW
-    ═══════════════════════════════════════════════════ */
-        .action-row {
-            width: 100%;
-            max-width: 960px;
-            display: flex;
-            align-items: center;
-            gap: 0.6rem;
-            padding: 0 1rem;
-            flex-wrap: wrap;
-        }
-
-        .action-btn {
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
-            padding: 0.55rem 1rem;
-            border-radius: 10px;
-            background: var(--color-glass);
-            border: 1px solid var(--color-glass-border);
-            color: var(--color-fg);
-            font-family: 'Plus Jakarta Sans', sans-serif;
-            font-size: 0.82rem;
+        
+        .toast {
+            position: fixed;
+            bottom: 2rem;
+            left: 50%;
+            transform: translateX(-50%) translateY(100px);
+            background: linear-gradient(135deg, var(--color-primary), var(--color-secondary));
+            color: white;
+            padding: 0.8rem 1.8rem;
+            border-radius: 9999px;
             font-weight: 600;
-            cursor: pointer;
-            text-decoration: none;
-            transition: all 0.2s var(--ease-smooth);
-            white-space: nowrap;
-        }
-
-        .action-btn i {
+            font-family: 'Outfit', sans-serif;
+            opacity: 0;
+            transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            z-index: 100;
+            box-shadow: 0 10px 25px rgba(var(--color-primary-rgb), 0.35);
+            letter-spacing: 0.5px;
             font-size: 0.9rem;
         }
-
-        .action-btn:hover {
-            background: var(--color-glass-hover);
-            border-color: rgba(255, 255, 255, 0.18);
-            transform: scale(1.03);
-            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
-        }
-
-        .action-btn:active {
-            transform: scale(0.97);
-        }
-
-        .action-btn.primary {
-            background: linear-gradient(135deg, rgba(255, 62, 62, 0.2), rgba(255, 122, 0, 0.15));
-            border-color: rgba(255, 62, 62, 0.35);
-            color: #ffaaaa;
-        }
-
-        .action-btn.primary:hover {
-            background: linear-gradient(135deg, rgba(255, 62, 62, 0.3), rgba(255, 122, 0, 0.25));
-            box-shadow: 0 0 20px rgba(255, 62, 62, 0.2);
-        }
-
-        .action-btn.loop-active {
-            background: rgba(255, 62, 62, 0.15);
-            border-color: rgba(255, 62, 62, 0.45);
-            color: var(--color-primary);
-            box-shadow: 0 0 12px rgba(255, 62, 62, 0.2);
-        }
-
-        /* ═══════════════════════════════════════════════════
-       EXTERNAL PLAYERS CARD
-    ═══════════════════════════════════════════════════ */
-        .external-players-card {
-            width: 100%;
-            max-width: 960px;
-            margin: 0 1rem;
-            padding: 0.9rem 1rem;
-            background: var(--color-glass);
-            border: 1px solid var(--color-glass-border);
-            border-radius: 12px;
-        }
-
-        .ext-card-title {
-            font-family: 'Outfit', sans-serif;
-            font-size: 0.72rem;
-            font-weight: 700;
-            color: rgba(255, 255, 255, 0.35);
-            text-transform: uppercase;
-            letter-spacing: 0.08em;
-            margin-bottom: 0.65rem;
-        }
-
-        .ext-players-row {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 0.5rem;
-        }
-
-        .ext-player-btn {
-            display: flex;
-            align-items: center;
-            gap: 0.45rem;
-            padding: 0.45rem 0.85rem;
-            border-radius: 8px;
-            background: rgba(255, 255, 255, 0.05);
-            border: 1px solid rgba(255, 255, 255, 0.09);
-            color: rgba(255, 255, 255, 0.7);
-            text-decoration: none;
-            font-family: 'Plus Jakarta Sans', sans-serif;
-            font-size: 0.78rem;
-            font-weight: 600;
-            transition: all 0.18s var(--ease-smooth);
-            cursor: pointer;
-        }
-
-        .ext-player-btn:hover {
-            background: rgba(255, 255, 255, 0.1);
-            border-color: rgba(255, 255, 255, 0.18);
-            color: #fff;
-            transform: scale(1.04);
-        }
-
-        .ext-player-btn:active {
-            transform: scale(0.96);
-        }
-
-        .ext-player-btn i {
-            font-size: 0.85rem;
-            opacity: 0.8;
-        }
-
-        /* ═══════════════════════════════════════════════════
-       KEYBOARD SHORTCUTS CARD
-    ═══════════════════════════════════════════════════ */
-        .shortcuts-card {
-            width: 100%;
-            max-width: 960px;
-            margin: 0 1rem;
-            border-radius: 12px;
-            background: var(--color-glass);
-            border: 1px solid var(--color-glass-border);
-            overflow: hidden;
-        }
-
-        .shortcuts-toggle {
-            width: 100%;
-            padding: 0.75rem 1rem;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            cursor: pointer;
-            background: none;
-            border: none;
-            color: var(--color-fg);
-            font-family: 'Outfit', sans-serif;
-            font-size: 0.82rem;
-            font-weight: 700;
-            letter-spacing: 0.03em;
-            transition: background 0.15s;
-        }
-
-        .shortcuts-toggle:hover {
-            background: rgba(255, 255, 255, 0.03);
-        }
-
-        .shortcuts-toggle i {
-            transition: transform 0.25s var(--ease-smooth);
-            font-size: 0.75rem;
-            color: rgba(255, 255, 255, 0.4);
-        }
-
-        .shortcuts-toggle.open i {
-            transform: rotate(180deg);
-        }
-
-        .shortcuts-body {
-            display: none;
-            padding: 0.25rem 1rem 1rem;
-        }
-
-        .shortcuts-body.open {
-            display: block;
-        }
-
-        .shortcuts-grid {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 0.3rem 1.5rem;
-        }
-
-        .shortcut-item {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding: 0.28rem 0;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.04);
-            font-size: 0.78rem;
-            color: rgba(255, 255, 255, 0.6);
-        }
-
-        .shortcut-item span:first-child {
-            font-family: 'Plus Jakarta Sans', sans-serif;
-        }
-
-        .shortcut-key {
-            font-family: 'Outfit', sans-serif;
-            font-size: 0.7rem;
-            font-weight: 700;
-            padding: 0.1rem 0.45rem;
-            background: rgba(255, 255, 255, 0.07);
-            border: 1px solid rgba(255, 255, 255, 0.12);
-            border-radius: 5px;
-            color: rgba(255, 255, 255, 0.55);
-        }
-
-        @media (max-width: 639px) {
-            .shortcuts-card {
-                display: none !important;
-            }
-        }
-
-        /* ═══════════════════════════════════════════════════
-       AUDIO PLAYER (for audio type)
-    ═══════════════════════════════════════════════════ */
-        .audio-player-card {
-            width: 100%;
-            max-width: 640px;
-            padding: 2rem;
-            background: var(--color-glass);
-            border: 1px solid var(--color-glass-border);
-            border-radius: 20px;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            gap: 1.5rem;
-            margin: 2rem 1rem;
-        }
-
-        .audio-art {
-            width: 160px;
-            height: 160px;
-            border-radius: 50%;
-            background: linear-gradient(135deg, rgba(255, 62, 62, 0.3), rgba(255, 122, 0, 0.2));
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 3.5rem;
-            border: 2px solid rgba(255, 62, 62, 0.25);
-            box-shadow: 0 0 40px rgba(255, 62, 62, 0.2);
-            animation: audioSpin 12s linear infinite paused;
-        }
-
-        .audio-art.playing {
-            animation-play-state: running;
-        }
-
-        @keyframes audioSpin {
-            to {
-                transform: rotate(360deg);
-            }
-        }
-
-        .audio-title {
-            font-family: 'Outfit', sans-serif;
-            font-size: 1rem;
-            font-weight: 700;
-            color: var(--color-fg);
-            text-align: center;
-            word-break: break-word;
-        }
-
-        audio#audio-player {
-            width: 100%;
-            max-width: 400px;
-            accent-color: var(--color-primary);
-        }
-
-        audio::-webkit-media-controls-panel {
-            background: rgba(255, 62, 62, 0.08);
-        }
-
-        /* ═══════════════════════════════════════════════════
-       IMAGE VIEWER
-    ═══════════════════════════════════════════════════ */
-        .image-viewer {
-            width: 100%;
-            max-width: 960px;
-            padding: 1rem;
-        }
-
-        .image-viewer img {
-            width: 100%;
-            max-height: 80vh;
-            object-fit: contain;
-            border-radius: 12px;
-            border: 1px solid var(--color-glass-border);
-        }
-
-        /* ═══════════════════════════════════════════════════
-       PDF / DOC VIEWER
-    ═══════════════════════════════════════════════════ */
-        .doc-viewer {
-            width: 100%;
-            max-width: 960px;
-            padding: 0 1rem;
-        }
-
-        .doc-viewer iframe {
-            width: 100%;
-            height: 80vh;
-            border: 1px solid var(--color-glass-border);
-            border-radius: 12px;
-            background: rgba(255, 255, 255, 0.02);
-        }
-
-        /* ═══════════════════════════════════════════════════
-       UTILITY CLASSES
-    ═══════════════════════════════════════════════════ */
-        .glass-card {
-            background: var(--color-glass);
-            border: 1px solid var(--color-glass-border);
-            border-radius: 12px;
-        }
-
-        .hidden-el {
-            display: none !important;
-        }
-
-        .sr-only {
-            position: absolute;
-            width: 1px;
-            height: 1px;
-            padding: 0;
-            margin: -1px;
-            overflow: hidden;
-            clip: rect(0, 0, 0, 0);
-            white-space: nowrap;
-            border-width: 0;
-        }
-
-        /* Spacing helpers */
-        .mt-3 {
-            margin-top: 0.75rem;
-        }
-
-        .mt-4 {
-            margin-top: 1rem;
-        }
-
-        .gap-3 {
-            gap: 0.75rem;
-        }
-
-        .w-full {
-            width: 100%;
-        }
-
-        /* Mobile: larger touch targets */
-        @media (max-width: 639px) {
-            .ctrl-btn {
-                width: 40px;
-                height: 40px;
-                font-size: 1rem;
-            }
-
-            .ctrl-btn-play {
-                width: 44px;
-                height: 44px;
-                font-size: 1.1rem;
-            }
-
-            .time-display {
-                font-size: 0.72rem;
-                min-width: 72px;
-            }
-        }
-
-        /* Page width limiter */
-        .page-col {
-            width: 100%;
-            max-width: 960px;
-            padding: 0 1rem;
-        }
-
-        /* Subtitle upload button inside popup */
-        .sub-upload-btn {
-            width: 100%;
-            padding: 0.3rem 0.6rem;
-            border-radius: 7px;
-            background: rgba(255, 255, 255, 0.04);
-            border: 1px dashed rgba(255, 255, 255, 0.15);
-            color: rgba(255, 255, 255, 0.5);
-            font-family: 'Outfit', sans-serif;
-            font-size: 0.75rem;
-            cursor: pointer;
-            text-align: center;
-            transition: all 0.15s;
-            margin-top: 0.3rem;
-        }
-
-        .sub-upload-btn:hover {
-            border-color: rgba(255, 62, 62, 0.4);
-            color: rgba(255, 62, 62, 0.8);
+        
+        .toast.show {
+            transform: translateX(-50%) translateY(0);
+            opacity: 1;
         }
     </style>
 </head>
-
 <body>
 
-    <!-- Background Scene -->
-    <div class="bg-scene" aria-hidden="true">
-        <div class="bg-glow-red"></div>
-        <div class="bg-glow-orange"></div>
-        <div class="bg-grid"></div>
-    </div>
+    <!-- Ambient background glows -->
+    <div class="grid-background"></div>
+    <div class="radial-glow glow-1"></div>
+    <div class="radial-glow glow-2"></div>
 
-    <!-- Mini Progress Bar -->
-    <div id="mini-progress" role="progressbar" aria-label="Video progress"></div>
+    <nav>
+        <a href="/" class="brand">AMATERASU STREAM</a>
+    </nav>
 
-    <!-- Main App -->
-    <div id="app">
-
-        <!-- PAGE HEADER -->
-        <header class="page-header">
-            <div class="header-logo" aria-hidden="true">☀️</div>
-            <h1 class="header-title" title="{{ file_name }}">{{ file_name }}</h1>
-            <span class="header-badge">{{ file_type }}</span>
-        </header>
-
-        <!-- ═══════════════════ VIDEO PLAYER ═══════════════════ -->
-        {% if file_type == 'video' %}
-        <section id="player-section" aria-label="Video Player">
-            <div id="player-wrapper">
-
-                <!-- Player Container (16:9) -->
-                <div id="player-container">
-
-                    <!-- The Video Element — primary source, HTTP 206 range streaming -->
-                    <video id="player" src="{{ file_url }}" preload="metadata" playsinline webkit-playsinline
-                        tabindex="0" aria-label="{{ file_name }}"></video>
-
-                    <!-- Toast Container -->
-                    <div id="toast-container" aria-live="polite"></div>
-
-                    <!-- Buffering Overlay -->
-                    <div id="buffering-overlay" aria-live="polite" aria-label="Buffering">
-                        <div class="spinner-ring"></div>
-                        <span class="buffering-label" id="buffering-label">Buffering...</span>
-                    </div>
-
-                    <!-- Error Overlay -->
-                    <div id="error-overlay" role="alert">
-                        <div class="error-icon"><i class="fa-solid fa-circle-exclamation"></i></div>
-                        <div class="error-title">Playback Failed</div>
-                        <div class="error-sub">The stream may be unavailable or the format is unsupported.</div>
-                        <button class="error-retry-btn" id="retry-btn">
-                            <i class="fa-solid fa-rotate-right"></i> Retry
-                        </button>
-                    </div>
-
-                    <!-- Center Play Button -->
-                    <div id="center-play-btn" aria-hidden="true">
-                        <i class="fa-solid fa-play"></i>
-                    </div>
-
-                    <!-- Skip Intro Button -->
-                    <button id="skip-intro-btn" type="button">Skip Intro →</button>
-
-                    <!-- Resume Prompt -->
-                    <div id="resume-prompt" role="dialog" aria-label="Resume playback">
-                        <span class="resume-text" id="resume-text">Resume from 00:00?</span>
-                        <button class="resume-btn primary" id="resume-yes-btn">Resume</button>
-                        <button class="resume-btn secondary" id="resume-no-btn">Start Over</button>
-                    </div>
-
-                    <!-- Swipe / Brightness Indicator -->
-                    <div class="swipe-indicator" id="brightness-indicator">
-                        <span class="si-icon">☀️</span>
-                        <div class="swipe-bar-track">
-                            <div class="swipe-bar-fill" id="brightness-bar-fill" style="height:50%"></div>
-                        </div>
-                        <span class="si-label" id="brightness-label">100%</span>
-                    </div>
-
-                    <!-- Swipe / Volume Indicator -->
-                    <div class="swipe-indicator" id="volume-indicator">
-                        <span class="si-icon" id="vol-swipe-icon">🔊</span>
-                        <div class="swipe-bar-track">
-                            <div class="swipe-bar-fill" id="volume-bar-fill" style="height:100%"></div>
-                        </div>
-                        <span class="si-label" id="volume-swipe-label">100%</span>
-                    </div>
-
-                    <!-- Seek Indicator (horizontal swipe) -->
-                    <div class="swipe-indicator" id="seek-indicator">
-                        <span class="seek-indicator-time" id="seek-indicator-time">0:00</span>
-                        <span class="seek-indicator-delta" id="seek-indicator-delta"></span>
-                    </div>
-
-                    <!-- Gesture Overlay (invisible zones for tap/swipe) -->
-                    <div id="gesture-overlay">
-                        <div class="gesture-zone left" id="gz-left"></div>
-                        <div class="gesture-zone center" id="gz-center"></div>
-                        <div class="gesture-zone right" id="gz-right"></div>
-                    </div>
-
-                    <!-- VIDEO CONTROLS -->
-                    <div id="controls">
-
-                        <!-- Seek Bar Row -->
-                        <div class="seek-row">
-                            <div class="seekbar-wrapper" id="seekbar-wrapper" role="slider" aria-label="Seek"
-                                aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
-                                <div class="seekbar-track" id="seekbar-track">
-                                    <div class="seekbar-buffered" id="seekbar-buffered"></div>
-                                    <div class="seekbar-progress" id="seekbar-progress"></div>
-                                    <div class="seekbar-thumb" id="seekbar-thumb"></div>
-                                </div>
-                                <div class="seekbar-tooltip" id="seekbar-tooltip">0:00</div>
-                            </div>
-                        </div>
-
-                        <!-- Controls Main Row -->
-                        <div class="controls-row">
-
-                            <!-- Play/Pause -->
-                            <button class="ctrl-btn ctrl-btn-play" id="play-pause-btn" type="button"
-                                title="Play/Pause (Space)" aria-label="Play/Pause">
-                                <i class="fa-solid fa-play" id="play-icon"></i>
-                            </button>
-
-                            <!-- Skip Back 10s -->
-                            <button class="ctrl-btn" id="skip-back-btn" type="button" title="Skip back 10s (←)"
-                                aria-label="Skip back 10 seconds">
-                                <svg class="skip-svg-btn" viewBox="0 0 36 36" fill="none"
-                                    xmlns="http://www.w3.org/2000/svg">
-                                    <path d="M7 18 A11 11 0 1 1 13.5 27.5" stroke="currentColor" stroke-width="2"
-                                        stroke-linecap="round" fill="none" />
-                                    <polyline points="6,13 7,18 12,17" stroke="currentColor" stroke-width="2"
-                                        stroke-linecap="round" stroke-linejoin="round" fill="none" />
-                                    <text x="18" y="21" text-anchor="middle" font-size="8" font-weight="700"
-                                        fill="currentColor" font-family="Outfit,sans-serif">10</text>
-                                </svg>
-                            </button>
-
-                            <!-- Skip Forward 10s -->
-                            <button class="ctrl-btn" id="skip-fwd-btn" type="button" title="Skip forward 10s (→)"
-                                aria-label="Skip forward 10 seconds">
-                                <svg class="skip-svg-btn" viewBox="0 0 36 36" fill="none"
-                                    xmlns="http://www.w3.org/2000/svg">
-                                    <path d="M29 18 A11 11 0 1 0 22.5 27.5" stroke="currentColor" stroke-width="2"
-                                        stroke-linecap="round" fill="none" />
-                                    <polyline points="30,13 29,18 24,17" stroke="currentColor" stroke-width="2"
-                                        stroke-linecap="round" stroke-linejoin="round" fill="none" />
-                                    <text x="18" y="21" text-anchor="middle" font-size="8" font-weight="700"
-                                        fill="currentColor" font-family="Outfit,sans-serif">10</text>
-                                </svg>
-                            </button>
-
-                            <!-- Time Display -->
-                            <span class="time-display" id="time-display">0:00 / 0:00</span>
-
-                            <div class="ctrl-spacer"></div>
-
-                            <!-- Quality Badge -->
-                            <span id="quality-badge" title="Video resolution"></span>
-
-                            <!-- Volume -->
-                            <div class="vol-wrapper">
-                                <button class="ctrl-btn" id="mute-btn" type="button" title="Mute/Unmute (M)"
-                                    aria-label="Mute/Unmute">
-                                    <i class="fa-solid fa-volume-high" id="vol-icon"></i>
-                                </button>
-                                <div class="vol-slider-wrap">
-                                    <input type="range" class="vol-slider" id="vol-slider" min="0" max="1" step="0.01"
-                                        value="1" aria-label="Volume" />
-                                </div>
-                            </div>
-
-                            <!-- Playback Speed -->
-                            <div class="ctrl-popup-wrap" id="speed-popup-wrap">
-                                <button class="ctrl-btn" id="speed-btn" type="button" title="Playback speed"
-                                    aria-label="Playback speed" aria-expanded="false">
-                                    <i class="fa-solid fa-gauge-high"></i>
-                                </button>
-                                <div class="ctrl-popup" id="speed-popup" role="menu">
-                                    <div class="ctrl-popup-title">Speed</div>
-                                </div>
-                            </div>
-
-                            <!-- Audio Track -->
-                            <div class="ctrl-popup-wrap hidden-el" id="audio-track-wrap">
-                                <button class="ctrl-btn" id="audio-track-btn" type="button" title="Audio track"
-                                    aria-label="Audio track" aria-expanded="false">
-                                    <i class="fa-solid fa-language"></i>
-                                </button>
-                                <div class="ctrl-popup" id="audio-track-popup" role="menu">
-                                    <div class="ctrl-popup-title">Audio Track</div>
-                                </div>
-                            </div>
-
-                            <!-- Subtitle Track -->
-                            <div class="ctrl-popup-wrap" id="sub-track-wrap">
-                                <button class="ctrl-btn" id="sub-track-btn" type="button" title="Subtitles"
-                                    aria-label="Subtitles" aria-expanded="false">
-                                    <i class="fa-solid fa-closed-captioning"></i>
-                                </button>
-                                <div class="ctrl-popup" id="sub-track-popup" role="menu">
-                                    <div class="ctrl-popup-title">Subtitles</div>
-                                    <div id="sub-track-list"></div>
-                                    <div class="popup-divider"></div>
-                                    <label class="sub-upload-btn" title="Upload .srt or .vtt subtitle file">
-                                        <i class="fa-solid fa-upload"></i> Upload Subtitle
-                                        <input type="file" accept=".srt,.vtt" id="sub-file-input" class="sr-only" />
-                                    </label>
-                                </div>
-                            </div>
-
-                            <!-- PiP -->
-                            <button class="ctrl-btn hidden-el" id="pip-btn" type="button" title="Picture-in-Picture"
-                                aria-label="Picture in Picture">
-                                <i class="fa-solid fa-table-cells"></i>
-                            </button>
-
-                            <!-- Settings -->
-                            <div style="position:relative;">
-                                <button class="ctrl-btn" id="settings-btn" type="button" title="Settings"
-                                    aria-label="Settings" aria-expanded="false">
-                                    <i class="fa-solid fa-gear"></i>
-                                </button>
-                                <div id="settings-panel" role="dialog" aria-label="Settings">
-                                    <div class="settings-section-title">Playback</div>
-                                    <div class="settings-row">
-                                        <span>Speed</span>
-                                        <span id="settings-speed-label"
-                                            style="font-weight:700;color:var(--color-primary);">1x</span>
-                                    </div>
-                                    <div class="settings-row">
-                                        <span>Loop</span>
-                                        <div class="settings-toggle" id="settings-loop-toggle" title="Toggle loop"
-                                            role="switch" aria-checked="false" tabindex="0"></div>
-                                    </div>
-                                    <div class="popup-divider"></div>
-                                    <div class="settings-section-title">Subtitles</div>
-                                    <div class="settings-row">
-                                        <span>Font Size</span>
-                                        <div class="sub-size-btns">
-                                            <button class="sub-size-btn" data-size="0.85rem">S</button>
-                                            <button class="sub-size-btn active" data-size="1.1rem">M</button>
-                                            <button class="sub-size-btn" data-size="1.4rem">L</button>
-                                            <button class="sub-size-btn" data-size="1.75rem">XL</button>
-                                        </div>
-                                    </div>
-                                    <div class="settings-row">
-                                        <span>Position</span>
-                                        <div style="display:flex;gap:0.3rem;">
-                                            <button class="sub-pos-btn active" data-pos="bottom">↓ Bot</button>
-                                            <button class="sub-pos-btn" data-pos="top">↑ Top</button>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <!-- Fullscreen -->
-                            <button class="ctrl-btn" id="fullscreen-btn" type="button" title="Fullscreen (F)"
-                                aria-label="Fullscreen">
-                                <i class="fa-solid fa-expand" id="fs-icon"></i>
-                            </button>
-
-                        </div><!-- /.controls-row -->
-                    </div><!-- /#controls -->
-
-                </div><!-- /#player-container -->
-            </div><!-- /#player-wrapper -->
-        </section><!-- /#player-section -->
-
-        <!-- FILE INFO STRIP -->
-        <div class="file-info-strip">
-            <span class="file-info-name" title="{{ file_name }}">{{ file_name }}</span>
-            <div class="file-info-meta">
-                <span class="meta-pill">{{ file_size }}</span>
-                <span class="meta-pill type-video">{{ file_type }}</span>
-                <span class="meta-pill res hidden-el" id="meta-duration"></span>
-                <span class="meta-pill res hidden-el" id="meta-res"></span>
-                <span class="meta-pill res hidden-el" id="meta-fps"></span>
-            </div>
-        </div>
-
-        <!-- ACTION ROW -->
-        <div class="action-row mt-3">
-            <a class="action-btn primary" href="{{ file_url }}?disposition=attachment" download id="download-btn">
-                <i class="fa-solid fa-download"></i> Download
-            </a>
-            <button class="action-btn" id="copy-link-btn" type="button">
-                <i class="fa-solid fa-link"></i> Copy Link
-            </button>
-            <button class="action-btn" id="copy-stream-btn" type="button">
-                <i class="fa-solid fa-copy"></i> Copy Stream URL
-            </button>
-            <button class="action-btn" id="loop-btn" type="button">
-                <i class="fa-solid fa-repeat"></i> Loop
-            </button>
-            <button class="action-btn" id="theatre-btn" type="button">
-                <i class="fa-solid fa-expand-arrows-alt"></i> Theatre
-            </button>
-        </div>
-
-        <!-- EXTERNAL PLAYERS CARD -->
-        <div class="external-players-card mt-3">
-            <div class="ext-card-title"><i class="fa-solid fa-arrow-up-right-from-square"></i> &nbsp;Open in External
-                Player</div>
-            <div class="ext-players-row" id="ext-players-row">
-                <!-- Populated by JS using window.location.origin + file_url -->
-            </div>
-        </div>
-
-        <!-- KEYBOARD SHORTCUTS -->
-        <div class="shortcuts-card mt-3 mt-4">
-            <button class="shortcuts-toggle" id="shortcuts-toggle" type="button" aria-expanded="false">
-                <span><i class="fa-solid fa-keyboard"></i> &nbsp;Keyboard Shortcuts</span>
-                <i class="fa-solid fa-chevron-down"></i>
-            </button>
-            <div class="shortcuts-body" id="shortcuts-body">
-                <div class="shortcuts-grid">
-                    <div class="shortcut-item"><span>Play / Pause</span><kbd class="shortcut-key">Space</kbd></div>
-                    <div class="shortcut-item"><span>Seek back 10s</span><kbd class="shortcut-key">←</kbd></div>
-                    <div class="shortcut-item"><span>Seek forward 10s</span><kbd class="shortcut-key">→</kbd></div>
-                    <div class="shortcut-item"><span>Volume up</span><kbd class="shortcut-key">↑</kbd></div>
-                    <div class="shortcut-item"><span>Volume down</span><kbd class="shortcut-key">↓</kbd></div>
-                    <div class="shortcut-item"><span>Mute / Unmute</span><kbd class="shortcut-key">M</kbd></div>
-                    <div class="shortcut-item"><span>Fullscreen</span><kbd class="shortcut-key">F</kbd></div>
-                    <div class="shortcut-item"><span>Theatre mode</span><kbd class="shortcut-key">T</kbd></div>
-                    <div class="shortcut-item"><span>Loop toggle</span><kbd class="shortcut-key">L</kbd></div>
-                    <div class="shortcut-item"><span>Jump to % of video</span><kbd class="shortcut-key">0–9</kbd></div>
-                    <div class="shortcut-item"><span>Picture-in-Picture</span><kbd class="shortcut-key">P</kbd></div>
-                    <div class="shortcut-item"><span>Double-click</span><kbd class="shortcut-key">Fullscreen</kbd></div>
-                </div>
-            </div>
-        </div>
-
-        {% elif file_type == 'audio' %}
-        <!-- ═══════════════════ AUDIO PLAYER ═══════════════════ -->
-        <div class="audio-player-card">
-            <div class="audio-art" id="audio-art">🎵</div>
-            <div class="audio-title">{{ file_name }}</div>
-            <audio id="audio-player" src="{{ file_url }}" controls preload="metadata">
-                Your browser does not support the audio element.
+    <div class="container">
+        <!-- Player -->
+        <div class="player-wrapper" style="{% if file_type not in ['video', 'audio', 'image', 'pdf', 'doc'] %}display:none;{% endif %}">
+            {% if file_type == 'video' %}
+            <video id="player" playsinline controls data-poster="">
+                <source src="{{file_url}}" type="video/mp4" />
+            </video>
+            {% elif file_type == 'audio' %}
+            <audio id="player" controls style="width: 100%; border-radius: 1rem;">
+                <source src="{{file_url}}" type="audio/mpeg" />
             </audio>
+            {% elif file_type == 'image' %}
+            <img src="{{file_url}}" alt="{{file_name}}" style="width: 100%; display: block;" />
+            {% elif file_type == 'pdf' or file_type == 'doc' %}
+            {% set doc_url = 'https://docs.google.com/gview?url=' ~ file_url ~ '&embedded=true' if file_type == 'doc' else file_url %}
+            <iframe src="{{doc_url}}" style="width: 100%; height: 75vh; border: none; background: white;"></iframe>
+            {% endif %}
         </div>
 
-        <!-- FILE INFO STRIP (audio) -->
-        <div class="file-info-strip">
-            <span class="file-info-name" title="{{ file_name }}">{{ file_name }}</span>
-            <div class="file-info-meta">
-                <span class="meta-pill">{{ file_size }}</span>
-                <span class="meta-pill type-audio">{{ file_type }}</span>
+        <!-- Info -->
+        <div class="info-card">
+            <h1 class="file-title" id="fileName">{{file_name}}</h1>
+            <div class="file-meta">
+                <span class="badge">Size: {{file_size}}</span>
+            </div>
+
+            <!-- Actions -->
+            <div class="action-grid" id="action-buttons">
+                <!-- Buttons injected by JS for correct Absolute URL -->
             </div>
         </div>
+    </div>
+    
+    <div id="toast" class="toast">Link copied to clipboard!</div>
 
-        {% elif file_type == 'image' %}
-        <!-- ═══════════════════ IMAGE VIEWER ═══════════════════ -->
-        <div class="image-viewer mt-3">
-            <img src="{{ file_url }}" alt="{{ file_name }}" loading="lazy" />
-        </div>
-
-        <!-- FILE INFO STRIP (image) -->
-        <div class="file-info-strip">
-            <span class="file-info-name" title="{{ file_name }}">{{ file_name }}</span>
-            <div class="file-info-meta">
-                <span class="meta-pill">{{ file_size }}</span>
-                <span class="meta-pill type-image">{{ file_type }}</span>
-            </div>
-        </div>
-
-        {% elif file_type == 'pdf' or file_type == 'doc' %}
-        <!-- ═══════════════════ DOC/PDF VIEWER ═══════════════════ -->
-        {% set doc_url = 'https://docs.google.com/gview?url=' ~ request.url.scheme ~ '://' ~ request.url.netloc ~
-        file_url ~ '&embedded=true' if file_type == 'doc' else file_url %}
-        <div class="doc-viewer mt-3">
-            <iframe src="{{ doc_url }}" title="{{ file_name }}" allowfullscreen></iframe>
-        </div>
-
-        <!-- FILE INFO STRIP (doc/pdf) -->
-        <div class="file-info-strip">
-            <span class="file-info-name" title="{{ file_name }}">{{ file_name }}</span>
-            <div class="file-info-meta">
-                <span class="meta-pill">{{ file_size }}</span>
-                <span class="meta-pill {% if file_type == 'pdf' %}type-pdf{% else %}type-doc{% endif %}">{{ file_type
-                    }}</span>
-            </div>
-        </div>
-
-        {% endif %}
-
-        <!-- ACTION ROW for non-video types -->
-        {% if file_type != 'video' %}
-        <div class="action-row mt-3">
-            <a class="action-btn primary" href="{{ file_url }}?disposition=attachment" download>
-                <i class="fa-solid fa-download"></i> Download
-            </a>
-            <button class="action-btn" id="copy-link-btn-nv" type="button">
-                <i class="fa-solid fa-link"></i> Copy Link
-            </button>
-            <button class="action-btn" id="copy-stream-btn-nv" type="button">
-                <i class="fa-solid fa-copy"></i> Copy Stream URL
-            </button>
-        </div>
-
-        {% if file_type == 'audio' %}
-        <div class="external-players-card mt-3">
-            <div class="ext-card-title"><i class="fa-solid fa-arrow-up-right-from-square"></i> &nbsp;Open in External
-                Player</div>
-            <div class="ext-players-row" id="ext-players-row-audio"></div>
-        </div>
-        {% endif %}
-        {% endif %}
-
-        <div style="height:2rem;"></div>
-    </div><!-- /#app -->
-
-    <!-- ═══════════════════════════════════════════════════
-     JAVASCRIPT
-═══════════════════════════════════════════════════ -->
+    <!-- Scripts -->
+    <script src="https://cdn.plyr.io/3.6.9/plyr.js"></script>
     <script>
-        (function () {
-            'use strict';
-
-            /* ─── Jinja2 template variables ─── */
-            const FILE_URL = "{{ file_url }}";
-            const FILE_NAME = "{{ file_name | replace('"', '\\"') }}";
-            const FILE_TYPE = "{{ file_type }}";
-
-            /* ─── Helpers ─── */
-            const $ = id => document.getElementById(id);
-            const $q = sel => document.querySelector(sel);
-            const $qa = sel => document.querySelectorAll(sel);
-
-            function formatTime(secs) {
-                if (!isFinite(secs) || isNaN(secs)) return '0:00';
-                secs = Math.max(0, Math.floor(secs));
-                const h = Math.floor(secs / 3600);
-                const m = Math.floor((secs % 3600) / 60);
-                const s = secs % 60;
-                if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
-                return `${m}:${String(s).padStart(2, '0')}`;
-            }
-
-            function clamp(v, min, max) { return Math.min(Math.max(v, min), max); }
-
-            /* ─── Throttle / Debounce ─── */
-            function throttle(fn, wait) {
-                let last = 0;
-                return function (...args) {
-                    const now = Date.now();
-                    if (now - last >= wait) { last = now; fn.apply(this, args); }
-                };
-            }
-            function debounce(fn, wait) {
-                let timer;
-                return function (...args) {
-                    clearTimeout(timer);
-                    timer = setTimeout(() => fn.apply(this, args), wait);
-                };
-            }
-
-            /* ─── Language code map ─── */
-            const LANG_MAP = {
-                jpn: 'Japanese', ja: 'Japanese', eng: 'English', en: 'English',
-                hin: 'Hindi', hi: 'Hindi', fre: 'French', fr: 'French',
-                deu: 'German', de: 'German', spa: 'Spanish', es: 'Spanish',
-                por: 'Portuguese', pt: 'Portuguese', ita: 'Italian', it: 'Italian',
-                chi: 'Chinese', zh: 'Chinese', kor: 'Korean', ko: 'Korean',
-                ara: 'Arabic', ar: 'Arabic', rus: 'Russian', ru: 'Russian',
-                tur: 'Turkish', tr: 'Turkish', tha: 'Thai', th: 'Thai',
-                vie: 'Vietnamese', vi: 'Vietnamese', pol: 'Polish', pl: 'Polish',
-                nld: 'Dutch', nl: 'Dutch', swe: 'Swedish', sv: 'Swedish',
-                nor: 'Norwegian', no: 'Norwegian', dan: 'Danish', da: 'Danish',
-                fin: 'Finnish', fi: 'Finnish', ben: 'Bengali', bn: 'Bengali',
-                tam: 'Tamil', ta: 'Tamil', tel: 'Telugu', te: 'Telugu',
-                mal: 'Malayalam', ml: 'Malayalam', kan: 'Kannada', kn: 'Kannada',
-                mar: 'Marathi', mr: 'Marathi', urd: 'Urdu', ur: 'Urdu',
-            };
-            function langName(code, label, index) {
-                if (label && label.trim()) return label.trim();
-                if (code && LANG_MAP[code.toLowerCase()]) return LANG_MAP[code.toLowerCase()];
-                if (code && code.trim()) return code.toUpperCase();
-                return `Track ${index + 1}`;
-            }
-
-            /* ════════════════════════════════════════════════════
-               TOAST SYSTEM
-            ════════════════════════════════════════════════════ */
-            function showToast(message, type = 'info', duration = 2000) {
-                try {
-                    const container = $('toast-container');
-                    if (!container) return;
-                    const el = document.createElement('div');
-                    el.className = `toast-item ${type}`;
-                    el.textContent = message;
-                    el.addEventListener('click', () => dismissToast(el));
-                    container.appendChild(el);
-                    setTimeout(() => dismissToast(el), duration);
-                } catch (e) { }
-            }
-            function dismissToast(el) {
-                if (!el || !el.parentNode) return;
-                el.classList.add('toast-out');
-                el.addEventListener('animationend', () => el.remove(), { once: true });
-                setTimeout(() => el.remove(), 400);
-            }
-
-            /* Seek flash (center of player) */
-            function showSeekFlash(text) {
-                try {
-                    const pc = $('player-container');
-                    if (!pc) return;
-                    const el = document.createElement('div');
-                    el.className = 'seek-flash';
-                    el.textContent = text;
-                    pc.appendChild(el);
-                    el.addEventListener('animationend', () => el.remove(), { once: true });
-                    setTimeout(() => el.remove(), 800);
-                } catch (e) { }
-            }
-
-            /* ════════════════════════════════════════════════════
-               NON-VIDEO: Copy buttons & Audio art animation
-            ════════════════════════════════════════════════════ */
-            if (FILE_TYPE !== 'video') {
-                const absUrl = window.location.href;
-                const streamUrl = window.location.origin + FILE_URL;
-
-                function setupCopyBtn(id, text, label) {
-                    const btn = $(id);
-                    if (!btn) return;
-                    btn.addEventListener('click', () => copyText(text, label));
-                }
-                function copyText(text, label) {
-                    if (navigator.clipboard) {
-                        navigator.clipboard.writeText(text).then(() => {
-                            showGlobalToast(`✓ ${label} copied!`);
-                        }).catch(() => fallbackCopy(text, label));
-                    } else { fallbackCopy(text, label); }
-                }
-                function fallbackCopy(text, label) {
-                    const ta = document.createElement('textarea');
-                    ta.value = text;
-                    ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0;pointer-events:none;';
-                    document.body.appendChild(ta);
-                    ta.select();
-                    try { document.execCommand('copy'); showGlobalToast(`✓ ${label} copied!`); } catch (e) { }
-                    ta.remove();
-                }
-                function showGlobalToast(msg) {
-                    const el = document.createElement('div');
-                    el.style.cssText = `
-        position:fixed;top:20px;left:50%;transform:translateX(-50%);
-        background:rgba(16,185,129,0.22);border:1px solid rgba(16,185,129,0.4);
-        color:#6ee7b7;padding:0.4rem 1rem;border-radius:8px;
-        font-family:'Outfit',sans-serif;font-size:0.82rem;font-weight:600;
-        z-index:9999;animation:toastIn 0.3s ease forwards;pointer-events:none;
-      `;
-                    el.textContent = msg;
-                    document.body.appendChild(el);
-                    setTimeout(() => el.remove(), 2500);
-                }
-                setupCopyBtn('copy-link-btn-nv', absUrl, 'Link');
-                setupCopyBtn('copy-stream-btn-nv', streamUrl, 'Stream URL');
-
-                // Audio art spinning
-                if (FILE_TYPE === 'audio') {
-                    const art = $('audio-art');
-                    const ap = $('audio-player');
-                    if (ap && art) {
-                        ap.addEventListener('play', () => art.classList.add('playing'));
-                        ap.addEventListener('pause', () => art.classList.remove('playing'));
-                        // External players for audio
-                        buildExtPlayers('ext-players-row-audio');
-                    }
-                }
-                return; // Stop here for non-video
-            }
-
-            /* ════════════════════════════════════════════════════
-               VIDEO PLAYER — MAIN INIT
-            ════════════════════════════════════════════════════ */
-            document.addEventListener('DOMContentLoaded', () => {
-                try { initVideoPlayer(); } catch (e) { console.error('Player init error:', e); }
+        document.addEventListener('DOMContentLoaded', () => {
+            {% if file_type == 'video' or file_type == 'audio' %}
+            // Initialize Player
+            const player = new Plyr('#player', {
+                controls: ['play-large', 'play', 'progress', 'current-time', 'duration', 'mute', 'volume', 'captions', 'settings', 'pip', 'airplay', 'fullscreen'],
+                settings: ['captions', 'quality', 'speed', 'loop']
             });
-
-            function initVideoPlayer() {
-                const video = $('player');
-                const playerCont = $('player-container');
-                const controls = $('controls');
-                const playPauseBtn = $('play-pause-btn');
-                const playIcon = $('play-icon');
-                const centerPlay = $('center-play-btn');
-                const skipBackBtn = $('skip-back-btn');
-                const skipFwdBtn = $('skip-fwd-btn');
-                const timeDisplay = $('time-display');
-                const seekbarWrap = $('seekbar-wrapper');
-                const seekbarBuf = $('seekbar-buffered');
-                const seekbarProg = $('seekbar-progress');
-                const seekbarThumb = $('seekbar-thumb');
-                const seekbarTip = $('seekbar-tooltip');
-                const muteBtn = $('mute-btn');
-                const volIcon = $('vol-icon');
-                const volSlider = $('vol-slider');
-                const speedBtn = $('speed-btn');
-                const speedPopup = $('speed-popup');
-                const audioTrackWrap = $('audio-track-wrap');
-                const audioTrackBtn = $('audio-track-btn');
-                const audioPopup = $('audio-track-popup');
-                const subTrackBtn = $('sub-track-btn');
-                const subPopup = $('sub-track-popup');
-                const subList = $('sub-track-list');
-                const subFileInput = $('sub-file-input');
-                const pipBtn = $('pip-btn');
-                const settingsBtn = $('settings-btn');
-                const settingsPanel = $('settings-panel');
-                const fsBtn = $('fullscreen-btn');
-                const fsIcon = $('fs-icon');
-                const bufferingOvl = $('buffering-overlay');
-                const bufferingLbl = $('buffering-label');
-                const errorOvl = $('error-overlay');
-                const retryBtn = $('retry-btn');
-                const miniProgress = $('mini-progress');
-                const qualityBadge = $('quality-badge');
-                const loopBtn = $('loop-btn');
-                const theatreBtn = $('theatre-btn');
-                const copyLinkBtn = $('copy-link-btn');
-                const copyStreamBtn = $('copy-stream-btn');
-                const skipIntroBtn = $('skip-intro-btn');
-                const resumePrompt = $('resume-prompt');
-                const resumeText = $('resume-text');
-                const resumeYes = $('resume-yes-btn');
-                const resumeNo = $('resume-no-btn');
-                const brightnessInd = $('brightness-indicator');
-                const volumeInd = $('volume-indicator');
-                const seekInd = $('seek-indicator');
-                const briBarFill = $('brightness-bar-fill');
-                const briLabel = $('brightness-label');
-                const volBarFill = $('volume-bar-fill');
-                const volSwipeLabel = $('volume-swipe-label');
-                const seekIndTime = $('seek-indicator-time');
-                const seekIndDelta = $('seek-indicator-delta');
-                const settingsLoop = $('settings-loop-toggle');
-                const settingsSpeed = $('settings-speed-label');
-                const shortcutsToggle = $('shortcuts-toggle');
-                const shortcutsBody = $('shortcuts-body');
-
-                if (!video) return;
-
-                /* ── State ── */
-                let isDraggingSeek = false;
-                let controlsTimer = null;
-                let isTheatre = false;
-                let savedBrightness = 1;
-                let lsWriteTimer = null;
-                let subTracksCount = 0;
-                let skipIntroShown = false;
-                let loopActive = false;
-                let activeSpeedItem = null;
-                let resumeDismissTimer = null;
-
-                const SPEEDS = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
-                const STREAM_URL = window.location.origin + FILE_URL;
-                const LS_POS_KEY = 'player_pos_' + btoa(FILE_URL).replace(/=/g, '');
-                const isEpisode = /[Ss]\d{1,2}[Ee]\d{1,2}|[Ee][Pp]?\d{1,3}/.test(FILE_NAME);
-                const isFirefox = navigator.userAgent.toLowerCase().includes('firefox');
-
-                /* ── Load persisted preferences ── */
-                try {
-                    const savedVol = parseFloat(localStorage.getItem('player_volume') ?? '1');
-                    if (!isNaN(savedVol)) { video.volume = clamp(savedVol, 0, 1); volSlider.value = video.volume; }
-                    savedBrightness = parseFloat(localStorage.getItem('player_brightness') ?? '1');
-                    if (!isNaN(savedBrightness)) { savedBrightness = clamp(savedBrightness, 0.2, 2); }
-                    document.documentElement.style.setProperty('--player-brightness', savedBrightness);
-                    const savedSpeed = parseFloat(localStorage.getItem('player_speed') ?? '1');
-                    if (!isNaN(savedSpeed) && SPEEDS.includes(savedSpeed)) video.playbackRate = savedSpeed;
-                    loopActive = localStorage.getItem('player_loop') === 'true';
-                    video.loop = loopActive;
-                    if (loopActive) {
-                        loopBtn?.classList.add('loop-active');
-                        if (settingsLoop) { settingsLoop.classList.add('on'); settingsLoop.setAttribute('aria-checked', 'true'); }
-                    }
-                    const savedSubSize = localStorage.getItem('player_sub_size') ?? '1.1rem';
-                    document.documentElement.style.setProperty('--sub-font-size', savedSubSize);
-                } catch (e) { }
-
-                /* ── Update volume icon ── */
-                function updateVolIcon() {
-                    const v = video.volume;
-                    const m = video.muted;
-                    volIcon.className = 'fa-solid ' + (m || v === 0 ? 'fa-volume-xmark' : v < 0.4 ? 'fa-volume-low' : v < 0.75 ? 'fa-volume' : 'fa-volume-high');
+            {% endif %}
+            
+            // Build absolute URLs for intent schemes
+            const absoluteStreamUrl = new URL('{{file_url}}', window.location.origin).href;
+            const downloadUrl = new URL(absoluteStreamUrl);
+            downloadUrl.searchParams.set('disposition', 'attachment');
+            const absoluteDownloadUrl = downloadUrl.href;
+            const safeUrl = encodeURIComponent(absoluteStreamUrl);
+            
+            const actions = [
+                {
+                    text: 'Download',
+                    desc: 'Save to local device',
+                    url: absoluteDownloadUrl,
+                    icon: '<i class="fa-solid fa-cloud-arrow-down text-red-500"></i>',
+                    primary: true
+                },
+                {
+                    text: 'Copy Link',
+                    desc: 'Copy stream address',
+                    onclick: 'copyLink()',
+                    icon: '<i class="fa-solid fa-copy text-orange-500"></i>',
+                    primary: false
                 }
-
-                /* ── Play / Pause ── */
-                function togglePlay() {
-                    if (video.paused) { video.play().catch(() => { }); } else { video.pause(); }
+            ];
+            
+            {% if file_type == 'video' or file_type == 'audio' %}
+            actions.push(
+                {
+                    text: 'VLC Player',
+                    desc: 'Stream to VLC (Android)',
+                    url: `intent:${absoluteStreamUrl}#Intent;action=android.intent.action.VIEW;type={{file_type}}/*;package=org.videolan.vlc;end`,
+                    icon: '<i class="fa-brands fa-vlc text-orange-500"></i>',
+                    primary: false
+                },
+                {
+                    text: 'MX Player',
+                    desc: 'Stream to MX (Android)',
+                    url: `intent:${absoluteStreamUrl}#Intent;action=android.intent.action.VIEW;type={{file_type}}/*;package=com.mxtech.videoplayer.ad;end`,
+                    icon: '<i class="fa-solid fa-circle-play text-red-500"></i>',
+                    primary: false
+                },
+                {
+                    text: 'iOS VLC',
+                    desc: 'Stream to VLC (iOS)',
+                    url: `vlc-x-callback://x-callback-url/stream?url=${absoluteStreamUrl}`,
+                    icon: '<i class="fa-brands fa-vlc text-orange-400"></i>',
+                    primary: false
+                },
+                {
+                    text: 'nPlayer',
+                    desc: 'Stream to nPlayer',
+                    url: `nplayer-${absoluteStreamUrl}`,
+                    icon: '<i class="fa-solid fa-play text-red-400"></i>',
+                    primary: false
                 }
-                function syncPlayState() {
-                    const paused = video.paused;
-                    playIcon.className = paused ? 'fa-solid fa-play' : 'fa-solid fa-pause';
-                    centerPlay.classList.toggle('playing', !paused);
-                    const audioArt = $('audio-art');
-                    if (audioArt) audioArt.classList.toggle('playing', !paused);
+            );
+            {% endif %}
+            
+            const btnContainer = document.getElementById('action-buttons');
+            actions.forEach(act => {
+                const isBtn = !!act.onclick;
+                const tag = isBtn ? 'button' : 'a';
+                const el = document.createElement(tag);
+                
+                if (act.primary) {
+                    el.className = 'action-card primary-card';
+                } else {
+                    el.className = 'action-card glass-card';
                 }
-                playPauseBtn?.addEventListener('click', (e) => { e.stopPropagation(); togglePlay(); });
-                video.addEventListener('play', syncPlayState);
-                video.addEventListener('pause', syncPlayState);
-                video.addEventListener('ended', syncPlayState);
-
-                /* ── Skip 10s ── */
-                function seekBy(delta) {
-                    const newTime = clamp(video.currentTime + delta, 0, video.duration || 0);
-                    video.currentTime = newTime;
-                    showSeekFlash(delta > 0 ? `+${delta}s` : `${delta}s`);
-                    showToast(delta > 0 ? `+${delta}s` : `${delta}s`, 'seek', 1200);
+                
+                if(isBtn) {
+                    el.setAttribute('onclick', act.onclick);
+                } else {
+                    el.href = act.url;
                 }
-                skipBackBtn?.addEventListener('click', (e) => { e.stopPropagation(); seekBy(-10); });
-                skipFwdBtn?.addEventListener('click', (e) => { e.stopPropagation(); seekBy(10); });
+                
+                el.innerHTML = `
+                    <div class="card-icon">${act.icon}</div>
+                    <div class="card-content">
+                        <span class="card-title">${act.text}</span>
+                        <span class="card-desc">${act.desc}</span>
+                    </div>
+                `;
+                btnContainer.appendChild(el);
+            });
+        });
 
-                /* ── Seek bar ── */
-                let animFrameId = null;
-                function updateSeekBar() {
-                    if (!video.duration || isNaN(video.duration)) { animFrameId = requestAnimationFrame(updateSeekBar); return; }
-                    const pct = (video.currentTime / video.duration) * 100;
-                    seekbarProg.style.width = pct + '%';
-                    seekbarThumb.style.left = pct + '%';
-                    seekbarWrap.setAttribute('aria-valuenow', pct.toFixed(1));
+        // Copy Link
+        function copyLink() {
+            const link = new URL('{{file_url}}', window.location.origin).href;
+            navigator.clipboard.writeText(link).then(() => {
+                showToast("Stream link copied to clipboard!");
+            }).catch(err => {
+                console.error('Failed to copy link: ', err);
+                prompt("Copy the link below:", link);
+            });
+        }
 
-                    // Buffered
-                    if (video.buffered.length > 0) {
-                        const bufEnd = video.buffered.end(video.buffered.length - 1);
-                        const bufPct = (bufEnd / video.duration) * 100;
-                        seekbarBuf.style.width = bufPct + '%';
-                        // Buffering %
-                        const bufPctInt = bufPct.toFixed(0);
-                        if (bufferingLbl && $('buffering-overlay').classList.contains('visible')) {
-                            bufferingLbl.textContent = `Buffering ${bufPctInt}%`;
-                        }
-                    }
-
-                    // Time display
-                    timeDisplay.textContent = `${formatTime(video.currentTime)} / ${formatTime(video.duration)}`;
-
-                    // Mini progress bar
-                    if (miniProgress) miniProgress.style.width = pct + '%';
-
-                    animFrameId = requestAnimationFrame(updateSeekBar);
-                }
-                animFrameId = requestAnimationFrame(updateSeekBar);
-
-                function seekbarClickHandler(e) {
-                    const rect = seekbarWrap.getBoundingClientRect();
-                    const x = clamp(e.clientX - rect.left, 0, rect.width);
-                    const pct = x / rect.width;
-                    if (video.duration && !isNaN(video.duration)) {
-                        video.currentTime = pct * video.duration;
-                    }
-                }
-                function seekbarHoverHandler(e) {
-                    const rect = seekbarWrap.getBoundingClientRect();
-                    const x = clamp(e.clientX - rect.left, 0, rect.width);
-                    const pct = x / rect.width;
-                    const time = pct * (video.duration || 0);
-                    seekbarTip.textContent = formatTime(time);
-                    seekbarTip.style.left = x + 'px';
-                }
-
-                seekbarWrap.addEventListener('mousedown', (e) => {
-                    e.stopPropagation();
-                    isDraggingSeek = true;
-                    seekbarWrap.classList.add('dragging');
-                    seekbarClickHandler(e);
-                });
-                document.addEventListener('mousemove', (e) => {
-                    if (!isDraggingSeek) return;
-                    seekbarClickHandler(e);
-                });
-                document.addEventListener('mouseup', () => {
-                    if (!isDraggingSeek) return;
-                    isDraggingSeek = false;
-                    seekbarWrap.classList.remove('dragging');
-                });
-                seekbarWrap.addEventListener('mousemove', seekbarHoverHandler);
-
-                /* Touch seek bar */
-                seekbarWrap.addEventListener('touchstart', (e) => {
-                    e.stopPropagation();
-                    isDraggingSeek = true;
-                    seekbarWrap.classList.add('dragging');
-                    const touch = e.touches[0];
-                    const rect = seekbarWrap.getBoundingClientRect();
-                    const x = clamp(touch.clientX - rect.left, 0, rect.width);
-                    const pct = x / rect.width;
-                    if (video.duration) video.currentTime = pct * video.duration;
-                }, { passive: false });
-                seekbarWrap.addEventListener('touchmove', (e) => {
-                    if (!isDraggingSeek) return;
-                    e.preventDefault();
-                    const touch = e.touches[0];
-                    const rect = seekbarWrap.getBoundingClientRect();
-                    const x = clamp(touch.clientX - rect.left, 0, rect.width);
-                    const pct = x / rect.width;
-                    if (video.duration) video.currentTime = pct * video.duration;
-                }, { passive: false });
-                seekbarWrap.addEventListener('touchend', () => {
-                    isDraggingSeek = false;
-                    seekbarWrap.classList.remove('dragging');
-                });
-
-                /* ── Volume ── */
-                muteBtn?.addEventListener('click', (e) => {
-                    e.stopPropagation();
-                    video.muted = !video.muted;
-                    updateVolIcon();
-                });
-                volSlider?.addEventListener('input', (e) => {
-                    e.stopPropagation();
-                    video.volume = parseFloat(e.target.value);
-                    video.muted = video.volume === 0;
-                    updateVolIcon();
-                    saveVolume();
-                });
-                video.addEventListener('volumechange', () => {
-                    volSlider.value = video.muted ? 0 : video.volume;
-                    updateVolIcon();
-                });
-                const saveVolume = debounce(() => {
-                    try { localStorage.setItem('player_volume', video.volume); } catch (e) { }
-                }, 500);
-
-                /* ── Playback Speed ── */
-                function buildSpeedMenu() {
-                    speedPopup.innerHTML = '<div class="ctrl-popup-title">Speed</div>';
-                    SPEEDS.forEach(s => {
-                        const item = document.createElement('div');
-                        item.className = 'ctrl-popup-item' + (video.playbackRate === s ? ' active' : '');
-                        item.textContent = s + 'x';
-                        item.dataset.speed = s;
-                        item.setAttribute('role', 'menuitem');
-                        item.addEventListener('click', (e) => {
-                            e.stopPropagation();
-                            video.playbackRate = s;
-                            try { localStorage.setItem('player_speed', s); } catch (e) { }
-                            settingsSpeed && (settingsSpeed.textContent = s + 'x');
-                            $qa('#speed-popup .ctrl-popup-item').forEach(el => el.classList.toggle('active', parseFloat(el.dataset.speed) === s));
-                            closeAllPopups();
-                            showToast(`Speed: ${s}x`, 'info', 1500);
-                        });
-                        speedPopup.appendChild(item);
-                    });
-                }
-                buildSpeedMenu();
-
-                /* ── Audio Tracks ── */
-                function initAudioTracks() {
-                    try {
-                        if (isFirefox) return; // Firefox doesn't support AudioTrackList
-                        const audioTracks = video.audioTracks;
-                        if (!audioTracks || audioTracks.length <= 1) return;
-                        audioTrackWrap.classList.remove('hidden-el');
-                        buildAudioTrackMenu();
-                    } catch (e) { }
-                }
-                function buildAudioTrackMenu() {
-                    try {
-                        const audioTracks = video.audioTracks;
-                        if (!audioTracks) return;
-                        audioPopup.innerHTML = '<div class="ctrl-popup-title">Audio Track</div>';
-                        for (let i = 0; i < audioTracks.length; i++) {
-                            const t = audioTracks[i];
-                            const name = langName(t.language, t.label, i);
-                            const item = document.createElement('div');
-                            item.className = 'ctrl-popup-item' + (t.enabled ? ' active' : '');
-                            item.textContent = name;
-                            item.setAttribute('role', 'menuitem');
-                            item.addEventListener('click', (e) => {
-                                e.stopPropagation();
-                                for (let j = 0; j < audioTracks.length; j++) {
-                                    audioTracks[j].enabled = (j === i);
-                                }
-                                $qa('#audio-track-popup .ctrl-popup-item').forEach((el, idx) => {
-                                    el.classList.toggle('active', idx === i);
-                                });
-                                closeAllPopups();
-                                showToast(`Audio: ${name}`, 'success', 2000);
-                            });
-                            audioPopup.appendChild(item);
-                        }
-                    } catch (e) { }
-                }
-
-                /* ── Subtitle Tracks ── */
-                function initSubtitleTracks() {
-                    try {
-                        rebuildSubMenu();
-                        video.textTracks.addEventListener('addtrack', () => rebuildSubMenu());
-                        video.textTracks.addEventListener('removetrack', () => rebuildSubMenu());
-                    } catch (e) { }
-                }
-                function rebuildSubMenu() {
-                    try {
-                        subList.innerHTML = '';
-                        const tracks = video.textTracks;
-                        subTracksCount = tracks.length;
-
-                        // "Off" option
-                        const offItem = document.createElement('div');
-                        offItem.className = 'ctrl-popup-item' + (subTracksCount === 0 || allHidden(tracks) ? ' active' : '');
-                        offItem.textContent = 'Off';
-                        offItem.setAttribute('role', 'menuitem');
-                        offItem.addEventListener('click', (e) => {
-                            e.stopPropagation();
-                            for (let i = 0; i < tracks.length; i++) tracks[i].mode = 'disabled';
-                            $qa('#sub-track-list .ctrl-popup-item').forEach((el, i) => el.classList.toggle('active', i === 0));
-                            closeAllPopups();
-                            showToast('Subtitles: Off', 'info', 1500);
-                        });
-                        subList.appendChild(offItem);
-
-                        for (let i = 0; i < tracks.length; i++) {
-                            const t = tracks[i];
-                            const name = langName(t.language, t.label, i);
-                            const item = document.createElement('div');
-                            item.className = 'ctrl-popup-item' + (t.mode === 'showing' ? ' active' : '');
-                            item.textContent = name || `Track ${i + 1}`;
-                            item.setAttribute('role', 'menuitem');
-                            item.addEventListener('click', (e) => {
-                                e.stopPropagation();
-                                for (let j = 0; j < tracks.length; j++) tracks[j].mode = (j === i) ? 'showing' : 'hidden';
-                                $qa('#sub-track-list .ctrl-popup-item').forEach((el, idx) => el.classList.toggle('active', idx === i + 1));
-                                closeAllPopups();
-                                showToast(`Subtitles: ${name || `Track ${i + 1}`}`, 'success', 1800);
-                            });
-                            subList.appendChild(item);
-                        }
-                    } catch (e) { }
-                }
-                function allHidden(tracks) {
-                    for (let i = 0; i < tracks.length; i++) if (tracks[i].mode === 'showing') return false;
-                    return true;
-                }
-
-                /* ── External Subtitle Upload ── */
-                subFileInput?.addEventListener('change', async (e) => {
-                    try {
-                        const file = e.target.files[0];
-                        if (!file) return;
-                        const ext = file.name.split('.').pop().toLowerCase();
-                        let vttUrl;
-                        if (ext === 'vtt') {
-                            vttUrl = URL.createObjectURL(file);
-                        } else if (ext === 'srt') {
-                            const text = await file.text();
-                            const vttText = srtToVtt(text);
-                            const blob = new Blob([vttText], { type: 'text/vtt' });
-                            vttUrl = URL.createObjectURL(blob);
-                        } else {
-                            showToast('Only .srt and .vtt files are supported.', 'error');
-                            return;
-                        }
-                        const trackEl = document.createElement('track');
-                        trackEl.kind = 'subtitles';
-                        trackEl.label = file.name;
-                        trackEl.src = vttUrl;
-                        trackEl.default = true;
-                        video.appendChild(trackEl);
-                        setTimeout(() => {
-                            const tracks = video.textTracks;
-                            for (let i = 0; i < tracks.length; i++) {
-                                if (tracks[i].label === file.name) tracks[i].mode = 'showing';
-                                else tracks[i].mode = 'hidden';
-                            }
-                            rebuildSubMenu();
-                        }, 300);
-                        showToast(`Subtitles loaded: ${file.name}`, 'success', 2500);
-                        e.target.value = '';
-                    } catch (err) { showToast('Failed to load subtitle file.', 'error'); }
-                });
-
-                function srtToVtt(srt) {
-                    let vtt = 'WEBVTT\n\n';
-                    vtt += srt
-                        .replace(/\r\n/g, '\n')
-                        .replace(/\r/g, '\n')
-                        .replace(/(\d{2}:\d{2}:\d{2}),(\d{3})/g, '$1.$2')
-                        .replace(/(\d{2}:\d{2}:\d{2}\.\d{3}) -->(\d{ 2}: \d{ 2}: \d{ 2}\.\d{ 3}) / g, '$1 --> $2');
-                    return vtt;
-                }
-
-                /* ── PiP ── */
-                try {
-                    if (document.pictureInPictureEnabled) {
-                        pipBtn.classList.remove('hidden-el');
-                        pipBtn.addEventListener('click', async (e) => {
-                            e.stopPropagation();
-                            try {
-                                if (document.pictureInPictureElement) {
-                                    await document.exitPictureInPicture();
-                                } else {
-                                    await video.requestPictureInPicture();
-                                }
-                            } catch (err) { showToast('PiP not available.', 'error'); }
-                        });
-                        video.addEventListener('enterpictureinpicture', () => {
-                            pipBtn.classList.add('pip-active');
-                            showToast('Picture-in-Picture active', 'info');
-                        });
-                        video.addEventListener('leavepictureinpicture', () => {
-                            pipBtn.classList.remove('pip-active');
-                        });
-                    }
-                } catch (e) { }
-
-                /* ── Fullscreen ── */
-                function requestFS() {
-                    const el = playerCont;
-                    try {
-                        if (el.requestFullscreen) el.requestFullscreen();
-                        else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen();
-                        else if (el.mozRequestFullScreen) el.mozRequestFullScreen();
-                        else if (el.msRequestFullscreen) el.msRequestFullscreen();
-                        try {
-                            if (screen.orientation && screen.orientation.lock) {
-                                screen.orientation.lock('landscape').catch(() => { });
-                            }
-                        } catch (e2) { }
-                    } catch (e) { }
-                }
-                function exitFS() {
-                    try {
-                        if (document.exitFullscreen) document.exitFullscreen();
-                        else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
-                        else if (document.mozCancelFullScreen) document.mozCancelFullScreen();
-                        else if (document.msExitFullscreen) document.msExitFullscreen();
-                    } catch (e) { }
-                }
-                function isFullscreen() {
-                    return !!(document.fullscreenElement || document.webkitFullscreenElement ||
-                        document.mozFullScreenElement || document.msFullscreenElement);
-                }
-                function toggleFS() {
-                    if (isFullscreen()) exitFS(); else requestFS();
-                }
-                function onFSChange() {
-                    const fs = isFullscreen();
-                    fsIcon.className = fs ? 'fa-solid fa-compress' : 'fa-solid fa-expand';
-                    fsBtn.classList.toggle('active', fs);
-                }
-                document.addEventListener('fullscreenchange', onFSChange);
-                document.addEventListener('webkitfullscreenchange', onFSChange);
-                document.addEventListener('mozfullscreenchange', onFSChange);
-                document.addEventListener('MSFullscreenChange', onFSChange);
-                fsBtn?.addEventListener('click', (e) => { e.stopPropagation(); toggleFS(); });
-
-                /* ── Double-click fullscreen (desktop) ── */
-                let clickCount = 0, clickTimer = null;
-                playerCont.addEventListener('dblclick', (e) => {
-                    if (e.target.closest('#controls') || e.target.closest('#skip-intro-btn') || e.target.closest('#resume-prompt')) return;
-                    toggleFS();
-                });
-
-                /* ── Theatre Mode ── */
-                theatreBtn?.addEventListener('click', (e) => {
-                    e.stopPropagation();
-                    isTheatre = !isTheatre;
-                    document.body.classList.toggle('theatre-mode', isTheatre);
-                    theatreBtn.classList.toggle('loop-active', isTheatre);
-                    theatreBtn.innerHTML = isTheatre
-                        ? '<i class="fa-solid fa-compress-arrows-alt"></i> Exit Theatre'
-                        : '<i class="fa-solid fa-expand-arrows-alt"></i> Theatre';
-                    showToast(isTheatre ? 'Theatre Mode ON' : 'Theatre Mode OFF', 'info', 1500);
-                });
-
-                /* ── Loop ── */
-                function setLoop(val) {
-                    loopActive = val;
-                    video.loop = val;
-                    loopBtn.classList.toggle('loop-active', val);
-                    if (settingsLoop) {
-                        settingsLoop.classList.toggle('on', val);
-                        settingsLoop.setAttribute('aria-checked', String(val));
-                    }
-                    try { localStorage.setItem('player_loop', val); } catch (e) { }
-                }
-                loopBtn?.addEventListener('click', (e) => { e.stopPropagation(); setLoop(!loopActive); showToast(`Loop: ${!video.loop ? 'Off' : 'On'}`, 'info', 1200); });
-                settingsLoop?.addEventListener('click', (e) => { e.stopPropagation(); setLoop(!loopActive); });
-                settingsLoop?.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setLoop(!loopActive); } });
-
-                /* ── Copy buttons ── */
-                copyLinkBtn?.addEventListener('click', (e) => {
-                    e.stopPropagation();
-                    copyToClipboard(window.location.href, 'Link');
-                });
-                copyStreamBtn?.addEventListener('click', (e) => {
-                    e.stopPropagation();
-                    copyToClipboard(STREAM_URL, 'Stream URL');
-                });
-                function copyToClipboard(text, label) {
-                    if (navigator.clipboard && navigator.clipboard.writeText) {
-                        navigator.clipboard.writeText(text)
-                            .then(() => showToast(`✓ ${label} copied!`, 'success'))
-                            .catch(() => fallbackCopy2(text, label));
-                    } else { fallbackCopy2(text, label); }
-                }
-                function fallbackCopy2(text, label) {
-                    const ta = document.createElement('textarea');
-                    ta.value = text;
-                    ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0;pointer-events:none;';
-                    document.body.appendChild(ta);
-                    ta.select();
-                    try { document.execCommand('copy'); showToast(`✓ ${label} copied!`, 'success'); } catch (e) { showToast('Copy failed', 'error'); }
-                    ta.remove();
-                }
-
-                /* ── External Players ── */
-                buildExtPlayers('ext-players-row');
-
-                /* ── Buffering ── */
-                video.addEventListener('waiting', () => bufferingOvl.classList.add('visible'));
-                video.addEventListener('playing', () => bufferingOvl.classList.remove('visible'));
-                video.addEventListener('canplay', () => { bufferingOvl.classList.remove('visible'); });
-
-                /* ── Error handling ── */
-                video.addEventListener('error', () => {
-                    bufferingOvl.classList.remove('visible');
-                    errorOvl.classList.add('visible');
-                });
-                retryBtn?.addEventListener('click', () => {
-                    errorOvl.classList.remove('visible');
-                    const currentSrc = video.src;
-                    video.src = '';
-                    setTimeout(() => { video.src = currentSrc; video.load(); video.play().catch(() => { }); }, 200);
-                });
-
-                /* ── Video metadata & quality ── */
-                video.addEventListener('loadedmetadata', () => {
-                    try {
-                        // Duration
-                        const durEl = $('meta-duration');
-                        if (durEl) { durEl.textContent = formatTime(video.duration); durEl.classList.remove('hidden-el'); }
-                        // Resolution
-                        if (video.videoWidth && video.videoHeight) {
-                            const resEl = $('meta-res');
-                            if (resEl) { resEl.textContent = `${video.videoWidth}×${video.videoHeight}`; resEl.classList.remove('hidden-el'); }
-                            qualityBadge.textContent = `${video.videoWidth}×${video.videoHeight}`;
-                            qualityBadge.style.display = 'block';
-                        }
-                        // FPS (approximate via getVideoPlaybackQuality)
-                        try {
-                            if (video.getVideoPlaybackQuality) {
-                                const q = video.getVideoPlaybackQuality();
-                                if (q && q.totalVideoFrames) {
-                                    const fps = Math.round(q.totalVideoFrames / video.duration);
-                                    if (fps > 0 && fps < 200) {
-                                        const fpsEl = $('meta-fps');
-                                        if (fpsEl) { fpsEl.textContent = `~${fps} fps`; fpsEl.classList.remove('hidden-el'); }
-                                    }
-                                }
-                            }
-                        } catch (e2) { }
-                        // Audio/subtitle track detection
-                        initAudioTracks();
-                        initSubtitleTracks();
-                        // Resume prompt
-                        checkResume();
-                    } catch (e) { }
-                });
-
-                video.addEventListener('canplay', () => {
-                    try { initAudioTracks(); } catch (e) { }
-                });
-
-                /* ── Skip Intro ── */
-                if (isEpisode) {
-                    video.addEventListener('timeupdate', () => {
-                        if (!skipIntroShown && video.currentTime >= 60 && video.currentTime <= 200) {
-                            skipIntroBtn.classList.add('visible');
-                        } else if (video.currentTime > 200 || video.currentTime < 30) {
-                            skipIntroBtn.classList.remove('visible');
-                        }
-                    });
-                }
-                skipIntroBtn?.addEventListener('click', (e) => {
-                    e.stopPropagation();
-                    video.currentTime = clamp(video.currentTime + 85, 0, video.duration || 999999);
-                    skipIntroBtn.classList.remove('visible');
-                    skipIntroShown = true;
-                    showToast('Skipped intro', 'seek', 1500);
-                });
-
-                /* ── Playback Memory ── */
-                function checkResume() {
-                    try {
-                        const saved = JSON.parse(localStorage.getItem(LS_POS_KEY));
-                        if (!saved || !saved.time) return;
-                        const savedTime = parseFloat(saved.time);
-                        if (isNaN(savedTime) || savedTime < 5) return;
-                        if (video.duration && savedTime >= video.duration - 10) return;
-                        resumeText.textContent = `Resume from ${formatTime(savedTime)}?`;
-                        resumePrompt.classList.add('visible');
-                        // Auto-dismiss after 8s → resume
-                        resumeDismissTimer = setTimeout(() => {
-                            video.currentTime = savedTime;
-                            resumePrompt.classList.remove('visible');
-                        }, 8000);
-                    } catch (e) { }
-                }
-                resumeYes?.addEventListener('click', () => {
-                    try {
-                        clearTimeout(resumeDismissTimer);
-                        const saved = JSON.parse(localStorage.getItem(LS_POS_KEY));
-                        if (saved) video.currentTime = parseFloat(saved.time);
-                        resumePrompt.classList.remove('visible');
-                        video.play().catch(() => { });
-                    } catch (e) { resumePrompt.classList.remove('visible'); }
-                });
-                resumeNo?.addEventListener('click', () => {
-                    clearTimeout(resumeDismissTimer);
-                    resumePrompt.classList.remove('visible');
-                });
-
-                // Save position (throttled every 5s)
-                const savePosition = throttle(() => {
-                    try {
-                        localStorage.setItem(LS_POS_KEY, JSON.stringify({ time: video.currentTime, timestamp: Date.now() }));
-                    } catch (e) { }
-                }, 5000);
-                video.addEventListener('timeupdate', savePosition);
-
-                /* ── Controls auto-hide ── */
-                function showControls() {
-                    controls.classList.remove('hidden');
-                    playerCont.classList.remove('hide-cursor');
-                }
-                function scheduleHideControls() {
-                    clearTimeout(controlsTimer);
-                    if (!video.paused) {
-                        controlsTimer = setTimeout(() => {
-                            controls.classList.add('hidden');
-                            playerCont.classList.add('hide-cursor');
-                        }, 3000);
-                    }
-                }
-                playerCont.addEventListener('mousemove', () => { showControls(); scheduleHideControls(); });
-                playerCont.addEventListener('mouseenter', () => { showControls(); scheduleHideControls(); });
-                playerCont.addEventListener('mouseleave', () => {
-                    if (!video.paused) { controls.classList.add('hidden'); playerCont.classList.add('hide-cursor'); }
-                });
-                video.addEventListener('pause', () => { showControls(); clearTimeout(controlsTimer); });
-                video.addEventListener('play', () => { scheduleHideControls(); });
-
-                /* ── Popup management ── */
-                function closeAllPopups() {
-                    speedPopup.classList.remove('open');
-                    audioPopup.classList.remove('open');
-                    subPopup.classList.remove('open');
-                    settingsPanel.classList.remove('open');
-                    speedBtn.setAttribute('aria-expanded', 'false');
-                    audioTrackBtn?.setAttribute('aria-expanded', 'false');
-                    subTrackBtn.setAttribute('aria-expanded', 'false');
-                    settingsBtn.setAttribute('aria-expanded', 'false');
-                }
-                function togglePopup(popup, btn) {
-                    const isOpen = popup.classList.contains('open');
-                    closeAllPopups();
-                    if (!isOpen) {
-                        popup.classList.add('open');
-                        btn.setAttribute('aria-expanded', 'true');
-                    }
-                }
-                speedBtn?.addEventListener('click', (e) => { e.stopPropagation(); togglePopup(speedPopup, speedBtn); });
-                audioTrackBtn?.addEventListener('click', (e) => { e.stopPropagation(); togglePopup(audioPopup, audioTrackBtn); });
-                subTrackBtn?.addEventListener('click', (e) => { e.stopPropagation(); togglePopup(subPopup, subTrackBtn); });
-                settingsBtn?.addEventListener('click', (e) => { e.stopPropagation(); togglePopup(settingsPanel, settingsBtn); });
-                document.addEventListener('click', closeAllPopups);
-
-                /* ── Settings panel extras ── */
-                // Subtitle size buttons
-                $qa('.sub-size-btn').forEach(btn => {
-                    btn.addEventListener('click', (e) => {
-                        e.stopPropagation();
-                        const size = btn.dataset.size;
-                        document.documentElement.style.setProperty('--sub-font-size', size);
-                        $qa('.sub-size-btn').forEach(b => b.classList.toggle('active', b === btn));
-                        try { localStorage.setItem('player_sub_size', size); } catch (e2) { }
-                    });
-                });
-                // Subtitle position
-                $qa('.sub-pos-btn').forEach(btn => {
-                    btn.addEventListener('click', (e) => {
-                        e.stopPropagation();
-                        $qa('.sub-pos-btn').forEach(b => b.classList.remove('active'));
-                        btn.classList.add('active');
-                        // top position hack: shift track cue alignment via style
-                        const tracks = video.textTracks;
-                        for (let i = 0; i < tracks.length; i++) {
-                            if (tracks[i].mode === 'showing') {
-                                try { tracks[i].cues && Array.from(tracks[i].cues).forEach(c => { c.line = btn.dataset.pos === 'top' ? 5 : -1; }); } catch (e2) { }
-                            }
-                        }
-                        showToast(`Subtitle position: ${btn.dataset.pos}`, 'info', 1500);
-                    });
-                });
-
-                /* ── Keyboard Shortcuts ── */
-                document.addEventListener('keydown', (e) => {
-                    const tag = (e.target.tagName || '').toUpperCase();
-                    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || e.target.isContentEditable) return;
-                    if (document.querySelector('#player-section') === null) return;
-
-                    switch (e.key) {
-                        case ' ':
-                        case 'k':
-                            e.preventDefault();
-                            togglePlay();
-                            break;
-                        case 'ArrowLeft':
-                            e.preventDefault();
-                            seekBy(-10);
-                            break;
-                        case 'ArrowRight':
-                            e.preventDefault();
-                            seekBy(10);
-                            break;
-                        case 'ArrowUp':
-                            e.preventDefault();
-                            video.volume = clamp(video.volume + 0.1, 0, 1);
-                            video.muted = false;
-                            volSlider.value = video.volume;
-                            updateVolIcon();
-                            showToast(`Volume: ${Math.round(video.volume * 100)}%`, 'info', 1000);
-                            saveVolume();
-                            break;
-                        case 'ArrowDown':
-                            e.preventDefault();
-                            video.volume = clamp(video.volume - 0.1, 0, 1);
-                            volSlider.value = video.volume;
-                            updateVolIcon();
-                            showToast(`Volume: ${Math.round(video.volume * 100)}%`, 'info', 1000);
-                            saveVolume();
-                            break;
-                        case 'm':
-                        case 'M':
-                            e.preventDefault();
-                            video.muted = !video.muted;
-                            updateVolIcon();
-                            showToast(video.muted ? 'Muted' : 'Unmuted', 'info', 1000);
-                            break;
-                        case 'f':
-                        case 'F':
-                            e.preventDefault();
-                            toggleFS();
-                            break;
-                        case 't':
-                        case 'T':
-                            e.preventDefault();
-                            theatreBtn?.click();
-                            break;
-                        case 'l':
-                        case 'L':
-                            e.preventDefault();
-                            setLoop(!loopActive);
-                            showToast(`Loop: ${loopActive ? 'On' : 'Off'}`, 'info', 1200);
-                            break;
-                        case 'p':
-                        case 'P':
-                            e.preventDefault();
-                            pipBtn?.click();
-                            break;
-                        default:
-                            if (e.key >= '0' && e.key <= '9') {
-                                e.preventDefault();
-                                const pct = parseInt(e.key) / 10;
-                                if (video.duration) video.currentTime = pct * video.duration;
-                            }
-                    }
-                });
-
-                /* ── Shortcuts toggle ── */
-                shortcutsToggle?.addEventListener('click', () => {
-                    const open = shortcutsBody.classList.toggle('open');
-                    shortcutsToggle.classList.toggle('open', open);
-                    shortcutsToggle.setAttribute('aria-expanded', String(open));
-                });
-
-                /* ════════════════════════════════════════════════════
-                   GESTURE DETECTION (Touch)
-                ════════════════════════════════════════════════════ */
-                const gestureOverlay = $('gesture-overlay');
-                let touchStartX = 0, touchStartY = 0;
-                let touchStartTime = 0;
-                let swipeMode = null; // 'brightness' | 'volume' | 'seek' | null
-                let swipeZone = null; // 'left' | 'right'
-                let lastBrightness = savedBrightness;
-                let lastVolume = video.volume;
-                let swipeActive = false;
-                let tapTimer = null;
-                let tapCount = 0;
-                let tapZone = null;
-                let briHideTimer = null, volHideTimer = null, seekHideTimer = null;
-
-                function getSwipeZone(clientX) {
-                    const rect = playerCont.getBoundingClientRect();
-                    const relX = clientX - rect.left;
-                    return relX < rect.width / 2 ? 'left' : 'right';
-                }
-
-                function showBrightnessIndicator(val) {
-                    const pct = Math.round(((val - 0.2) / (2 - 0.2)) * 100);
-                    briLabel.textContent = `${Math.round(val * 100)}%`;
-                    briBarFill.style.height = clamp(pct, 0, 100) + '%';
-                    brightnessInd.classList.add('visible');
-                    clearTimeout(briHideTimer);
-                    briHideTimer = setTimeout(() => brightnessInd.classList.remove('visible'), 1500);
-                }
-                function showVolumeIndicator(val) {
-                    volSwipeLabel.textContent = `${Math.round(val * 100)}%`;
-                    volBarFill.style.height = (val * 100) + '%';
-                    volumeInd.classList.add('visible');
-                    clearTimeout(volHideTimer);
-                    volHideTimer = setTimeout(() => volumeInd.classList.remove('visible'), 1500);
-                }
-                function showSeekIndicator(time, delta) {
-                    seekIndTime.textContent = formatTime(time);
-                    seekIndDelta.textContent = (delta >= 0 ? '+' : '') + delta.toFixed(0) + 's';
-                    seekInd.classList.add('visible');
-                    clearTimeout(seekHideTimer);
-                    seekHideTimer = setTimeout(() => seekInd.classList.remove('visible'), 1000);
-                }
-
-                gestureOverlay.addEventListener('touchstart', (e) => {
-                    // Don't intercept if touching controls
-                    if (e.target.closest('#controls') || isDraggingSeek) return;
-                    const touch = e.touches[0];
-                    touchStartX = touch.clientX;
-                    touchStartY = touch.clientY;
-                    touchStartTime = Date.now();
-                    swipeMode = null;
-                    swipeZone = getSwipeZone(touch.clientX);
-                    lastBrightness = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--player-brightness') || '1') || 1;
-                    lastVolume = video.volume;
-                    swipeActive = false;
-
-                    // Tap detection
-                    tapCount++;
-                    const zone = touch.clientX < playerCont.getBoundingClientRect().left + playerCont.offsetWidth * 0.33 ? 'left'
-                        : touch.clientX > playerCont.getBoundingClientRect().left + playerCont.offsetWidth * 0.67 ? 'right'
-                            : 'center';
-                    tapZone = zone;
-
-                    clearTimeout(tapTimer);
-                    if (tapCount === 1) {
-                        tapTimer = setTimeout(() => {
-                            if (tapCount === 1) {
-                                // Single tap center: show/hide controls
-                                if (tapZone === 'center') {
-                                    if (controls.classList.contains('hidden')) showControls();
-                                    else { if (!video.paused) scheduleHideControls(); }
-                                }
-                            }
-                            tapCount = 0;
-                        }, 250);
-                    } else if (tapCount >= 2) {
-                        clearTimeout(tapTimer);
-                        tapCount = 0;
-                        // Double-tap action
-                        if (tapZone === 'left') {
-                            seekBy(-10);
-                            showTapRipple('left', '⟪ 10');
-                        } else if (tapZone === 'right') {
-                            seekBy(10);
-                            showTapRipple('right', '10 ⟫');
-                        } else {
-                            togglePlay();
-                            showTapRipple('center', video.paused ? '▶' : '⏸');
-                        }
-                    }
-                }, { passive: true });
-
-                gestureOverlay.addEventListener('touchmove', (e) => {
-                    if (e.target.closest('#controls') || isDraggingSeek) return;
-                    const touch = e.touches[0];
-                    const deltaX = touch.clientX - touchStartX;
-                    const deltaY = touchStartY - touch.clientY; // positive = swipe up
-
-                    if (!swipeActive) {
-                        if (Math.abs(deltaX) > 8 || Math.abs(deltaY) > 8) {
-                            swipeActive = true;
-                            if (Math.abs(deltaX) > Math.abs(deltaY) * 0.5 && Math.abs(deltaX) > Math.abs(deltaY)) {
-                                swipeMode = 'seek';
-                            } else {
-                                swipeMode = swipeZone === 'left' ? 'brightness' : 'volume';
-                            }
-                        }
-                        return;
-                    }
-
-                    if (swipeMode === 'brightness') {
-                        e.preventDefault && e.cancelable && e.preventDefault();
-                        const change = deltaY * (0.01 / 3);
-                        const newVal = clamp(lastBrightness + change, 0.2, 2.0);
-                        document.documentElement.style.setProperty('--player-brightness', newVal);
-                        showBrightnessIndicator(newVal);
-                        try { localStorage.setItem('player_brightness', newVal); } catch (e2) { }
-                    } else if (swipeMode === 'volume') {
-                        e.preventDefault && e.cancelable && e.preventDefault();
-                        const change = deltaY * (0.005 / 3);
-                        const newVol = clamp(lastVolume + change, 0, 1);
-                        video.volume = newVol;
-                        video.muted = newVol === 0;
-                        volSlider.value = newVol;
-                        updateVolIcon();
-                        showVolumeIndicator(newVol);
-                    } else if (swipeMode === 'seek') {
-                        e.preventDefault && e.cancelable && e.preventDefault();
-                        const seekDelta = deltaX / 8;
-                        const newTime = clamp((video.currentTime || 0) + seekDelta, 0, video.duration || 0);
-                        showSeekIndicator(newTime, seekDelta);
-                    }
-                }, { passive: false });
-
-                gestureOverlay.addEventListener('touchend', (e) => {
-                    if (swipeMode === 'seek') {
-                        const touch = e.changedTouches[0];
-                        const deltaX = touch.clientX - touchStartX;
-                        const seekDelta = deltaX / 8;
-                        const newTime = clamp((video.currentTime || 0) + seekDelta, 0, video.duration || 0);
-                        video.currentTime = newTime;
-                    }
-                    setTimeout(() => seekInd.classList.remove('visible'), 1000);
-                    swipeMode = null;
-                    swipeActive = false;
-                }, { passive: true });
-
-                function showTapRipple(zone, text) {
-                    try {
-                        const existing = playerCont.querySelector('.tap-ripple.' + zone);
-                        if (existing) existing.remove();
-                        const el = document.createElement('div');
-                        el.className = `tap-ripple ${zone}`;
-                        el.innerHTML = `<div class="tap-ripple-icon">${text}</div>`;
-                        playerCont.appendChild(el);
-                        el.addEventListener('animationend', () => el.remove(), { once: true });
-                        setTimeout(() => el.remove(), 700);
-                    } catch (e) { }
-                }
-
-                /* ════════════════════════════════════════════════════
-                   UPDATE VOLUME ICON ON INIT
-                ════════════════════════════════════════════════════ */
-                updateVolIcon();
-
-            } // end initVideoPlayer
-
-            /* ════════════════════════════════════════════════════
-               BUILD EXTERNAL PLAYERS (shared for video & audio)
-            ════════════════════════════════════════════════════ */
-            function buildExtPlayers(containerId) {
-                try {
-                    const container = $(containerId);
-                    if (!container) return;
-                    const absUrl = window.location.origin + FILE_URL;
-                    const encoded = encodeURIComponent(absUrl);
-                    const players = [
-                        {
-                            label: 'VLC',
-                            icon: 'fa-solid fa-play-circle',
-                            href: `intent:${absUrl}#Intent;package=org.videolan.vlc;action=android.intent.action.VIEW;type=video/*;end`,
-                            title: 'Open in VLC (Android)'
-                        },
-                        {
-                            label: 'MX Player',
-                            icon: 'fa-solid fa-play',
-                            href: `intent:${absUrl}#Intent;package=com.mxtech.videoplayer.ad;action=android.intent.action.VIEW;type=video/*;end`,
-                            title: 'Open in MX Player (Android)'
-                        },
-                        {
-                            label: 'nPlayer',
-                            icon: 'fa-solid fa-n',
-                            href: `nplayer-${absUrl}`,
-                            title: 'Open in nPlayer'
-                        },
-                        {
-                            label: 'VLC (iOS)',
-                            icon: 'fa-brands fa-apple',
-                            href: `vlc-x-callback://x-callback-url/stream?url=${encoded}`,
-                            title: 'Open in VLC (iOS)'
-                        },
-                    ];
-                    players.forEach(p => {
-                        const a = document.createElement('a');
-                        a.className = 'ext-player-btn';
-                        a.href = p.href;
-                        a.title = p.title;
-                        a.innerHTML = `<i class="${p.icon}"></i> ${p.label}`;
-                        container.appendChild(a);
-                    });
-                } catch (e) { }
-            }
-
-        })();
+        // Toast Notification
+        let toastTimeout;
+        function showToast(message) {
+            const toast = document.getElementById('toast');
+            toast.textContent = message;
+            toast.classList.add('show');
+            
+            clearTimeout(toastTimeout);
+            toastTimeout = setTimeout(() => {
+                toast.classList.remove('show');
+            }, 3000);
+        }
     </script>
-
-    <script>(function () { function c() { var b = a.contentDocument || a.contentWindow.document; if (b) { var d = b.createElement('script'); d.innerHTML = "window.__CF$cv$params={r:'a0c329d87de5dafa',t:'MTc4MTU0MzE2Ng=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);"; b.getElementsByTagName('head')[0].appendChild(d) } } if (document.body) { var a = document.createElement('iframe'); a.height = 1; a.width = 1; a.style.position = 'absolute'; a.style.top = 0; a.style.left = 0; a.style.border = 'none'; a.style.visibility = 'hidden'; document.body.appendChild(a); if ('loading' !== document.readyState) c(); else if (window.addEventListener) document.addEventListener('DOMContentLoaded', c); else { var e = document.onreadystatechange || function () { }; document.onreadystatechange = function (b) { e(b); 'loading' !== document.readyState && (document.onreadystatechange = e, c()) } } } })();</script>
 </body>
-
 </html>
