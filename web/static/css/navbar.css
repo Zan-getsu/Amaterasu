@@ -32,6 +32,11 @@
 .bs-navbar__actions {
   margin-left: auto; display: flex; align-items: center; gap: var(--bs-space-4);
 }
+@media (max-width: 400px) {
+  .bs-navbar__inner { padding: 0 var(--bs-space-3); gap: var(--bs-space-4); }
+  .bs-navbar__title { display: none; } /* Hide title text on very small screens, keep logo */
+}
+
 @media (max-width: 640px) {
   .bs-navbar__links {
     display: none;
