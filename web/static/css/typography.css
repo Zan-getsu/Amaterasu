@@ -13,3 +13,13 @@
 /* Labels */
 .bs-label { font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; }
 .bs-mono  { font-family: var(--bs-font-mono); font-size: 13px; }
+
+/* Effects */
+.bs-text-gold-gradient {
+  background: var(--bs-gradient-gold);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  color: transparent;
+  display: inline-block;
+}
