@@ -45,6 +45,10 @@ from .restart import (
     restart_notification,
     restart_sessions,
     resume_incomplete_tasks,
+    manage_incomplete_tasks,
+    single_resume_task,
+    single_delete_task,
+    back_manage_tasks,
 )
 from .rss import get_rss_menu, rss_listener
 from .search import initiate_search_tools, torrent_search, torrent_search_update
@@ -123,6 +127,10 @@ __all__ = [
     "restart_notification",
     "restart_sessions",
     "resume_incomplete_tasks",
+    "manage_incomplete_tasks",
+    "single_resume_task",
+    "single_delete_task",
+    "back_manage_tasks",
     "rss_listener",
     "run_shell",
     "select",

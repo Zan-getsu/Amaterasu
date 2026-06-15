@@ -309,6 +309,30 @@ def add_handlers():
         )
     )
     TgClient.bot.add_handler(
+        CallbackQueryHandler(
+            manage_incomplete_tasks,
+            filters=regex(r"^manage_tasks_\d+_\d+$"),
+        )
+    )
+    TgClient.bot.add_handler(
+        CallbackQueryHandler(
+            single_resume_task,
+            filters=regex(r"^rnt_\d+_\w+_\d+$"),
+        )
+    )
+    TgClient.bot.add_handler(
+        CallbackQueryHandler(
+            single_delete_task,
+            filters=regex(r"^dlt_\d+_\w+_\d+$"),
+        )
+    )
+    TgClient.bot.add_handler(
+        CallbackQueryHandler(
+            back_manage_tasks,
+            filters=regex(r"^back_manage_\d+$"),
+        )
+    )
+    TgClient.bot.add_handler(
         MessageHandler(
             restart_sessions,
             filters=command(BotCommands.RestartSessionsCommand, case_sensitive=True)

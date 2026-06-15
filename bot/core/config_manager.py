@@ -53,6 +53,7 @@ class Config:
     INCOMPLETE_TASK_NOTIFIER = False
     IMG_SOURCES = ["wallpaperflare"]
     INC_TASK_RESUME = False
+    INCOMPLETE_TASK_TTL = 86400
     INDEX_URL = ""
     IS_TEAM_DRIVE = False
     JD_EMAIL = ""

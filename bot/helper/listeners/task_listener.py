@@ -128,13 +128,12 @@ class TaskListener(TaskConfig):
  """,
             )
         if (
-            self.is_super_chat
-            and (Config.INCOMPLETE_TASK_NOTIFIER or Config.INC_TASK_RESUME)
+            (Config.INCOMPLETE_TASK_NOTIFIER or Config.INC_TASK_RESUME)
             and Config.DATABASE_URL
         ):
             await database.add_incomplete_task(
                 self.message.chat.id,
-                self.message.link,
+                self.message.link or f"pm:{self.user_id}:{self.message.id}",
                 self.tag,
                 user_id=self.user_id,
                 command=self.message.text or "",
@@ -144,6 +143,7 @@ class TaskListener(TaskConfig):
                     else 0
                 ),
                 name=self.name or "",
+                is_pm=not self.is_super_chat,
             )
 
     async def _metadata_handler_cb(self, _, message):
@@ -539,11 +539,12 @@ class TaskListener(TaskConfig):
         self, link, files, folders, mime_type, rclone_path="", dir_id=""
     ):
         if (
-            self.is_super_chat
-            and (Config.INCOMPLETE_TASK_NOTIFIER or Config.INC_TASK_RESUME)
+            (Config.INCOMPLETE_TASK_NOTIFIER or Config.INC_TASK_RESUME)
             and Config.DATABASE_URL
         ):
-            await database.rm_complete_task(self.message.link)
+            await database.rm_complete_task(
+                self.message.link or f"pm:{self.user_id}:{self.message.id}"
+            )
         msg = (
             f"<b><i>{escape(self.name)}</i></b>\n│"
             f"\n┟ <b>Task Size</b> → {get_readable_file_size(self.size)}"
@@ -790,11 +791,12 @@ class TaskListener(TaskConfig):
             await update_status_message(self.message.chat.id)
 
         if (
-            self.is_super_chat
-            and (Config.INCOMPLETE_TASK_NOTIFIER or Config.INC_TASK_RESUME)
+            (Config.INCOMPLETE_TASK_NOTIFIER or Config.INC_TASK_RESUME)
             and Config.DATABASE_URL
         ):
-            await database.rm_complete_task(self.message.link)
+            await database.rm_complete_task(
+                self.message.link or f"pm:{self.user_id}:{self.message.id}"
+            )
 
         async with queue_dict_lock:
             if self.mid in queued_dl:
@@ -828,11 +830,12 @@ class TaskListener(TaskConfig):
             await update_status_message(self.message.chat.id)
 
         if (
-            self.is_super_chat
-            and (Config.INCOMPLETE_TASK_NOTIFIER or Config.INC_TASK_RESUME)
+            (Config.INCOMPLETE_TASK_NOTIFIER or Config.INC_TASK_RESUME)
             and Config.DATABASE_URL
         ):
-            await database.rm_complete_task(self.message.link)
+            await database.rm_complete_task(
+                self.message.link or f"pm:{self.user_id}:{self.message.id}"
+            )
 
         async with queue_dict_lock:
             if self.mid in queued_dl:

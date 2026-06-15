@@ -279,28 +279,25 @@ class DbManager:
         await self.db.rss[_part()].delete_one({"_id": user_id})
 
     async def add_incomplete_task(
-        self, cid, link, tag, user_id=None, command="", reply_to_msg_id=0, name=""
+        self, cid, link, tag, user_id=None, command="", reply_to_msg_id=0, name="", is_pm=False
     ):
         if self._return:
             return
-        data = {
-            "cid": cid,
-            "tag": tag,
-            "link": link,
-            "restart_notified": False,
-            "schema_version": INCOMPLETE_TASK_SCHEMA,
-            "created_at": datetime.now(timezone.utc),
-        }
-        if user_id is not None:
-            data["user_id"] = user_id
-        if command:
-            data["command"] = command
-        if reply_to_msg_id:
-            data["reply_to_msg_id"] = reply_to_msg_id
-        if name:
-            data["name"] = name
-        await self.db.tasks[TgClient.ID].update_one(
-            {"_id": link}, {"$set": data}, upsert=True
+        await self.db.tasks[str(TgClient.ID)].update_one(
+            {"_id": link},
+            {"$setOnInsert": {
+                "cid": cid,
+                "tag": tag,
+                "user_id": user_id,
+                "command": command,
+                "reply_to_msg_id": reply_to_msg_id,
+                "name": name,
+                "is_pm": is_pm,
+                "restart_notified": False,
+                "schema_version": INCOMPLETE_TASK_SCHEMA,
+                "created_at": datetime.now(timezone.utc),
+            }},
+            upsert=True,
         )
 
     async def get_pm_uids(self):
@@ -321,14 +318,13 @@ class DbManager:
         await self.db.pm_users[_part()].delete_one({"_id": user_id})
 
     async def rm_complete_task(self, link):
-        if self._return:
+        if self._return or not link:
             return
-        query = {"$or": [{"_id": link}, {"link": link}]}
-        collection = str(TgClient.ID)
-        await self.db.tasks[collection].delete_many(query)
-        legacy_collection = _part()
-        if legacy_collection != collection:
-            await self.db.tasks[legacy_collection].delete_many(query)
+        # Normalize: ensure consistent format
+        normalized = str(link).strip()
+        result = await self.db.tasks[str(TgClient.ID)].delete_one({"_id": normalized})
+        if result.deleted_count == 0:
+            LOGGER.debug(f"rm_complete_task: no doc found for link={normalized!r}")
 
     async def discard_legacy_incomplete_tasks(self):
         if self._return:
@@ -342,11 +338,14 @@ class DbManager:
         if self._return:
             return []
         query = {"schema_version": INCOMPLETE_TASK_SCHEMA}
-        if not notified:
+        if notified is None:
+            pass  # no filter on restart_notified
+        elif not notified:
             query["restart_notified"] = {"$ne": True}
-        return [
-            row async for row in self.db.tasks[TgClient.ID].find(query)
-        ]
+        else:
+            query["restart_notified"] = True
+        cursor = self.db.tasks[str(TgClient.ID)].find(query)
+        return await cursor.to_list(length=None)
 
     async def update_incomplete_task(self, link, data):
         if self._return:
