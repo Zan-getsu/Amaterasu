@@ -146,7 +146,7 @@ document.addEventListener("DOMContentLoaded", () => {
   // ------------------------------
 
   // Handle Accordion specific to this page if not handled globally
-  document.querySelectorAll('.bs-accordion-trigger').forEach(trigger => {
+  document.querySelectorAll('.acc-trigger').forEach(trigger => {
     trigger.addEventListener('click', () => {
       const isOpen = trigger.classList.contains('open');
       trigger.classList.toggle('open', !isOpen);
@@ -377,13 +377,13 @@ document.addEventListener("DOMContentLoaded", () => {
 
   async function renderProfilesList() {
     if(!profilesListContainer) return;
-    profilesListContainer.innerHTML = '<div class="bs-empty"><i class="fa-solid fa-spinner fa-spin bs-empty__icon"></i><h3 class="bs-empty__title">Loading...</h3></div>';
+    profilesListContainer.innerHTML = '<div style="text-align:center; padding: 40px; color: var(--bs-text-muted);"><i data-lucide="loader" class="fa-spin" style="width:24px;height:24px;margin-bottom:8px;"></i><h3>Loading...</h3></div>';
     
     cachedProfiles = await profileApi.list();
     const ids = Object.keys(cachedProfiles);
     
     if(ids.length === 0) {
-      profilesListContainer.innerHTML = '<div class="bs-empty" style="padding: 40px;"><i class="fa-solid fa-folder-open bs-empty__icon"></i><h3 class="bs-empty__title">No Profiles Found</h3><p class="bs-empty__subtitle">Create and save a profile first.</p></div>';
+      profilesListContainer.innerHTML = '<div style="text-align:center; padding: 40px; color: var(--bs-text-muted);"><i data-lucide="folder-open" style="width:24px;height:24px;margin-bottom:8px;"></i><h3 style="color:var(--bs-text-primary); margin-bottom:4px;">No Profiles Found</h3><p style="font-size:13px;">Create and save a profile first.</p></div>';
       return;
     }
 
@@ -391,27 +391,28 @@ document.addEventListener("DOMContentLoaded", () => {
     for(const id of ids) {
       const p = cachedProfiles[id];
       html += `
-        <div class="bs-card bs-card--elevated" style="padding: 16px; margin-bottom: 8px;">
-          <div class="bs-flex" style="justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 12px;">
+        <div style="background: var(--bs-graphite); border: 1px solid var(--bs-border); border-radius: var(--bs-radius-md); padding: 16px; margin-bottom: 8px;">
+          <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 12px;">
             <div>
               <div style="font-weight: 700; color: var(--bs-text-primary); margin-bottom: 4px;">
                 ${p.name || 'Unnamed Profile'} 
-                ${p.is_default ? '<span class="bs-badge bs-badge--success" style="margin-left: 8px;">Default</span>' : ''}
+                ${p.is_default ? '<span class="chip" style="margin-left: 8px; border-color: #2ecc71; color: #2ecc71;">Default</span>' : ''}
               </div>
               <div style="font-size: 12px; color: var(--bs-text-muted);">
                 <i class="fa-solid fa-film"></i> ${p.video_codec || 'copy'} · <i class="fa-solid fa-music"></i> ${p.audio_codec || 'copy'}
               </div>
             </div>
-            <div class="bs-flex" style="gap: 8px;">
-              ${!p.is_default ? `<button onclick="actionProfile('default', '${id}')" class="bs-btn bs-btn--sm bs-btn--ghost" title="Set Default"><i class="fa-solid fa-star"></i></button>` : ''}
-              <button onclick="actionProfile('load', '${id}')" class="bs-btn bs-btn--sm bs-btn--primary">Load</button>
-              <button onclick="actionProfile('delete', '${id}')" class="bs-btn bs-btn--sm bs-btn--danger"><i class="fa-solid fa-trash"></i></button>
+            <div style="display: flex; gap: 8px;">
+              ${!p.is_default ? `<button onclick="actionProfile('default', '${id}')" class="btn btn--ghost btn--sm" title="Set Default"><i data-lucide="star" style="width:14px;height:14px;"></i></button>` : ''}
+              <button onclick="actionProfile('load', '${id}')" class="btn btn--primary btn--sm">Load</button>
+              <button onclick="actionProfile('delete', '${id}')" class="btn btn--ghost btn--sm" style="color: #e74c3c; border-color: rgba(231,76,60,0.3);"><i data-lucide="trash-2" style="width:14px;height:14px;"></i></button>
             </div>
           </div>
         </div>
       `;
     }
     profilesListContainer.innerHTML = html;
+    if (window.lucide) { window.lucide.createIcons(); }
   }
 
   document.getElementById('btn-my-profiles')?.addEventListener('click', () => {
