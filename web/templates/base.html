@@ -48,6 +48,13 @@
 
   <div id="bs-toast-container" class="bs-toast-container"></div>
   <script src="/static/js/ui.js" defer></script>
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <script>
+    document.addEventListener("DOMContentLoaded", () => {
+      lucide.createIcons();
+    });
+  </script>
   {% block extra_js %}{% endblock %}
 </body>
 </html>

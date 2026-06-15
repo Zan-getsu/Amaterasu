@@ -2,11 +2,300 @@
 
 {% block title %}Amaterasu Status{% endblock %}
 
+{% block extra_css %}
+<style>
+/* ===== ANIMATIONS ===== */
+@keyframes float {
+  0%, 100% { transform: translateY(0px); }
+  50%      { transform: translateY(-8px); }
+}
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(20px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.fade-in {
+  animation: fadeInUp 0.5s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  opacity: 0;
+}
+.fade-in-1 { animation-delay: 0.1s; }
+.fade-in-2 { animation-delay: 0.2s; }
+.fade-in-3 { animation-delay: 0.3s; }
+.fade-in-4 { animation-delay: 0.4s; }
+.fade-in-5 { animation-delay: 0.5s; }
+
+/* ===== HERO ===== */
+.hero-section {
+  padding: var(--bs-space-20) 0 var(--bs-space-16);
+  text-align: center;
+  position: relative;
+  overflow: hidden;
+}
+.hero-section::before {
+  content: '';
+  position: absolute;
+  top: -200px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 800px;
+  height: 800px;
+  background: radial-gradient(circle, rgba(212,175,55,0.06) 0%, transparent 70%);
+  pointer-events: none;
+}
+.hero-logo-container {
+  display: flex;
+  justify-content: center;
+  margin-bottom: var(--bs-space-6);
+  animation: float 6s ease-in-out infinite;
+}
+.hero-wordmark {
+  font-family: var(--bs-font-mono);
+  font-size: clamp(28px, 5vw, 48px);
+  font-weight: 800;
+  letter-spacing: 0.15em;
+  color: var(--bs-gold);
+  margin-bottom: var(--bs-space-4);
+}
+.hero-version {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 10px;
+  border-radius: var(--bs-radius-sm);
+  font-size: 11px;
+  font-weight: 600;
+  font-family: var(--bs-font-mono);
+  background: var(--bs-gold-dim);
+  color: var(--bs-gold);
+  border: 1px solid var(--bs-gold-border);
+  margin-bottom: var(--bs-space-4);
+}
+.hero-subtitle {
+  font-size: clamp(14px, 2vw, 16px);
+  color: var(--bs-text-muted);
+  max-width: 480px;
+  margin: 0 auto var(--bs-space-8);
+  line-height: 1.6;
+}
+.hero-actions {
+  display: flex;
+  justify-content: center;
+  gap: var(--bs-space-3);
+  flex-wrap: wrap;
+}
+
+/* ===== STATS ===== */
+.stats-section {
+  padding: var(--bs-space-10) 0;
+}
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--bs-space-5);
+  max-width: 900px;
+  margin: 0 auto;
+}
+@media (max-width: 768px) {
+  .stats-grid { grid-template-columns: 1fr; }
+}
+.stat-card {
+  background: var(--bs-graphite);
+  border: 1px solid var(--bs-border);
+  border-radius: var(--bs-radius-lg);
+  padding: var(--bs-space-6);
+  text-align: center;
+  transition: border-color var(--bs-transition-base), box-shadow var(--bs-transition-base);
+}
+.stat-card:hover {
+  border-color: var(--bs-gold-border);
+  box-shadow: var(--bs-shadow-gold);
+}
+.stat-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: var(--bs-radius-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto var(--bs-space-4);
+}
+.stat-value {
+  font-size: 28px;
+  font-weight: 800;
+  color: var(--bs-text-primary);
+  font-family: var(--bs-font-mono);
+  margin-bottom: var(--bs-space-1);
+}
+.stat-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--bs-text-muted);
+}
+
+/* ===== FEATURES ===== */
+.features-section {
+  padding: var(--bs-space-16) 0;
+}
+.features-header {
+  text-align: center;
+  margin-bottom: var(--bs-space-12);
+}
+.features-title {
+  font-size: clamp(22px, 3vw, 30px);
+  font-weight: 700;
+  letter-spacing: -0.025em;
+  color: var(--bs-text-primary);
+  margin-bottom: var(--bs-space-3);
+}
+.features-subtitle {
+  font-size: 14px;
+  color: var(--bs-text-muted);
+  max-width: 500px;
+  margin: 0 auto;
+}
+.features-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--bs-space-6);
+}
+@media (max-width: 1024px) {
+  .features-grid { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 640px) {
+  .features-grid { grid-template-columns: 1fr; }
+}
+.feature-card {
+  background: transparent;
+  border: 1px solid var(--bs-border-subtle);
+  border-radius: var(--bs-radius-lg);
+  padding: var(--bs-space-6);
+  transition: all var(--bs-transition-base);
+}
+.feature-card:hover {
+  background: var(--bs-elevated);
+  border-color: var(--bs-border);
+}
+.feature-icon-wrap {
+  width: 32px;
+  height: 32px;
+  border-radius: var(--bs-radius-sm);
+  background: var(--bs-gold-dim);
+  color: var(--bs-gold);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: var(--bs-space-4);
+}
+.feature-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--bs-space-2);
+}
+.feature-title {
+  font-weight: 600;
+  color: var(--bs-text-primary);
+}
+.feature-badge {
+  font-size: 10px;
+  font-weight: 700;
+  font-family: var(--bs-font-mono);
+  padding: 2px 6px;
+  background: var(--bs-elevated-3);
+  color: var(--bs-text-muted);
+  border-radius: 4px;
+  letter-spacing: 0.05em;
+}
+.feature-desc {
+  font-size: 13px;
+  color: var(--bs-text-muted);
+  line-height: 1.6;
+}
+
+/* ===== FOOTER ===== */
+.footer {
+  border-top: 1px solid var(--bs-border);
+  padding: var(--bs-space-6) 0;
+  margin-top: var(--bs-space-16);
+  background: var(--bs-graphite);
+}
+.footer-inner {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 0 var(--bs-space-6);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--bs-space-4);
+}
+.footer-text {
+  font-size: 13px;
+  color: var(--bs-text-muted);
+  font-family: var(--bs-font-mono);
+}
+.footer-links {
+  display: flex;
+  gap: var(--bs-space-4);
+}
+.footer-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--bs-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  transition: color var(--bs-transition-fast);
+}
+.footer-link:hover {
+  color: var(--bs-gold);
+}
+
+.btn-primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 20px;
+  background: var(--bs-gold);
+  color: var(--bs-obsidian);
+  border-radius: var(--bs-radius-sm);
+  font-weight: 600;
+  font-size: 14px;
+  transition: all var(--bs-transition-fast);
+  border: none;
+}
+.btn-primary:hover {
+  background: var(--bs-gold-hover);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(212,175,55,0.3);
+}
+.btn-secondary {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 20px;
+  background: transparent;
+  color: var(--bs-text-primary);
+  border: 1px solid var(--bs-border);
+  border-radius: var(--bs-radius-sm);
+  font-weight: 600;
+  font-size: 14px;
+  transition: all var(--bs-transition-fast);
+}
+.btn-secondary:hover {
+  background: var(--bs-elevated);
+  border-color: var(--bs-text-secondary);
+}
+</style>
+{% endblock %}
+
 {% block content %}
-<section class="bs-section bs-section--lg bs-text-center">
-  <div class="bs-container">
-    <!-- Hero Section -->
-    <svg class="bs-navbar__logo bs-mb-6" viewBox="0 0 32 32" fill="none" style="width: 80px; height: 80px; margin: 0 auto; display: block;" xmlns="http://www.w3.org/2000/svg">
+<!-- Hero -->
+<section class="hero-section">
+  <div class="hero-logo-container fade-in fade-in-1">
+    <svg width="80" height="80" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
       <circle cx="16" cy="16" r="12" fill="#0B0F14" stroke="#D4AF37" stroke-width="2"/>
       <path d="M32 16C32 24.8366 24.8366 32 16 32C7.16344 32 0 24.8366 0 16C0 7.16344 7.16344 0 16 0C24.8366 0 32 7.16344 32 16ZM28 16C28 9.37258 22.6274 4 16 4C9.37258 4 4 9.37258 4 16C4 22.6274 9.37258 28 16 28C22.6274 28 28 22.6274 28 16Z" fill="url(#paint0_radial)"/>
       <defs>
@@ -16,81 +305,171 @@
         </radialGradient>
       </defs>
     </svg>
-    <h1 class="bs-h1 bs-mb-2" style="color: var(--bs-gold); font-family: var(--bs-font-mono);">AMATERASU</h1>
-    <div class="bs-mb-4">
-      <span class="bs-badge bs-badge--neutral">{% if version %}{{ version }}{% else %}v1.2.1{% endif %}</span>
-      <div class="bs-status-badge bs-status-badge--online">
-        <span class="bs-status-badge__dot"></span>
-        <span>{% if status %}{{ status }}{% else %}Online{% endif %}</span>
-      </div>
-    </div>
-    <p class="bs-body-lg bs-section-subtitle" style="margin: 0 auto;">Telegram Mirroring Infrastructure</p>
-    {% if bot_name %}<p class="bs-body bs-mt-2">Bot: {{ bot_name }}</p>{% endif %}
+  </div>
+  <h1 class="hero-wordmark fade-in fade-in-2">AMATERASU</h1>
+  <div class="hero-version fade-in fade-in-2">
+    <i data-lucide="shield" style="width:12px;height:12px;"></i>
+    {% if version %}{{ version }}{% else %}v2.0.0-rc.1{% endif %}
+  </div>
+  <p class="hero-subtitle fade-in fade-in-3">
+    Self-hosted Telegram mirroring infrastructure with multi-engine downloads,
+    media processing, and enterprise-grade resilience.
+  </p>
+  {% if bot_name %}<p class="bs-caption bs-text-muted bs-mb-6 fade-in fade-in-3">Node: {{ bot_name }}</p>{% endif %}
+  <div class="hero-actions fade-in fade-in-4">
+    <!-- Links removed per user instruction to keep pages isolated -->
+    <!-- You can optionally add generic action buttons here if you'd like -->
   </div>
 </section>
 
-<section class="bs-section bs-section--sm">
-  <div class="bs-container bs-container--md">
-    <!-- Details Grid -->
-    <div class="bs-grid-2 bs-mt-6" style="text-align: left;">
-      <div class="bs-card bs-card--glass" style="padding: var(--bs-space-4);">
-        <div class="bs-label bs-text-muted bs-mb-2">Bot Name</div>
-        <div class="bs-h3 bs-text-gold-gradient">{% if bot_name %}{{ bot_name }}{% else %}Amaterasu{% endif %}</div>
+<!-- Stats Grid -->
+<section class="stats-section">
+  <div style="max-width: 1280px; margin: 0 auto; padding: 0 var(--bs-space-6);">
+    <div class="stats-grid">
+      <!-- Active Tasks -->
+      <div class="stat-card fade-in fade-in-2">
+        <div class="stat-icon" style="background: rgba(46, 204, 113, 0.15);">
+          <i data-lucide="activity" style="color: var(--bs-success); width: 20px; height: 20px;"></i>
+        </div>
+        <div class="stat-value" id="stat-tasks">0</div>
+        <div class="stat-label">Active Tasks</div>
       </div>
-      <div class="bs-card bs-card--glass" style="padding: var(--bs-space-4);">
-        <div class="bs-label bs-text-muted bs-mb-2">Owner</div>
-        <div class="bs-h3 bs-text-gold-gradient">{% if owner %}{{ owner }}{% else %}Admin{% endif %}</div>
+      <!-- Server CPU -->
+      <div class="stat-card fade-in fade-in-3">
+        <div class="stat-icon" style="background: rgba(212, 175, 55, 0.15);">
+          <i data-lucide="cpu" style="color: var(--bs-gold); width: 20px; height: 20px;"></i>
+        </div>
+        <div class="stat-value"><span id="stat-cpu">0</span>%</div>
+        <div class="stat-label">Server CPU</div>
       </div>
-    </div>
-
-    <!-- Stats Grid -->
-    <div class="bs-grid-3 bs-mt-6 bs-mb-10" id="stats-grid">
-      <div class="bs-card bs-card--glass bs-text-center">
-        <h3 class="bs-h2 bs-mb-2" id="stat-tasks">0</h3>
-        <p class="bs-body-sm bs-text-muted">Active Tasks</p>
-      </div>
-      <div class="bs-card bs-card--glass bs-text-center">
-        <h3 class="bs-h2 bs-mb-2"><span id="stat-cpu">0</span>%</h3>
-        <p class="bs-body-sm bs-text-muted">Server CPU</p>
-      </div>
-      <div class="bs-card bs-card--glass bs-text-center">
-        <h3 class="bs-h2 bs-mb-2" id="stat-uptime">0s</h3>
-        <p class="bs-body-sm bs-text-muted">Uptime</p>
-      </div>
-    </div>
-
-    <!-- Feature Cards Grid -->
-    <div class="bs-grid-2">
-      <div class="bs-card">
-        <h3 class="bs-h4 bs-mb-2">Multi-Engine Downloads</h3>
-        <p class="bs-body-sm bs-text-muted">Support for qBittorrent, Aria2c, and SABnzbd with automatic routing.</p>
-      </div>
-      <div class="bs-card">
-        <h3 class="bs-h4 bs-mb-2">FileToLink Streaming</h3>
-        <p class="bs-body-sm bs-text-muted">Instant web streaming from Telegram files with byte-range support.</p>
-      </div>
-      <div class="bs-card">
-        <h3 class="bs-h4 bs-mb-2">Auto-Rename Engine</h3>
-        <p class="bs-body-sm bs-text-muted">Intelligent metadata extraction and dynamic renaming patterns.</p>
-      </div>
-      <div class="bs-card">
-        <h3 class="bs-h4 bs-mb-2">Enterprise Resilience</h3>
-        <p class="bs-body-sm bs-text-muted">Built for high availability and concurrent load balancing.</p>
-      </div>
-      <div class="bs-card">
-        <h3 class="bs-h4 bs-mb-2">Media Processing</h3>
-        <p class="bs-body-sm bs-text-muted">Hardware-accelerated FFmpeg profiles for AV1, HEVC, and OPUS.</p>
-      </div>
-      <div class="bs-card">
-        <h3 class="bs-h4 bs-mb-2">RSS Automation</h3>
-        <p class="bs-body-sm bs-text-muted">Fully automated download feeds from multiple tracker sources.</p>
+      <!-- Uptime -->
+      <div class="stat-card fade-in fade-in-4">
+        <div class="stat-icon" style="background: rgba(52, 152, 219, 0.15);">
+          <i data-lucide="clock" style="color: var(--bs-info); width: 20px; height: 20px;"></i>
+        </div>
+        <div class="stat-value" id="stat-uptime">0s</div>
+        <div class="stat-label">Uptime</div>
       </div>
     </div>
   </div>
 </section>
 
-<footer class="bs-section bs-section--sm bs-text-center">
-  <p class="bs-caption bs-text-muted">&copy; 2026 Amaterasu. All rights reserved.</p>
+<!-- Features -->
+<section class="features-section">
+  <div style="max-width: 1280px; margin: 0 auto; padding: 0 var(--bs-space-6);">
+    <div class="features-header">
+      <h2 class="features-title">Infrastructure Components</h2>
+      <p class="features-subtitle">A comprehensive toolkit for automated media acquisition and processing.</p>
+    </div>
+    <div class="features-grid">
+      <!-- Feature 1 -->
+      <div class="feature-card fade-in" style="animation-delay: 0.1s;">
+        <div class="feature-icon-wrap"><i data-lucide="download" style="width: 18px; height: 18px;"></i></div>
+        <div class="feature-header">
+          <span class="feature-title">Multi-Engine Downloads</span>
+          <span class="feature-badge">Core</span>
+        </div>
+        <p class="feature-desc">Aria2c, qBittorrent, JDownloader, Sabnzbd - unified under one interface with automatic engine selection.</p>
+      </div>
+      <!-- Feature 2 -->
+      <div class="feature-card fade-in" style="animation-delay: 0.18s;">
+        <div class="feature-icon-wrap"><i data-lucide="link-2" style="width: 18px; height: 18px;"></i></div>
+        <div class="feature-header">
+          <span class="feature-title">FileToLink Streaming</span>
+          <span class="feature-badge">F2L</span>
+        </div>
+        <p class="feature-desc">Generate direct download and streamable links for Telegram files with token-based authentication.</p>
+      </div>
+      <!-- Feature 3 -->
+      <div class="feature-card fade-in" style="animation-delay: 0.26s;">
+        <div class="feature-icon-wrap"><i data-lucide="file-text" style="width: 18px; height: 18px;"></i></div>
+        <div class="feature-header">
+          <span class="feature-title">Auto-Rename Engine</span>
+          <span class="feature-badge">Smart</span>
+        </div>
+        <p class="feature-desc">Intelligent file renaming with pattern matching, episode detection, and custom template variables.</p>
+      </div>
+      <!-- Feature 4 -->
+      <div class="feature-card fade-in" style="animation-delay: 0.34s;">
+        <div class="feature-icon-wrap"><i data-lucide="shield" style="width: 18px; height: 18px;"></i></div>
+        <div class="feature-header">
+          <span class="feature-title">Enterprise Resilience</span>
+          <span class="feature-badge">Robust</span>
+        </div>
+        <p class="feature-desc">Automatic retry, connection pooling, multi-account rotation, and graceful degradation.</p>
+      </div>
+      <!-- Feature 5 -->
+      <div class="feature-card fade-in" style="animation-delay: 0.42s;">
+        <div class="feature-icon-wrap"><i data-lucide="film" style="width: 18px; height: 18px;"></i></div>
+        <div class="feature-header">
+          <span class="feature-title">Media Processing</span>
+          <span class="feature-badge">FFmpeg</span>
+        </div>
+        <p class="feature-desc">FFmpeg-powered encoding with profile presets, codec selection, and quality optimization.</p>
+      </div>
+      <!-- Feature 6 -->
+      <div class="feature-card fade-in" style="animation-delay: 0.5s;">
+        <div class="feature-icon-wrap"><i data-lucide="rss" style="width: 18px; height: 18px;"></i></div>
+        <div class="feature-header">
+          <span class="feature-title">RSS Automation</span>
+          <span class="feature-badge">Auto</span>
+        </div>
+        <p class="feature-desc">Monitor feeds, auto-download new episodes, and organize with intelligent categorization.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Architecture overview -->
+<section style="padding: var(--bs-space-12) 0 var(--bs-space-16);">
+  <div style="max-width: 900px; margin: 0 auto; padding: 0 var(--bs-space-6);">
+    <div style="background: var(--bs-graphite); border: 1px solid var(--bs-border); border-radius: var(--bs-radius-xl); overflow: hidden;">
+      <div style="display: flex; align-items: center; justify-content: space-between; padding: 12px 20px; background: var(--bs-elevated); border-bottom: 1px solid var(--bs-border);">
+        <span style="font-size: 11px; color: var(--bs-text-muted); font-family: var(--bs-font-mono); text-transform: uppercase; letter-spacing: 0.1em;">
+          System Architecture
+        </span>
+        <div style="display: flex; gap: 6px;">
+          <span style="width: 8px; height: 8px; border-radius: 50%; background: var(--bs-error); opacity: 0.6;"></span>
+          <span style="width: 8px; height: 8px; border-radius: 50%; background: var(--bs-warning); opacity: 0.6;"></span>
+          <span style="width: 8px; height: 8px; border-radius: 50%; background: var(--bs-success); opacity: 0.6;"></span>
+        </div>
+      </div>
+      <pre style="padding: var(--bs-space-6); font-family: var(--bs-font-mono); font-size: 12px; line-height: 1.8; color: var(--bs-text-muted); overflow: auto; margin: 0;">
++-------------------------------------------------------------+
+|                    AMATERASU v2.0                           |
++-------------------------------------------------------------+
+|  Aria2c  |   qBit   |  JDown   |   Sabd   |    Rclone       |
++-------------------------------------------------------------+
+|              FastAPI Web Interface (8080)                   |
++-------------------------------------------------------------+
+|  Mirror  |  Leech   |  Encode  |  F2Link  |     RSS         |
++-------------------------------------------------------------+
+|                 MongoDB | Redis | Pyrogram                  |
++-------------------------------------------------------------+
+|              Telegram Bot API Gateway                       |
++-------------------------------------------------------------+
+      </pre>
+    </div>
+  </div>
+</section>
+
+<!-- Footer -->
+<footer class="footer">
+  <div class="footer-inner">
+    <div style="display: flex; align-items: center; gap: var(--bs-space-3);">
+      <svg width="18" height="18" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <circle cx="16" cy="16" r="12" fill="#0B0F14" stroke="#D4AF37" stroke-width="2"/>
+        <path d="M32 16C32 24.8366 24.8366 32 16 32C7.16344 32 0 24.8366 0 16C0 7.16344 7.16344 0 16 0C24.8366 0 32 7.16344 32 16ZM28 16C28 9.37258 22.6274 4 16 4C9.37258 4 4 9.37258 4 16C4 22.6274 9.37258 28 16 28C22.6274 28 28 22.6274 28 16Z" fill="url(#paint0_radial)"/>
+      </svg>
+      <span class="footer-text">© 2026 Amaterasu — Black Sun Infrastructure</span>
+    </div>
+    <div class="footer-links">
+      <a href="https://git.nbmirror.qzz.io/itsniloy/Amaterasu" class="footer-link" target="_blank" rel="noopener noreferrer">
+        <i data-lucide="zap" style="width: 12px; height: 12px;"></i> Source
+      </a>
+      <!-- Links removed per user instruction -->
+    </div>
+  </div>
 </footer>
 {% endblock %}
 
@@ -101,9 +480,12 @@
       const res = await fetch('/api/status');
       if (res.ok) {
         const data = await res.json();
-        document.getElementById('stat-tasks').textContent = data.active_tasks;
-        document.getElementById('stat-cpu').textContent = data.cpu;
-        document.getElementById('stat-uptime').textContent = data.uptime;
+        const statTasks = document.getElementById('stat-tasks');
+        const statCpu = document.getElementById('stat-cpu');
+        const statUptime = document.getElementById('stat-uptime');
+        if(statTasks) statTasks.textContent = data.active_tasks;
+        if(statCpu) statCpu.textContent = data.cpu;
+        if(statUptime) statUptime.textContent = data.uptime;
       }
     } catch (e) {
       console.error('Failed to fetch bot stats:', e);

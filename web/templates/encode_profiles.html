@@ -4,46 +4,74 @@
 
 {% block extra_css %}
 <style>
-/* Specific Encode Page Styles from Prompt */
-.bs-chip {
-  display: inline-flex; align-items: center;
-  padding: 3px 8px; border-radius: var(--bs-radius-sm);
-  font-size: 11px; font-family: var(--bs-font-mono);
-  background: var(--bs-elevated); color: var(--bs-gold);
-  border: 1px solid var(--bs-gold-border);
-  cursor: pointer; transition: all var(--bs-transition-fast);
-}
-.bs-chip:hover { background: var(--bs-gold-dim); }
+.encode-page { max-width: 1280px; margin: 0 auto; padding: var(--bs-space-8) var(--bs-space-6) var(--bs-space-16); }
+.encode-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--bs-space-8); flex-wrap: wrap; gap: var(--bs-space-4); }
+.encode-title { font-size: clamp(22px, 3vw, 28px); font-weight: 700; letter-spacing: -0.025em; color: var(--bs-text-primary); margin:0; }
+.encode-title-sub { font-size: 13px; color: var(--bs-text-muted); margin-top: 4px; }
+.encode-actions { display: flex; gap: var(--bs-space-3); flex-wrap: wrap; }
+.encode-layout { display: grid; grid-template-columns: 1fr 420px; gap: var(--bs-space-6); align-items: start; }
+@media (max-width: 1024px) { .encode-layout { grid-template-columns: 1fr; } .encode-preview { position: static !important; } }
+.encode-preview { position: sticky; top: 80px; }
 
-.bs-slider { -webkit-appearance: none; appearance: none; width: 100%; height: 4px; border-radius: 2px; background: var(--bs-elevated-2); outline: none; margin-top: 10px; }
-.bs-slider::-webkit-slider-thumb {
-  -webkit-appearance: none; appearance: none;
-  width: 16px; height: 16px; border-radius: 50%;
-  background: var(--bs-gold); border: 2px solid var(--bs-graphite);
-  cursor: pointer; box-shadow: 0 0 8px var(--bs-gold-glow);
-  transition: transform var(--bs-transition-fast);
-}
-.bs-slider::-webkit-slider-thumb:hover { transform: scale(1.2); }
+/* Accordion */
+.acc-item { border: 1px solid var(--bs-border); border-radius: var(--bs-radius-lg); overflow: hidden; margin-bottom: var(--bs-space-3); transition: border-color var(--bs-transition-base); }
+.acc-item:hover { border-color: rgba(212,175,55,0.15); }
+.acc-trigger { width: 100%; display: flex; align-items: center; justify-content: space-between; padding: 16px 20px; background: var(--bs-graphite); color: var(--bs-text-primary); font-size: 14px; font-weight: 600; cursor: pointer; border: none; transition: background var(--bs-transition-fast); gap: var(--bs-space-3); }
+.acc-trigger:hover { background: var(--bs-elevated); }
+.acc-trigger--open { color: var(--bs-gold); }
+.acc-trigger-left { display: flex; align-items: center; gap: var(--bs-space-3); }
+.acc-trigger-icon { width: 28px; height: 28px; border-radius: var(--bs-radius-sm); background: var(--bs-gold-dim); display: flex; align-items: center; justify-content: center; color: var(--bs-gold); flex-shrink: 0; }
+.acc-content { padding: var(--bs-space-5) var(--bs-space-5) var(--bs-space-6); background: var(--bs-graphite); border-top: 1px solid var(--bs-border); display: flex; flex-direction: column; gap: var(--bs-space-5); }
 
-.bs-toggle { position: relative; display: inline-flex; align-items: center; cursor: pointer; gap: 8px; }
-.bs-toggle input { opacity: 0; width: 0; height: 0; position: absolute; }
-.bs-toggle__track {
-  width: 40px; height: 22px; border-radius: 11px;
-  background: var(--bs-elevated-2); border: 1px solid var(--bs-border);
-  transition: all var(--bs-transition-base); position: relative;
-}
-.bs-toggle input:checked + .bs-toggle__track { background: var(--bs-gold); border-color: var(--bs-gold); }
-.bs-toggle__thumb {
-  position: absolute; top: 2px; left: 2px;
-  width: 16px; height: 16px; border-radius: 50%;
-  background: var(--bs-graphite); transition: transform var(--bs-transition-fast);
-  box-shadow: var(--bs-shadow-sm);
-}
-.bs-toggle input:checked ~ .bs-toggle__thumb { transform: translateX(18px); }
+/* Form Elements */
+.form-group { display: flex; flex-direction: column; gap: var(--bs-space-2); }
+.form-label { font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--bs-text-muted); }
+.form-input, .form-select { width: 100%; padding: 10px 14px; background: var(--bs-elevated); border: 1px solid var(--bs-border); border-radius: var(--bs-radius-md); color: var(--bs-text-primary); font-size: 14px; font-family: var(--bs-font-sans); transition: all var(--bs-transition-fast); outline: none; }
+.form-input::placeholder { color: var(--bs-text-disabled); }
+.form-input:hover, .form-select:hover { border-color: rgba(212,175,55,0.25); }
+.form-input:focus, .form-select:focus { border-color: var(--bs-gold-border); box-shadow: 0 0 0 3px var(--bs-gold-dim); background: var(--bs-elevated-2); }
+.form-select { appearance: none; cursor: pointer; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%236B7A8D' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 12px center; padding-right: 36px; }
+.form-row { display: grid; grid-template-columns: 1fr 1fr; gap: var(--bs-space-4); }
+@media (max-width: 640px) { .form-row { grid-template-columns: 1fr; } }
+.form-hint { font-size: 12px; color: var(--bs-text-disabled); }
 
-.bs-split-layout { display: grid; grid-template-columns: 1fr 420px; gap: var(--bs-space-6); align-items: start; }
-.bs-split-layout__preview { position: sticky; top: 80px; }
-@media (max-width: 1024px) { .bs-split-layout { grid-template-columns: 1fr; } .bs-split-layout__preview { position: static; } }
+/* Sliders */
+.slider-wrap { display: flex; align-items: center; gap: var(--bs-space-4); }
+.slider-input { -webkit-appearance: none; appearance: none; flex: 1; height: 4px; border-radius: 2px; background: var(--bs-elevated-2); outline: none; }
+.slider-input::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 16px; height: 16px; border-radius: 50%; background: var(--bs-gold); border: 2px solid var(--bs-graphite); cursor: pointer; box-shadow: 0 0 8px var(--bs-gold-glow); transition: transform var(--bs-transition-fast); }
+.slider-input::-webkit-slider-thumb:hover { transform: scale(1.2); }
+.slider-value { min-width: 40px; padding: 4px 8px; background: var(--bs-elevated); border: 1px solid var(--bs-border); border-radius: var(--bs-radius-sm); font-family: var(--bs-font-mono); font-size: 13px; color: var(--bs-gold); text-align: center; font-weight: 600; }
+
+/* Toggles */
+.toggle-wrap { display: flex; align-items: center; gap: var(--bs-space-3); cursor: pointer; position: relative; }
+.toggle-wrap input { position: absolute; opacity: 0; width: 0; height: 0; }
+.toggle-track { width: 40px; height: 22px; border-radius: 11px; background: var(--bs-elevated-2); border: 1px solid var(--bs-border); position: relative; transition: all var(--bs-transition-base); flex-shrink: 0; }
+.toggle-wrap input:checked ~ .toggle-track { background: var(--bs-gold); border-color: var(--bs-gold); }
+.toggle-thumb { position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: var(--bs-graphite); transition: transform var(--bs-transition-fast); box-shadow: var(--bs-shadow-sm); }
+.toggle-wrap input:checked ~ .toggle-track .toggle-thumb, .toggle-wrap input:checked ~ .toggle-thumb { transform: translateX(18px); }
+.toggle-label { font-size: 13px; color: var(--bs-text-secondary); }
+
+/* Chips */
+.chip-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+.chip { display: inline-flex; align-items: center; padding: 3px 8px; border-radius: var(--bs-radius-sm); font-size: 11px; font-family: var(--bs-font-mono); background: var(--bs-elevated); color: var(--bs-gold); border: 1px solid var(--bs-gold-border); cursor: pointer; transition: all var(--bs-transition-fast); }
+.chip:hover { background: var(--bs-gold-dim); }
+
+/* Buttons */
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: var(--bs-space-2); padding: 9px 18px; border-radius: var(--bs-radius-md); font-size: 13px; font-weight: 600; border: none; cursor: pointer; transition: all var(--bs-transition-fast); white-space: nowrap; }
+.btn--primary { background: var(--bs-gold); color: #0B0F14; box-shadow: 0 2px 8px rgba(212,175,55,0.25); }
+.btn--primary:hover { background: var(--bs-gold-hover); box-shadow: 0 4px 16px rgba(212,175,55,0.35); transform: translateY(-1px); }
+.btn--ghost { background: transparent; color: var(--bs-text-secondary); border: 1px solid var(--bs-border); }
+.btn--ghost:hover { background: var(--bs-gold-dim); color: var(--bs-gold); border-color: var(--bs-gold-border); }
+.btn--sm { padding: 6px 12px; font-size: 12px; border-radius: var(--bs-radius-sm); }
+
+/* Previews */
+.preview-card { background: var(--bs-graphite); border: 1px solid var(--bs-border); border-radius: var(--bs-radius-lg); overflow: hidden; }
+.preview-header { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; background: var(--bs-elevated); border-bottom: 1px solid var(--bs-border); }
+.preview-tabs { display: flex; gap: 2px; background: var(--bs-graphite); border-radius: var(--bs-radius-sm); padding: 2px; }
+.preview-tab { padding: 4px 12px; font-size: 11px; font-weight: 600; font-family: var(--bs-font-mono); border: none; border-radius: var(--bs-radius-sm); cursor: pointer; transition: all var(--bs-transition-fast); display: flex; align-items: center; gap: 4px; background: transparent; color: var(--bs-text-muted); }
+.preview-tab--active { background: var(--bs-elevated-2); color: var(--bs-gold); }
+.preview-body { padding: var(--bs-space-4); max-height: 500px; overflow: auto; }
+.preview-code { font-family: var(--bs-font-mono); font-size: 12px; line-height: 1.7; color: var(--bs-text-secondary); white-space: pre-wrap; word-break: break-all; margin: 0; }
 </style>
 {% endblock %}
 
@@ -54,24 +82,24 @@
     <!-- Page Header -->
     <div class="bs-section-header bs-flex" style="justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px;">
       <div>
-        <h1 class="bs-h2 bs-section-title" style="margin-bottom: 0;">Encoding Profile Creator</h1>
-        <p class="bs-section-subtitle" style="margin-top: 4px;">Visually build FFmpeg encoding profiles. Syncs directly to your Telegram bot.</p>
+        <h1 class="bs-h2 encode-title" style="margin-bottom: 0;">Encoding Profile Creator</h1>
+        <p class="encode-title-sub" style="margin-top: 4px;">Visually build FFmpeg encoding profiles. Syncs directly to your Telegram bot.</p>
       </div>
-      <div class="bs-flex" style="gap: 12px; flex-wrap: wrap; justify-content: flex-end;">
+      <div class="encode-actions">
         <button id="btn-my-profiles" class="bs-btn bs-btn--ghost">
           <i class="fa-solid fa-list"></i> My Profiles
         </button>
         <button id="btn-import" class="bs-btn bs-btn--ghost">
           <i class="fa-solid fa-file-import"></i> Import JSON
         </button>
-        <button id="btn-save" class="bs-btn bs-btn--primary">
+        <button id="btn-save" class="btn btn--primary">
           <i class="fa-solid fa-save"></i> Save Profile
         </button>
       </div>
     </div>
 
     <!-- Two-column layout -->
-    <div class="bs-split-layout">
+    <div class="encode-layout">
       
       <!-- LEFT: Profile Builder -->
       <div class="bs-card bs-card--glass" style="padding: 0; overflow: hidden;">
@@ -84,13 +112,13 @@
           </button>
           <div class="bs-accordion-content" style="display: block;">
             <div class="bs-grid-2">
-              <div class="bs-input-group">
+              <div class="form-input-group">
                 <label class="bs-label">Profile Name</label>
-                <input type="text" id="p-name" class="bs-input" placeholder="e.g. x265-1080p" value="Custom Profile">
+                <input type="text" id="p-name" class="form-input" placeholder="e.g. x265-1080p" value="Custom Profile">
               </div>
-              <div class="bs-input-group">
+              <div class="form-input-group">
                 <label class="bs-label">Subtitle Mode</label>
-                <select id="p-sub-mode" class="bs-input bs-select">
+                <select id="p-sub-mode" class="form-input form-select">
                   <option value="copy">Copy All Subtitles</option>
                   <option value="none">No Subtitles</option>
                 </select>
@@ -107,38 +135,38 @@
           </button>
           <div class="bs-accordion-content" style="display: none;">
             <div class="bs-grid-2">
-              <div class="bs-input-group">
+              <div class="form-input-group">
                 <label class="bs-label">Video Codec</label>
-                <select id="v-codec" class="bs-input bs-select">
+                <select id="v-codec" class="form-input form-select">
                   <option value="libsvtav1">libsvtav1 (AV1)</option>
                   <option value="libx265" selected>libx265 (HEVC)</option>
                   <option value="libx264">libx264 (AVC)</option>
                   <option value="copy">copy</option>
                 </select>
               </div>
-              <div class="bs-input-group">
+              <div class="form-input-group">
                 <label class="bs-label">Pixel Format</label>
-                <select id="v-pix_fmt" class="bs-input bs-select">
+                <select id="v-pix_fmt" class="form-input form-select">
                   <option value="yuv420p10le">10-bit (yuv420p10le)</option>
                   <option value="yuv420p">8-bit (yuv420p)</option>
                 </select>
               </div>
             </div>
             
-            <div class="bs-input-group" style="margin-top: 16px;">
+            <div class="form-input-group" style="margin-top: 16px;">
               <div class="bs-flex" style="justify-content: space-between;">
                 <label class="bs-label">CRF (Quality)</label>
                 <span id="v-crf-val" class="bs-mono bs-text-primary">24</span>
               </div>
-              <input type="range" id="v-crf" class="bs-slider" min="0" max="51" value="24">
+              <input type="range" id="v-crf" class="slider-input" min="0" max="51" value="24">
             </div>
 
-            <div class="bs-input-group" style="margin-top: 16px;">
+            <div class="form-input-group" style="margin-top: 16px;">
               <div class="bs-flex" style="justify-content: space-between;">
                 <label class="bs-label">Preset (Speed)</label>
                 <span id="v-preset-val" class="bs-mono bs-text-primary">medium</span>
               </div>
-              <select id="v-preset-select" class="bs-input bs-select" style="margin-top: 8px;">
+              <select id="v-preset-select" class="form-input form-select" style="margin-top: 8px;">
                 <option value="veryslow">veryslow</option>
                 <option value="slower">slower</option>
                 <option value="slow">slow</option>
@@ -151,9 +179,9 @@
               </select>
             </div>
             
-            <div class="bs-input-group" style="margin-top: 16px;">
+            <div class="form-input-group" style="margin-top: 16px;">
               <label class="bs-label">Video Track Metadata (e.g., Title)</label>
-              <input type="text" id="v-metadata-title" class="bs-input" placeholder="Encoded by Amaterasu">
+              <input type="text" id="v-metadata-title" class="form-input" placeholder="Encoded by Amaterasu">
             </div>
           </div>
         </div>
@@ -166,34 +194,34 @@
           </button>
           <div class="bs-accordion-content" style="display: none;">
             <div class="bs-grid-2">
-              <div class="bs-input-group">
+              <div class="form-input-group">
                 <label class="bs-label">Format Profile</label>
-                <input type="text" id="v-profile" class="bs-input bs-input--mono" placeholder="main, high, main10">
+                <input type="text" id="v-profile" class="form-input form-input--mono" placeholder="main, high, main10">
               </div>
-              <div class="bs-input-group">
+              <div class="form-input-group">
                 <label class="bs-label">Format Level</label>
-                <input type="text" id="v-level" class="bs-input bs-input--mono" placeholder="4.1, 5.1">
+                <input type="text" id="v-level" class="form-input form-input--mono" placeholder="4.1, 5.1">
               </div>
             </div>
             
             <div class="bs-grid-3" style="margin-top: 16px;">
-              <div class="bs-input-group">
+              <div class="form-input-group">
                 <label class="bs-label">Color Primaries</label>
-                <input type="text" id="v-color-prim" class="bs-input bs-input--mono" placeholder="bt2020">
+                <input type="text" id="v-color-prim" class="form-input form-input--mono" placeholder="bt2020">
               </div>
-              <div class="bs-input-group">
+              <div class="form-input-group">
                 <label class="bs-label">Color TRC</label>
-                <input type="text" id="v-color-trc" class="bs-input bs-input--mono" placeholder="smpte2084">
+                <input type="text" id="v-color-trc" class="form-input form-input--mono" placeholder="smpte2084">
               </div>
-              <div class="bs-input-group">
+              <div class="form-input-group">
                 <label class="bs-label">Colorspace</label>
-                <input type="text" id="v-colorspace" class="bs-input bs-input--mono" placeholder="bt2020nc">
+                <input type="text" id="v-colorspace" class="form-input form-input--mono" placeholder="bt2020nc">
               </div>
             </div>
 
-            <div class="bs-input-group" style="margin-top: 16px;">
+            <div class="form-input-group" style="margin-top: 16px;">
               <label class="bs-label">Extra FFmpeg Parameters</label>
-              <input type="text" id="v-extra" class="bs-input bs-input--mono" placeholder="-bf 2 -g 240">
+              <input type="text" id="v-extra" class="form-input form-input--mono" placeholder="-bf 2 -g 240">
             </div>
           </div>
         </div>
@@ -206,18 +234,18 @@
           </button>
           <div class="bs-accordion-content" style="display: none;">
             <div class="bs-grid-2">
-              <div class="bs-input-group">
+              <div class="form-input-group">
                 <label class="bs-label">Audio Codec</label>
-                <select id="a-codec" class="bs-input bs-select">
+                <select id="a-codec" class="form-input form-select">
                   <option value="libopus" selected>libopus</option>
                   <option value="aac">aac</option>
                   <option value="flac">flac</option>
                   <option value="copy">copy</option>
                 </select>
               </div>
-              <div class="bs-input-group">
+              <div class="form-input-group">
                 <label class="bs-label">Channels</label>
-                <select id="a-channels" class="bs-input bs-select">
+                <select id="a-channels" class="form-input form-select">
                   <option value="2" selected>Stereo (2.0)</option>
                   <option value="6">Surround (5.1)</option>
                   <option value="8">Surround (7.1)</option>
@@ -225,15 +253,15 @@
               </div>
             </div>
 
-            <div class="bs-input-group" style="margin-top: 16px;">
+            <div class="form-input-group" style="margin-top: 16px;">
               <label class="bs-label">Audio Bitrate</label>
-              <input type="text" id="a-bitrate" class="bs-input bs-input--mono" placeholder="128k" value="128k">
+              <input type="text" id="a-bitrate" class="form-input form-input--mono" placeholder="128k" value="128k">
             </div>
 
             <div style="margin-top: 16px;">
-              <label class="bs-toggle">
+              <label class="toggle-wrap">
                 <input type="checkbox" id="a-vbr" checked>
-                <div class="bs-toggle__track"><div class="bs-toggle__thumb"></div></div>
+                <div class="toggle-track"><div class="toggle-thumb"></div></div>
                 <span class="bs-label" style="text-transform: none; font-size: 13px;">Enable Variable Bitrate (VBR)</span>
               </label>
             </div>
@@ -247,17 +275,17 @@
             <i class="fa-solid fa-chevron-down"></i>
           </button>
           <div class="bs-accordion-content" style="display: none;">
-            <div class="bs-input-group">
+            <div class="form-input-group">
               <label class="bs-label">Subtitle Mode</label>
-              <select id="s-mode" class="bs-input bs-select">
+              <select id="s-mode" class="form-input form-select">
                 <option value="copy" selected>Copy (Keep Subtitles)</option>
                 <option value="extract">Extract Subtitles</option>
                 <option value="none">None (Strip Subtitles)</option>
               </select>
             </div>
-            <div class="bs-input-group" style="margin-top: 16px;">
+            <div class="form-input-group" style="margin-top: 16px;">
               <label class="bs-label">Subtitle Track Metadata (Title)</label>
-              <input type="text" id="s-metadata-title" class="bs-input" placeholder="English (Amaterasu)">
+              <input type="text" id="s-metadata-title" class="form-input" placeholder="English (Amaterasu)">
             </div>
           </div>
         </div>
@@ -270,36 +298,36 @@
           </button>
           <div class="bs-accordion-content" style="display: none;">
             
-            <div class="bs-input-group" style="margin-bottom: 16px;">
+            <div class="form-input-group" style="margin-bottom: 16px;">
               <div class="bs-flex" style="justify-content: space-between;">
                 <label class="bs-label">Rename Pattern</label>
               </div>
-              <input type="text" id="g-rename" class="bs-input bs-input--mono" placeholder="[Amaterasu] {title} {quality}">
+              <input type="text" id="g-rename" class="form-input form-input--mono" placeholder="[Amaterasu] {title} {quality}">
               <div class="bs-flex" style="gap: 6px; flex-wrap: wrap; margin-top: 4px;">
-                <button type="button" class="bs-chip" onclick="insertChip('g-rename', '{title}')">{title}</button>
-                <button type="button" class="bs-chip" onclick="insertChip('g-rename', '{quality}')">{quality}</button>
-                <button type="button" class="bs-chip" onclick="insertChip('g-rename', '{codec}')">{codec}</button>
+                <button type="button" class="chip" onclick="insertChip('g-rename', '{title}')">{title}</button>
+                <button type="button" class="chip" onclick="insertChip('g-rename', '{quality}')">{quality}</button>
+                <button type="button" class="chip" onclick="insertChip('g-rename', '{codec}')">{codec}</button>
               </div>
             </div>
 
-            <div class="bs-input-group" style="margin-bottom: 16px;">
+            <div class="form-input-group" style="margin-bottom: 16px;">
               <label class="bs-label">Global File Title</label>
-              <input type="text" id="g-title" class="bs-input" placeholder="Amaterasu Release">
+              <input type="text" id="g-title" class="form-input" placeholder="Amaterasu Release">
             </div>
 
-            <div class="bs-input-group" style="margin-bottom: 16px;">
+            <div class="form-input-group" style="margin-bottom: 16px;">
               <label class="bs-label">Audio Track Title</label>
-              <input type="text" id="a-metadata-title" class="bs-input" placeholder="Audio Title">
+              <input type="text" id="a-metadata-title" class="form-input" placeholder="Audio Title">
             </div>
 
-            <div class="bs-input-group" style="margin-bottom: 16px;">
+            <div class="form-input-group" style="margin-bottom: 16px;">
               <label class="bs-label">Custom Metadata Tags (JSON)</label>
-              <textarea id="g-custom-meta" class="bs-input bs-input--mono bs-textarea" placeholder='{"comment": "Amaterasu Release"}'></textarea>
+              <textarea id="g-custom-meta" class="form-input form-input--mono bs-textarea" placeholder='{"comment": "Amaterasu Release"}'></textarea>
             </div>
 
-            <div class="bs-input-group">
+            <div class="form-input-group">
               <label class="bs-label">Stream Disposition Flags (JSON)</label>
-              <textarea id="g-disposition" class="bs-input bs-input--mono bs-textarea" placeholder='{"v:0": "default", "s:0": "0"}'></textarea>
+              <textarea id="g-disposition" class="form-input form-input--mono bs-textarea" placeholder='{"v:0": "default", "s:0": "0"}'></textarea>
             </div>
           </div>
         </div>
@@ -307,7 +335,7 @@
       </div>
 
       <!-- RIGHT: Live Preview Panel -->
-      <div class="bs-split-layout__preview">
+      <div class="encode-preview">
         <div class="bs-card">
           <div class="bs-flex" style="gap: 8px; margin-bottom: 16px;">
             <button id="tab-json" class="bs-btn bs-btn--sm bs-btn--primary">JSON</button>

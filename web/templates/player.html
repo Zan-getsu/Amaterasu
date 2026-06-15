@@ -5,36 +5,46 @@
 {% block extra_css %}
 <link rel="stylesheet" href="https://cdn.plyr.io/3.6.9/plyr.css" />
 <style>
-  .plyr--video .plyr__control.plyr__tab-focus,
-  .plyr--video .plyr__control:hover,
-  .plyr--video .plyr__control[aria-expanded=true] {
-      background: var(--bs-gold) !important;
-  }
-  .plyr--full-ui input[type=range] {
-      color: var(--bs-gold) !important;
-  }
-  .bs-player-wrapper {
-      border-radius: var(--bs-radius-lg);
-      overflow: hidden;
-      background: #000;
-      border: 1px solid var(--bs-border);
-      box-shadow: var(--bs-shadow-lg);
-  }
+/* Plyr Customizations */
+.plyr--video .plyr__control.plyr__tab-focus,
+.plyr--video .plyr__control:hover,
+.plyr--video .plyr__control[aria-expanded=true] { background: var(--bs-gold) !important; }
+.plyr--full-ui input[type=range] { color: var(--bs-gold) !important; }
+
+/* Stream Page Styles */
+.stream-page { max-width: 720px; margin: 0 auto; padding: var(--bs-space-10) var(--bs-space-6) var(--bs-space-16); }
+.stream-card { background: var(--bs-graphite); border: 1px solid var(--bs-border); border-radius: var(--bs-radius-xl); overflow: hidden; animation: fadeInUp 0.5s cubic-bezier(0.22,1,0.36,1); }
+.stream-player { background: #0d1117; display: flex; align-items: center; justify-content: center; position: relative; border-bottom: 1px solid var(--bs-border); }
+.stream-info { padding: var(--bs-space-6); }
+.stream-filename { font-size: 16px; font-weight: 700; color: var(--bs-text-primary); line-height: 1.4; margin-bottom: var(--bs-space-4); word-break: break-word; }
+.stream-meta { display: flex; flex-wrap: wrap; gap: var(--bs-space-4); margin-bottom: var(--bs-space-6); padding-bottom: var(--bs-space-6); border-bottom: 1px solid var(--bs-border); }
+.stream-meta-item { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--bs-text-muted); }
+.stream-meta-item i { color: var(--bs-text-disabled); width: 14px; height: 14px; }
+.stream-download-btn { width: 100%; display: flex; align-items: center; justify-content: center; gap: var(--bs-space-2); padding: 14px 24px; border-radius: var(--bs-radius-md); font-size: 14px; font-weight: 600; border: none; cursor: pointer; transition: all var(--bs-transition-fast); background: var(--bs-gold); color: #0B0F14; box-shadow: 0 2px 8px rgba(212,175,55,0.25); margin-bottom: var(--bs-space-4); }
+.stream-download-btn:hover { background: var(--bs-gold-hover); box-shadow: 0 4px 16px rgba(212,175,55,0.35); transform: translateY(-1px); }
+.stream-security { display: flex; align-items: center; justify-content: center; gap: 6px; font-size: 11px; color: var(--bs-text-disabled); padding-top: var(--bs-space-4); border-top: 1px solid var(--bs-border); }
+.stream-actions { display: grid; grid-template-columns: 1fr 1fr; gap: var(--bs-space-4); margin-bottom: var(--bs-space-6); }
+@media (max-width: 640px) { .stream-actions { grid-template-columns: 1fr; } }
+.action-card { background: var(--bs-elevated); border: 1px solid var(--bs-border); border-radius: var(--bs-radius-md); padding: 12px; display: flex; align-items: center; gap: 12px; cursor: pointer; transition: all var(--bs-transition-fast); text-decoration: none; color: inherit; }
+.action-card:hover { border-color: var(--bs-gold-border); background: var(--bs-elevated-2); }
+.action-icon { width: 36px; height: 36px; border-radius: var(--bs-radius-sm); background: var(--bs-graphite); display: flex; align-items: center; justify-content: center; color: var(--bs-gold); flex-shrink: 0; }
+.action-text { font-size: 13px; font-weight: 600; color: var(--bs-text-primary); display: block; }
+.action-desc { font-size: 11px; color: var(--bs-text-muted); display: block; }
 </style>
 {% endblock %}
 
 {% block content %}
-<section class="bs-section bs-section--sm">
-  <div class="bs-container">
+<div class="stream-page">
+  <div class="stream-card">
     
     <!-- Player -->
-    <div class="bs-player-wrapper bs-mb-6" style="{% if file_type not in ['video', 'audio', 'image', 'pdf', 'doc'] %}display:none;{% endif %}">
+    <div class="stream-player" style="{% if file_type not in ['video', 'audio', 'image', 'pdf', 'doc'] %}display:none;{% endif %}">
         {% if file_type == 'video' %}
-        <video id="player" playsinline controls data-poster="">
+        <video id="player" playsinline controls style="width: 100%;">
             <source src="{{file_url}}" type="video/mp4" />
         </video>
         {% elif file_type == 'audio' %}
-        <audio id="player" controls style="width: 100%; border-radius: var(--bs-radius-lg);">
+        <audio id="player" controls style="width: 100%; border-radius: 0;">
             <source src="{{file_url}}" type="audio/mpeg" />
         </audio>
         {% elif file_type == 'image' %}
@@ -46,25 +56,41 @@
     </div>
 
     <!-- Info -->
-    <div class="bs-card bs-card--glass">
-        <h1 class="bs-h2 bs-mb-2" id="fileName" style="word-break: break-all;">{{file_name}}</h1>
-        <div class="bs-flex bs-items-center bs-gap-2 bs-mb-6">
-            <span class="bs-badge bs-badge--neutral">Size: {{file_size}}</span>
+    <div class="stream-info">
+      <h1 class="stream-filename">{{file_name}}</h1>
+
+      <div class="stream-meta">
+        <div class="stream-meta-item">
+          <i data-lucide="hard-drive"></i>
+          <span>{{file_size}}</span>
         </div>
-
-        <!-- Actions Grid -->
-        <div class="bs-grid-2" id="action-buttons">
-            <!-- Buttons injected by JS for correct Absolute URL -->
+        <div class="stream-meta-item">
+          <i data-lucide="file-type"></i>
+          <span>{{file_type | upper}}</span>
         </div>
-    </div>
+      </div>
 
-    <!-- Security Notice -->
-    <div class="bs-caption bs-text-disabled bs-mt-4" style="text-align: center;">
-      <i class="fa-solid fa-shield-halved"></i> Protected by Amaterasu token auth
-    </div>
+      <!-- Actions Grid -->
+      <div class="stream-actions" id="action-buttons">
+          <!-- Buttons injected by JS -->
+      </div>
 
+      <!-- Main Download Button -->
+      <a id="main-download-btn" href="#" style="text-decoration: none;">
+        <button class="stream-download-btn">
+          <i data-lucide="download" style="width: 16px; height: 16px;"></i>
+          Download File
+        </button>
+      </a>
+
+      <!-- Security Notice -->
+      <div class="stream-security">
+        <i data-lucide="shield" style="width: 12px; height: 12px;"></i>
+        Protected by Amaterasu token authentication
+      </div>
+    </div>
   </div>
-</section>
+</div>
 {% endblock %}
 
 {% block extra_js %}
@@ -85,20 +111,14 @@ document.addEventListener('DOMContentLoaded', () => {
     downloadUrl.searchParams.set('disposition', 'attachment');
     const absoluteDownloadUrl = downloadUrl.href;
     
+    document.getElementById('main-download-btn').href = absoluteDownloadUrl;
+    
     const actions = [
-        {
-            text: 'Download',
-            desc: 'Save to local device',
-            url: absoluteDownloadUrl,
-            icon: '<i class="fa-solid fa-cloud-arrow-down"></i>',
-            primary: true
-        },
         {
             text: 'Copy Link',
             desc: 'Copy stream address',
             onclick: 'copyLink()',
-            icon: '<i class="fa-solid fa-copy"></i>',
-            primary: false
+            icon: '<i data-lucide="copy"></i>'
         }
     ];
     
@@ -108,29 +128,25 @@ document.addEventListener('DOMContentLoaded', () => {
             text: 'VLC Player',
             desc: 'Stream to VLC (Android)',
             url: `intent:${absoluteStreamUrl}#Intent;action=android.intent.action.VIEW;type={{file_type}}/*;package=org.videolan.vlc;end`,
-            icon: '<i class="fa-brands fa-vlc"></i>',
-            primary: false
+            icon: '<i data-lucide="monitor-play"></i>'
         },
         {
             text: 'MX Player',
             desc: 'Stream to MX (Android)',
             url: `intent:${absoluteStreamUrl}#Intent;action=android.intent.action.VIEW;type={{file_type}}/*;package=com.mxtech.videoplayer.ad;end`,
-            icon: '<i class="fa-solid fa-circle-play"></i>',
-            primary: false
+            icon: '<i data-lucide="play-circle"></i>'
         },
         {
             text: 'iOS VLC',
             desc: 'Stream to VLC (iOS)',
             url: `vlc-x-callback://x-callback-url/stream?url=${absoluteStreamUrl}`,
-            icon: '<i class="fa-brands fa-vlc"></i>',
-            primary: false
+            icon: '<i data-lucide="smartphone"></i>'
         },
         {
             text: 'nPlayer',
             desc: 'Stream to nPlayer',
             url: `nplayer-${absoluteStreamUrl}`,
-            icon: '<i class="fa-solid fa-play"></i>',
-            primary: false
+            icon: '<i data-lucide="play"></i>'
         }
     );
     {% endif %}
@@ -141,33 +157,33 @@ document.addEventListener('DOMContentLoaded', () => {
         const tag = isBtn ? 'button' : 'a';
         const el = document.createElement(tag);
         
-        // Convert to bs-card that looks like a button
-        el.className = `bs-card bs-flex bs-items-center bs-gap-3 bs-cursor-pointer`;
-        if (act.primary) {
-            el.style.background = 'linear-gradient(135deg, var(--bs-gold-glow), rgba(212,175,55,0.1))';
-            el.style.border = '1px solid var(--bs-gold)';
-        } else {
-            el.classList.add('bs-card--interactive');
-        }
-        
+        el.className = 'action-card';
         if(isBtn) {
             el.setAttribute('onclick', act.onclick);
+            el.style.textAlign = 'left';
+            el.style.border = '1px solid var(--bs-border)';
+            el.style.background = 'var(--bs-elevated)';
+            el.style.fontFamily = 'inherit';
         } else {
             el.href = act.url;
-            el.style.textDecoration = 'none';
         }
         
         el.innerHTML = `
-            <div class="bs-badge ${act.primary ? 'bs-badge--gold' : 'bs-badge--neutral'}" style="padding: 12px; border-radius: 8px;">
+            <div class="action-icon">
                 ${act.icon}
             </div>
-            <div class="bs-flex-col">
-                <span class="bs-body bs-text-primary" style="font-weight: 600;">${act.text}</span>
-                <span class="bs-caption bs-text-muted">${act.desc}</span>
+            <div>
+                <span class="action-text">${act.text}</span>
+                <span class="action-desc">${act.desc}</span>
             </div>
         `;
         btnContainer.appendChild(el);
     });
+
+    // Re-initialize Lucide icons for the dynamically added ones
+    if (window.lucide) {
+        window.lucide.createIcons();
+    }
 });
 
 // Copy Link
