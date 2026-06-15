@@ -211,7 +211,7 @@ async def _send_recovery_message_to_chat(cid, user_id, tasks, now):
 
 
 async def notify_incomplete_tasks():
-    if not (Config.INCOMPLETE_TASK_NOTIFIER and Config.DATABASE_URL):
+    if not ((Config.INCOMPLETE_TASK_NOTIFIER or Config.INC_TASK_RESUME) and Config.DATABASE_URL):
         return
 
     tasks = await database.get_incomplete_task_docs(notified=False)
@@ -631,9 +631,7 @@ async def restart_notification():
 
     now = datetime.now(timezone(Config.TIMEZONE))
 
-    if Config.INC_TASK_RESUME:
-        await auto_resume_incomplete_tasks()
-    else:
+    if Config.INC_TASK_RESUME or Config.INCOMPLETE_TASK_NOTIFIER:
         discarded = await database.discard_legacy_incomplete_tasks()
         if discarded:
             LOGGER.warning(
