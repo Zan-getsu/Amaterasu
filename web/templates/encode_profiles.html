@@ -25,7 +25,7 @@
 
 /* Form Elements */
 .form-group { display: flex; flex-direction: column; gap: var(--bs-space-2); }
-.form-label { font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--form-hint); }
+.form-label { font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--bs-text-muted); }
 .form-input, .form-select { width: 100%; padding: 10px 14px; background: var(--bs-elevated); border: 1px solid var(--bs-border); border-radius: var(--bs-radius-md); color: var(--bs-text-primary); font-size: 14px; font-family: var(--bs-font-sans); transition: all var(--bs-transition-fast); outline: none; }
 .form-input::placeholder { color: var(--bs-text-disabled); }
 .form-input:hover, .form-select:hover { border-color: rgba(212,175,55,0.25); }
@@ -68,7 +68,7 @@
 .preview-card { background: var(--bs-graphite); border: 1px solid var(--bs-border); border-radius: var(--bs-radius-lg); overflow: hidden; }
 .preview-header { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; background: var(--bs-elevated); border-bottom: 1px solid var(--bs-border); }
 .preview-tabs { display: flex; gap: 2px; background: var(--bs-graphite); border-radius: var(--bs-radius-sm); padding: 2px; }
-.preview-tab { padding: 4px 12px; font-size: 11px; font-weight: 600; font-family: var(--bs-font-mono); border: none; border-radius: var(--bs-radius-sm); cursor: pointer; transition: all var(--bs-transition-fast); display: flex; align-items: center; gap: 4px; background: transparent; color: var(--form-hint); }
+.preview-tab { padding: 4px 12px; font-size: 11px; font-weight: 600; font-family: var(--bs-font-mono); border: none; border-radius: var(--bs-radius-sm); cursor: pointer; transition: all var(--bs-transition-fast); display: flex; align-items: center; gap: 4px; background: transparent; color: var(--bs-text-muted); }
 .preview-tab--active { background: var(--bs-elevated-2); color: var(--bs-gold); }
 .preview-body { padding: var(--bs-space-4); max-height: 500px; overflow: auto; }
 .preview-code { font-family: var(--bs-font-mono); font-size: 12px; line-height: 1.7; color: var(--bs-text-secondary); white-space: pre-wrap; word-break: break-all; margin: 0; }
@@ -87,13 +87,12 @@
       </div>
       <div class="encode-actions">
         <button id="btn-my-profiles" class="btn btn--ghost">
-          <i class="lucide-list"></i> My Profiles
+          <i data-lucide="list" style="width:14px;height:14px;"></i> My Profiles
         </button>
         <button id="btn-import" class="btn btn--ghost">
-          <i class="lucide-import"></i> Import JSON
+          <i data-lucide="import" style="width:14px;height:14px;"></i> Import JSON
         </button>
-        <button id="btn-save" class="btn btn--primary"><i data-lucide="check" style="width:14px;height:14px;"></i>
-          <i class="fa-solid fa-save"></i> Save Profile
+        <button id="btn-save" class="btn btn--primary"><i data-lucide="check" style="width:14px;height:14px;"></i> Save Profile
         </button>
       </div>
     </div>
@@ -102,7 +101,7 @@
     <div class="encode-layout">
       
       <!-- LEFT: Profile Builder -->
-      <div >
+      <div class="encode-form-wrapper">
         
         <!-- [1] Profile Name + Codec Selectors -->
         <div class="acc-item">
@@ -156,7 +155,7 @@
             <div class="form-group" style="margin-top: 16px;">
               <div class="bs-flex" style="justify-content: space-between;">
                 <label class="form-label">CRF (Quality)</label>
-                <span id="v-crf-val" class="preview-code bs-text-primary">24</span>
+                <span id="v-crf-val" style="font-family: var(--bs-font-mono); color: var(--bs-text-primary); font-weight: 600;">24</span>
               </div>
               <input type="range" id="v-crf" class="slider-input" min="0" max="51" value="24">
             </div>
@@ -164,7 +163,7 @@
             <div class="form-group" style="margin-top: 16px;">
               <div class="bs-flex" style="justify-content: space-between;">
                 <label class="form-label">Preset (Speed)</label>
-                <span id="v-preset-val" class="preview-code bs-text-primary">medium</span>
+                <span id="v-preset-val" style="font-family: var(--bs-font-mono); color: var(--bs-text-primary); font-weight: 600;">medium</span>
               </div>
               <select id="v-preset-select" class="form-input form-select" style="margin-top: 8px;">
                 <option value="veryslow">veryslow</option>
@@ -337,20 +336,19 @@
       <!-- RIGHT: Live Preview Panel -->
       <div class="encode-preview">
         <div class="preview-card">
-          <div class="preview-header"><div class="preview-tabs">
-            <button id="tab-json" class="preview-tab preview-tab--active">JSON</button>
-            <button id="tab-cmd" class="preview-tab">FFmpeg Command</button>
-          </div>
-          
-          <div class="bs-code-block">
-            <div class="preview-header">
-              <span class="form-label" id="preview-lang">JSON</span>
+          <div class="preview-header">
+            <div class="preview-tabs">
+              <button id="tab-json" class="preview-tab preview-tab--active">JSON</button>
+              <button id="tab-cmd" class="preview-tab">FFmpeg Command</button>
+            </div>
+            <div style="display:flex; gap:8px; align-items:center;">
+              <span class="form-hint" id="preview-lang" style="font-size:11px;">JSON</span>
               <button class="preview-copy" data-copy="#preview-code" aria-label="Copy code">
-                <i class="lucide-copy"></i>
+                <i data-lucide="copy" style="width:14px;height:14px;"></i>
               </button>
             </div>
-            <div class="preview-body"><pre class="preview-code" id="preview-code">{}</pre></div>
           </div>
+          <div class="preview-body"><pre class="preview-code" id="preview-code">{}</pre></div>
         </div>
       </div>
 
@@ -369,9 +367,9 @@
     <!-- Profile List Container -->
     <div id="profiles-list-container" style="max-height: 400px; overflow-y: auto; display: flex; flex-direction: column; gap: 12px;">
       <!-- Profiles will be injected here -->
-      <div class="bs-empty">
-        <i class="fa-solid fa-spinner fa-spin bs-empty__icon"></i>
-        <h3 class="bs-empty__title">Loading profiles...</h3>
+      <div style="text-align:center; padding: 40px; color: var(--bs-text-muted);">
+        <i data-lucide="loader" class="fa-spin" style="width:24px;height:24px;margin-bottom:8px;"></i>
+        <h3>Loading profiles...</h3>
       </div>
     </div>
   </div>
