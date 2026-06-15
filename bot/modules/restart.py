@@ -279,6 +279,23 @@ async def _resume_from_command(task):
         LOGGER.warning(f"Resume: cannot get user {user_id}: {e}")
         return False
 
+    reply_msg = None
+    if reply_to_msg_id:
+        try:
+            reply_msg = await TgClient.bot.get_messages(
+                chat_id=task["cid"], message_ids=reply_to_msg_id
+            )
+            # If the original message was deleted (e.g. by DELETE_LINKS=True)
+            if getattr(reply_msg, "empty", False):
+                reply_msg = None
+        except Exception as e:
+            LOGGER.warning(f"Resume: cannot fetch reply msg {reply_to_msg_id}: {e}")
+
+    # If there's no link in the command and the original file message is missing/deleted, it's unrecoverable
+    if not reply_msg and len(command.split()) == 1:
+        LOGGER.warning(f"Resume: Original message deleted and no link in command. Cannot resume task: {command}")
+        return False
+
     try:
         msg = await TgClient.bot.send_message(
             chat_id=task["cid"],
@@ -287,15 +304,9 @@ async def _resume_from_command(task):
         )
         msg.text = command
         msg.from_user = user
-        if reply_to_msg_id:
-            try:
-                reply_msg = await TgClient.bot.get_messages(
-                    chat_id=task["cid"], message_ids=reply_to_msg_id
-                )
-                if reply_msg:
-                    msg.reply_to_message = reply_msg
-            except Exception as e:
-                LOGGER.warning(f"Resume: cannot fetch reply msg {reply_to_msg_id}: {e}")
+        if reply_msg:
+            msg.reply_to_message = reply_msg
+            
         await handler(TgClient.bot, msg)
         await delete_message(msg)
         return True
