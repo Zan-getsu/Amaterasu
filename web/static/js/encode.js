@@ -1,6 +1,5 @@
 // 5. Encode Page: Live Preview
 document.addEventListener("DOMContentLoaded", () => {
-  const inputs = document.querySelectorAll('input, select, textarea');
   const previewCode = document.getElementById('preview-code');
   const previewLang = document.getElementById('preview-lang');
   
@@ -125,7 +124,7 @@ document.addEventListener("DOMContentLoaded", () => {
       audio_params: { bitrate: "192k" }
     },
     {
-      name: "dY AV1 Max Compression",
+      name: "dY" AV1 Max Compression",
       video_codec: "libsvtav1",
       audio_codec: "libopus",
       subtitle_mode: "copy",
@@ -154,39 +153,22 @@ document.addEventListener("DOMContentLoaded", () => {
   ];
 
   const LANGUAGES = [
-    { value: "eng", label: "English (eng)" },
-    { value: "jpn", label: "Japanese (jpn)" },
-    { value: "kor", label: "Korean (kor)" },
-    { value: "spa", label: "Spanish (spa)" },
-    { value: "fre", label: "French (fre)" },
-    { value: "ger", label: "German (ger)" },
-    { value: "ita", label: "Italian (ita)" },
-    { value: "hin", label: "Hindi (hin)" },
-    { value: "rus", label: "Russian (rus)" },
-    { value: "chi", label: "Chinese (chi)" },
-    { value: "ara", label: "Arabic (ara)" },
-    { value: "por", label: "Portuguese (por)" },
-    { value: "und", label: "Undefined (und)" }
+    {value: 'eng', label: 'English (eng)'}, {value: 'jpn', label: 'Japanese (jpn)'}, {value: 'spa', label: 'Spanish (spa)'},
+    {value: 'fra', label: 'French (fra)'}, {value: 'ger', label: 'German (ger)'}, {value: 'ita', label: 'Italian (ita)'},
+    {value: 'kor', label: 'Korean (kor)'}, {value: 'chi', label: 'Chinese (chi)'}, {value: 'rus', label: 'Russian (rus)'},
+    {value: 'ara', label: 'Arabic (ara)'}, {value: 'hin', label: 'Hindi (hin)'}, {value: 'por', label: 'Portuguese (por)'}
   ];
 
-  const DISPOSITION_OPTS = [
-    { value: "0", label: "0 (Remove all flags)" },
-    { value: "default", label: "default (Mark as default)" },
-    { value: "forced", label: "forced (Mark as forced)" },
-    { value: "default+forced", label: "default+forced (Default & Forced)" },
-    { value: "dub", label: "dub (Dub track)" },
-    { value: "comment", label: "comment (Commentary)" },
-    { value: "hearing_impaired", label: "hearing_impaired" },
-    { value: "visual_impaired", label: "visual_impaired" },
-    { value: "captions", label: "captions" }
-  ];
-
-  const TRACK_OPTS = [
-    { value: "?", label: "All Tracks (?)" },
-    { value: "0", label: "Track 1" },
-    { value: "1", label: "Track 2" },
-    { value: "2", label: "Track 3" },
-    { value: "3", label: "Track 4" }
+  const DISPOSITION_OPTIONS = [
+    {label: '0 (Remove all flags)', value: '0'},
+    {label: 'default (Mark as default)', value: 'default'},
+    {label: 'forced (Mark as forced)', value: 'forced'},
+    {label: 'default+forced (Default & Forced)', value: 'default+forced'},
+    {label: 'dub (Dub track)', value: 'dub'},
+    {label: 'comment (Commentary)', value: 'comment'},
+    {label: 'hearing_impaired', value: 'hearing_impaired'},
+    {label: 'visual_impaired', value: 'visual_impaired'},
+    {label: 'captions', value: 'captions'}
   ];
 
   // Populate Quick Presets UI
@@ -214,105 +196,213 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
-  // --- STREAM TAG BUILDER LOGIC ---
-  const state = {
-    'v-meta': [], 'v-disp': [],
-    'a-meta': [], 'a-disp': [],
-    's-meta': [], 's-disp': []
-  };
+  // Reactive Codec UI Logic
+  function updateCodecUI() {
+    const vCodec = document.getElementById('v-codec')?.value;
+    const aCodec = document.getElementById('a-codec')?.value;
 
-  window.addTag = function(target) {
-    if(target.endsWith('-meta')) {
-      state[target].push({ track: '?', tagType: 'title', tagValue: '' });
-    } else {
-      state[target].push({ track: '?', tagValue: 'default' });
-    }
-    renderTags(target);
-    generatePreview();
-  };
+    const vCrfContainer = document.getElementById('v-crf')?.closest('.form-group');
+    const vPresetContainer = document.getElementById('v-preset-select')?.closest('.form-group');
+    const vPixFmtContainer = document.getElementById('v-pix_fmt')?.closest('.form-group');
 
-  window.rmTag = function(target, idx) {
-    state[target].splice(idx, 1);
-    renderTags(target);
-    generatePreview();
-  };
-
-  window.updTag = function(target, idx, field, val) {
-    state[target][idx][field] = val;
-    if(field === 'tagType') {
-      if(val === 'language') state[target][idx].tagValue = 'eng';
-      else state[target][idx].tagValue = '';
-    }
-    renderTags(target);
-    generatePreview();
-  };
-
-  function renderTags(target) {
-    const container = document.getElementById(`${target}-container`);
-    if(!container) return;
-    const isMeta = target.endsWith('-meta');
-
-    let html = '';
-    state[target].forEach((t, i) => {
-      html += `<div style="display:flex; gap:8px; align-items:start;">`;
-      
-      // Track Select
-      html += `<select class="form-select" style="flex:1;" onchange="updTag('${target}', ${i}, 'track', this.value)">`;
-      TRACK_OPTS.forEach(opt => {
-        html += `<option value="${opt.value}" ${t.track === opt.value ? 'selected' : ''}>${opt.label}</option>`;
-      });
-      html += `</select>`;
-
-      if (isMeta) {
-        // Tag Type Select
-        html += `<select class="form-select" style="flex:1;" onchange="updTag('${target}', ${i}, 'tagType', this.value)">
-                  <option value="title" ${t.tagType === 'title' ? 'selected' : ''}>Title</option>
-                  <option value="language" ${t.tagType === 'language' ? 'selected' : ''}>Language</option>
-                  <option value="handler_name" ${t.tagType === 'handler_name' ? 'selected' : ''}>Handler</option>
-                  <option value="custom" ${t.tagType === 'custom' ? 'selected' : ''}>Custom</option>
-                 </select>`;
-        
-        // Tag Value Input/Select
-        if (t.tagType === 'language') {
-          html += `<select class="form-select" style="flex:2;" onchange="updTag('${target}', ${i}, 'tagValue', this.value)">`;
-          LANGUAGES.forEach(l => {
-            html += `<option value="${l.value}" ${t.tagValue === l.value ? 'selected' : ''}>${l.label}</option>`;
-          });
-          html += `</select>`;
-        } else {
-          html += `<input type="text" class="form-input form-input--mono" style="flex:2;" placeholder="${t.tagType === 'custom' ? 'e.g. BPS=120' : 'Value...'}" value="${t.tagValue}" oninput="updTag('${target}', ${i}, 'tagValue', this.value)">`;
-        }
+    if (vCrfContainer && vPresetContainer && vPixFmtContainer) {
+      if (vCodec === 'copy') {
+        vCrfContainer.style.display = 'none';
+        vPresetContainer.style.display = 'none';
+        vPixFmtContainer.style.display = 'none';
       } else {
-        // Disposition Value Select
-        html += `<select class="form-select" style="flex:2;" onchange="updTag('${target}', ${i}, 'tagValue', this.value)">`;
-        DISPOSITION_OPTS.forEach(opt => {
-          html += `<option value="${opt.value}" ${t.tagValue === opt.value ? 'selected' : ''}>${opt.label}</option>`;
-        });
-        html += `</select>`;
-      }
+        vCrfContainer.style.display = 'flex';
+        vPresetContainer.style.display = 'flex';
+        vPixFmtContainer.style.display = 'flex';
 
-      html += `<button type="button" class="btn btn--ghost btn--icon" onclick="rmTag('${target}', ${i})" style="padding:10px; color:#e74c3c; border:none; background:rgba(255,255,255,0.05);"><i data-lucide="trash-2" style="width:16px;height:16px;"></i></button>`;
-      html += `</div>`;
+        const presetSelect = document.getElementById('v-preset-select');
+        const currentVal = presetSelect.value;
+        presetSelect.innerHTML = '';
+        
+        if (vCodec === 'libsvtav1') {
+          for(let i=0; i<=13; i++) {
+            let label = `Preset ${i}`;
+            if(i < 4) label += ' (Slowest)';
+            if(i > 9) label += ' (Fastest)';
+            presetSelect.innerHTML += `<option value="${i}">${label}</option>`;
+          }
+        } else {
+          const presets = ['veryslow', 'slower', 'slow', 'medium', 'fast', 'faster', 'veryfast', 'superfast', 'ultrafast'];
+          presets.forEach(p => presetSelect.innerHTML += `<option value="${p}">${p}</option>`);
+        }
+        
+        const validOptions = Array.from(presetSelect.options).map(o => o.value);
+        if(validOptions.includes(currentVal)) {
+          presetSelect.value = currentVal;
+        } else {
+          presetSelect.value = vCodec === 'libsvtav1' ? '4' : 'medium';
+        }
+        const vPresetVal = document.getElementById('v-preset-val');
+        if(vPresetVal) vPresetVal.textContent = presetSelect.value;
+      }
+    }
+
+    const aBitrateContainer = document.getElementById('a-bitrate')?.closest('.form-group');
+    const aChannelsContainer = document.getElementById('a-channels')?.closest('.form-group');
+    const aVbrContainer = document.getElementById('a-vbr')?.closest('.toggle-wrap');
+
+    if (aBitrateContainer && aChannelsContainer && aVbrContainer) {
+      if (aCodec === 'copy') {
+        aBitrateContainer.style.display = 'none';
+        aChannelsContainer.style.display = 'none';
+        aVbrContainer.style.display = 'none';
+      } else if (aCodec === 'flac') {
+        aBitrateContainer.style.display = 'none';
+        aChannelsContainer.style.display = 'flex';
+        aVbrContainer.style.display = 'none';
+      } else {
+        aBitrateContainer.style.display = 'flex';
+        aChannelsContainer.style.display = 'flex';
+        aVbrContainer.style.display = 'flex';
+      }
+    }
+  }
+
+  document.getElementById('v-codec')?.addEventListener('change', () => { updateCodecUI(); generatePreview(); });
+  document.getElementById('a-codec')?.addEventListener('change', () => { updateCodecUI(); generatePreview(); });
+
+  // Reactive Track Selector UI
+  document.querySelectorAll('.track-selector-dropdown').forEach(sel => {
+    sel.addEventListener('change', (e) => {
+      const targetId = e.target.getAttribute('data-target');
+      const input = document.getElementById(targetId);
+      if(e.target.value === 'custom') {
+        input.style.display = 'block';
+        input.value = '';
+      } else {
+        input.style.display = 'none';
+        input.value = e.target.value;
+      }
+      generatePreview();
+    });
+  });
+
+  // --- STREAM TAG BUILDER LOGIC ---
+  let metadataTags = [];
+  let dispositionTags = [];
+
+  function renderTags(containerId, tags, type) {
+    const container = document.getElementById(containerId);
+    if(!container) return;
+    
+    let html = '';
+    tags.forEach((t, i) => {
+      if(type === 'disp') {
+        let selectOptions = DISPOSITION_OPTIONS.map(opt => `<option value="${opt.value}" ${t.value === opt.value ? 'selected' : ''}>${opt.label}</option>`).join('');
+        html += `
+          <div style="display:flex; gap:8px; align-items:flex-start;">
+            <select class="form-select form-input--mono tag-key" data-idx="${i}" data-type="${type}" style="flex:1;">
+              <option value="0" ${t.track === '0' ? 'selected' : ''}>Track 1</option>
+              <option value="1" ${t.track === '1' ? 'selected' : ''}>Track 2</option>
+              <option value="2" ${t.track === '2' ? 'selected' : ''}>Track 3</option>
+              <option value="?" ${t.track === '?' ? 'selected' : ''}>All Tracks (?)</option>
+            </select>
+            <select class="form-select form-input--mono tag-val" data-idx="${i}" data-type="${type}" style="flex:2;">
+              <option value="" disabled ${t.value === '' ? 'selected' : ''}>Select Disposition...</option>
+              ${selectOptions}
+            </select>
+            <button type="button" class="btn btn--ghost btn--icon tag-rm" data-idx="${i}" data-type="${type}" style="padding:10px; color:#e74c3c; border:none;"><i data-lucide="trash-2" style="width:16px;height:16px;"></i></button>
+          </div>
+        `;
+      } else {
+        let langOpts = LANGUAGES.map(l => `<option value="${l.value}" ${t.tagValue === l.value ? 'selected' : ''}>${l.label}</option>`).join('');
+        let valueFieldHtml = '';
+        
+        if (t.tagType === 'language') {
+           valueFieldHtml = `<select class="form-select form-input--mono tag-val-custom" data-idx="${i}" data-type="${type}" style="flex:2;">
+              <option value="" disabled ${t.tagValue === '' ? 'selected' : ''}>Select Language...</option>
+              ${langOpts}
+              <option value="und" ${t.tagValue === 'und' ? 'selected' : ''}>Undefined (und)</option>
+           </select>`;
+        } else if (t.tagType === 'custom') {
+           valueFieldHtml = `<input type="text" class="form-input form-input--mono tag-val-custom" data-idx="${i}" data-type="${type}" placeholder="Value" value="${t.tagValue}" style="flex:2;">`;
+        } else {
+           valueFieldHtml = `<input type="text" class="form-input form-input--mono tag-val-custom" data-idx="${i}" data-type="${type}" placeholder="Enter ${t.tagType}..." value="${t.tagValue}" style="flex:2;">`;
+        }
+
+        html += `
+          <div style="display:flex; gap:8px; align-items:flex-start; flex-wrap: wrap; margin-bottom: 8px;">
+            <select class="form-select form-input--mono tag-key-track" data-idx="${i}" data-type="${type}" style="flex:1; min-width: 100px;">
+              <option value="0" ${t.track === '0' ? 'selected' : ''}>Track 1</option>
+              <option value="1" ${t.track === '1' ? 'selected' : ''}>Track 2</option>
+              <option value="2" ${t.track === '2' ? 'selected' : ''}>Track 3</option>
+              <option value="?" ${t.track === '?' ? 'selected' : ''}>All Tracks (?)</option>
+            </select>
+            <select class="form-select form-input--mono tag-type" data-idx="${i}" data-type="${type}" style="flex:1; min-width: 100px;">
+              <option value="title" ${t.tagType === 'title' ? 'selected' : ''}>Title</option>
+              <option value="language" ${t.tagType === 'language' ? 'selected' : ''}>Language</option>
+              <option value="handler_name" ${t.tagType === 'handler_name' ? 'selected' : ''}>Handler</option>
+              <option value="custom" ${t.tagType === 'custom' ? 'selected' : ''}>Custom</option>
+            </select>
+            ${t.tagType === 'custom' ? `<input type="text" class="form-input form-input--mono tag-key-custom" data-idx="${i}" data-type="${type}" placeholder="Key" value="${t.tagKey}" style="flex:1;">` : ''}
+            ${valueFieldHtml}
+            <button type="button" class="btn btn--ghost btn--icon tag-rm" data-idx="${i}" data-type="${type}" style="padding:10px; color:#e74c3c; border:none;"><i data-lucide="trash-2" style="width:16px;height:16px;"></i></button>
+          </div>
+        `;
+      }
     });
     container.innerHTML = html;
     if (window.lucide) { window.lucide.createIcons(); }
+
+    container.querySelectorAll('input, select').forEach(el => {
+      if (!el.classList.contains('tag-rm')) {
+        el.addEventListener('change', updateTag);
+        el.addEventListener('input', updateTag);
+      }
+    });
+    container.querySelectorAll('.tag-rm').forEach(el => el.addEventListener('click', removeTag));
   }
 
-  // --- TRACK SELECTOR LOGIC ---
-  window.toggleTrackInput = function(prefix) {
-    const sel = document.getElementById(`${prefix}_sel`);
-    const wrap = document.getElementById(`${prefix}_custom_wrap`);
-    const inp = document.getElementById(`m-${prefix}`);
-    if (sel.value === 'custom') {
-      wrap.style.display = 'block';
-      inp.value = '';
+  function updateTag(e) {
+    const el = e.currentTarget;
+    const idx = parseInt(el.getAttribute('data-idx'));
+    const type = el.getAttribute('data-type');
+    
+    if(type === 'meta') {
+      if(el.classList.contains('tag-key-track')) metadataTags[idx].track = el.value;
+      if(el.classList.contains('tag-type')) {
+        metadataTags[idx].tagType = el.value;
+        if(el.value !== 'custom') metadataTags[idx].tagKey = el.value;
+        renderTags('metadata-tags-container', metadataTags, 'meta');
+      }
+      if(el.classList.contains('tag-key-custom')) metadataTags[idx].tagKey = el.value;
+      if(el.classList.contains('tag-val-custom')) metadataTags[idx].tagValue = el.value;
     } else {
-      wrap.style.display = 'none';
-      inp.value = sel.value;
+      if(el.classList.contains('tag-key')) dispositionTags[idx].track = el.value;
+      if(el.classList.contains('tag-val')) dispositionTags[idx].value = el.value;
     }
     generatePreview();
-  };
+  }
 
+  function removeTag(e) {
+    const idx = parseInt(e.currentTarget.getAttribute('data-idx'));
+    const type = e.currentTarget.getAttribute('data-type');
+    if(type === 'meta') {
+      metadataTags.splice(idx, 1);
+      renderTags('metadata-tags-container', metadataTags, 'meta');
+    } else {
+      dispositionTags.splice(idx, 1);
+      renderTags('disposition-tags-container', dispositionTags, 'disp');
+    }
+    generatePreview();
+  }
+
+  document.getElementById('btn-add-metadata')?.addEventListener('click', () => {
+    metadataTags.push({track: '?', tagType: 'custom', tagKey: '', tagValue: ''});
+    renderTags('metadata-tags-container', metadataTags, 'meta');
+    generatePreview();
+  });
+
+  document.getElementById('btn-add-disposition')?.addEventListener('click', () => {
+    dispositionTags.push({track: '?', value: ''});
+    renderTags('disposition-tags-container', dispositionTags, 'disp');
+    generatePreview();
+  });
 
   // Populate Form from Profile Data
   function loadProfileIntoForm(id, data) {
@@ -329,96 +419,75 @@ document.addEventListener("DOMContentLoaded", () => {
     if(data.audio_codec) document.getElementById('a-codec').value = data.audio_codec;
     if(data.subtitle_mode) document.getElementById('s-mode').value = data.subtitle_mode;
     
-    // Clear all state
-    for(let k in state) state[k] = [];
+    updateCodecUI();
 
-    const handleTrackLoader = (prefix, val) => {
-      const inp = document.getElementById(`m-${prefix}`);
-      const sel = document.getElementById(`${prefix}_sel`);
-      const wrap = document.getElementById(`${prefix}_custom_wrap`);
-      if(!inp || !sel) return;
-      inp.value = val !== undefined ? val : "";
-      
-      const isCommon = ['?', '0', '1', '0,1', '1,0'].includes(inp.value);
-      if (inp.value === "") {
-        sel.value = '?';
-        wrap.style.display = 'none';
-      } else if (isCommon) {
-        sel.value = inp.value;
-        wrap.style.display = 'none';
-      } else {
-        sel.value = 'custom';
-        wrap.style.display = 'block';
-      }
-    };
-
+    metadataTags = [];
     if(data.metadata) {
-      document.getElementById('g-title').value = data.metadata.title || "";
-      handleTrackLoader('v_track', data.metadata.v_track);
-      handleTrackLoader('a_track', data.metadata.a_track);
-      handleTrackLoader('s_track', data.metadata.s_track);
+      if(data.metadata.title !== undefined) document.getElementById('g-title').value = data.metadata.title;
+      else document.getElementById('g-title').value = "";
+      
+      const tracks = ['v_track', 'a_track', 's_track'];
+      tracks.forEach(tr => {
+        if(data.metadata[tr] !== undefined) {
+          const val = data.metadata[tr];
+          document.getElementById(`m-${tr}`).value = val;
+          const select = document.getElementById(`m-${tr}-select`);
+          if(select) {
+            const validOptions = Array.from(select.options).map(o => o.value);
+            if(validOptions.includes(val)) {
+              select.value = val;
+              document.getElementById(`m-${tr}`).style.display = 'none';
+            } else {
+              select.value = 'custom';
+              document.getElementById(`m-${tr}`).style.display = 'block';
+            }
+          }
+        } else {
+          document.getElementById(`m-${tr}`).value = "";
+          const select = document.getElementById(`m-${tr}-select`);
+          if(select) { select.value = "?"; document.getElementById(`m-${tr}`).style.display = 'none'; }
+        }
+      });
       
       const standardKeys = ['title', 'v_track', 'a_track', 's_track'];
       for(const k in data.metadata) {
         if(!standardKeys.includes(k.trim())) {
-          const val = data.metadata[k];
-          let track = '?';
-          let tagType = 'custom';
-          let tagValue = val;
-          let target = null;
+          // Parse key to extract track and tagKey
+          // Expected formats: s:v:0:title, v:0, title (global)
+          let tTrack = '?';
+          let tType = 'custom';
+          let tKey = k.trim();
+          let tVal = data.metadata[k];
           
-          let parsedKey = k.trim();
-          if(parsedKey.startsWith('s:v:')) { target = 'v-meta'; parsedKey = parsedKey.substring(4); }
-          else if(parsedKey.startsWith('s:a:')) { target = 'a-meta'; parsedKey = parsedKey.substring(4); }
-          else if(parsedKey.startsWith('s:s:')) { target = 's-meta'; parsedKey = parsedKey.substring(4); }
-          
-          if(target) {
-            const spl = parsedKey.indexOf(':');
-            if(spl !== -1) {
-              track = parsedKey.substring(0, spl);
-              const tKey = parsedKey.substring(spl+1);
-              if(['title','language','handler_name'].includes(tKey)) {
-                tagType = tKey;
-              } else {
-                tagValue = `${tKey}=${val}`;
-              }
-            } else {
-              if(['title','language','handler_name'].includes(parsedKey)) tagType = parsedKey;
-              else tagValue = `${parsedKey}=${val}`;
-            }
-            state[target].push({ track, tagType, tagValue });
+          if(tKey.startsWith('s:v:') || tKey.startsWith('s:a:') || tKey.startsWith('s:s:')) {
+            tTrack = tKey.substring(4);
+            // Wait, ffmpeg uses s:v:0 for stream specifiers, but my UI prefixes it later
+            // The JSON key is actually the literal key applied.
+            // Let's just treat it as custom if it's complex, unless we can parse it easily.
           }
+          // Simple parsing:
+          const split = tKey.split(':');
+          if(split.length > 2) {
+             tTrack = split[split.length - 2];
+             tKey = split[split.length - 1];
+          } else if (split.length == 2) {
+             tTrack = split[split.length - 1];
+             tKey = split[0];
+          }
+          if(['title', 'language', 'handler_name'].includes(tKey)) tType = tKey;
+          
+          metadataTags.push({track: tTrack, tagType: tType, tagKey: tKey, tagValue: tVal});
         }
       }
     } else {
       document.getElementById('g-title').value = "";
-      handleTrackLoader('v_track', "");
-      handleTrackLoader('a_track', "");
-      handleTrackLoader('s_track', "");
+      ['v_track', 'a_track', 's_track'].forEach(tr => {
+         document.getElementById(`m-${tr}`).value = "";
+         const select = document.getElementById(`m-${tr}-select`);
+         if(select) { select.value = "?"; document.getElementById(`m-${tr}`).style.display = 'none'; }
+      });
     }
-    
-    if(data.disposition) {
-      for(const k in data.disposition) {
-        const val = data.disposition[k];
-        let track = '?';
-        let target = null;
-        let parsedKey = k.trim();
-        
-        if(parsedKey.startsWith('v:')) { target = 'v-disp'; track = parsedKey.substring(2); }
-        else if(parsedKey.startsWith('a:')) { target = 'a-disp'; track = parsedKey.substring(2); }
-        else if(parsedKey.startsWith('s:')) { target = 's-disp'; track = parsedKey.substring(2); }
-        else if(parsedKey.startsWith('v')) { target = 'v-disp'; track = '?'; }
-        else if(parsedKey.startsWith('a')) { target = 'a-disp'; track = '?'; }
-        else if(parsedKey.startsWith('s')) { target = 's-disp'; track = '?'; }
-
-        if(target) {
-          if(track === '') track = '?';
-          state[target].push({ track, tagValue: val });
-        }
-      }
-    }
-
-    Object.keys(state).forEach(renderTags);
+    renderTags('metadata-tags-container', metadataTags, 'meta');
     
     if(data.video_params) {
       if(data.video_params.crf !== undefined) {
@@ -443,6 +512,17 @@ document.addEventListener("DOMContentLoaded", () => {
       document.getElementById('a-channels').value = data.audio_params.channels || "2";
       document.getElementById('a-vbr').checked = data.audio_params.vbr || false;
     }
+
+    dispositionTags = [];
+    if(data.disposition) {
+      for(const k in data.disposition) {
+        const split = k.split(':');
+        let tTrack = '?';
+        if(split.length > 1) tTrack = split[split.length-1];
+        dispositionTags.push({track: tTrack, value: data.disposition[k]});
+      }
+    }
+    renderTags('disposition-tags-container', dispositionTags, 'disp');
     
     generatePreview();
   }
@@ -485,53 +565,33 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // Generate Profile JSON
   function getProfileJSON() {
-    const v_track = document.getElementById('m-v_track')?.value || "";
-    const a_track = document.getElementById('m-a_track')?.value || "";
-    const s_track = document.getElementById('m-s_track')?.value || "";
-    
     const metaObj = {
       title: document.getElementById('g-title')?.value || "",
-      v_track: v_track === "?" ? "" : v_track,
-      a_track: a_track === "?" ? "" : a_track,
-      s_track: s_track === "?" ? "" : s_track,
+      v_track: document.getElementById('m-v_track')?.value || "?",
+      a_track: document.getElementById('m-a_track')?.value || "?",
+      s_track: document.getElementById('m-s_track')?.value || "?",
     };
     
-    const resolveMeta = (target, prefix) => {
-      state[target].forEach(t => {
-        let key = `${prefix}${t.track === '?' ? '' : t.track + ':'}`;
-        if(t.tagType === 'custom') {
-          const spl = t.tagValue.indexOf('=');
-          if(spl !== -1) {
-            key += t.tagValue.substring(0, spl);
-            let ukey = key;
-            while(metaObj[ukey] !== undefined) ukey += ' ';
-            metaObj[ukey] = t.tagValue.substring(spl+1);
-          }
-        } else {
-          key += t.tagType;
-          let ukey = key;
-          while(metaObj[ukey] !== undefined) ukey += ' ';
-          metaObj[ukey] = t.tagValue;
-        }
-      });
-    };
-    resolveMeta('v-meta', 's:v:');
-    resolveMeta('a-meta', 's:a:');
-    resolveMeta('s-meta', 's:s:');
-
-    ['title', 'v_track', 'a_track', 's_track'].forEach(k => {
-      if(!metaObj[k]) delete metaObj[k];
+    metadataTags.forEach(t => {
+      if(t.tagKey && t.tagValue) {
+        let ukey = t.tagKey.trim();
+        if(t.track !== '?') ukey = `${ukey}:${t.track}`;
+        while(metaObj[ukey] !== undefined) ukey += ' ';
+        metaObj[ukey] = t.tagValue;
+      }
     });
 
+    // Cleanup empty standard keys
+    ['title'].forEach(k => { if(!metaObj[k]) delete metaObj[k]; });
+    ['v_track', 'a_track', 's_track'].forEach(k => { if(!metaObj[k] || metaObj[k]==='?') delete metaObj[k]; });
+
     const dispObj = {};
-    const resolveDisp = (target, prefix) => {
-      state[target].forEach(t => {
-        dispObj[`${prefix}${t.track === '?' ? '' : ':'+t.track}`] = t.tagValue;
-      });
-    };
-    resolveDisp('v-disp', 'v');
-    resolveDisp('a-disp', 'a');
-    resolveDisp('s-disp', 's');
+    dispositionTags.forEach(t => {
+      if(t.value) {
+        let key = t.track !== '?' ? `v:${t.track}` : 'v';
+        dispObj[key] = t.value;
+      }
+    });
 
     return {
       name: document.getElementById('p-name')?.value || "Custom Profile",
@@ -542,9 +602,9 @@ document.addEventListener("DOMContentLoaded", () => {
       subtitle_mode: document.getElementById('s-mode')?.value || "copy",
       metadata: Object.keys(metaObj).length > 0 ? metaObj : undefined,
       video_params: {
-        crf: parseInt(document.getElementById('v-crf')?.value || "24"),
-        preset: document.getElementById('v-preset-select')?.value || "medium",
-        pix_fmt: document.getElementById('v-pix_fmt')?.value || "yuv420p10le",
+        crf: document.getElementById('v-codec')?.value !== 'copy' ? parseInt(document.getElementById('v-crf')?.value || "24") : undefined,
+        preset: document.getElementById('v-codec')?.value !== 'copy' ? document.getElementById('v-preset-select')?.value : undefined,
+        pix_fmt: document.getElementById('v-codec')?.value !== 'copy' ? document.getElementById('v-pix_fmt')?.value : undefined,
         profile: document.getElementById('v-profile')?.value || "",
         level: document.getElementById('v-level')?.value || "",
         color_primaries: document.getElementById('v-color-prim')?.value || "",
@@ -552,11 +612,11 @@ document.addEventListener("DOMContentLoaded", () => {
         colorspace: document.getElementById('v-colorspace')?.value || "",
         extra_params: document.getElementById('v-extra')?.value || ""
       },
-      audio_params: {
-        bitrate: document.getElementById('a-bitrate')?.value || "128k",
+      audio_params: document.getElementById('a-codec')?.value !== 'copy' ? {
+        bitrate: document.getElementById('a-codec')?.value !== 'flac' ? document.getElementById('a-bitrate')?.value : undefined,
         channels: parseInt(document.getElementById('a-channels')?.value || "2"),
-        vbr: document.getElementById('a-vbr')?.checked || false
-      },
+        vbr: document.getElementById('a-codec')?.value !== 'flac' ? document.getElementById('a-vbr')?.checked : undefined
+      } : undefined,
       disposition: Object.keys(dispObj).length > 0 ? dispObj : undefined
     };
   }
@@ -566,9 +626,9 @@ document.addEventListener("DOMContentLoaded", () => {
     let cmd = `ffmpeg -i input.mkv \\\n`;
     
     // Track Mapping
-    if(profile.metadata?.v_track) cmd += `  -map 0:v${profile.metadata.v_track === '?' ? '' : ':'+profile.metadata.v_track} \\\n`;
-    if(profile.metadata?.a_track) cmd += `  -map 0:a${profile.metadata.a_track === '?' ? '' : ':'+profile.metadata.a_track} \\\n`;
-    if(profile.metadata?.s_track) cmd += `  -map 0:s${profile.metadata.s_track === '?' ? '' : ':'+profile.metadata.s_track} \\\n`;
+    if(profile.metadata?.v_track) cmd += `  -map 0:v:${profile.metadata.v_track === '?' ? '' : profile.metadata.v_track} \\\n`;
+    if(profile.metadata?.a_track) cmd += `  -map 0:a:${profile.metadata.a_track === '?' ? '' : profile.metadata.a_track} \\\n`;
+    if(profile.metadata?.s_track) cmd += `  -map 0:s:${profile.metadata.s_track === '?' ? '' : profile.metadata.s_track} \\\n`;
 
     // Video
     cmd += `  -c:v ${profile.video_codec} `;
@@ -656,6 +716,13 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   // --- BUTTON ACTIONS ---
+
+  document.getElementById('btn-copy')?.addEventListener('click', () => {
+    if(previewCode) {
+      navigator.clipboard.writeText(previewCode.textContent);
+      if(typeof showToast === 'function') showToast("Copied to clipboard!");
+    }
+  });
 
   document.getElementById('btn-import')?.addEventListener('click', () => {
     const input = prompt("Paste your profile JSON here:");
@@ -793,10 +860,10 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // Listeners
   document.addEventListener('input', (e) => {
-    if(e.target.matches('input, select, textarea')) generatePreview();
+    if(e.target.matches('input:not(.tag-val-custom, .tag-key-custom), select:not(.tag-key, .tag-val, .tag-key-track, .tag-type), textarea')) generatePreview();
   });
   document.addEventListener('change', (e) => {
-    if(e.target.matches('input, select, textarea')) generatePreview();
+    if(e.target.matches('input:not(.tag-val-custom, .tag-key-custom), select:not(.tag-key, .tag-val, .tag-key-track, .tag-type), textarea')) generatePreview();
   });
 
   // Initialize

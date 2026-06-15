@@ -86,6 +86,9 @@
         <p class="encode-title-sub" style="margin-top: 4px;">Visually build FFmpeg encoding profiles. Syncs directly to your Telegram bot.</p>
       </div>
       <div class="encode-actions">
+        <button id="btn-copy" class="btn btn--ghost" title="Copy to Clipboard">
+          <i data-lucide="copy" style="width:14px;height:14px;"></i> Copy
+        </button>
         <button id="btn-import" class="btn btn--ghost" title="Import JSON">
           <i data-lucide="download" style="width:14px;height:14px;"></i> Import JSON
         </button>
@@ -240,7 +243,15 @@
 
             <div class="form-group" style="margin-top: 16px;">
               <label class="form-label">Video Track Index (v_track)</label>
-              <input type="text" id="m-v_track" class="form-input form-input--mono" placeholder="e.g. 0, 1, ?">
+              <select id="m-v_track-select" class="form-select form-input--mono track-selector-dropdown" data-target="m-v_track">
+                <option value="?">Keep All Tracks (?)</option>
+                <option value="0">Track 1 Only (0)</option>
+                <option value="1">Track 2 Only (1)</option>
+                <option value="0,1">Tracks 1 & 2 (0,1)</option>
+                <option value="1,0">Tracks 2 & 1 (1,0)</option>
+                <option value="custom">Custom Mapping...</option>
+              </select>
+              <input type="text" id="m-v_track" class="form-input form-input--mono" placeholder="e.g. 0,1 or ?" style="display: none; margin-top: 8px;">
             </div>
           </div>
         </div>
@@ -287,7 +298,15 @@
 
             <div class="form-group" style="margin-top: 16px;">
               <label class="form-label">Audio Track Index (a_track)</label>
-              <input type="text" id="m-a_track" class="form-input form-input--mono" placeholder="e.g. 0, 1, ?">
+              <select id="m-a_track-select" class="form-select form-input--mono track-selector-dropdown" data-target="m-a_track">
+                <option value="?">Keep All Tracks (?)</option>
+                <option value="0">Track 1 Only (0)</option>
+                <option value="1">Track 2 Only (1)</option>
+                <option value="0,1">Tracks 1 & 2 (0,1)</option>
+                <option value="1,0">Tracks 2 & 1 (1,0)</option>
+                <option value="custom">Custom Mapping...</option>
+              </select>
+              <input type="text" id="m-a_track" class="form-input form-input--mono" placeholder="e.g. 0,1 or ?" style="display: none; margin-top: 8px;">
             </div>
           </div>
         </div>
@@ -314,7 +333,15 @@
 
             <div class="form-group" style="margin-top: 16px;">
               <label class="form-label">Subtitle Track Index (s_track)</label>
-              <input type="text" id="m-s_track" class="form-input form-input--mono" placeholder="e.g. 0, 1, ?">
+              <select id="m-s_track-select" class="form-select form-input--mono track-selector-dropdown" data-target="m-s_track">
+                <option value="?">Keep All Tracks (?)</option>
+                <option value="0">Track 1 Only (0)</option>
+                <option value="1">Track 2 Only (1)</option>
+                <option value="0,1">Tracks 1 & 2 (0,1)</option>
+                <option value="1,0">Tracks 2 & 1 (1,0)</option>
+                <option value="custom">Custom Mapping...</option>
+              </select>
+              <input type="text" id="m-s_track" class="form-input form-input--mono" placeholder="e.g. 0,1 or ?" style="display: none; margin-top: 8px;">
             </div>
           </div>
         </div>
