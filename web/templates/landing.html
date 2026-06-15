@@ -44,17 +44,17 @@
     </div>
 
     <!-- Stats Grid -->
-    <div class="bs-grid-3 bs-mt-6 bs-mb-10">
+    <div class="bs-grid-3 bs-mt-6 bs-mb-10" id="stats-grid">
       <div class="bs-card bs-card--glass bs-text-center">
-        <h3 class="bs-h2 bs-mb-2">12</h3>
+        <h3 class="bs-h2 bs-mb-2" id="stat-tasks">0</h3>
         <p class="bs-body-sm bs-text-muted">Active Tasks</p>
       </div>
       <div class="bs-card bs-card--glass bs-text-center">
-        <h3 class="bs-h2 bs-mb-2">1.2k</h3>
-        <p class="bs-body-sm bs-text-muted">Total Downloads</p>
+        <h3 class="bs-h2 bs-mb-2"><span id="stat-cpu">0</span>%</h3>
+        <p class="bs-body-sm bs-text-muted">Server CPU</p>
       </div>
       <div class="bs-card bs-card--glass bs-text-center">
-        <h3 class="bs-h2 bs-mb-2">99%</h3>
+        <h3 class="bs-h2 bs-mb-2" id="stat-uptime">0s</h3>
         <p class="bs-body-sm bs-text-muted">Uptime</p>
       </div>
     </div>
@@ -92,4 +92,27 @@
 <footer class="bs-section bs-section--sm bs-text-center">
   <p class="bs-caption bs-text-muted">&copy; 2026 Amaterasu. All rights reserved.</p>
 </footer>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+  async function fetchStats() {
+    try {
+      const res = await fetch('/api/status');
+      if (res.ok) {
+        const data = await res.json();
+        document.getElementById('stat-tasks').textContent = data.active_tasks;
+        document.getElementById('stat-cpu').textContent = data.cpu;
+        document.getElementById('stat-uptime').textContent = data.uptime;
+      }
+    } catch (e) {
+      console.error('Failed to fetch bot stats:', e);
+    }
+  }
+
+  document.addEventListener('DOMContentLoaded', () => {
+    fetchStats();
+    setInterval(fetchStats, 3000);
+  });
+</script>
 {% endblock %}

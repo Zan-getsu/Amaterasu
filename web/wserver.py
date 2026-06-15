@@ -225,6 +225,21 @@ def _require_profile_user(request: Request) -> int:
     return user_id
 
 
+@app.api_route("/api/status", methods=["GET"])
+async def get_bot_status():
+    from bot import task_dict, bot_start_time
+    from bot.helper.ext_utils.status_utils import get_readable_time
+    from psutil import cpu_percent, virtual_memory
+    from time import time
+    
+    return JSONResponse({
+        "active_tasks": len(task_dict),
+        "uptime": get_readable_time(time() - bot_start_time),
+        "cpu": cpu_percent(),
+        "ram": virtual_memory().percent
+    })
+
+
 def _require_profile_database(database) -> None:
     if database.db is None:
         raise HTTPException(status_code=503, detail="Profile database is unavailable")
