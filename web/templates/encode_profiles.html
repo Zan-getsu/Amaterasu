@@ -188,15 +188,8 @@
                 <label class="form-label">Profile Name</label>
                 <input type="text" id="p-name" class="form-input" placeholder="e.g. x265-1080p" value="Custom Profile">
               </div>
-              <div class="form-group">
-                <label class="form-label">Subtitle Mode
-                  <span class="tooltip-wrap"><i data-lucide="help-circle" class="tooltip-icon"></i><span class="tooltip-bubble">Choose how subtitles are handled in the output file.</span></span>
-                </label>
-                <select id="s-mode" class="form-input form-select">
-                  <option value="copy" selected>Copy original subtitles</option>
-                  <option value="none">Remove subtitles</option>
-                  <option value="burn">Burn-in (Hardsubs)</option>
-                </select>
+              <div class="form-group" style="display: none;">
+                <!-- Placeholder to keep form-row grid happy or we can just remove form-row class -->
               </div>
             </div>
           </div>
@@ -480,6 +473,17 @@
             <i data-lucide="chevron-down" style="width:18px;height:18px;" class="chevron"></i>
           </button>
           <div class="acc-content" style="display: none;">
+            <div class="form-group" style="margin-bottom: 16px;">
+              <label class="form-label">Subtitle Mode
+                <span class="tooltip-wrap"><i data-lucide="help-circle" class="tooltip-icon"></i><span class="tooltip-bubble">Choose how subtitles are handled in the output file.</span></span>
+              </label>
+              <select id="s-mode" class="form-input form-select">
+                <option value="copy" selected>Copy original subtitles</option>
+                <option value="none">Remove subtitles</option>
+                <option value="burn">Burn-in (Hardsubs)</option>
+              </select>
+            </div>
+
             <!-- Subtitle Track Selection & Tags -->
             <div class="form-group" style="margin-bottom: 16px;">
               <label class="form-label">Subtitle Tracks to Keep</label>
