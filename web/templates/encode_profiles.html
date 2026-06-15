@@ -86,14 +86,29 @@
         <p class="encode-title-sub" style="margin-top: 4px;">Visually build FFmpeg encoding profiles. Syncs directly to your Telegram bot.</p>
       </div>
       <div class="encode-actions">
+        <button id="btn-import" class="btn btn--ghost" title="Import JSON">
+          <i data-lucide="download" style="width:14px;height:14px;"></i> Import JSON
+        </button>
+        <button id="btn-delete" class="btn btn--ghost" title="Delete Profile" style="display: none; color: #e74c3c; border-color: rgba(231,76,60,0.3);">
+          <i data-lucide="trash-2" style="width:14px;height:14px;"></i>
+        </button>
+        <button id="btn-reset" class="btn btn--ghost" title="Reset All Settings">
+          <i data-lucide="rotate-ccw" style="width:14px;height:14px;"></i>
+        </button>
         <button id="btn-my-profiles" class="btn btn--ghost">
           <i data-lucide="list" style="width:14px;height:14px;"></i> My Profiles
         </button>
-        <button id="btn-import" class="btn btn--ghost">
-          <i data-lucide="import" style="width:14px;height:14px;"></i> Import JSON
-        </button>
         <button id="btn-save" class="btn btn--primary"><i data-lucide="check" style="width:14px;height:14px;"></i> Save Profile
         </button>
+      </div>
+    </div>
+
+
+    <!-- Quick Presets -->
+    <div style="margin-bottom: 32px;">
+      <h3 style="font-size: 13px; font-weight: 700; color: var(--bs-text-muted); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 16px; margin-left: 8px;">Quick Presets</h3>
+      <div id="quick-presets-container" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px;">
+        <!-- Injected via JS -->
       </div>
     </div>
 
@@ -222,6 +237,11 @@
               <label class="form-label">Extra FFmpeg Parameters</label>
               <input type="text" id="v-extra" class="form-input form-input--mono" placeholder="-bf 2 -g 240">
             </div>
+
+            <div class="form-group" style="margin-top: 16px;">
+              <label class="form-label">Video Track Index (v_track)</label>
+              <input type="text" id="m-v_track" class="form-input form-input--mono" placeholder="e.g. 0, 1, ?">
+            </div>
           </div>
         </div>
 
@@ -264,6 +284,11 @@
                 <span class="form-label" style="text-transform: none; font-size: 13px;">Enable Variable Bitrate (VBR)</span>
               </label>
             </div>
+
+            <div class="form-group" style="margin-top: 16px;">
+              <label class="form-label">Audio Track Index (a_track)</label>
+              <input type="text" id="m-a_track" class="form-input form-input--mono" placeholder="e.g. 0, 1, ?">
+            </div>
           </div>
         </div>
 
@@ -286,6 +311,11 @@
               <label class="form-label">Subtitle Track Metadata (Title)</label>
               <input type="text" id="s-metadata-title" class="form-input" placeholder="English (Amaterasu)">
             </div>
+
+            <div class="form-group" style="margin-top: 16px;">
+              <label class="form-label">Subtitle Track Index (s_track)</label>
+              <input type="text" id="m-s_track" class="form-input form-input--mono" placeholder="e.g. 0, 1, ?">
+            </div>
           </div>
         </div>
 
@@ -304,8 +334,13 @@
               <input type="text" id="g-rename" class="form-input form-input--mono" placeholder="[Amaterasu] {title} {quality}">
               <div class="bs-flex" style="gap: 6px; flex-wrap: wrap; margin-top: 4px;">
                 <button type="button" class="chip" onclick="insertChip('g-rename', '{title}')">{title}</button>
+                <button type="button" class="chip" onclick="insertChip('g-rename', '{episode}')">{episode}</button>
                 <button type="button" class="chip" onclick="insertChip('g-rename', '{quality}')">{quality}</button>
+                <button type="button" class="chip" onclick="insertChip('g-rename', '{resolution}')">{resolution}</button>
+                <button type="button" class="chip" onclick="insertChip('g-rename', '{source}')">{source}</button>
+                <button type="button" class="chip" onclick="insertChip('g-rename', '{audio}')">{audio}</button>
                 <button type="button" class="chip" onclick="insertChip('g-rename', '{codec}')">{codec}</button>
+                <button type="button" class="chip" onclick="insertChip('g-rename', '{basename}')">{basename}</button>
               </div>
             </div>
 
@@ -320,13 +355,19 @@
             </div>
 
             <div class="form-group" style="margin-bottom: 16px;">
-              <label class="form-label">Custom Metadata Tags (JSON)</label>
-              <textarea id="g-custom-meta" class="form-input form-input--mono bs-textarea" placeholder='{"comment": "Amaterasu Release"}'></textarea>
+              <label class="form-label">Custom Metadata Tags</label>
+              <div id="metadata-tags-container" style="display: flex; flex-direction: column; gap: 8px;"></div>
+              <button type="button" class="btn btn--ghost btn--sm" id="btn-add-metadata" style="align-self: flex-start; margin-top: 8px;">
+                <i data-lucide="plus" style="width:14px;height:14px;"></i> Add Metadata Tag
+              </button>
             </div>
 
             <div class="form-group">
-              <label class="form-label">Stream Disposition Flags (JSON)</label>
-              <textarea id="g-disposition" class="form-input form-input--mono bs-textarea" placeholder='{"v:0": "default", "s:0": "0"}'></textarea>
+              <label class="form-label">Stream Disposition Flags</label>
+              <div id="disposition-tags-container" style="display: flex; flex-direction: column; gap: 8px;"></div>
+              <button type="button" class="btn btn--ghost btn--sm" id="btn-add-disposition" style="align-self: flex-start; margin-top: 8px;">
+                <i data-lucide="plus" style="width:14px;height:14px;"></i> Add Disposition Flag
+              </button>
             </div>
           </div>
         </div>
