@@ -1,0 +1,23 @@
+/* Shared utility classes */
+.bs-text-center { text-align: center; }
+.bs-text-right { text-align: right; }
+.bs-d-none { display: none !important; }
+.bs-flex { display: flex; }
+.bs-flex-col { display: flex; flex-direction: column; }
+.bs-items-center { align-items: center; }
+.bs-justify-between { justify-content: space-between; }
+.bs-justify-center { justify-content: center; }
+.bs-gap-2 { gap: var(--bs-space-2); }
+.bs-gap-3 { gap: var(--bs-space-3); }
+.bs-gap-4 { gap: var(--bs-space-4); }
+
+/* Margins */
+.bs-mt-2 { margin-top: var(--bs-space-2); }
+.bs-mt-4 { margin-top: var(--bs-space-4); }
+.bs-mt-6 { margin-top: var(--bs-space-6); }
+.bs-mb-2 { margin-bottom: var(--bs-space-2); }
+.bs-mb-4 { margin-bottom: var(--bs-space-4); }
+.bs-mb-6 { margin-bottom: var(--bs-space-6); }
+
+/* Width */
+.bs-w-full { width: 100%; }

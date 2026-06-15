@@ -1,0 +1,15 @@
+*, *::before, *::after { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  background: var(--bs-obsidian);
+  color: var(--bs-text-primary);
+  font-family: var(--bs-font-sans);
+  -webkit-font-smoothing: antialiased;
+  line-height: 1.6; margin: 0; padding-top: 60px;
+  min-height: 100vh;
+}
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: var(--bs-obsidian); }
+::-webkit-scrollbar-thumb { background: var(--bs-border); border-radius: 99px; }
+::-webkit-scrollbar-thumb:hover { background: var(--bs-gold); }
+::selection { background: var(--bs-gold-dim); color: var(--bs-gold); }

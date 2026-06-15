@@ -1,373 +1,84 @@
-<!DOCTYPE html>
-<html lang="en">
+{% extends "base.html" %}
 
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Amaterasu | Premium Automation</title>
-    <!-- FontAwesome 6 -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
-    <!-- Google Fonts Outfit & Plus Jakarta Sans -->
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link
-        href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=Outfit:wght@300;400;500;600;700;800&display=swap"
-        rel="stylesheet">
+{% block title %}Amaterasu Status{% endblock %}
 
-    <style>
-        :root {
-            --color-bg: #050505;
-            --color-fg: #f3f4f6;
-            --color-glass: rgba(255, 255, 255, 0.03);
-            --color-glass-hover: rgba(255, 255, 255, 0.08);
-            --color-glass-border: rgba(255, 255, 255, 0.08);
-            --color-primary: #ff3e3e;
-            /* Premium Red */
-            --color-primary-rgb: 255, 62, 62;
-            --color-secondary: #ff7a00;
-            /* Premium Orange */
-            --color-secondary-rgb: 255, 122, 0;
-            --color-text-main: #f8fafc;
-            --color-text-muted: #94a3b8;
-        }
-
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-
-        body {
-            font-family: 'Plus Jakarta Sans', sans-serif;
-            background-color: var(--color-bg);
-            color: var(--color-fg);
-            line-height: 1.6;
-            min-height: 100vh;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            position: relative;
-            overflow-x: hidden;
-            background-image:
-                radial-gradient(circle at 50% 0%, rgba(var(--color-primary-rgb), 0.04) 0%, transparent 50%),
-                radial-gradient(circle at 80% 10%, rgba(var(--color-secondary-rgb), 0.04) 0%, transparent 40%);
-            background-attachment: fixed;
-            touch-action: manipulation;
-            -webkit-font-smoothing: antialiased;
-        }
-
-        /* Background grid and flows */
-        .grid-background {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background-image:
-                linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px),
-                linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
-            background-size: 30px 30px;
-            mask-image: radial-gradient(circle at center, black 40%, transparent 100%);
-            -webkit-mask-image: radial-gradient(circle at center, black 40%, transparent 100%);
-            pointer-events: none;
-            z-index: 0;
-        }
-
-        .radial-glow {
-            position: fixed;
-            width: 600px;
-            height: 600px;
-            border-radius: 50%;
-            filter: blur(140px);
-            opacity: 0.18;
-            pointer-events: none;
-            z-index: 0;
-        }
-
-        .glow-1 {
-            top: -250px;
-            left: 15%;
-            background: radial-gradient(circle, var(--color-primary) 0%, transparent 70%);
-        }
-
-        .glow-2 {
-            bottom: -250px;
-            right: 15%;
-            background: radial-gradient(circle, var(--color-secondary) 0%, transparent 70%);
-        }
-
-        .container {
-            width: 100%;
-            max-width: 680px;
-            padding: 2.5rem 1.5rem;
-            position: relative;
-            z-index: 10;
-        }
-
-        /* Glass Content Card */
-        .content-card {
-            background: rgba(10, 10, 10, 0.6);
-            backdrop-filter: blur(16px);
-            -webkit-backdrop-filter: blur(16px);
-            border: 1px solid var(--color-glass-border);
-            border-radius: 2rem;
-            padding: 3.5rem 2.5rem;
-            text-align: center;
-            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-            transform: translateZ(0);
-            will-change: backdrop-filter, transform;
-        }
-
-        .content-card:hover {
-            background-color: var(--color-glass-hover);
-            border-color: rgba(255, 255, 255, 0.15);
-            box-shadow: 0 0 30px -10px rgba(var(--color-primary-rgb), 0.15);
-            transform: translateY(-2px) translateZ(0);
-        }
-
-        /* Fire Animated Logo */
-        .logo-container {
-            position: relative;
-            width: 140px;
-            height: 140px;
-            margin: 0 auto 2.5rem;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
-
-        .fire-flame {
-            font-size: 4.5rem;
-            background: linear-gradient(180deg, #ff3e3e 0%, #ff7a00 50%, #ffbc00 100%);
-            -webkit-background-clip: text;
-            background-clip: text;
-            color: transparent;
-            position: relative;
-            z-index: 2;
-            filter: drop-shadow(0 0 15px rgba(255, 62, 62, 0.6));
-            animation: flameWobble 1.5s ease-in-out infinite alternate;
-        }
-
-        .fire-glow {
-            position: absolute;
-            width: 100%;
-            height: 100%;
-            border-radius: 50%;
-            z-index: 1;
-            filter: blur(14px);
-            opacity: 0.95;
-            background: radial-gradient(circle, #ffbc00 20%, #ff7a00 50%, #ff3e3e 80%, transparent 100%);
-            animation: flameFlicker 1.8s ease-in-out infinite alternate;
-        }
-
-        .fire-glow-outer {
-            position: absolute;
-            width: 120%;
-            height: 120%;
-            border-radius: 50%;
-            z-index: 0;
-            filter: blur(28px);
-            opacity: 0.7;
-            background: radial-gradient(circle, #ff7a00 30%, #ff3e3e 70%, transparent 100%);
-            animation: flamePulse 1.4s ease-in-out infinite alternate;
-        }
-
-        @keyframes flameWobble {
-            0% {
-                transform: scale(0.95) rotate(-3deg);
-                filter: drop-shadow(0 0 10px rgba(255, 62, 62, 0.5));
-            }
-
-            100% {
-                transform: scale(1.05) rotate(3deg) translate(1px, -2px);
-                filter: drop-shadow(0 0 25px rgba(255, 122, 0, 0.8));
-            }
-        }
-
-        @keyframes flameFlicker {
-            0% {
-                transform: scale(0.96) rotate(-2deg);
-                filter: blur(10px);
-                opacity: 0.8;
-            }
-
-            50% {
-                transform: scale(1.04) rotate(4deg) translate(2px, -2px);
-                filter: blur(14px);
-                opacity: 0.95;
-            }
-
-            100% {
-                transform: scale(0.98) rotate(-1deg) translate(-1px, 1px);
-                filter: blur(12px);
-                opacity: 0.85;
-            }
-        }
-
-        @keyframes flamePulse {
-            0% {
-                transform: scale(0.92) translateY(0);
-                opacity: 0.55;
-            }
-
-            100% {
-                transform: scale(1.08) translateY(-5px);
-                opacity: 0.75;
-            }
-        }
-
-        /* Typography */
-        h1 {
-            font-size: 3rem;
-            font-weight: 900;
-            margin-bottom: 0.75rem;
-            letter-spacing: 4px;
-            text-transform: uppercase;
-            font-family: 'Outfit', sans-serif;
-            background: linear-gradient(135deg, var(--color-primary), var(--color-secondary));
-            -webkit-background-clip: text;
-            background-clip: text;
-            color: transparent;
-            text-shadow: 0 0 30px rgba(var(--color-primary-rgb), 0.15);
-        }
-
-        .version {
-            display: inline-block;
-            font-size: 0.85rem;
-            font-weight: 700;
-            background: rgba(var(--color-primary-rgb), 0.1);
-            color: #fca5a5;
-            border: 1px solid rgba(var(--color-primary-rgb), 0.2);
-            padding: 0.25rem 0.75rem;
-            border-radius: 9999px;
-            margin-bottom: 1.5rem;
-            font-family: 'Outfit', sans-serif;
-        }
-
-        .subtitle {
-            font-size: 1.1rem;
-            color: var(--color-text-muted);
-            margin-bottom: 2.5rem;
-            max-width: 480px;
-            margin-left: auto;
-            margin-right: auto;
-        }
-
-        /* Buttons Grid */
-        .links-grid {
-            display: grid;
-            grid-template-columns: repeat(2, 1fr);
-            gap: 1rem;
-            margin-bottom: 2.5rem;
-        }
-
-        .btn-link {
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            gap: 0.75rem;
-            padding: 1rem 1.5rem;
-            background: var(--color-glass);
-            border: 1px solid var(--color-glass-border);
-            color: var(--color-fg);
-            text-decoration: none;
-            border-radius: 1rem;
-            font-weight: 600;
-            font-size: 0.95rem;
-            font-family: 'Outfit', sans-serif;
-            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-        }
-
-        .btn-link:hover {
-            background: var(--color-glass-hover);
-            border-color: rgba(255, 255, 255, 0.2);
-            color: #ffffff;
-            transform: translateY(-2px);
-            box-shadow: 0 0 15px rgba(255, 255, 255, 0.05);
-        }
-
-        .btn-link i {
-            font-size: 1.1rem;
-            transition: transform 0.25s ease;
-        }
-
-        .btn-link:hover i {
-            transform: scale(1.15);
-        }
-
-        /* Highlights */
-        .tagline {
-            font-size: 0.9rem;
-            color: var(--color-secondary);
-            font-weight: 700;
-            letter-spacing: 2px;
-            text-transform: uppercase;
-            margin-top: 1.5rem;
-            font-family: 'Outfit', sans-serif;
-        }
-
-        .copyright {
-            margin-top: 2rem;
-            font-size: 0.8rem;
-            color: var(--color-text-muted);
-            opacity: 0.7;
-        }
-
-        @media (max-width: 580px) {
-            .links-grid {
-                grid-template-columns: 1fr;
-            }
-
-            .content-card {
-                padding: 2.5rem 1.5rem;
-            }
-
-            h1 {
-                font-size: 2.25rem;
-            }
-        }
-    </style>
-</head>
-
-<body>
-    <div class="grid-background"></div>
-    <div class="radial-glow glow-1"></div>
-    <div class="radial-glow glow-2"></div>
-
-    <div class="container">
-        <div class="content-card">
-            <!-- Pure Animated Fire Logo -->
-            <div class="logo-container">
-                <div class="fire-glow"></div>
-                <div class="fire-glow-outer"></div>
-                <div class="fire-flame">
-                    <i class="fa-solid fa-fire-flame-curved"></i>
-                </div>
-            </div>
-
-            <div class="version">V1.1.0</div>
-            <h1>Amaterasu</h1>
-            <p class="subtitle">Experience the next generation of workflow automation</p>
-
-            <div class="links-grid">
-                <a href="https://t.me/itsniloybhowmick" class="btn-link">
-                    <i class="fab fa-telegram-plane text-red-500"></i> Telegram Channel
-                </a>
-                <a href="https://t.me/its_niloy" class="btn-link">
-                    <i class="fas fa-comments text-orange-500"></i> Support Group
-                </a>
-                <a href="https://github.com/its-niloy/Amaterasu" class="btn-link">
-                    <i class="fab fa-github text-red-500"></i> GitHub Repository
-                </a>
-                <a href="https://github.com/its-niloy/Amaterasu" class="btn-link">
-                    <i class="fas fa-book text-orange-500"></i> Documentation
-                </a>
-            </div>
-
-            <div class="tagline">Simplify your workflow, maximize your impact!</div>
-            <p class="copyright">&copy; 2026 Amaterasu. All rights reserved.</p>
-        </div>
+{% block content %}
+<section class="bs-section bs-section--lg bs-text-center">
+  <div class="bs-container">
+    <!-- Hero Section -->
+    <svg class="bs-navbar__logo bs-mb-6" viewBox="0 0 32 32" fill="none" style="width: 80px; height: 80px; margin: 0 auto; display: block;" xmlns="http://www.w3.org/2000/svg">
+      <circle cx="16" cy="16" r="12" fill="#0B0F14" stroke="#D4AF37" stroke-width="2"/>
+      <path d="M32 16C32 24.8366 24.8366 32 16 32C7.16344 32 0 24.8366 0 16C0 7.16344 7.16344 0 16 0C24.8366 0 32 7.16344 32 16ZM28 16C28 9.37258 22.6274 4 16 4C9.37258 4 4 9.37258 4 16C4 22.6274 9.37258 28 16 28C22.6274 28 28 22.6274 28 16Z" fill="url(#paint0_radial)"/>
+      <defs>
+        <radialGradient id="paint0_radial" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(16 16) rotate(90) scale(16)">
+          <stop stop-color="#D4AF37" stop-opacity="0.25"/>
+          <stop offset="1" stop-color="#D4AF37" stop-opacity="0"/>
+        </radialGradient>
+      </defs>
+    </svg>
+    <h1 class="bs-h1 bs-mb-2" style="color: var(--bs-gold); font-family: var(--bs-font-mono);">AMATERASU</h1>
+    <div class="bs-mb-4">
+      <span class="bs-badge bs-badge--neutral">{% if version %}{{ version }}{% else %}v1.2.1{% endif %}</span>
+      <div class="bs-status-badge bs-status-badge--online">
+        <span class="bs-status-badge__dot"></span>
+        <span>{% if status %}{{ status }}{% else %}Online{% endif %}</span>
+      </div>
     </div>
-</body>
+    <p class="bs-body-lg bs-section-subtitle" style="margin: 0 auto;">Telegram Mirroring Infrastructure</p>
+    {% if bot_name %}<p class="bs-body bs-mt-2">Bot: {{ bot_name }}</p>{% endif %}
+    {% if owner %}<p class="bs-body bs-mt-2">Owner: {{ owner }}</p>{% endif %}
+  </div>
+</section>
 
-</html>
+<section class="bs-section bs-section--sm">
+  <div class="bs-container bs-container--md">
+    <!-- Stats Grid -->
+    <div class="bs-grid-3 bs-mb-10">
+      <div class="bs-card bs-card--elevated bs-text-center">
+        <h3 class="bs-h2 bs-mb-2">12</h3>
+        <p class="bs-body-sm bs-text-muted">Active Tasks</p>
+      </div>
+      <div class="bs-card bs-card--elevated bs-text-center">
+        <h3 class="bs-h2 bs-mb-2">1.2k</h3>
+        <p class="bs-body-sm bs-text-muted">Total Downloads</p>
+      </div>
+      <div class="bs-card bs-card--elevated bs-text-center">
+        <h3 class="bs-h2 bs-mb-2">99%</h3>
+        <p class="bs-body-sm bs-text-muted">Uptime</p>
+      </div>
+    </div>
+
+    <!-- Feature Cards Grid -->
+    <div class="bs-grid-2">
+      <div class="bs-card">
+        <h3 class="bs-h4 bs-mb-2">Multi-Engine Downloads</h3>
+        <p class="bs-body-sm bs-text-muted">Support for qBittorrent, Aria2c, and SABnzbd with automatic routing.</p>
+      </div>
+      <div class="bs-card">
+        <h3 class="bs-h4 bs-mb-2">FileToLink Streaming</h3>
+        <p class="bs-body-sm bs-text-muted">Instant web streaming from Telegram files with byte-range support.</p>
+      </div>
+      <div class="bs-card">
+        <h3 class="bs-h4 bs-mb-2">Auto-Rename Engine</h3>
+        <p class="bs-body-sm bs-text-muted">Intelligent metadata extraction and dynamic renaming patterns.</p>
+      </div>
+      <div class="bs-card">
+        <h3 class="bs-h4 bs-mb-2">Enterprise Resilience</h3>
+        <p class="bs-body-sm bs-text-muted">Built for high availability and concurrent load balancing.</p>
+      </div>
+      <div class="bs-card">
+        <h3 class="bs-h4 bs-mb-2">Media Processing</h3>
+        <p class="bs-body-sm bs-text-muted">Hardware-accelerated FFmpeg profiles for AV1, HEVC, and OPUS.</p>
+      </div>
+      <div class="bs-card">
+        <h3 class="bs-h4 bs-mb-2">RSS Automation</h3>
+        <p class="bs-body-sm bs-text-muted">Fully automated download feeds from multiple tracker sources.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer class="bs-section bs-section--sm bs-text-center">
+  <p class="bs-caption bs-text-muted">&copy; 2026 Amaterasu. All rights reserved.</p>
+</footer>
+{% endblock %}

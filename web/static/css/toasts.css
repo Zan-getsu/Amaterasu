@@ -1,0 +1,12 @@
+.bs-toast-container { position: fixed; top: 72px; right: var(--bs-space-5); z-index: var(--bs-z-toast); display: flex; flex-direction: column; gap: var(--bs-space-3); }
+.bs-toast {
+  display: flex; align-items: flex-start; gap: var(--bs-space-3);
+  padding: 14px 16px; border-radius: var(--bs-radius-lg);
+  background: var(--bs-elevated-2); border: 1px solid var(--bs-border);
+  box-shadow: var(--bs-shadow-lg);
+  min-width: 280px; max-width: 380px;
+  animation: slideInRight 0.3s cubic-bezier(0.22,1,0.36,1);
+}
+.bs-toast--success { border-left: 3px solid var(--bs-success); }
+.bs-toast--error   { border-left: 3px solid var(--bs-error); }
+.bs-toast--warning { border-left: 3px solid var(--bs-warning); }

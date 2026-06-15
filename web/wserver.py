@@ -13,6 +13,7 @@ from aioqbt.client import create_client
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.templating import Jinja2Templates
+from fastapi.staticfiles import StaticFiles
 from sabnzbdapi import SabnzbdClient
 from aioqbt.exc import AQError
 
@@ -153,6 +154,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(lifespan=lifespan)
+app.mount("/static", StaticFiles(directory="web/static"), name="static")
 templates = Jinja2Templates(directory="web/templates")
 STREAM_TOKEN_LENGTH = 24
 

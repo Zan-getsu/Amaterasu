@@ -1,0 +1,8 @@
+.bs-progress { height: 4px; background: var(--bs-elevated); border-radius: var(--bs-radius-pill); overflow: hidden; }
+.bs-progress__fill {
+  height: 100%; background: var(--bs-gold);
+  border-radius: var(--bs-radius-pill);
+  transition: width 0.4s cubic-bezier(0.22,1,0.36,1);
+  box-shadow: 0 0 8px var(--bs-gold-glow);
+}
+.bs-progress--indeterminate .bs-progress__fill { animation: progress-indeterminate 1.5s ease infinite; }

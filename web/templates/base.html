@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{% block title %}Amaterasu{% endblock %}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/css/main.css" />
+  {% block extra_css %}{% endblock %}
+</head>
+<body>
+  {% block navbar %}
+  <nav class="bs-navbar">
+    <div class="bs-navbar__inner">
+      <a href="/" class="bs-navbar__brand">
+        <!-- Solar eclipse SVG logo mark -->
+        <svg class="bs-navbar__logo" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <circle cx="16" cy="16" r="12" fill="#0B0F14" stroke="#D4AF37" stroke-width="2"/>
+          <path d="M32 16C32 24.8366 24.8366 32 16 32C7.16344 32 0 24.8366 0 16C0 7.16344 7.16344 0 16 0C24.8366 0 32 7.16344 32 16ZM28 16C28 9.37258 22.6274 4 16 4C9.37258 4 4 9.37258 4 16C4 22.6274 9.37258 28 16 28C22.6274 28 28 22.6274 28 16Z" fill="url(#paint0_radial)"/>
+          <defs>
+            <radialGradient id="paint0_radial" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(16 16) rotate(90) scale(16)">
+              <stop stop-color="#D4AF37" stop-opacity="0.25"/>
+              <stop offset="1" stop-color="#D4AF37" stop-opacity="0"/>
+            </radialGradient>
+          </defs>
+        </svg>
+        <span class="bs-navbar__title">AMATERASU</span>
+      </a>
+      <button class="bs-navbar__mobile-toggle" aria-expanded="false" aria-label="Toggle navigation">
+        ☰
+      </button>
+      <div class="bs-navbar__links">
+        <a href="/" class="bs-nav-link">Home</a>
+        <a href="/app/encode-profiles" class="bs-nav-link">Encode Profiles</a>
+        <a href="/app/files" class="bs-nav-link">Files</a>
+      </div>
+      <div class="bs-navbar__actions">
+        <!-- Status indicator -->
+        <div class="bs-status-badge bs-status-badge--online">
+          <span class="bs-status-badge__dot"></span>
+          <span>Online</span>
+        </div>
+      </div>
+    </div>
+  </nav>
+  {% endblock %}
+
+  <main class="bs-main">
+    {% block content %}{% endblock %}
+  </main>
+
+  <div id="bs-toast-container" class="bs-toast-container"></div>
+  <script src="/static/js/ui.js" defer></script>
+  {% block extra_js %}{% endblock %}
+</body>
+</html>

@@ -1,0 +1,11 @@
+.bs-code-block {
+  background: #0d1117; border: 1px solid var(--bs-border);
+  border-radius: var(--bs-radius-lg); overflow: hidden;
+}
+.bs-code-block__header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 16px; background: var(--bs-graphite); border-bottom: 1px solid var(--bs-border);
+}
+.bs-code-block__lang { font-size: 11px; color: var(--bs-text-muted); font-family: var(--bs-font-mono); text-transform: uppercase; letter-spacing: 0.1em; }
+.bs-code-block pre { padding: var(--bs-space-5); overflow-x: auto; margin: 0; }
+.bs-code-block code { font-family: var(--bs-font-mono); font-size: 13px; line-height: 1.65; color: var(--bs-text-secondary); }
