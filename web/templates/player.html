@@ -183,7 +183,8 @@
         .container.theatre-mode .player-wrapper {
             border-radius: 0;
             border: none;
-            max-height: 60vh;
+            max-height: 85vh;
+            height: 85vh;
         }
 
         /* ═══════════════════════════════════════
@@ -776,7 +777,7 @@
             font-weight: 600;
             font-size: 0.85rem;
             cursor: pointer;
-            z-index: 20;
+            z-index: 30;
             display: none;
             transition: all 0.2s var(--ease-out);
         }
@@ -1401,13 +1402,13 @@
                     </div>
 
                     <!-- Audio tracks -->
-                    <button class="ctrl-btn" id="audioTrackBtn" title="Audio Tracks" style="display:none"><i class="fa-solid fa-headphones"></i></button>
+                    <button class="ctrl-btn" id="audioTrackBtn" title="Audio Tracks" style="display:none !important"><i class="fa-solid fa-headphones"></i></button>
 
                     <!-- Subtitles -->
-                    <button class="ctrl-btn" id="subtitleBtn" title="Subtitles" style="display:none"><i class="fa-solid fa-closed-captioning"></i></button>
+                    <button class="ctrl-btn" id="subtitleBtn" title="Subtitles" style="display:none !important"><i class="fa-solid fa-closed-captioning"></i></button>
 
                     <!-- Speed -->
-                    <button class="ctrl-btn" id="speedBtn" title="Speed"><span style="font-family:Outfit;font-size:0.72rem;font-weight:700">1x</span></button>
+                    <button class="ctrl-btn" id="speedBtn" title="Speed" style="display:none !important"><span style="font-family:Outfit;font-size:0.72rem;font-weight:700">1x</span></button>
 
                     <!-- Resolution badge -->
                     <span class="res-badge" id="resBadge" style="display:none"></span>
@@ -1989,10 +1990,10 @@
             function buildAudioPanel() {
                 const tracks = video.audioTracks;
                 if (!tracks || tracks.length <= 1) {
-                    audioTrackBtn.style.display = 'none';
+                    // audioTrackBtn.style.display = 'none';
                     return;
                 }
-                audioTrackBtn.style.display = '';
+                // audioTrackBtn.style.display = '';
                 audioPanel.innerHTML = '<div class="panel-title">Audio Track</div>';
                 for (let i = 0; i < tracks.length; i++) {
                     const t = tracks[i];
@@ -2038,7 +2039,7 @@
                 const tracks = video.textTracks;
                 const hasTrack = tracks.length > 0;
                 // Always show subtitle button (user can upload subs even with no tracks)
-                subtitleBtn.style.display = '';
+                // subtitleBtn.style.display = '';
 
                 subtitlePanel.innerHTML = '';
                 const titleEl = document.createElement('div');
