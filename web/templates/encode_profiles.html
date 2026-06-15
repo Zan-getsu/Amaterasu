@@ -158,6 +158,46 @@
           </div>
         </div>
 
+        <!-- [2] Advanced Video Settings -->
+        <div class="bs-accordion-item">
+          <button class="bs-accordion-trigger">
+            <span><i class="fa-solid fa-sliders bs-text-muted" style="margin-right: 8px;"></i> Advanced Video Settings</span>
+            <i class="fa-solid fa-chevron-down"></i>
+          </button>
+          <div class="bs-accordion-content" style="display: none;">
+            <div class="bs-grid-2">
+              <div class="bs-input-group">
+                <label class="bs-label">Format Profile</label>
+                <input type="text" id="v-profile" class="bs-input bs-input--mono" placeholder="main, high, main10">
+              </div>
+              <div class="bs-input-group">
+                <label class="bs-label">Format Level</label>
+                <input type="text" id="v-level" class="bs-input bs-input--mono" placeholder="4.1, 5.1">
+              </div>
+            </div>
+            
+            <div class="bs-grid-3" style="margin-top: 16px;">
+              <div class="bs-input-group">
+                <label class="bs-label">Color Primaries</label>
+                <input type="text" id="v-color-prim" class="bs-input bs-input--mono" placeholder="bt2020">
+              </div>
+              <div class="bs-input-group">
+                <label class="bs-label">Color TRC</label>
+                <input type="text" id="v-color-trc" class="bs-input bs-input--mono" placeholder="smpte2084">
+              </div>
+              <div class="bs-input-group">
+                <label class="bs-label">Colorspace</label>
+                <input type="text" id="v-colorspace" class="bs-input bs-input--mono" placeholder="bt2020nc">
+              </div>
+            </div>
+
+            <div class="bs-input-group" style="margin-top: 16px;">
+              <label class="bs-label">Extra FFmpeg Parameters</label>
+              <input type="text" id="v-extra" class="bs-input bs-input--mono" placeholder="-bf 2 -g 240">
+            </div>
+          </div>
+        </div>
+
         <!-- [3] Audio Settings -->
         <div class="bs-accordion-item">
           <button class="bs-accordion-trigger">
@@ -200,6 +240,28 @@
           </div>
         </div>
 
+        <!-- [4] Subtitle Settings -->
+        <div class="bs-accordion-item">
+          <button class="bs-accordion-trigger">
+            <span><i class="fa-solid fa-closed-captioning bs-text-muted" style="margin-right: 8px;"></i> Subtitle Settings</span>
+            <i class="fa-solid fa-chevron-down"></i>
+          </button>
+          <div class="bs-accordion-content" style="display: none;">
+            <div class="bs-input-group">
+              <label class="bs-label">Subtitle Mode</label>
+              <select id="s-mode" class="bs-input bs-select">
+                <option value="copy" selected>Copy (Keep Subtitles)</option>
+                <option value="extract">Extract Subtitles</option>
+                <option value="none">None (Strip Subtitles)</option>
+              </select>
+            </div>
+            <div class="bs-input-group" style="margin-top: 16px;">
+              <label class="bs-label">Subtitle Track Metadata (Title)</label>
+              <input type="text" id="s-metadata-title" class="bs-input" placeholder="English (Amaterasu)">
+            </div>
+          </div>
+        </div>
+
         <!-- [5] Global Metadata -->
         <div class="bs-accordion-item">
           <button class="bs-accordion-trigger">
@@ -225,9 +287,19 @@
               <input type="text" id="g-title" class="bs-input" placeholder="Amaterasu Release">
             </div>
 
+            <div class="bs-input-group" style="margin-bottom: 16px;">
+              <label class="bs-label">Audio Track Title</label>
+              <input type="text" id="a-metadata-title" class="bs-input" placeholder="Audio Title">
+            </div>
+
+            <div class="bs-input-group" style="margin-bottom: 16px;">
+              <label class="bs-label">Custom Metadata Tags (JSON)</label>
+              <textarea id="g-custom-meta" class="bs-input bs-input--mono bs-textarea" placeholder='{"comment": "Amaterasu Release"}'></textarea>
+            </div>
+
             <div class="bs-input-group">
-              <label class="bs-label">Cover Image URL</label>
-              <input type="url" id="g-cover" class="bs-input" placeholder="https://...">
+              <label class="bs-label">Stream Disposition Flags (JSON)</label>
+              <textarea id="g-disposition" class="bs-input bs-input--mono bs-textarea" placeholder='{"v:0": "default", "s:0": "0"}'></textarea>
             </div>
           </div>
         </div>

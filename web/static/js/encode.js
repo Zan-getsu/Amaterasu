@@ -1,6 +1,6 @@
 // 5. Encode Page: Live Preview
 document.addEventListener("DOMContentLoaded", () => {
-  const inputs = document.querySelectorAll('#p-name, #p-sub-mode, #v-codec, #v-pix_fmt, #v-crf, #v-preset-select, #v-metadata-title, #a-codec, #a-channels, #a-bitrate, #a-vbr, #g-rename, #g-title, #g-cover');
+  const inputs = document.querySelectorAll('input, select, textarea');
   const previewCode = document.getElementById('preview-code');
   const previewLang = document.getElementById('preview-lang');
   
@@ -94,11 +94,21 @@ document.addEventListener("DOMContentLoaded", () => {
     if(data.cover_image !== undefined) document.getElementById('g-cover').value = data.cover_image;
     if(data.video_codec) document.getElementById('v-codec').value = data.video_codec;
     if(data.audio_codec) document.getElementById('a-codec').value = data.audio_codec;
-    if(data.subtitle_mode) document.getElementById('p-sub-mode').value = data.subtitle_mode;
+    if(data.subtitle_mode) document.getElementById('s-mode').value = data.subtitle_mode;
     
     if(data.metadata) {
       if(data.metadata.title !== undefined) document.getElementById('g-title').value = data.metadata.title;
-      if(data.metadata.v_title !== undefined) document.getElementById('v-metadata-title').value = data.metadata.v_title;
+      if(data.metadata.v_track !== undefined) document.getElementById('v-metadata-title').value = data.metadata.v_track;
+      if(data.metadata.a_track !== undefined) document.getElementById('a-metadata-title').value = data.metadata.a_track;
+      if(data.metadata.s_track !== undefined) document.getElementById('s-metadata-title').value = data.metadata.s_track;
+      
+      const customMeta = { ...data.metadata };
+      delete customMeta.title; delete customMeta.v_track; delete customMeta.a_track; delete customMeta.s_track;
+      if(Object.keys(customMeta).length > 0) {
+        document.getElementById('g-custom-meta').value = JSON.stringify(customMeta, null, 2);
+      } else {
+        document.getElementById('g-custom-meta').value = "";
+      }
     }
     
     if(data.video_params) {
@@ -111,12 +121,24 @@ document.addEventListener("DOMContentLoaded", () => {
           if(document.getElementById('v-preset-val')) document.getElementById('v-preset-val').textContent = data.video_params.preset;
       }
       if(data.video_params.pix_fmt) document.getElementById('v-pix_fmt').value = data.video_params.pix_fmt;
+      if(data.video_params.profile) document.getElementById('v-profile').value = data.video_params.profile;
+      if(data.video_params.level) document.getElementById('v-level').value = data.video_params.level;
+      if(data.video_params.color_primaries) document.getElementById('v-color-prim').value = data.video_params.color_primaries;
+      if(data.video_params.color_trc) document.getElementById('v-color-trc').value = data.video_params.color_trc;
+      if(data.video_params.colorspace) document.getElementById('v-colorspace').value = data.video_params.colorspace;
+      if(data.video_params.extra_params) document.getElementById('v-extra').value = data.video_params.extra_params;
     }
 
     if(data.audio_params) {
       if(data.audio_params.bitrate) document.getElementById('a-bitrate').value = data.audio_params.bitrate;
       if(data.audio_params.channels) document.getElementById('a-channels').value = data.audio_params.channels;
       if(data.audio_params.vbr !== undefined) document.getElementById('a-vbr').checked = data.audio_params.vbr;
+    }
+
+    if(data.disposition) {
+      document.getElementById('g-disposition').value = JSON.stringify(data.disposition, null, 2);
+    } else {
+      document.getElementById('g-disposition').value = "";
     }
     
     generatePreview();
@@ -161,27 +183,49 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // Generate Profile JSON
   function getProfileJSON() {
+    let customMeta = {};
+    try {
+      const metaStr = document.getElementById('g-custom-meta')?.value?.trim();
+      if(metaStr) customMeta = JSON.parse(metaStr);
+    } catch(e) {}
+
+    let disposition = undefined;
+    try {
+      const dispStr = document.getElementById('g-disposition')?.value?.trim();
+      if(dispStr) disposition = JSON.parse(dispStr);
+    } catch(e) {}
+
     return {
       name: document.getElementById('p-name')?.value || "Custom Profile",
       rename: document.getElementById('g-rename')?.value || "",
       cover_image: document.getElementById('g-cover')?.value || "",
       video_codec: document.getElementById('v-codec')?.value || "libx265",
       audio_codec: document.getElementById('a-codec')?.value || "libopus",
-      subtitle_mode: document.getElementById('p-sub-mode')?.value || "copy",
+      subtitle_mode: document.getElementById('s-mode')?.value || "copy",
       metadata: {
         title: document.getElementById('g-title')?.value || "",
-        v_title: document.getElementById('v-metadata-title')?.value || ""
+        v_track: document.getElementById('v-metadata-title')?.value || "",
+        a_track: document.getElementById('a-metadata-title')?.value || "",
+        s_track: document.getElementById('s-metadata-title')?.value || "",
+        ...customMeta
       },
       video_params: {
         crf: parseInt(document.getElementById('v-crf')?.value || "24"),
         preset: document.getElementById('v-preset-select')?.value || "medium",
-        pix_fmt: document.getElementById('v-pix_fmt')?.value || "yuv420p10le"
+        pix_fmt: document.getElementById('v-pix_fmt')?.value || "yuv420p10le",
+        profile: document.getElementById('v-profile')?.value || "",
+        level: document.getElementById('v-level')?.value || "",
+        color_primaries: document.getElementById('v-color-prim')?.value || "",
+        color_trc: document.getElementById('v-color-trc')?.value || "",
+        colorspace: document.getElementById('v-colorspace')?.value || "",
+        extra_params: document.getElementById('v-extra')?.value || ""
       },
       audio_params: {
         bitrate: document.getElementById('a-bitrate')?.value || "128k",
         channels: parseInt(document.getElementById('a-channels')?.value || "2"),
         vbr: document.getElementById('a-vbr')?.checked || false
-      }
+      },
+      disposition: disposition
     };
   }
 
@@ -194,6 +238,12 @@ document.addEventListener("DOMContentLoaded", () => {
     if(profile.video_codec !== 'copy') {
       cmd += `  -crf ${profile.video_params.crf} -preset ${profile.video_params.preset} \\\n`;
       cmd += `  -pix_fmt ${profile.video_params.pix_fmt} \\\n`;
+      if(profile.video_params.profile) cmd += `  -profile:v ${profile.video_params.profile} \\\n`;
+      if(profile.video_params.level) cmd += `  -level ${profile.video_params.level} \\\n`;
+      if(profile.video_params.color_primaries) cmd += `  -color_primaries ${profile.video_params.color_primaries} \\\n`;
+      if(profile.video_params.color_trc) cmd += `  -color_trc ${profile.video_params.color_trc} \\\n`;
+      if(profile.video_params.colorspace) cmd += `  -colorspace ${profile.video_params.colorspace} \\\n`;
+      if(profile.video_params.extra_params) cmd += `  ${profile.video_params.extra_params} \\\n`;
     }
     
     // Audio
@@ -211,11 +261,23 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     // Metadata
-    if(profile.metadata.title) {
-      cmd += `  -metadata title="${profile.metadata.title}" \\\n`;
+    if(profile.metadata.title) cmd += `  -metadata title="${profile.metadata.title}" \\\n`;
+    if(profile.metadata.v_track) cmd += `  -metadata:s:v:0 title="${profile.metadata.v_track}" \\\n`;
+    if(profile.metadata.a_track) cmd += `  -metadata:s:a:0 title="${profile.metadata.a_track}" \\\n`;
+    if(profile.metadata.s_track) cmd += `  -metadata:s:s:0 title="${profile.metadata.s_track}" \\\n`;
+    
+    // Custom Tags
+    for(const key in profile.metadata) {
+      if(!['title', 'v_track', 'a_track', 's_track'].includes(key)) {
+        cmd += `  -metadata ${key}="${profile.metadata[key]}" \\\n`;
+      }
     }
-    if(profile.metadata.v_title) {
-      cmd += `  -metadata:s:v:0 title="${profile.metadata.v_title}" \\\n`;
+
+    // Disposition
+    if(profile.disposition) {
+      for(const [stream, val] of Object.entries(profile.disposition)) {
+        cmd += `  -disposition:${stream} ${val} \\\n`;
+      }
     }
 
     cmd += `  output.mkv`;
