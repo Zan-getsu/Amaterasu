@@ -887,6 +887,7 @@ def _parse_range_header(range_header: str | None, file_size: int) -> tuple[int, 
 
 @app.options("/watch/{path:path}")
 @app.options("/stream/{path:path}")
+@app.options("/dl/{path:path}")
 async def stream_options(path: str = ""):
     return Response(headers={**CORS_HEADERS, "Access-Control-Max-Age": "86400"})
 
@@ -933,8 +934,10 @@ async def watch_media(chat_id: str, message_id: int, request: Request, filename:
             
         if _route_stream_token_matches(secure_hash, chat_id, message_id):
             stream_url = f"/stream/{secure_hash}?disposition=inline"
+            download_url = f"/dl/{secure_hash}"
         else:
             stream_url = f"/stream/{chat_id}/{message_id}/{quote(filename, safe='')}?hash={secure_hash}&disposition=inline"
+            download_url = f"/dl/{chat_id}/{message_id}/{quote(filename, safe='')}?hash={secure_hash}"
         
         file_type = _classify_file_type(filename, mime_type)
         subtitles = await _find_companion_subtitles(client, chat_id, message_id) if file_type == "video" else []
@@ -942,6 +945,7 @@ async def watch_media(chat_id: str, message_id: int, request: Request, filename:
         return templates.TemplateResponse(request, "player.html", {
             "file_name": filename,
             "file_url": stream_url,
+            "download_url": download_url,
             "file_size": readable_size,
             "file_type": file_type,
             "mime_type": mime_type or "application/octet-stream",
@@ -957,8 +961,16 @@ async def stream_media_token(token: str, request: Request):
     return await stream_media(str(chat_id), message_id, request, filename=token)
 
 
+@app.api_route("/dl/{token}", methods=["GET", "HEAD"])
+async def download_media_token(token: str, request: Request):
+    chat_id, message_id = _decode_stream_route_token(token)
+    return await stream_media(str(chat_id), message_id, request, filename=token)
+
+
 @app.api_route("/stream/{chat_id}/{message_id}", methods=["GET", "HEAD"])
 @app.api_route("/stream/{chat_id}/{message_id}/{filename}", methods=["GET", "HEAD"])
+@app.api_route("/dl/{chat_id}/{message_id}", methods=["GET", "HEAD"])
+@app.api_route("/dl/{chat_id}/{message_id}/{filename}", methods=["GET", "HEAD"])
 async def stream_media(chat_id: str, message_id: int, request: Request, filename: str = None):
     try:
         chat_id = int(chat_id)
@@ -1004,7 +1016,10 @@ async def stream_media(chat_id: str, message_id: int, request: Request, filename
             
         content_length = end - start + 1
         
-        disposition = request.query_params.get("disposition", "attachment").strip().lower()
+        if request.url.path.startswith("/dl/"):
+            disposition = "attachment"
+        else:
+            disposition = request.query_params.get("disposition", "attachment").strip().lower()
         if disposition not in VALID_DISPOSITIONS:
             disposition = "attachment"
 

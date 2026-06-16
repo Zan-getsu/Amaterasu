@@ -5,6 +5,9 @@ from json import dumps, loads
 from struct import pack, unpack
 from time import time
 
+_B58_ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
+_B58_INDEX = {char: index for index, char in enumerate(_B58_ALPHABET)}
+
 
 def _b64encode(data: bytes) -> str:
     return urlsafe_b64encode(data).decode().rstrip("=")
@@ -13,6 +16,31 @@ def _b64encode(data: bytes) -> str:
 def _b64decode(data: str) -> bytes:
     padding = "=" * (-len(data) % 4)
     return urlsafe_b64decode(data + padding)
+
+
+def _b58encode(data: bytes) -> str:
+    if not data:
+        return ""
+    leading_zeroes = len(data) - len(data.lstrip(b"\0"))
+    value = int.from_bytes(data, "big")
+    encoded = ""
+    while value:
+        value, remainder = divmod(value, 58)
+        encoded = _B58_ALPHABET[remainder] + encoded
+    return ("1" * leading_zeroes) + (encoded or "1")
+
+
+def _b58decode(data: str) -> bytes:
+    if not data:
+        return b""
+    value = 0
+    for char in data:
+        if char not in _B58_INDEX:
+            raise ValueError("Invalid base58 character")
+        value = value * 58 + _B58_INDEX[char]
+    leading_zeroes = len(data) - len(data.lstrip("1"))
+    decoded = value.to_bytes((value.bit_length() + 7) // 8, "big") if value else b""
+    return (b"\0" * leading_zeroes) + decoded
 
 
 def _signature(secret: str, payload: str) -> str:
@@ -103,7 +131,7 @@ def make_route_token(
         purpose.encode() + b":" + payload,
         sha256,
     ).digest()[:12]
-    return _b64encode(payload + mac)
+    return f"r{_b58encode(payload + mac)}"
 
 
 def verify_route_token(
@@ -113,10 +141,20 @@ def verify_route_token(
 ) -> tuple[int, int] | None:
     if not token or not secret:
         return None
+    candidates = []
+    if token.startswith("r"):
+        try:
+            candidates.append(_b58decode(token[1:]))
+        except Exception:
+            pass
     try:
-        data = _b64decode(token)
+        candidates.append(_b64decode(token))
+    except Exception:
+        pass
+
+    for data in candidates:
         if len(data) != 24:
-            return None
+            continue
         payload, mac = data[:12], data[12:]
         expected = hmac_new(
             secret.encode(),
@@ -124,7 +162,6 @@ def verify_route_token(
             sha256,
         ).digest()[:12]
         if not compare_digest(mac, expected):
-            return None
+            continue
         return unpack(">qI", payload)
-    except Exception:
-        return None
+    return None

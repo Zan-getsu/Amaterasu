@@ -119,9 +119,6 @@
             <button class="am-btn" id="settings-btn" type="button" aria-label="Settings">
               <i data-lucide="settings"></i>
             </button>
-            <button class="am-btn am-extra-desktop" id="copy-btn" type="button" aria-label="Copy watch page URL">
-              <i data-lucide="copy"></i>
-            </button>
             <button class="am-btn am-extra-desktop" id="theater-btn" type="button" aria-label="Toggle theater mode">
               <i data-lucide="rectangle-horizontal"></i>
             </button>
@@ -200,6 +197,7 @@
 <script>
 window.AMATERASU_PLAYER = {
   fileUrl: {{ file_url | tojson }},
+  downloadUrl: {{ download_url | tojson }},
   fileType: {{ file_type | tojson }},
   fileName: {{ file_name | tojson }},
   fileSize: {{ file_size | tojson }},

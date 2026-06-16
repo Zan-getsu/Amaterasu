@@ -96,7 +96,7 @@ async def generate_link_markup(chat_id, message_id, filename, secure_hash=""):
     base_url = Config.BASE_URL.rstrip("/")
     
     stream_link = await maybe_shorten(f"{base_url}/watch{token_path}")
-    download_link = await maybe_shorten(f"{base_url}/stream{token_path}?disposition=attachment")
+    download_link = await maybe_shorten(f"{base_url}/dl{token_path}")
     
     buttons = [[
         InlineKeyboardButton("❖ STREAM ONLINE", url=stream_link),

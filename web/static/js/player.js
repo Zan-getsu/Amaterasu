@@ -10,9 +10,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const LOG_PREFIX = "[Amaterasu Player]";
 
     const absoluteStreamUrl = new URL(FILE_URL, window.location.origin).href;
-    const downloadUrl = new URL(absoluteStreamUrl);
-    downloadUrl.searchParams.set("disposition", "attachment");
-    const absoluteDownloadUrl = downloadUrl.href;
+    const absoluteDownloadUrl = new URL(config.downloadUrl || FILE_URL, window.location.origin).href;
     const mainDownload = document.getElementById("main-download-btn");
     if (mainDownload) mainDownload.href = absoluteDownloadUrl;
 
@@ -32,10 +30,10 @@ document.addEventListener("DOMContentLoaded", () => {
     }
     window.showToast = showToast;
 
-    function copyWatchUrl() {
-      const text = window.location.href;
+    function copyDownloadUrl() {
+      const text = absoluteDownloadUrl;
       if (navigator.clipboard && window.isSecureContext) {
-        return navigator.clipboard.writeText(text).then(() => showToast("Watch page URL copied", "copy"));
+        return navigator.clipboard.writeText(text).then(() => showToast("Download URL copied", "copy"));
       }
       const input = document.createElement("textarea");
       input.value = text;
@@ -46,7 +44,7 @@ document.addEventListener("DOMContentLoaded", () => {
       input.select();
       try {
         document.execCommand("copy");
-        showToast("Watch page URL copied", "copy");
+        showToast("Download URL copied", "copy");
       } catch (error) {
         console.error(LOG_PREFIX, "Clipboard fallback failed", error);
         window.prompt("Copy the link below:", text);
@@ -59,9 +57,9 @@ document.addEventListener("DOMContentLoaded", () => {
     function buildActions() {
       const actions = [
         {
-          text: "Copy Link",
-          desc: "Copy watch page address",
-          click: copyWatchUrl,
+          text: "Copy Download",
+          desc: "Copy direct download address",
+          click: copyDownloadUrl,
           icon: "copy",
         },
       ];
@@ -139,7 +137,6 @@ document.addEventListener("DOMContentLoaded", () => {
     const muteBtn = document.getElementById("mute-btn");
     const fullscreenBtn = document.getElementById("fullscreen-btn");
     const theaterBtn = document.getElementById("theater-btn");
-    const copyBtn = document.getElementById("copy-btn");
     const settingsBtn = document.getElementById("settings-btn");
     const audioBtn = document.getElementById("audio-btn");
     const subtitleBtn = document.getElementById("subtitle-btn");
@@ -182,7 +179,6 @@ document.addEventListener("DOMContentLoaded", () => {
     let hideGestureTimer = 0;
     let helpPreviousFocus = null;
     let statsVisible = false;
-    let audioFallbackShown = false;
     let hlsInstance = null;
 
     function clamp(value, min, max, fallback = min) {
@@ -331,9 +327,13 @@ document.addEventListener("DOMContentLoaded", () => {
     function buildAudioTracks() {
       const tracks = video.audioTracks;
       if (!tracks || tracks.length <= 1) {
-        if (!audioFallbackShown && !tracks && (FILE_NAME || "").toLowerCase().endsWith(".mkv")) {
-          audioFallbackShown = true;
-          showToast("This browser does not expose MKV audio tracks for switching.", "info", 4200);
+        if (!tracks && (FILE_NAME || "").toLowerCase().endsWith(".mkv")) {
+          audioBtn.hidden = false;
+          audioList.innerHTML = "";
+          const note = document.createElement("div");
+          note.className = "am-track-option";
+          note.textContent = "This browser does not expose MKV audio tracks for switching.";
+          audioList.appendChild(note);
         }
         return;
       }
@@ -580,7 +580,6 @@ document.addEventListener("DOMContentLoaded", () => {
       }
       showToast(document.body.classList.contains("theater-mode") ? "Theater mode on" : "Theater mode off", "rectangle-horizontal");
     });
-    copyBtn.addEventListener("click", () => copyWatchUrl());
     settingsBtn.addEventListener("click", () => togglePanel(settingsPanel));
     audioBtn.addEventListener("click", () => togglePanel(audioPanel));
     subtitleBtn.addEventListener("click", () => togglePanel(subtitlePanel));

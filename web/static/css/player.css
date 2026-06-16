@@ -292,7 +292,7 @@ body.theater-mode .stream-player--video {
 
 .am-control-surface {
   display: grid;
-  grid-template-columns: auto auto auto minmax(120px, 1fr) repeat(7, auto);
+  grid-template-columns: auto auto auto minmax(120px, 1fr) repeat(6, auto);
   align-items: center;
   gap: 8px;
   padding: 10px;
