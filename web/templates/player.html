@@ -1,116 +1,171 @@
 {% extends "base.html" %}
 
-{% block title %}Amaterasu Stream | {{file_name}}{% endblock %}
+{% block title %}Amaterasu Stream | {{ file_name }}{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="https://cdn.plyr.io/3.6.9/plyr.css" />
-<style>
-/* Plyr Customizations */
-.plyr--video .plyr__control.plyr__tab-focus,
-.plyr--video .plyr__control:hover,
-.plyr--video .plyr__control[aria-expanded=true] { background: var(--bs-gold) !important; }
-.plyr--full-ui input[type=range] { color: var(--bs-gold) !important; }
-
-/* Stream Page Styles */
-.stream-page { width: min(100%, 720px); margin: 0 auto; padding: clamp(20px, 5vw, var(--bs-space-10)) clamp(12px, 4vw, var(--bs-space-6)) var(--bs-space-16); }
-.stream-card { background: var(--bs-graphite); border: 1px solid var(--bs-border); border-radius: var(--bs-radius-xl); overflow: hidden; animation: fadeInUp 0.5s cubic-bezier(0.22,1,0.36,1); }
-.stream-player { background: #0d1117; display: flex; align-items: center; justify-content: center; position: relative; border-bottom: 1px solid var(--bs-border); overflow: hidden; }
-.stream-player--video { aspect-ratio: 16 / 9; min-height: 220px; }
-.stream-player--video > video,
-.stream-player--video .plyr { width: 100%; height: 100%; display: block; }
-.stream-player--video .plyr__video-wrapper { width: 100%; height: 100%; aspect-ratio: 16 / 9; background: #000; }
-.stream-player--video video { width: 100%; height: 100%; object-fit: contain; display: block; }
-.stream-player--audio { padding: var(--bs-space-5); }
-.stream-player--audio audio { width: 100%; }
-.stream-player--image img { width: 100%; display: block; }
-.stream-player--doc iframe,
-.stream-player--pdf iframe { width: 100%; height: min(75vh, 760px); min-height: 420px; border: none; background: white; }
-.stream-info { padding: var(--bs-space-6); }
-.stream-filename { font-size: 16px; font-weight: 700; color: var(--bs-text-primary); line-height: 1.4; margin-bottom: var(--bs-space-4); word-break: break-word; }
-.stream-meta { display: flex; flex-wrap: wrap; gap: var(--bs-space-4); margin-bottom: var(--bs-space-6); padding-bottom: var(--bs-space-6); border-bottom: 1px solid var(--bs-border); }
-.stream-meta-item { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--bs-text-muted); }
-.stream-meta-item i { color: var(--bs-text-disabled); width: 14px; height: 14px; }
-.stream-download-btn { width: 100%; display: flex; align-items: center; justify-content: center; gap: var(--bs-space-2); padding: 14px 24px; border-radius: var(--bs-radius-md); font-size: 14px; font-weight: 600; border: none; cursor: pointer; transition: all var(--bs-transition-fast); background: var(--bs-gold); color: #0B0F14; box-shadow: 0 2px 8px rgba(212,175,55,0.25); margin-bottom: var(--bs-space-4); }
-.stream-download-btn:hover { background: var(--bs-gold-hover); box-shadow: 0 4px 16px rgba(212,175,55,0.35); transform: translateY(-1px); }
-.stream-security { display: flex; align-items: center; justify-content: center; gap: 6px; font-size: 11px; color: var(--bs-text-disabled); padding-top: var(--bs-space-4); border-top: 1px solid var(--bs-border); }
-.stream-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--bs-space-4); margin-bottom: var(--bs-space-6); }
-.action-card { background: var(--bs-elevated); border: 1px solid var(--bs-border); border-radius: var(--bs-radius-md); padding: 12px; display: flex; align-items: center; gap: 12px; cursor: pointer; transition: all var(--bs-transition-fast); text-decoration: none; color: inherit; }
-.action-card:hover { border-color: var(--bs-gold-border); background: var(--bs-elevated-2); }
-.action-icon { width: 36px; height: 36px; border-radius: var(--bs-radius-sm); background: var(--bs-graphite); display: flex; align-items: center; justify-content: center; color: var(--bs-gold); flex-shrink: 0; }
-.action-card > div:last-child { min-width: 0; }
-.action-text { font-size: 13px; font-weight: 600; color: var(--bs-text-primary); display: block; }
-.action-desc { font-size: 11px; color: var(--bs-text-muted); display: block; overflow-wrap: anywhere; }
-
-@media (max-width: 640px) {
-  .stream-card { border-radius: var(--bs-radius-lg); }
-  .stream-player--video { min-height: 180px; }
-  .stream-info { padding: var(--bs-space-5); }
-  .stream-actions { grid-template-columns: 1fr; gap: var(--bs-space-3); }
-  .stream-download-btn { padding: 13px 18px; }
-}
-
-@media (max-width: 420px) {
-  .stream-page { padding-left: 0; padding-right: 0; padding-top: 0; }
-  .stream-card { border-left: none; border-right: none; border-radius: 0; }
-  .stream-player--video { min-height: 160px; }
-  .stream-info { padding: var(--bs-space-4); }
-  .stream-meta { gap: var(--bs-space-3); }
-  .stream-security { text-align: center; }
-}
-</style>
+<link rel="stylesheet" href="/static/css/player.css" />
 {% endblock %}
 
 {% block content %}
 <div class="stream-page">
   <div class="stream-card">
-    
-    <!-- Player -->
     <div class="stream-player stream-player--{{ 'doc' if file_type == 'doc' else file_type }}" style="{% if file_type not in ['video', 'audio', 'image', 'pdf', 'doc'] %}display:none;{% endif %}">
-        {% if file_type == 'video' %}
+      {% if file_type == 'video' %}
+      <div class="am-player is-paused" id="am-player" data-player-shell>
         <video id="player" playsinline controls preload="metadata">
-            <source src="{{file_url}}" type="video/mp4" />
+          <source src="{{ file_url }}" type="{{ mime_type }}" />
+          {% for sub in subtitles %}
+          <track kind="subtitles" src="{{ sub.url }}" label="{{ sub.label }}" srclang="{{ sub.srclang }}" />
+          {% endfor %}
         </video>
-        {% elif file_type == 'audio' %}
-        <audio id="player" controls preload="metadata">
-            <source src="{{file_url}}" type="audio/mpeg" />
-        </audio>
-        {% elif file_type == 'image' %}
-        <img src="{{file_url}}" alt="{{file_name}}" />
-        {% elif file_type == 'pdf' or file_type == 'doc' %}
-        {% set doc_url = 'https://docs.google.com/gview?url=' ~ file_url ~ '&embedded=true' if file_type == 'doc' else file_url %}
-        <iframe src="{{doc_url}}"></iframe>
-        {% endif %}
+
+        <div class="am-topbar" aria-hidden="false">
+          <button class="am-btn" id="help-btn" type="button" aria-label="Show keyboard shortcuts" title="Keyboard shortcuts">
+            <i data-lucide="circle-help"></i>
+          </button>
+        </div>
+
+        <div class="am-overlay" id="tap-layer" aria-hidden="true"></div>
+        <div class="am-toast-stack" id="player-toasts" aria-live="polite" aria-atomic="false"></div>
+        <div class="am-seek-indicator" id="seek-indicator">+10s</div>
+        <div class="am-gesture-indicator" id="gesture-left" data-side="left" aria-hidden="true">
+          <i data-lucide="sun"></i>
+          <div class="am-gesture-track"><div class="am-gesture-fill"></div></div>
+        </div>
+        <div class="am-gesture-indicator" id="gesture-right" data-side="right" aria-hidden="true">
+          <i data-lucide="volume-2"></i>
+          <div class="am-gesture-track"><div class="am-gesture-fill"></div></div>
+        </div>
+
+        <div class="am-stats" id="stats-panel" hidden></div>
+
+        <div class="am-error-card" id="error-card" hidden>
+          <h2>Playback failed</h2>
+          <p id="error-message">The browser could not load this stream.</p>
+          <div class="am-error-actions">
+            <button type="button" id="retry-btn" aria-label="Retry playback">Retry</button>
+            <a id="error-download" href="#">Download Instead</a>
+          </div>
+        </div>
+
+        <div class="am-panel" id="audio-panel" hidden>
+          <h2>Audio tracks</h2>
+          <div class="am-track-list" id="audio-track-list"></div>
+        </div>
+
+        <div class="am-panel" id="subtitle-panel" hidden>
+          <h2>Subtitles</h2>
+          <div class="am-track-list" id="subtitle-track-list"></div>
+        </div>
+
+        <div class="am-panel" id="settings-panel" hidden>
+          <h2>Settings</h2>
+          <h3>Playback speed</h3>
+          <div class="am-speed-grid" id="speed-grid"></div>
+          <div class="am-panel-row">
+            <span>Resolution</span>
+            <strong id="info-resolution">Unknown</strong>
+          </div>
+          <div class="am-panel-row">
+            <span>MIME type</span>
+            <strong id="info-mime">{{ mime_type }}</strong>
+          </div>
+          <div class="am-panel-row">
+            <span>File size</span>
+            <strong id="info-size">{{ file_size }}</strong>
+          </div>
+          <div class="am-panel-row">
+            <span>Picture in Picture</span>
+            <button class="am-toggle" id="pip-btn" type="button" aria-label="Toggle Picture in Picture">Open</button>
+          </div>
+          <div class="am-panel-row">
+            <span>Loop</span>
+            <button class="am-toggle" id="loop-btn" type="button" aria-label="Toggle loop" aria-pressed="false">Off</button>
+          </div>
+          <div class="am-panel-row">
+            <span>Autoplay Next</span>
+            <button class="am-toggle" id="autoplay-next-btn" type="button" aria-label="Autoplay next instructions">Setup</button>
+          </div>
+        </div>
+
+        <div class="am-controls" id="controls">
+          <div class="am-control-surface">
+            <button class="am-btn am-seek-btn" id="backward-btn" type="button" aria-label="Seek backward 10 seconds">-10s</button>
+            <button class="am-btn" id="play-btn" type="button" aria-label="Play">
+              <i data-lucide="play"></i>
+            </button>
+            <button class="am-btn am-seek-btn" id="forward-btn" type="button" aria-label="Seek forward 10 seconds">+10s</button>
+
+            <div class="am-progress-wrap">
+              <span class="am-time" id="current-time">0:00</span>
+              <div class="am-progress" id="progress" role="slider" aria-label="Playback progress" aria-valuemin="0" aria-valuemax="0" aria-valuenow="0" tabindex="0">
+                <div class="am-progress-buffer" id="buffered-bar"></div>
+                <div class="am-progress-fill" id="progress-fill"></div>
+                <div class="am-progress-thumb" id="progress-thumb"></div>
+                <div class="am-tooltip" id="progress-tooltip">0:00</div>
+              </div>
+              <span class="am-time" id="duration-time">0:00</span>
+            </div>
+
+            <button class="am-btn am-extra-desktop" id="mute-btn" type="button" aria-label="Mute">
+              <i data-lucide="volume-2"></i>
+            </button>
+            <button class="am-btn" id="audio-btn" type="button" aria-label="Audio tracks" hidden>
+              <i data-lucide="languages"></i>
+            </button>
+            <button class="am-btn" id="subtitle-btn" type="button" aria-label="Subtitle tracks" hidden>
+              <i data-lucide="captions"></i>
+            </button>
+            <button class="am-btn" id="settings-btn" type="button" aria-label="Settings">
+              <i data-lucide="settings"></i>
+            </button>
+            <button class="am-btn am-extra-desktop" id="copy-btn" type="button" aria-label="Copy watch page URL">
+              <i data-lucide="copy"></i>
+            </button>
+            <button class="am-btn am-extra-desktop" id="theater-btn" type="button" aria-label="Toggle theater mode">
+              <i data-lucide="rectangle-horizontal"></i>
+            </button>
+            <button class="am-btn" id="fullscreen-btn" type="button" aria-label="Fullscreen">
+              <i data-lucide="maximize"></i>
+            </button>
+          </div>
+        </div>
+      </div>
+      {% elif file_type == 'audio' %}
+      <audio id="player" controls preload="metadata">
+        <source src="{{ file_url }}" type="{{ mime_type }}" />
+      </audio>
+      {% elif file_type == 'image' %}
+      <img src="{{ file_url }}" alt="{{ file_name }}" />
+      {% elif file_type == 'pdf' or file_type == 'doc' %}
+      {% set doc_url = 'https://docs.google.com/gview?url=' ~ file_url ~ '&embedded=true' if file_type == 'doc' else file_url %}
+      <iframe src="{{ doc_url }}"></iframe>
+      {% endif %}
     </div>
 
-    <!-- Info -->
     <div class="stream-info">
-      <h1 class="stream-filename">{{file_name}}</h1>
+      <h1 class="stream-filename">{{ file_name }}</h1>
 
       <div class="stream-meta">
         <div class="stream-meta-item">
           <i data-lucide="hard-drive"></i>
-          <span>{{file_size}}</span>
+          <span>{{ file_size }}</span>
         </div>
         <div class="stream-meta-item">
           <i data-lucide="file-type"></i>
-          <span>{{file_type | upper}}</span>
+          <span>{{ file_type | upper }}</span>
         </div>
       </div>
 
-      <!-- Actions Grid -->
-      <div class="stream-actions" id="action-buttons">
-          <!-- Buttons injected by JS -->
-      </div>
+      <div class="stream-actions" id="action-buttons"></div>
 
-      <!-- Main Download Button -->
       <a id="main-download-btn" href="#" style="text-decoration: none;">
-        <button class="stream-download-btn">
+        <button class="stream-download-btn" type="button" aria-label="Download file">
           <i data-lucide="download" style="width: 16px; height: 16px;"></i>
           Download File
         </button>
       </a>
 
-      <!-- Security Notice -->
       <div class="stream-security">
         <i data-lucide="shield" style="width: 12px; height: 12px;"></i>
         Protected by Amaterasu token authentication
@@ -118,112 +173,39 @@
     </div>
   </div>
 </div>
+
+<div class="am-modal" id="help-modal" hidden>
+  <div class="am-modal-card" role="dialog" aria-modal="true" aria-labelledby="help-title">
+    <div class="am-modal-head">
+      <h2 id="help-title">Keyboard shortcuts</h2>
+      <button class="am-btn" id="help-close-btn" type="button" aria-label="Close keyboard shortcuts">
+        <i data-lucide="x"></i>
+      </button>
+    </div>
+    <div class="am-shortcut-grid">
+      <div class="am-shortcut"><span>Play or pause</span><kbd>Space / K</kbd></div>
+      <div class="am-shortcut"><span>Seek backward</span><kbd>Left</kbd></div>
+      <div class="am-shortcut"><span>Seek forward</span><kbd>Right</kbd></div>
+      <div class="am-shortcut"><span>Volume up</span><kbd>Up</kbd></div>
+      <div class="am-shortcut"><span>Volume down</span><kbd>Down</kbd></div>
+      <div class="am-shortcut"><span>Mute</span><kbd>M</kbd></div>
+      <div class="am-shortcut"><span>Fullscreen</span><kbd>F</kbd></div>
+      <div class="am-shortcut"><span>Debug stats</span><kbd>Ctrl Shift D</kbd></div>
+    </div>
+  </div>
+</div>
 {% endblock %}
 
 {% block extra_js %}
-<script src="https://cdn.plyr.io/3.6.9/plyr.js"></script>
 <script>
-document.addEventListener('DOMContentLoaded', () => {
-    {% if file_type == 'video' or file_type == 'audio' %}
-    // Initialize Player
-    const player = new Plyr('#player', {
-        controls: ['play-large', 'play', 'progress', 'current-time', 'duration', 'mute', 'volume', 'captions', 'settings', 'pip', 'airplay', 'fullscreen'],
-        settings: ['captions', 'quality', 'speed', 'loop']
-    });
-    {% endif %}
-    
-    // Build absolute URLs for intent schemes
-    const absoluteStreamUrl = new URL('{{file_url}}', window.location.origin).href;
-    const downloadUrl = new URL(absoluteStreamUrl);
-    downloadUrl.searchParams.set('disposition', 'attachment');
-    const absoluteDownloadUrl = downloadUrl.href;
-    
-    document.getElementById('main-download-btn').href = absoluteDownloadUrl;
-    
-    const actions = [
-        {
-            text: 'Copy Link',
-            desc: 'Copy stream address',
-            onclick: 'copyLink()',
-            icon: '<i data-lucide="copy"></i>'
-        }
-    ];
-    
-    {% if file_type == 'video' or file_type == 'audio' %}
-    actions.push(
-        {
-            text: 'VLC Player',
-            desc: 'Stream to VLC (Android)',
-            url: `intent:${absoluteStreamUrl}#Intent;action=android.intent.action.VIEW;type={{file_type}}/*;package=org.videolan.vlc;end`,
-            icon: '<i data-lucide="monitor-play"></i>'
-        },
-        {
-            text: 'MX Player',
-            desc: 'Stream to MX (Android)',
-            url: `intent:${absoluteStreamUrl}#Intent;action=android.intent.action.VIEW;type={{file_type}}/*;package=com.mxtech.videoplayer.ad;end`,
-            icon: '<i data-lucide="play-circle"></i>'
-        },
-        {
-            text: 'iOS VLC',
-            desc: 'Stream to VLC (iOS)',
-            url: `vlc-x-callback://x-callback-url/stream?url=${absoluteStreamUrl}`,
-            icon: '<i data-lucide="smartphone"></i>'
-        },
-        {
-            text: 'nPlayer',
-            desc: 'Stream to nPlayer',
-            url: `nplayer-${absoluteStreamUrl}`,
-            icon: '<i data-lucide="play"></i>'
-        }
-    );
-    {% endif %}
-    
-    const btnContainer = document.getElementById('action-buttons');
-    actions.forEach(act => {
-        const isBtn = !!act.onclick;
-        const tag = isBtn ? 'button' : 'a';
-        const el = document.createElement(tag);
-        
-        el.className = 'action-card';
-        if(isBtn) {
-            el.setAttribute('onclick', act.onclick);
-            el.style.textAlign = 'left';
-            el.style.border = '1px solid var(--bs-border)';
-            el.style.background = 'var(--bs-elevated)';
-            el.style.fontFamily = 'inherit';
-        } else {
-            el.href = act.url;
-        }
-        
-        el.innerHTML = `
-            <div class="action-icon">
-                ${act.icon}
-            </div>
-            <div>
-                <span class="action-text">${act.text}</span>
-                <span class="action-desc">${act.desc}</span>
-            </div>
-        `;
-        btnContainer.appendChild(el);
-    });
-
-    // Re-initialize Lucide icons for the dynamically added ones
-    if (window.lucide) {
-        window.lucide.createIcons();
-    }
-});
-
-// Copy Link
-function copyLink() {
-    const link = new URL('{{file_url}}', window.location.origin).href;
-    navigator.clipboard.writeText(link).then(() => {
-        if(typeof showToast === 'function') {
-            showToast("Stream link copied to clipboard!", "success");
-        }
-    }).catch(err => {
-        console.error('Failed to copy link: ', err);
-        prompt("Copy the link below:", link);
-    });
-}
+window.AMATERASU_PLAYER = {
+  fileUrl: {{ file_url | tojson }},
+  fileType: {{ file_type | tojson }},
+  fileName: {{ file_name | tojson }},
+  fileSize: {{ file_size | tojson }},
+  mimeType: {{ mime_type | tojson }},
+  subtitles: {{ subtitles | tojson }}
+};
 </script>
+<script src="/static/js/player.js" defer></script>
 {% endblock %}

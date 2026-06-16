@@ -14,7 +14,7 @@
 **The Absolute Pinnacle of Telegram Mirroring and Leeching**
 
 <p align="center">
-  <a href="#"><img src="https://img.shields.io/badge/Version-1.2.1-orange?style=for-the-badge&logo=rocket"></a>
+  <a href="#"><img src="https://img.shields.io/badge/Version-1.5.0-orange?style=for-the-badge&logo=rocket"></a>
   <a href="#"><img src="https://img.shields.io/github/repo-size/its-niloy/Amaterasu?color=FF4500&label=Size&style=for-the-badge"></a>
   <a href="#"><img src="https://img.shields.io/github/license/its-niloy/Amaterasu?style=for-the-badge&color=FF8C00"></a>
   <br>

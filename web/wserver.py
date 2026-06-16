@@ -18,7 +18,7 @@ from sabnzbdapi import SabnzbdClient
 from aioqbt.exc import AQError
 
 from web.nodes import extract_file_ids, make_tree
-from web.security import verify_route_token, verify_short_token, verify_signed_token
+from web.security import make_route_token, verify_route_token, verify_short_token, verify_signed_token
 from aiohttp import ClientSession
 
 getLogger("httpx").setLevel(WARNING)
@@ -766,6 +766,88 @@ def _classify_file_type(filename: str, mime_type: str | None) -> str:
     return "unknown"
 
 
+def _detect_lang_from_filename(filename: str) -> str:
+    stem = filename.rsplit("/", 1)[-1].rsplit(".", 1)[0].lower()
+    parts = [part for part in re.split(r"[\s._-]+", stem) if part]
+    aliases = {
+        "english": "en",
+        "eng": "en",
+        "en": "en",
+        "japanese": "ja",
+        "jpn": "ja",
+        "ja": "ja",
+        "bangla": "bn",
+        "bengali": "bn",
+        "ben": "bn",
+        "bn": "bn",
+        "hindi": "hi",
+        "hin": "hi",
+        "hi": "hi",
+        "arabic": "ar",
+        "ara": "ar",
+        "ar": "ar",
+        "spanish": "es",
+        "spa": "es",
+        "es": "es",
+        "french": "fr",
+        "fre": "fr",
+        "fra": "fr",
+        "fr": "fr",
+        "german": "de",
+        "ger": "de",
+        "deu": "de",
+        "de": "de",
+    }
+    for part in reversed(parts):
+        if part in aliases:
+            return aliases[part]
+    return "und"
+
+
+def _subtitle_label(filename: str) -> str:
+    name = filename.rsplit("/", 1)[-1].rsplit(".", 1)[0]
+    cleaned = re.sub(r"[\s._-]+", " ", name).strip()
+    return cleaned.title() if cleaned else "Subtitle"
+
+
+async def _find_companion_subtitles(client, chat_id: int, message_id: int) -> list[dict]:
+    subtitle_exts = {"srt", "vtt", "ass", "ssa"}
+    subtitles = []
+    try:
+        token_chat_id = int(chat_id)
+    except (TypeError, ValueError):
+        return subtitles
+    try:
+        messages = await client.get_media_group(chat_id, message_id)
+    except Exception:
+        messages = []
+
+    for subtitle_message in messages or []:
+        if getattr(subtitle_message, "id", None) == message_id:
+            continue
+        media = get_media(subtitle_message)
+        if not media:
+            continue
+        filename = _resolve_filename(subtitle_message, media, getattr(subtitle_message, "id", message_id))
+        ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+        if ext not in subtitle_exts:
+            continue
+        token = make_route_token(
+            _web_secret(),
+            "stream",
+            token_chat_id,
+            int(subtitle_message.id),
+        )
+        subtitles.append(
+            {
+                "url": f"/stream/{token}?disposition=inline",
+                "label": _subtitle_label(filename),
+                "srclang": _detect_lang_from_filename(filename),
+            }
+        )
+    return subtitles
+
+
 def _parse_range_header(range_header: str | None, file_size: int) -> tuple[int, int, bool]:
     if file_size <= 0:
         raise HTTPException(status_code=404, detail="File size is unavailable")
@@ -855,12 +937,15 @@ async def watch_media(chat_id: str, message_id: int, request: Request, filename:
             stream_url = f"/stream/{chat_id}/{message_id}/{quote(filename, safe='')}?hash={secure_hash}&disposition=inline"
         
         file_type = _classify_file_type(filename, mime_type)
-        
+        subtitles = await _find_companion_subtitles(client, chat_id, message_id) if file_type == "video" else []
+
         return templates.TemplateResponse(request, "player.html", {
             "file_name": filename,
             "file_url": stream_url,
             "file_size": readable_size,
-            "file_type": file_type
+            "file_type": file_type,
+            "mime_type": mime_type or "application/octet-stream",
+            "subtitles": subtitles,
         })
     finally:
         TgClient.stream_loads[client_id] -= 1
