@@ -12,9 +12,19 @@
 .plyr--full-ui input[type=range] { color: var(--bs-gold) !important; }
 
 /* Stream Page Styles */
-.stream-page { max-width: 720px; margin: 0 auto; padding: var(--bs-space-10) var(--bs-space-6) var(--bs-space-16); }
+.stream-page { width: min(100%, 720px); margin: 0 auto; padding: clamp(20px, 5vw, var(--bs-space-10)) clamp(12px, 4vw, var(--bs-space-6)) var(--bs-space-16); }
 .stream-card { background: var(--bs-graphite); border: 1px solid var(--bs-border); border-radius: var(--bs-radius-xl); overflow: hidden; animation: fadeInUp 0.5s cubic-bezier(0.22,1,0.36,1); }
-.stream-player { background: #0d1117; display: flex; align-items: center; justify-content: center; position: relative; border-bottom: 1px solid var(--bs-border); }
+.stream-player { background: #0d1117; display: flex; align-items: center; justify-content: center; position: relative; border-bottom: 1px solid var(--bs-border); overflow: hidden; }
+.stream-player--video { aspect-ratio: 16 / 9; min-height: 220px; }
+.stream-player--video > video,
+.stream-player--video .plyr { width: 100%; height: 100%; display: block; }
+.stream-player--video .plyr__video-wrapper { width: 100%; height: 100%; aspect-ratio: 16 / 9; background: #000; }
+.stream-player--video video { width: 100%; height: 100%; object-fit: contain; display: block; }
+.stream-player--audio { padding: var(--bs-space-5); }
+.stream-player--audio audio { width: 100%; }
+.stream-player--image img { width: 100%; display: block; }
+.stream-player--doc iframe,
+.stream-player--pdf iframe { width: 100%; height: min(75vh, 760px); min-height: 420px; border: none; background: white; }
 .stream-info { padding: var(--bs-space-6); }
 .stream-filename { font-size: 16px; font-weight: 700; color: var(--bs-text-primary); line-height: 1.4; margin-bottom: var(--bs-space-4); word-break: break-word; }
 .stream-meta { display: flex; flex-wrap: wrap; gap: var(--bs-space-4); margin-bottom: var(--bs-space-6); padding-bottom: var(--bs-space-6); border-bottom: 1px solid var(--bs-border); }
@@ -23,13 +33,30 @@
 .stream-download-btn { width: 100%; display: flex; align-items: center; justify-content: center; gap: var(--bs-space-2); padding: 14px 24px; border-radius: var(--bs-radius-md); font-size: 14px; font-weight: 600; border: none; cursor: pointer; transition: all var(--bs-transition-fast); background: var(--bs-gold); color: #0B0F14; box-shadow: 0 2px 8px rgba(212,175,55,0.25); margin-bottom: var(--bs-space-4); }
 .stream-download-btn:hover { background: var(--bs-gold-hover); box-shadow: 0 4px 16px rgba(212,175,55,0.35); transform: translateY(-1px); }
 .stream-security { display: flex; align-items: center; justify-content: center; gap: 6px; font-size: 11px; color: var(--bs-text-disabled); padding-top: var(--bs-space-4); border-top: 1px solid var(--bs-border); }
-.stream-actions { display: grid; grid-template-columns: 1fr 1fr; gap: var(--bs-space-4); margin-bottom: var(--bs-space-6); }
-@media (max-width: 640px) { .stream-actions { grid-template-columns: 1fr; } }
+.stream-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--bs-space-4); margin-bottom: var(--bs-space-6); }
 .action-card { background: var(--bs-elevated); border: 1px solid var(--bs-border); border-radius: var(--bs-radius-md); padding: 12px; display: flex; align-items: center; gap: 12px; cursor: pointer; transition: all var(--bs-transition-fast); text-decoration: none; color: inherit; }
 .action-card:hover { border-color: var(--bs-gold-border); background: var(--bs-elevated-2); }
 .action-icon { width: 36px; height: 36px; border-radius: var(--bs-radius-sm); background: var(--bs-graphite); display: flex; align-items: center; justify-content: center; color: var(--bs-gold); flex-shrink: 0; }
+.action-card > div:last-child { min-width: 0; }
 .action-text { font-size: 13px; font-weight: 600; color: var(--bs-text-primary); display: block; }
-.action-desc { font-size: 11px; color: var(--bs-text-muted); display: block; }
+.action-desc { font-size: 11px; color: var(--bs-text-muted); display: block; overflow-wrap: anywhere; }
+
+@media (max-width: 640px) {
+  .stream-card { border-radius: var(--bs-radius-lg); }
+  .stream-player--video { min-height: 180px; }
+  .stream-info { padding: var(--bs-space-5); }
+  .stream-actions { grid-template-columns: 1fr; gap: var(--bs-space-3); }
+  .stream-download-btn { padding: 13px 18px; }
+}
+
+@media (max-width: 420px) {
+  .stream-page { padding-left: 0; padding-right: 0; padding-top: 0; }
+  .stream-card { border-left: none; border-right: none; border-radius: 0; }
+  .stream-player--video { min-height: 160px; }
+  .stream-info { padding: var(--bs-space-4); }
+  .stream-meta { gap: var(--bs-space-3); }
+  .stream-security { text-align: center; }
+}
 </style>
 {% endblock %}
 
@@ -38,20 +65,20 @@
   <div class="stream-card">
     
     <!-- Player -->
-    <div class="stream-player" style="{% if file_type not in ['video', 'audio', 'image', 'pdf', 'doc'] %}display:none;{% endif %}">
+    <div class="stream-player stream-player--{{ 'doc' if file_type == 'doc' else file_type }}" style="{% if file_type not in ['video', 'audio', 'image', 'pdf', 'doc'] %}display:none;{% endif %}">
         {% if file_type == 'video' %}
-        <video id="player" playsinline controls style="width: 100%;">
+        <video id="player" playsinline controls preload="metadata">
             <source src="{{file_url}}" type="video/mp4" />
         </video>
         {% elif file_type == 'audio' %}
-        <audio id="player" controls style="width: 100%; border-radius: 0;">
+        <audio id="player" controls preload="metadata">
             <source src="{{file_url}}" type="audio/mpeg" />
         </audio>
         {% elif file_type == 'image' %}
-        <img src="{{file_url}}" alt="{{file_name}}" style="width: 100%; display: block;" />
+        <img src="{{file_url}}" alt="{{file_name}}" />
         {% elif file_type == 'pdf' or file_type == 'doc' %}
         {% set doc_url = 'https://docs.google.com/gview?url=' ~ file_url ~ '&embedded=true' if file_type == 'doc' else file_url %}
-        <iframe src="{{doc_url}}" style="width: 100%; height: 75vh; border: none; background: white;"></iframe>
+        <iframe src="{{doc_url}}"></iframe>
         {% endif %}
     </div>
 

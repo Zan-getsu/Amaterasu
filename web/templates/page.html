@@ -12,30 +12,150 @@
   <style>
     body {
       background: var(--bs-obsidian);
-      background-image: radial-gradient(circle at 50% 50%, var(--bs-gold-glow) 0%, transparent 60%);
+      background-image:
+        linear-gradient(180deg, rgba(212,175,55,0.08), transparent 320px),
+        linear-gradient(90deg, rgba(255,255,255,0.025) 1px, transparent 1px),
+        linear-gradient(180deg, rgba(255,255,255,0.02) 1px, transparent 1px);
+      background-size: auto, 40px 40px, 40px 40px;
       background-attachment: fixed;
       display: flex; flex-direction: column; min-height: 100vh;
       padding-top: 0;
     }
     .bs-center-wrap {
       flex: 1; display: flex; align-items: center; justify-content: center;
-      padding: var(--bs-space-6); width: 100%;
+      padding: clamp(16px, 4vw, var(--bs-space-8)); width: 100%;
+    }
+    .pin-entry-card { max-width: 420px; width: 100%; text-align: center; }
+    .selector-shell { width: min(100%, 1120px); padding: clamp(8px, 2vw, 24px) 0; align-self: flex-start; }
+    .selector-hero {
+      display: flex; align-items: flex-end; justify-content: space-between; gap: var(--bs-space-5);
+      margin-bottom: var(--bs-space-6);
+    }
+    .selector-kicker {
+      display: inline-flex; align-items: center; gap: 8px; color: var(--bs-gold);
+      font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em;
+      margin-bottom: var(--bs-space-2);
+    }
+    .selector-title { color: var(--bs-text-primary); font-size: clamp(26px, 4vw, 40px); font-weight: 800; line-height: 1.08; letter-spacing: 0; margin: 0; }
+    .selector-subtitle { color: var(--bs-text-muted); font-size: 13px; margin-top: var(--bs-space-2); max-width: 560px; }
+    .selector-status {
+      display: inline-flex; align-items: center; gap: 8px; flex-shrink: 0;
+      padding: 9px 12px; border: 1px solid var(--bs-border); border-radius: var(--bs-radius-md);
+      background: rgba(13,17,23,0.72); color: var(--bs-text-secondary); font-size: 12px; font-weight: 600;
+    }
+    .selector-status i { color: var(--bs-gold); }
+    .selector-stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--bs-space-4); margin-bottom: var(--bs-space-5); }
+    .selector-stat {
+      display: flex; align-items: center; gap: var(--bs-space-4);
+      padding: clamp(16px, 3vw, 22px); border: 1px solid var(--bs-border);
+      border-radius: var(--bs-radius-lg); background: rgba(18,24,32,0.78);
+      box-shadow: 0 12px 36px rgba(0,0,0,0.18);
+    }
+    .selector-stat__icon {
+      width: 46px; height: 46px; border-radius: var(--bs-radius-md);
+      display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;
+      background: var(--bs-gold-dim); color: var(--bs-gold); border: 1px solid var(--bs-gold-border);
+    }
+    .selector-stat__label { font-size: 11px; color: var(--bs-text-muted); font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 4px; }
+    .selector-stat__value { color: var(--bs-text-primary); font-size: clamp(20px, 3vw, 28px); font-weight: 800; letter-spacing: 0; line-height: 1.1; overflow-wrap: anywhere; }
+    .selector-stat__value small { color: var(--bs-text-muted); font-size: 0.72em; font-weight: 700; }
+    .file-browser {
+      border: 1px solid var(--bs-border); border-radius: var(--bs-radius-xl);
+      background: rgba(18,24,32,0.82); overflow: hidden; box-shadow: var(--bs-shadow-xl);
+    }
+    .browser-toolbar {
+      display: flex; align-items: center; justify-content: space-between; gap: var(--bs-space-4);
+      padding: var(--bs-space-5); border-bottom: 1px solid var(--bs-border);
+      background: rgba(13,17,23,0.58);
+    }
+    .toolbar-actions { display: flex; align-items: center; gap: var(--bs-space-2); flex-wrap: wrap; min-width: 0; }
+    .selector-shell .bs-btn { letter-spacing: 0; }
+    .submit-control { flex-shrink: 0; }
+    .path-strip {
+      display: flex; align-items: center; gap: 10px; min-width: 0;
+      padding: 12px var(--bs-space-5); border-bottom: 1px solid var(--bs-border-subtle);
+      color: var(--bs-text-muted); background: rgba(11,15,20,0.38); font-size: 12px;
+    }
+    .path-strip i { color: var(--bs-gold); flex-shrink: 0; }
+    .path-strip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .file-tree {
+      max-height: min(62vh, 620px); overflow-y: auto; padding: 8px;
+      scrollbar-color: rgba(212,175,55,0.36) transparent;
     }
     .file-tree-item {
-      padding: 12px 16px; border-bottom: 1px solid var(--bs-border-subtle);
-      transition: background var(--bs-transition-fast);
+      display: grid; grid-template-columns: 24px 42px minmax(0, 1fr); align-items: center; gap: 12px;
+      padding: 12px 14px; margin-bottom: 6px; border: 1px solid transparent;
+      border-radius: var(--bs-radius-md); transition: background var(--bs-transition-fast), border-color var(--bs-transition-fast), transform var(--bs-transition-fast);
       cursor: pointer;
     }
-    .file-tree-item:hover { background: var(--bs-elevated-3); }
-    .file-tree-item.folder-item { background: var(--bs-elevated); border: 1px solid var(--bs-border); margin-bottom: 4px; border-radius: var(--bs-radius-sm); }
-    .file-tree-item.file-item { padding-left: 32px; }
-    .icon-container { width: 32px; display: inline-flex; justify-content: center; color: var(--bs-text-muted); }
+    .file-tree-item:hover { background: rgba(255,255,255,0.035); border-color: var(--bs-border); transform: translateX(2px); }
+    .file-tree-item.folder-item { background: rgba(212,175,55,0.055); border-color: rgba(212,175,55,0.12); }
+    .file-tree-item.back-button { grid-template-columns: 42px minmax(0, 1fr); color: var(--bs-gold); background: rgba(212,175,55,0.08); }
+    .file-tree-item.back-button:hover { transform: none; border-color: var(--bs-gold-border); }
+    .icon-container {
+      width: 42px; height: 42px; display: inline-flex; align-items: center; justify-content: center;
+      border-radius: var(--bs-radius-md); color: var(--bs-text-muted); background: rgba(11,15,20,0.5); border: 1px solid var(--bs-border-subtle);
+    }
     .icon-container i { font-size: 16px; }
-    .folder-item .icon-container i { color: var(--bs-gold); }
-    .custom-checkbox { margin-right: 12px; cursor: pointer; }
-    .edit-btn { background: transparent; border: 1px solid var(--bs-border); color: var(--bs-text-secondary); padding: 2px 6px; border-radius: 4px; font-size: 11px; margin-left: 12px; cursor: pointer; }
-    .edit-btn:hover { background: var(--bs-elevated-2); color: var(--bs-text-primary); }
-    .pin-entry-card { max-width: 400px; width: 100%; text-align: center; }
+    .folder-item .icon-container { color: var(--bs-gold); background: var(--bs-gold-dim); border-color: var(--bs-gold-border); }
+    .file-info { min-width: 0; display: flex; flex-direction: column; gap: 7px; }
+    .file-main { display: flex; align-items: center; justify-content: space-between; gap: var(--bs-space-4); min-width: 0; }
+    .file-name { color: var(--bs-text-primary); font-size: 14px; line-height: 1.35; min-width: 0; overflow-wrap: anywhere; }
+    .folder-item .file-name { font-weight: 700; }
+    .file-meta { display: inline-flex; align-items: center; justify-content: flex-end; gap: 8px; flex-shrink: 0; color: var(--bs-text-muted); font-size: 12px; white-space: nowrap; }
+    .custom-checkbox {
+      -webkit-appearance: none; appearance: none; width: 20px; height: 20px; margin: 0;
+      border: 1px solid var(--bs-border); border-radius: 6px; background: rgba(11,15,20,0.72);
+      cursor: pointer; position: relative; transition: all var(--bs-transition-fast); flex-shrink: 0;
+    }
+    .custom-checkbox:hover { border-color: var(--bs-gold-border); background: var(--bs-gold-dim); }
+    .custom-checkbox:checked { background: var(--bs-gold); border-color: var(--bs-gold); }
+    .custom-checkbox:checked::after {
+      content: '\f00c'; font-family: 'Font Awesome 6 Free'; font-weight: 900; font-size: 11px;
+      color: #0B0F14; position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    }
+    .custom-checkbox:indeterminate { background: var(--bs-gold-hover); border-color: var(--bs-gold-hover); }
+    .custom-checkbox:indeterminate::after {
+      content: '\f068'; font-family: 'Font Awesome 6 Free'; font-weight: 900; font-size: 11px;
+      color: #0B0F14; position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    }
+    .edit-btn {
+      display: inline-flex; align-items: center; gap: 5px; background: transparent;
+      border: 1px solid var(--bs-border); color: var(--bs-text-secondary);
+      padding: 4px 8px; border-radius: var(--bs-radius-sm); font-size: 11px; font-weight: 700; cursor: pointer;
+      transition: all var(--bs-transition-fast);
+    }
+    .edit-btn:hover { background: var(--bs-gold-dim); color: var(--bs-gold); border-color: var(--bs-gold-border); }
+    .file-progress { display: flex; align-items: center; gap: 10px; max-width: 260px; }
+    .file-progress .bs-progress { flex: 1; margin: 0; }
+    .file-progress__value { color: var(--bs-gold); font-family: var(--bs-font-mono); font-size: 11px; font-weight: 700; }
+    @media (max-width: 780px) {
+      .selector-hero { align-items: flex-start; flex-direction: column; }
+      .selector-status { width: 100%; justify-content: center; }
+      .selector-stats { grid-template-columns: 1fr; }
+      .browser-toolbar { align-items: stretch; flex-direction: column; }
+      .toolbar-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .toolbar-actions .bs-btn, .submit-control { width: 100%; }
+      .submit-control { min-height: 44px; }
+    }
+    @media (max-width: 560px) {
+      .bs-center-wrap { padding: 0; align-items: stretch; }
+      .pin-entry-card { margin: var(--bs-space-5); }
+      .selector-shell { padding: 0; }
+      .selector-hero { padding: var(--bs-space-5) var(--bs-space-4) 0; }
+      .selector-stats { padding: 0 var(--bs-space-4); }
+      .selector-stat { padding: var(--bs-space-4); }
+      .file-browser { border-left: none; border-right: none; border-radius: 0; }
+      .browser-toolbar { padding: var(--bs-space-4); }
+      .toolbar-actions { grid-template-columns: 1fr; }
+      .path-strip { padding-left: var(--bs-space-4); padding-right: var(--bs-space-4); }
+      .file-tree { max-height: none; overflow: visible; padding: 8px var(--bs-space-3) var(--bs-space-4); }
+      .file-tree-item { grid-template-columns: 22px 38px minmax(0, 1fr); gap: 10px; padding: 11px 10px; }
+      .file-tree-item.back-button { grid-template-columns: 38px minmax(0, 1fr); }
+      .icon-container { width: 38px; height: 38px; }
+      .file-main { align-items: flex-start; flex-direction: column; gap: 6px; }
+      .file-meta { justify-content: flex-start; flex-wrap: wrap; white-space: normal; }
+    }
   </style>
 </head>
 <body>
@@ -66,37 +186,49 @@
     </div>
 
     <!-- File Manager UI -->
-    <div id="fileManager" class="bs-container bs-container--md" style="display: none; padding-top: 40px; padding-bottom: 40px;">
-      
-      <div class="bs-grid-2 bs-mb-6">
-        <div class="bs-card bs-card--glass bs-flex bs-items-center bs-gap-4">
-          <div class="bs-badge bs-badge--gold" style="padding: 12px; border-radius: 12px;"><i class="fa-solid fa-file-shield" style="font-size: 20px;"></i></div>
+    <div id="fileManager" class="selector-shell" style="display: none;">
+      <div class="selector-hero">
+        <div>
+          <div class="selector-kicker"><i class="fa-solid fa-layer-group"></i> Torrent Selector</div>
+          <h1 class="selector-title">Choose Files</h1>
+          <p class="selector-subtitle">Browse the torrent directory, select what you need, and submit the final file list.</p>
+        </div>
+        <div class="selector-status"><i class="fa-solid fa-shield-halved"></i> Authenticated Session</div>
+      </div>
+
+      <div class="selector-stats">
+        <div class="selector-stat">
+          <div class="selector-stat__icon"><i class="fa-solid fa-file-shield" style="font-size: 20px;"></i></div>
           <div>
-            <p class="bs-label">Selected Files</p>
-            <h3 class="bs-h2"><span id="selectedCount" style="color: var(--bs-gold);">0</span> <span class="bs-text-muted">/</span> <span id="totalCount">0</span></h3>
+            <p class="selector-stat__label">Selected Files</p>
+            <div class="selector-stat__value"><span id="selectedCount" style="color: var(--bs-gold);">0</span> <small>/</small> <span id="totalCount">0</span></div>
           </div>
         </div>
-        <div class="bs-card bs-flex bs-items-center bs-gap-4">
-          <div class="bs-badge bs-badge--info" style="padding: 12px; border-radius: 12px;"><i class="fa-solid fa-database" style="font-size: 20px;"></i></div>
+        <div class="selector-stat">
+          <div class="selector-stat__icon"><i class="fa-solid fa-database" style="font-size: 20px;"></i></div>
           <div>
-            <p class="bs-label">Total Size</p>
-            <h3 class="bs-h2"><span id="selectedSize" style="color: var(--bs-info);">0 B</span> <span class="bs-text-muted">/</span> <span id="totalSize">0 B</span></h3>
+            <p class="selector-stat__label">Total Size</p>
+            <div class="selector-stat__value"><span id="selectedSize" style="color: var(--bs-info);">0 B</span> <small>/</small> <span id="totalSize">0 B</span></div>
           </div>
         </div>
       </div>
 
-      <div class="bs-card">
-        <div class="bs-flex bs-items-center bs-justify-between bs-mb-6" style="flex-wrap: wrap; gap: 16px;">
-          <div class="bs-flex bs-gap-2">
+      <section class="file-browser">
+        <div class="browser-toolbar">
+          <div class="toolbar-actions">
             <button id="selectAllBtn" class="bs-btn bs-btn--secondary bs-btn--sm"><i class="fa-solid fa-list-check"></i> Select Folder</button>
             <button id="invertSelectionBtn" class="bs-btn bs-btn--ghost bs-btn--sm"><i class="fa-solid fa-arrow-rotate-left"></i> Invert Selection</button>
             <button id="selectEverythingBtn" class="bs-btn bs-btn--ghost bs-btn--sm"><i class="fa-solid fa-check-double"></i> Select Everything</button>
           </div>
-          <button id="submitBtn" class="bs-btn bs-btn--primary"><i class="fa-solid fa-circle-check"></i> Submit Selection</button>
+          <button id="submitBtn" class="bs-btn bs-btn--primary submit-control"><i class="fa-solid fa-circle-check"></i> Submit Selection</button>
+        </div>
+        <div class="path-strip">
+          <i class="fa-solid fa-folder-tree"></i>
+          <span id="currentPath">Root</span>
         </div>
 
-        <div id="fileTree" style="max-height: 60vh; overflow-y: auto;"></div>
-      </div>
+        <div id="fileTree" class="file-tree"></div>
+      </section>
     </div>
   </div>
 
@@ -130,6 +262,7 @@
     const totalCountEl = document.getElementById('totalCount');
     const selectedSizeEl = document.getElementById('selectedSize');
     const totalSizeEl = document.getElementById('totalSize');
+    const currentPathEl = document.getElementById('currentPath');
 
     pinInput.focus();
     const urlParams = new Proxy(new URLSearchParams(window.location.search), {
@@ -167,21 +300,32 @@
         return totalSize;
     }
 
+    function renderCurrentPath() {
+        if (!currentPathEl) return;
+        if (!currentFolder) {
+            currentPathEl.textContent = 'Root';
+            return;
+        }
+        const fullPath = getFullPath(currentFolder);
+        currentPathEl.textContent = fullPath ? `Root / ${fullPath} / ${currentFolder.name}` : `Root / ${currentFolder.name}`;
+    }
+
     function renderFileTree(nodes) {
+        renderCurrentPath();
         fileTree.innerHTML = '';
         if (currentFolder) {
             const backButton = document.createElement('div');
-            backButton.className = 'file-tree-item folder-item bs-flex bs-items-center';
+            backButton.className = 'file-tree-item back-button';
             backButton.innerHTML = `
                 <span class="icon-container"><i class="fa-solid fa-arrow-left"></i></span>
-                <span class="file-name bs-body" style="font-weight: 600;">Back to parent directory</span>
+                <span class="file-name" style="font-weight: 700;">Back to parent directory</span>
             `;
             backButton.addEventListener('click', goBack);
             fileTree.appendChild(backButton);
         }
         nodes.forEach(node => {
             const div = document.createElement('div');
-            div.className = `file-tree-item bs-flex bs-items-center bs-gap-3 ${node.type === 'folder' ? 'folder-item' : 'file-item'}`;
+            div.className = `file-tree-item ${node.type === 'folder' ? 'folder-item' : 'file-item'}`;
             
             const checkbox = document.createElement('input');
             checkbox.type = 'checkbox';
@@ -199,18 +343,17 @@
             }
 
             const fileInfo = document.createElement('div');
-            fileInfo.className = 'bs-flex-col bs-w-full';
+            fileInfo.className = 'file-info';
 
             const topRow = document.createElement('div');
-            topRow.className = 'bs-flex bs-items-center bs-justify-between';
+            topRow.className = 'file-main';
 
             const nameElement = document.createElement('div');
-            nameElement.className = 'file-name bs-body bs-text-primary cursor-pointer';
-            nameElement.style.fontWeight = node.type === 'folder' ? '600' : '400';
+            nameElement.className = 'file-name';
             nameElement.textContent = node.name;
 
             const sizeInfo = document.createElement('div');
-            sizeInfo.className = 'bs-caption bs-text-muted bs-flex bs-items-center';
+            sizeInfo.className = 'file-meta';
             const size = node.type === 'folder' ? calculateFolderSize(node) : node.size;
             sizeInfo.innerHTML = `<span>${formatSize(size)}</span>`;
 
@@ -227,8 +370,13 @@
 
             if (node.type === 'file' && node.progress !== undefined) {
                 const prog = document.createElement('div');
-                prog.className = 'bs-progress bs-mt-2';
-                prog.innerHTML = `<div class="bs-progress__fill" style="width: ${node.progress}%;"></div>`;
+                prog.className = 'file-progress';
+                prog.innerHTML = `
+                    <div class="bs-progress">
+                        <div class="bs-progress__fill" style="width: ${node.progress}%;"></div>
+                    </div>
+                    <span class="file-progress__value">${node.progress}%</span>
+                `;
                 fileInfo.appendChild(prog);
             }
 
