@@ -12,6 +12,8 @@
 
 body.theater-mode {
   background: #000;
+  padding-top: 0;
+  overflow: hidden;
 }
 
 body.theater-mode .bs-navbar,
@@ -21,6 +23,10 @@ body.theater-mode .stream-info {
 
 body.theater-mode .bs-main {
   padding: 0;
+  height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 body.theater-mode .stream-page {
@@ -36,8 +42,9 @@ body.theater-mode .stream-card {
 }
 
 body.theater-mode .stream-player--video {
-  height: 70vh;
-  min-height: 70vh;
+  height: 100vh;
+  min-height: 100vh;
+  aspect-ratio: auto;
   transition: height 300ms ease;
 }
 
@@ -240,9 +247,19 @@ body.theater-mode .stream-player--video {
   touch-action: manipulation;
 }
 
-.am-player:fullscreen {
+.am-player:fullscreen,
+.am-player:-webkit-full-screen,
+.am-player:-moz-full-screen,
+.am-player:-ms-fullscreen {
   width: 100vw;
   height: 100vh;
+}
+
+.am-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  cursor: pointer;
 }
 
 .am-player:not(.is-ready) .am-overlay,
@@ -257,6 +274,11 @@ body.theater-mode .stream-player--video {
 .am-player.is-idle:not(.is-paused) .am-topbar {
   opacity: 0;
   pointer-events: none;
+  transition: opacity 0.4s ease;
+}
+
+.am-player.is-idle:not(.is-paused) {
+  cursor: none;
 }
 
 .am-player.is-paused .am-controls,
@@ -273,7 +295,7 @@ body.theater-mode .stream-player--video {
   left: 0;
   right: 0;
   z-index: 4;
-  transition: opacity var(--bs-transition-fast);
+  transition: opacity 0.35s ease;
 }
 
 .am-topbar {
@@ -291,8 +313,8 @@ body.theater-mode .stream-player--video {
 }
 
 .am-control-surface {
-  display: grid;
-  grid-template-columns: auto auto auto minmax(120px, 1fr) repeat(6, auto);
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
   padding: 10px;
@@ -300,7 +322,13 @@ body.theater-mode .stream-player--video {
   border-radius: var(--bs-radius-sm);
   background: var(--am-player-glass);
   backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
   box-shadow: 0 18px 45px rgba(0, 0, 0, 0.35);
+}
+
+.am-progress-wrap {
+  order: 10;
+  width: 100%;
 }
 
 .am-btn {
@@ -349,10 +377,14 @@ body.theater-mode .stream-player--video {
 
 .am-progress-wrap {
   min-width: 0;
-  display: grid;
-  grid-template-columns: auto minmax(70px, 1fr) auto;
+  display: flex;
   align-items: center;
   gap: 8px;
+}
+
+.am-progress {
+  flex: 1;
+  min-width: 0;
 }
 
 .am-time {
@@ -370,6 +402,8 @@ body.theater-mode .stream-player--video {
   background: rgba(255, 255, 255, 0.18);
   cursor: pointer;
   outline: none;
+  flex: 1;
+  min-width: 0;
 }
 
 .am-progress:hover,
@@ -763,10 +797,6 @@ body.theater-mode .stream-player--video {
 }
 
 @media (max-width: 820px) {
-  .am-control-surface {
-    grid-template-columns: auto auto auto minmax(120px, 1fr) repeat(4, auto);
-  }
-
   .am-extra-desktop {
     display: none;
   }
@@ -795,27 +825,27 @@ body.theater-mode .stream-player--video {
   }
 
   .am-controls {
-    padding: 10px;
-  }
-
-  .am-control-surface {
-    grid-template-columns: auto auto auto minmax(92px, 1fr) repeat(3, auto);
-    gap: 6px;
     padding: 8px;
   }
 
+  .am-control-surface {
+    gap: 4px;
+    padding: 6px;
+  }
+
   .am-btn {
-    width: 34px;
-    height: 34px;
+    width: 32px;
+    height: 32px;
+  }
+
+  .am-btn i {
+    width: 16px;
+    height: 16px;
   }
 
   .am-seek-btn {
-    width: 42px;
-  }
-
-  .am-progress-wrap {
-    grid-template-columns: 1fr;
-    gap: 4px;
+    width: 38px;
+    font-size: 11px;
   }
 
   .am-progress {
@@ -823,16 +853,24 @@ body.theater-mode .stream-player--video {
   }
 
   .am-time {
-    display: none;
+    font-size: 11px;
+    min-width: 38px;
   }
 
   .am-progress-thumb {
-    width: 18px;
-    height: 18px;
+    width: 16px;
+    height: 16px;
   }
 
   .am-shortcut-grid {
     grid-template-columns: 1fr;
+  }
+
+  .am-panel {
+    right: 8px;
+    bottom: 64px;
+    width: min(300px, calc(100% - 16px));
+    padding: 10px;
   }
 }
 
@@ -863,5 +901,19 @@ body.theater-mode .stream-player--video {
 
   .stream-security {
     text-align: center;
+  }
+
+  .am-seek-btn {
+    display: none;
+  }
+
+  .am-control-surface {
+    gap: 3px;
+    padding: 5px;
+  }
+
+  .am-btn {
+    width: 30px;
+    height: 30px;
   }
 }

@@ -397,15 +397,59 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     async function toggleFullscreen() {
-      if (document.fullscreenElement) {
-        await document.exitFullscreen();
-        return;
+      try {
+        const fsElement = document.fullscreenElement
+          || document.webkitFullscreenElement
+          || document.mozFullScreenElement
+          || document.msFullscreenElement;
+
+        if (fsElement) {
+          if (document.exitFullscreen) {
+            await document.exitFullscreen();
+          } else if (document.webkitExitFullscreen) {
+            document.webkitExitFullscreen();
+          } else if (document.mozCancelFullScreen) {
+            document.mozCancelFullScreen();
+          } else if (document.msExitFullscreen) {
+            document.msExitFullscreen();
+          }
+          return;
+        }
+
+        if (shell.requestFullscreen) {
+          await shell.requestFullscreen();
+        } else if (shell.webkitRequestFullscreen) {
+          shell.webkitRequestFullscreen();
+        } else if (shell.mozRequestFullScreen) {
+          shell.mozRequestFullScreen();
+        } else if (shell.msRequestFullscreen) {
+          shell.msRequestFullscreen();
+        } else if (video.webkitEnterFullscreen) {
+          video.webkitEnterFullscreen();
+        } else if (video.webkitSupportsFullscreen) {
+          video.webkitEnterFullscreen();
+        } else {
+          showToast("Fullscreen is not supported on this device", "info");
+        }
+      } catch (error) {
+        console.warn(LOG_PREFIX, "Fullscreen failed", error);
+        if (video.webkitEnterFullscreen) {
+          try {
+            video.webkitEnterFullscreen();
+          } catch (fallbackError) {
+            console.warn(LOG_PREFIX, "Fallback fullscreen also failed", fallbackError);
+            showToast("Fullscreen is not available", "triangle-alert");
+          }
+        }
       }
-      if (shell.requestFullscreen) {
-        await shell.requestFullscreen();
-      } else if (video.webkitEnterFullscreen) {
-        video.webkitEnterFullscreen();
-      }
+    }
+
+    function updateFullscreenIcon() {
+      const fsElement = document.fullscreenElement
+        || document.webkitFullscreenElement
+        || document.mozFullScreenElement
+        || document.msFullscreenElement;
+      setIcon(fullscreenBtn, fsElement ? "minimize" : "maximize");
     }
 
     async function togglePip() {
@@ -638,8 +682,21 @@ document.addEventListener("DOMContentLoaded", () => {
     });
 
     shell.addEventListener("mousemove", showControls);
+    shell.addEventListener("mouseleave", () => {
+      if (!video.paused && !draggingProgress) {
+        window.clearTimeout(idleTimer);
+        idleTimer = window.setTimeout(() => {
+          shell.classList.add("is-idle");
+        }, 600);
+      }
+    });
     shell.addEventListener("click", (event) => {
-      if (event.target === video) showControls();
+      if (event.target === video || event.target.id === "tap-layer") {
+        if (!isTouch) {
+          togglePlay();
+          showControls();
+        }
+      }
     });
     shell.addEventListener("touchstart", (event) => {
       const touch = event.touches[0];
@@ -695,11 +752,16 @@ document.addEventListener("DOMContentLoaded", () => {
         } else if (x > rect.width * 0.7) {
           seekBy(10);
         } else {
-          shell.classList.toggle("is-idle");
+          togglePlay();
         }
         lastTapTime = 0;
       } else {
         lastTapTime = now;
+        if (shell.classList.contains("is-idle")) {
+          showControls();
+        } else if (!video.paused) {
+          shell.classList.add("is-idle");
+        }
       }
       touchState = null;
     });
@@ -778,6 +840,11 @@ document.addEventListener("DOMContentLoaded", () => {
     Array.from(speedGrid.children).forEach((child) => {
       child.classList.toggle("is-active", child.textContent === `${video.playbackRate}x`);
     });
+
+    document.addEventListener("fullscreenchange", updateFullscreenIcon);
+    document.addEventListener("webkitfullscreenchange", updateFullscreenIcon);
+    document.addEventListener("mozfullscreenchange", updateFullscreenIcon);
+    document.addEventListener("MSFullscreenChange", updateFullscreenIcon);
 
     loadHlsIfNeeded().finally(() => {
       shell.classList.add("is-ready");
