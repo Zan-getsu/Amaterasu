@@ -323,9 +323,10 @@ async def list_profiles(request: Request):
 
     user_id = _require_profile_user(request)
     _require_profile_database(database)
-    profiles = await database.get_encode_profiles(user_id)
-    if profiles and "_id" in profiles:
-        del profiles["_id"]
+    doc_id = f"{_BOT_ID}_{user_id}"
+    profiles = await database.db.encode_profiles.find_one({"_id": doc_id})
+    profiles = profiles or {}
+    profiles.pop("_id", None)
     return JSONResponse(profiles)
 
 @app.post("/api/profiles")
@@ -337,7 +338,12 @@ async def create_profile(request: Request):
     _require_profile_database(database)
     data = await _read_profile_data(request)
     pid = uuid.uuid4().hex[:8]
-    await database.save_encode_profile(user_id, pid, data)
+    doc_id = f"{_BOT_ID}_{user_id}"
+    await database.db.encode_profiles.update_one(
+        {"_id": doc_id},
+        {"$set": {pid: data}},
+        upsert=True,
+    )
     return JSONResponse({"id": pid, "status": "created"})
 
 @app.put("/api/profiles/{pid}")
@@ -348,7 +354,12 @@ async def update_profile(pid: str, request: Request):
     _require_profile_database(database)
     pid = _validate_profile_id(pid)
     data = await _read_profile_data(request)
-    await database.save_encode_profile(user_id, pid, data)
+    doc_id = f"{_BOT_ID}_{user_id}"
+    await database.db.encode_profiles.update_one(
+        {"_id": doc_id},
+        {"$set": {pid: data}},
+        upsert=True,
+    )
     return JSONResponse({"status": "updated"})
 
 @app.delete("/api/profiles/{pid}")
@@ -358,7 +369,11 @@ async def delete_profile(pid: str, request: Request):
     user_id = _require_profile_user(request)
     _require_profile_database(database)
     pid = _validate_profile_id(pid)
-    await database.delete_encode_profile(user_id, pid)
+    doc_id = f"{_BOT_ID}_{user_id}"
+    await database.db.encode_profiles.update_one(
+        {"_id": doc_id},
+        {"$unset": {pid: ""}},
+    )
     return JSONResponse({"status": "deleted"})
 
 @app.post("/api/profiles/{pid}/default")
@@ -368,7 +383,25 @@ async def set_default_profile(pid: str, request: Request):
     user_id = _require_profile_user(request)
     _require_profile_database(database)
     pid = _validate_profile_id(pid)
-    await database.set_default_encode_profile(user_id, pid)
+    doc_id = f"{_BOT_ID}_{user_id}"
+    profiles = await database.db.encode_profiles.find_one({"_id": doc_id})
+    if not profiles or pid not in profiles:
+        raise HTTPException(status_code=404, detail="Profile not found")
+    update_dict = {}
+    for k, v in profiles.items():
+        if k == "_id":
+            continue
+        if isinstance(v, dict) and v.get("is_default"):
+            update_dict[f"{k}.is_default"] = False
+    if update_dict:
+        await database.db.encode_profiles.update_one(
+            {"_id": doc_id}, {"$set": update_dict}
+        )
+    await database.db.encode_profiles.update_one(
+        {"_id": doc_id},
+        {"$set": {f"{pid}.is_default": True}},
+        upsert=True,
+    )
     return JSONResponse({"status": "default_set"})
 
 
