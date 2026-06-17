@@ -172,12 +172,12 @@ class Clone(TaskListener):
                 await send_message(
                     self.message,
                     f"""<b>❖ LIMIT BREACHED</b>
-<pre>
+<code>
 ┌─ {'Task Size':<9}: {get_readable_file_size(self.size)}
 ├─ {'In Mode':<9}: {self.mode[0]}
 ├─ {'Out Mode':<9}: {self.mode[1]}
 └─ {'Details':<9}: {limit_exceeded}
-</pre>""",
+</code>""",
                 )
                 return
             await self.on_download_start()

@@ -547,7 +547,7 @@ async def get_user_settings(from_user, stype="main"):
         btns = buttons.build_menu(2)
 
         text = f"""<b>❖ LEECH SETTINGS</b>
-<pre>
+<code>
 ┌─ {'Name':<15}: {user_name}
 ├─ {'Type':<15}: {ltype}
 ├─ {'Thumbnail':<15}: {thumbmsg}
@@ -559,7 +559,7 @@ async def get_user_settings(from_user, stype="main"):
 ├─ {'Caption':<15}: {escape(lcap)}
 ├─ {'Destination':<15}: {leech_dest}
 └─ {'Thumb Layout':<15}: {thumb_layout}
-</pre>
+</code>
 """
 
     elif stype == "uphoster":
@@ -580,10 +580,10 @@ async def get_user_settings(from_user, stype="main"):
 
         destinations = [_display_value(s.capitalize()) for s in uphoster_service.split(",")]
         text = f"""<b>❖ UPHOSTER SETTINGS</b>
-<pre>
+<code>
 ┌─ {'Name':<11}: {user_name}
 └─ {'Destination':<11}: {', '.join(destinations)}
-</pre>
+</code>
 """
 
     elif stype == "pixeldrain":
@@ -601,10 +601,10 @@ async def get_user_settings(from_user, stype="main"):
         pdtoken = _display_value(pdtoken)
 
         text = f"""<b>❖ PIXELDRAIN SETTINGS</b>
-<pre>
+<code>
 ┌─ {'Name':<9}: {user_name}
 └─ {'API Key':<9}: {pdtoken}
-</pre>
+</code>
 """
 
     elif stype == "devuploads":
@@ -624,11 +624,11 @@ async def get_user_settings(from_user, stype="main"):
         )
 
         text = f"""<b>❖ DEVUPLOADS SETTINGS</b>
-<pre>
+<code>
 ┌─ {'Name':<11}: {user_name}
 ├─ {'API Key':<11}: {dukey}
 └─ {'Folder ID':<11}: {dufolder}
-</pre>
+</code>
 """
 
     elif stype == "vikingfile":
@@ -648,11 +648,11 @@ async def get_user_settings(from_user, stype="main"):
         )
 
         text = f"""<b>❖ VIKINGFILE SETTINGS</b>
-<pre>
+<code>
 ┌─ {'Name':<9}: {user_name}
 ├─ {'Hash':<9}: {vfhash}
 └─ {'Folder':<9}: {vffolder}
-</pre>
+</code>
 """
 
     elif stype == "buzzheavier":
@@ -681,11 +681,11 @@ async def get_user_settings(from_user, stype="main"):
         bzfolder = _display_value(bzfolder)
 
         text = f"""<b>❖ BUZZHEAVIER SETTINGS</b>
-<pre>
+<code>
 ┌─ {'Name':<11}: {user_name}
 ├─ {'Token':<11}: {bztoken}
 └─ {'Folder ID':<11}: {bzfolder}
-</pre>
+</code>
 """
 
     elif stype == "gofile":
@@ -714,11 +714,11 @@ async def get_user_settings(from_user, stype="main"):
         gffolder = _display_value(gffolder)
 
         text = f"""<b>❖ GOFILE SETTINGS</b>
-<pre>
+<code>
 ┌─ {'Name':<11}: {user_name}
 ├─ {'Token':<11}: {gftoken}
 └─ {'Folder ID':<11}: {gffolder}
-</pre>
+</code>
 """
 
     elif stype == "rclone":
@@ -750,12 +750,12 @@ async def get_user_settings(from_user, stype="main"):
         rcflags = _display_value(rcflags)
 
         text = f"""<b>❖ RCLONE SETTINGS</b>
-<pre>
+<code>
 ┌─ {'Name':<9}: {user_name}
 ├─ {'Config':<9}: {rccmsg}
 ├─ {'Flags':<9}: {rcflags}
 └─ {'Path':<9}: {rccpath}
-</pre>
+</code>
 """
 
     elif stype == "gdrive":
@@ -816,7 +816,7 @@ async def get_user_settings(from_user, stype="main"):
         btns = buttons.build_menu(2)
 
         text = f"""<b>❖ GDRIVE SETTINGS</b>
-<pre>
+<code>
 ┌─ {'Name':<11}: {user_name}
 ├─ {'Token':<11}: {tokenmsg}
 ├─ {'GDrive ID':<11}: {gdrive_id}
@@ -826,7 +826,7 @@ async def get_user_settings(from_user, stype="main"):
 ├─ {'Drive Cat':<11}: {dc_status}
 ├─ ─── CATEGORIES ───────────────
 {drive_cat_display}
-</pre>
+</code>
 """
     elif stype == "mirror":
         buttons.data_button("⚙ RClone Tools", f"userset {user_id} rclone")
@@ -875,7 +875,7 @@ async def get_user_settings(from_user, stype="main"):
         btns = buttons.build_menu(1)
 
         text = f"""<b>❖ MIRROR SETTINGS</b>
-<pre>
+<code>
 ┌─ {'Name':<11}: {user_name}
 ├─ {'Rclone Conf':<11}: {rccmsg}
 ├─ {'Rclone Path':<11}: {rccpath}
@@ -883,7 +883,7 @@ async def get_user_settings(from_user, stype="main"):
 ├─ {'Gdrive ID':<11}: {gdrive_id}
 ├─ {'Index Link':<11}: {index}
 └─ {'Stop Dupe':<11}: {sd_msg}
-</pre>
+</code>
 """
 
     elif stype == "mega":
@@ -919,12 +919,12 @@ async def get_user_settings(from_user, stype="main"):
         pass_display = _display_value(masked_pass if mega_password else None, "Not Set")
         account_status = "✅ Configured" if has_creds else "❌ Not Configured"
         text = f"""<b>❖ MEGA SETTINGS</b>
-<pre>
+<code>
 ┌─ {'Name':<9}: {user_name}
 ├─ {'Account':<9}: {account_status}
 ├─ {'Email':<9}: {email_display}
 └─ {'Password':<9}: {pass_display}
-</pre>
+</code>
 """
 
     elif stype == "ffset":
@@ -994,14 +994,14 @@ async def get_user_settings(from_user, stype="main"):
         btns = buttons.build_menu(2)
 
         text = f"""<b>❖ FF SETTINGS</b>
-<pre>
+<code>
 ┌─ {'Name':<11}: {user_name}
 ├─ {'FFmpeg CMDs':<11}: {ffc}
 ├─ {'Def Meta':<11}: {display_meta_val}
 ├─ {'Audio Meta':<11}: {display_audio_meta}
 ├─ {'Video Meta':<11}: {display_video_meta}
 └─ {'Sub Meta':<11}: {display_subtitle_meta}
-</pre>
+</code>
 """
 
     elif stype == "advanced":
@@ -1070,7 +1070,7 @@ async def get_user_settings(from_user, stype="main"):
         btns = buttons.build_menu(1)
 
         text = f"""<b>❖ ADVANCED SETTINGS</b>
-<pre>
+<code>
 ┌─ {'Name':<11}: {user_name}
 ├─ {'Name Swap':<11}: {ns_msg}
 ├─ {'Auto-Rename':<11}: {ar_msg}
@@ -1079,7 +1079,7 @@ async def get_user_settings(from_user, stype="main"):
 ├─ {'Up Paths':<11}: {upload_paths}
 ├─ {'YT-DLP Opts':<11}: {ytopt}
 └─ {'YT Cookie':<11}: {user_cookie_msg}
-</pre>
+</code>
 """
     elif stype == "yttools":
         buttons.data_button("❖ YT DESCRIPTION", f"userset {user_id} menu YT_DESP")
@@ -1123,24 +1123,24 @@ async def get_user_settings(from_user, stype="main"):
         btns = buttons.build_menu(2)
 
         text = f"""<b>❖ YOUTUBE TOOLS</b>
-<pre>
+<code>
 ┌─ {'Name':<13}: {user_name}
 ├─ {'Description':<13}: {escape(str(yt_desp_val))}
 ├─ {'Tags':<13}: {escape(str(yt_tags_val))}
 ├─ {'Category ID':<13}: {escape(str(yt_cat_id_val))}
 └─ {'Privacy':<13}: {escape(str(yt_privacy_val))}
-</pre>"""
+</code>"""
 
     elif stype == "encode":
         profiles = await database.get_encode_profiles(user_id)
         
         buttons.data_button("➕ Create Profile", f"userset {user_id} enc_create", position="header")
         
-        text = "<b>❖ ENCODE PROFILES</b>\n<pre>\n"
+        text = "<b>❖ ENCODE PROFILES</b>\n<code>\n"
         if not profiles or len(profiles) <= 1:
-            text += "└─ No custom profiles found.\n</pre>"
+            text += "└─ No custom profiles found.\n</code>"
         else:
-            text += "└─ Select a profile to edit/delete/set default.\n</pre>"
+            text += "└─ Select a profile to edit/delete/set default.\n</code>"
             for pid, pdata in profiles.items():
                 if pid == "_id":
                     continue
@@ -1595,7 +1595,7 @@ async def edit_user_settings(client, query):
         buttons.data_button("↩ BACK", f"userset {user_id} back encode", "footer")
         buttons.data_button("✕ CLOSE", f"userset {user_id} close", "footer", style=ButtonStyle.DANGER)
         
-        text = f"<b>❖ ENCODE PROFILE: {pdata.get('name', pid)}</b>\n<pre>\n"
+        text = f"<b>❖ ENCODE PROFILE: {pdata.get('name', pid)}</b>\n<code>\n"
         text += f"<b>Video Codec:</b> {pdata.get('video_codec', 'libsvtav1')}\n"
         text += f"<b>Audio Codec:</b> {pdata.get('audio_codec', 'libopus')}\n"
         text += f"<b>Video Params:</b> {pdata.get('video_params', {})}\n"
@@ -1669,7 +1669,7 @@ async def edit_user_settings(client, query):
         buttons.data_button("↩ BACK", f"userset {user_id} back uphoster", "footer")
         buttons.data_button("✕ CLOSE", f"userset {user_id} close", "footer", style=ButtonStyle.DANGER)
 
-        text = f"""<b>❖ SELECT UPHOSTER DESTINATIONS</b>\n<pre>"""
+        text = f"""<b>❖ SELECT UPHOSTER DESTINATIONS</b>\n<code>"""
         await edit_message(message, text, buttons.build_menu(1))
     elif data[2] == "menu":
         await query.answer()
@@ -1697,7 +1697,7 @@ async def edit_user_settings(client, query):
         buttons.data_button("↩ BACK", f"userset {user_id} menu {data[3]}", "footer")
         buttons.data_button("✕ CLOSE", f"userset {user_id} close", "footer", style=ButtonStyle.DANGER)
         prompt_title = data[3].replace("_", " ").title()
-        new_message_text = f"<b>❖ SET {prompt_title.upper()}</b>\n<pre>\n{text}"
+        new_message_text = f"<b>❖ SET {prompt_title.upper()}</b>\n<code>\n{text}"
         await edit_message(message, new_message_text, buttons.build_menu(1))
         rfunc = partial(get_menu, data[3], message, user_id)
         pfunc = partial(add_file, ftype=data[3], rfunc=rfunc)

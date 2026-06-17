@@ -27,7 +27,7 @@ async def speedtest(_, message):
 
     result = speed_results.results.dict()
     string_speed = f"""<b>❖ SPEEDTEST INFO</b>
-<pre>
+<code>
 ┌─ {'Upload':<9}: {get_readable_file_size(result['upload'] / 8)}/s
 ├─ {'Download':<9}: {get_readable_file_size(result['download'] / 8)}/s
 ├─ {'Ping':<9}: {result['ping']} ms
@@ -41,7 +41,7 @@ async def speedtest(_, message):
 ├─ {'Latency':<9}: {result['server']['latency']}
 ├─ {'Latitude':<9}: {result['server']['lat']}
 └─ {'Longitude':<9}: {result['server']['lon']}
-</pre>
+</code>
 """
     try:
         await send_message(message, string_speed)

@@ -32,11 +32,11 @@ async def get_plugins_menu(user_id: int, stype: str = "main"):
         buttons.data_button("✕ CLOSE", f"plugins {user_id} close", position="footer", style=ButtonStyle.DANGER)
 
         text = f"""<b>❖ PLUGIN MANAGEMENT</b>
-<pre>
+<code>
 ┌─ {'Loaded Plugins':<17}: {len(loaded_plugins)}
 ├─ {'Available Plugins':<17}: {len(available_plugins)}
 └─ {'Total Plugins':<17}: {len(loaded_plugins) + len(available_plugins)}
-</pre>"""
+</code>"""
 
         btns = buttons.build_menu(2)
 
@@ -53,9 +53,9 @@ async def get_plugins_menu(user_id: int, stype: str = "main"):
         buttons.data_button("✕ CLOSE", f"plugins {user_id} close", position="footer", style=ButtonStyle.DANGER)
 
         text = f"""<b>❖ LOADED PLUGINS</b>
-<pre>
+<code>
 └─ {'Total Loaded':<12}: {len(loaded_plugins)}
-</pre>"""
+</code>"""
 
         btns = buttons.build_menu(1)
 
@@ -72,16 +72,16 @@ async def get_plugins_menu(user_id: int, stype: str = "main"):
 
         unloaded_count = len([p for p in available_plugins if p not in loaded_plugins])
         text = f"""<b>❖ AVAILABLE PLUGINS</b>
-<pre>
+<code>
 └─ {'Unloaded Plugins':<16}: {unloaded_count}
-</pre>"""
+</code>"""
 
         btns = buttons.build_menu(1)
 
     elif stype == "info":
         loaded_plugins = plugin_manager.list_plugins()
 
-        text = "<b>❖ PLUGIN INFORMATION</b>\n<pre>\n"
+        text = "<b>❖ PLUGIN INFORMATION</b>\n<code>\n"
         for i, plugin in enumerate(loaded_plugins):
             status = "✅ Enabled" if plugin.enabled else "❌ Disabled"
             prefix1 = "┌─"
@@ -92,7 +92,7 @@ async def get_plugins_menu(user_id: int, stype: str = "main"):
             text += f"{prefix2} {'Status':<11}: {status}\n"
             text += f"{prefix2} {'Commands':<11}: {', '.join(plugin.commands) if plugin.commands else 'None'}\n"
             text += f"{prefix3} {'Description':<11}: {plugin.description}\n\n"
-        text += "</pre>"
+        text += "</code>"
 
         buttons.data_button("↩ BACK", f"plugins {user_id} main", position="footer")
         buttons.data_button("✕ CLOSE", f"plugins {user_id} close", position="footer", style=ButtonStyle.DANGER)
@@ -115,13 +115,13 @@ async def get_plugins_menu(user_id: int, stype: str = "main"):
             buttons.data_button("✕ CLOSE", f"plugins {user_id} close", position="footer", style=ButtonStyle.DANGER)
 
             text = f"""<b>❖ PLUGIN: {plugin_name}</b>
-<pre>
+<code>
 ┌─ {'Version':<11}: {plugin_info.version}
 ├─ {'Author':<11}: {plugin_info.author}
 ├─ {'Status':<11}: {status}
 ├─ {'Commands':<11}: {', '.join(plugin_info.commands) if plugin_info.commands else 'None'}
 └─ {'Description':<11}: {plugin_info.description}
-</pre>"""
+</code>"""
 
             btns = buttons.build_menu(2)
         else:

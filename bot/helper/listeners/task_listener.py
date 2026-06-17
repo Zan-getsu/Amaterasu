@@ -113,20 +113,20 @@ class TaskListener(TaskConfig):
             self.pm_msg = await send_message(
                 self.user_id,
                 f"""<b>❖ TASK STARTED</b>
-<pre>
+<code>
 └─ {'Link':<9}: {self.source_url}
-</pre>
+</code>
 """,
             )
         if Config.LINKS_LOG_ID:
             await send_message(
                 Config.LINKS_LOG_ID,
                 f"""<b>❖ {mode_name.upper()} STARTED</b>
-<pre>
+<code>
 ┌─ {'User':<15}: {self.tag} ( #ID{self.user_id} )
 ├─ {'Message Link':<15}: {self.message.link}
 └─ {'Link':<15}: {self.source_url}
-</pre>
+</code>
 """,
             )
         if (
@@ -548,7 +548,7 @@ class TaskListener(TaskConfig):
                 self.message.link or f"pm:{self.user_id}:{self.message.id}"
             )
         msg = (
-            f"<b>❖ {escape(self.name)}</b>\n<pre>"
+            f"<b>❖ {escape(self.name)}</b>\n<code>"
             f"\n┌─ {'Task Size':<15}: {get_readable_file_size(self.size)}"
             f"\n├─ {'Time Taken':<15}: {get_readable_time(time() - self.message.date.timestamp())}"
             f"\n├─ {'In Mode':<15}: {self.mode[0]}"
@@ -573,7 +573,7 @@ class TaskListener(TaskConfig):
                     f"{self.tag}\nYour video has been uploaded to YouTube successfully!"
                 )
 
-            msg += f"\n\n<b>Task By: </b>{self.tag}"
+            msg += f"\n</code>\n\n<b>Task By: </b>{self.tag}"
 
             button = buttons.build_menu(1) if link else None
 
@@ -590,7 +590,7 @@ class TaskListener(TaskConfig):
             msg += f"\n├─ {{'Total Files':<15}}: {folders}"
             if mime_type != 0:
                 msg += f"\n├─ {{'Corrupted Files':<15}}: {mime_type}"
-            msg += f"\n└─ {{'Task By':<15}}: {self.tag}\n</pre>\n"
+            msg += f"\n└─ {{'Task By':<15}}: {self.tag}\n</code>\n"
 
             if self.bot_pm:
                 pmsg = msg
@@ -718,7 +718,7 @@ class TaskListener(TaskConfig):
                 if not multi_link_msg and rclone_path:
                     msg += f"\n├─ {{'Path':<15}}: {rclone_path}"
                 button = None
-            msg += f"\n└─ {{'Task By':<15}}: {self.tag}\n</pre>\n"
+            msg += f"\n└─ {{'Task By':<15}}: {self.tag}\n</code>\n"
             group_msg = (
                 msg + "〶 <b><u>Action Performed :</u></b>\n"
                 "⋗ <i>Cloud link(s) have been sent to User PM</i>\n\n"
@@ -770,22 +770,22 @@ class TaskListener(TaskConfig):
         await self.remove_from_same_dir()
         msg = (
             f"""<b>❖ LIMIT BREACHED</b>
-<pre>
+<code>
 ┌─ {'Task Size':<12}: {get_readable_file_size(self.size)}
 ├─ {'In Mode':<12}: {self.mode[0]}
 ├─ {'Out Mode':<12}: {self.mode[1]}
 └─ {'Details':<12}: {error}
-</pre>"""
+</code>"""
             if is_limit
             else f"""<b>❖ DOWNLOAD STOPPED</b>
-<pre>
+<code>
 ┌─ {'Due To':<12}: {escape(str(error))}
 ├─ {'Task Size':<12}: {get_readable_file_size(self.size)}
 ├─ {'Time Taken':<12}: {get_readable_time(time() - self.message.date.timestamp())}
 ├─ {'In Mode':<12}: {self.mode[0]}
 ├─ {'Out Mode':<12}: {self.mode[1]}
 └─ {'Task By':<12}: {self.tag}
-</pre>"""
+</code>"""
         )
 
         await send_message(self.message, msg, button)

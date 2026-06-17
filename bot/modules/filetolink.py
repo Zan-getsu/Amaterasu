@@ -151,11 +151,9 @@ async def prepare_stored_media(message):
 def build_caption(title, filename, readable_size, stream_link, download_link):
     title = title.replace("❖ ", "").strip()
     caption = (
-        f"<b>❖ {title}</b>\n"
-        f"<pre>\n"
-        f"┌─ {'Name':<6} : {filename}\n"
-        f"└─ {'Size':<6} : {readable_size}\n"
-        f"</pre>\n"
+        f"<b>❖ {title}</b>\n\n"
+        f"<code>┌─ {'Name':<6} : {filename}\n"
+        f"└─ {'Size':<6} : {readable_size}</code>\n\n"
         f"<b>DL:</b>\n<code>{download_link}</code>\n\n"
         f"<b>Play:</b>\n<code>{stream_link}</code>"
     )
@@ -243,7 +241,7 @@ async def link_command_handler(client, message):
                 LOGGER.error(f"Failed to process batch message {msg_id}: {e}")
                 failed += 1
                 
-        await edit_message(status_msg, f"<b>❖ BATCH COMPLETED</b>\n<pre>\n┌─ {'Processed':<9} : {processed}\n└─ {'Failed':<9} : {failed}\n</pre>")
+        await edit_message(status_msg, f"<b>❖ BATCH COMPLETED</b>\n\n<code>┌─ {'Processed':<9} : {processed}\n└─ {'Failed':<9} : {failed}</code>")
     else:
         await process_media_message(client, message, message.reply_to_message)
 

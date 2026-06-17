@@ -666,12 +666,12 @@ async def restart_notification():
                 chat_id=chat_id,
                 message_id=msg_id,
                 text=f"""<b>❖ RESTARTED SUCCESSFULLY!</b>
-<pre>
+<code>
 ┌─ {'Date':<9}: {now.strftime("%d/%m/%y")}
 ├─ {'Time':<9}: {now.strftime("%I:%M:%S %p")}
 ├─ {'TimeZone':<9}: {Config.TIMEZONE}
 └─ {'Version':<9}: {get_version()}
-</pre>""",
+</code>""",
             )
         except Exception as e:
             LOGGER.error(e)

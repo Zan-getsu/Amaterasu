@@ -41,11 +41,11 @@ async def delete_broadcast(bc_id, message):
     return await edit_message(
         temp_wait,
         f"""<b>❖ BROADCAST DELETED STATS</b>
-<pre>
+<code>
 ┌─ {'Total Users':<15}: {total}
 ├─ {'Success':<15}: {success}
 └─ {'Failed Attempts':<15}: {failed}
-</pre>
+</code>
 <b>Broadcast ID:</b> <code>{bc_id}</code>""",
     )
 
@@ -88,11 +88,11 @@ async def edit_broadcast(bc_id, message, rply):
     return await edit_message(
         temp_wait,
         f"""<b>❖ BROADCAST EDITED STATS</b>
-<pre>
+<code>
 ┌─ {'Total Users':<15}: {total}
 ├─ {'Success':<15}: {success}
 └─ {'Failed Attempts':<15}: {failed}
-</pre>
+</code>
 <b>Broadcast ID:</b> <code>{bc_id}</code>""",
     )
 
@@ -154,13 +154,13 @@ async def broadcast(_, message):
     # Broadcasting logic
     start_time = time()
     status = """<b>❖ BROADCAST STATS</b>
-<pre>
+<code>
 ┌─ {'Total Users':<17}: {t}
 ├─ {'Success':<17}: {s}
 ├─ {'Blocked Users':<17}: {b}
 ├─ {'Deleted Accounts':<17}: {d}
 └─ {'Unsuccess Attempt':<17}: {u}
-</pre>"""
+</code>"""
     updater = time()
     bc_hash, bc_msgs = token_hex(5), []
     pls_wait = await send_message(message, status.format(t=0, s=0, b=0, d=0, u=0))

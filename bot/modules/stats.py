@@ -95,7 +95,7 @@ async def get_stats(event, key="home"):
         p_cores = cpu_count(logical=False)
         v_cores = (sys_cpu or 0) - (p_cores or 0)
         msg = f"""<b>❖ BOT STATISTICS</b>
-<pre>
+<code>
 ├─ {'Uptime':<9}: {get_readable_time(time() - bot_start_time)}
 ├─ ─── INSTANCE RAM ─────────────
 ├─ {'Progress':<9}: {get_progress_bar_string(bot_ram_pct)} {bot_ram_pct}%
@@ -125,7 +125,7 @@ async def get_stats(event, key="home"):
 ├─ {'Used':<9}: {get_readable_file_size(used)}
 ├─ {'Free':<9}: {get_readable_file_size(free)}
 └─ {'Total':<9}: {get_readable_file_size(total)}
-</pre>
+</code>
 """
     elif key == "stsys":
         cpu_usage = cpu_percent(interval=0.5)
@@ -133,7 +133,7 @@ async def get_stats(event, key="home"):
         p_cores = cpu_count(logical=False)
         v_cores = (sys_cpu or 0) - (p_cores or 0)
         msg = f"""<b>❖ SYSTEM OS</b>
-<pre>
+<code>
 ├─ {'Uptime':<9}: {get_readable_time(time() - boot_time())}
 ├─ {'Version':<9}: {version()}
 ├─ {'Arch':<9}: {platform()}
@@ -151,7 +151,7 @@ async def get_stats(event, key="home"):
 ├─ {'V-Core':<9}: {v_cores}
 ├─ {'Total':<9}: {sys_cpu}
 └─ {'Usable':<9}: {len(Process().cpu_affinity())}
-</pre>
+</code>
 """
     elif key == "strepo":
         last_commit, changelog = "No Data", "N/A"
@@ -175,17 +175,17 @@ async def get_stats(event, key="home"):
         )[0]
         official_v = official_v.strip() or "N/A"
         msg = f"""<b>❖ REPO METRICS</b>
-<pre>
+<code>
 ├─ {'Updated':<10}: {last_commit}
 ├─ {'Current':<10}: {get_version()}
 ├─ {'Latest':<10}: {official_v}
 ├─ {'ChangeLog':<10}: {changelog}
 └─ {'Remarks':<10}: {compare_versions(get_version(), official_v)}
-</pre>"""
+</code>"""
     elif key == "stpkgs":
         ver = bot_cache.get("eng_versions", {})
         msg = f"""<b>❖ PACKAGES</b>
-<pre>
+<code>
 ├─ {'Python':<11}: {ver.get("python", "N/A")}
 ├─ {'Aria2':<11}: {ver.get("aria2", "N/A")}
 ├─ {'qBittorrent':<11}: {ver.get("qBittorrent", "N/A")}
@@ -198,10 +198,10 @@ async def get_stats(event, key="home"):
 ├─ {'PyroTgFork':<11}: {ver.get("pyrotgfork", "N/A")}
 ├─ {'Google API':<11}: {ver.get("gapi", "N/A")}
 └─ {'MegaSDK':<11}: {ver.get("mega", "N/A")}
-</pre>"""
+</code>"""
     elif key == "tlimits":
         msg = f"""<b>❖ TASK LIMITS</b>
-<pre>
+<code>
 ├─ {'Direct':<11}: {Config.DIRECT_LIMIT or "∞"} GB
 ├─ {'Torrent':<11}: {Config.TORRENT_LIMIT or "∞"} GB
 ├─ {'GDrive':<11}: {Config.GD_DL_LIMIT or "∞"} GB
@@ -221,7 +221,7 @@ async def get_stats(event, key="home"):
 ├─ {'User Time':<11}: {Config.USER_TIME_INTERVAL or "0"}s
 ├─ {'User Tasks':<11}: {Config.USER_MAX_TASKS or "∞"}
 └─ {'Bot Tasks':<11}: {Config.BOT_MAX_TASKS or "∞"}
-</pre>"""
+</code>"""
 
     elif key == "systasks":
         from html import escape
@@ -247,7 +247,7 @@ async def get_stats(event, key="home"):
         except Exception:
             processes = []
 
-        msg = "<b>❖ SYSTEM TASKS</b>\n<pre>\n"
+        msg = "<b>❖ SYSTEM TASKS</b>\n<code>\n"
 
         if processes:
             for i, proc in enumerate(processes, 1):
@@ -260,9 +260,9 @@ async def get_stats(event, key="home"):
                 msg += f"{prefix_top} {i:02d} {name} (PID:{proc['pid']})\n"
                 msg += f"{prefix_bot}    CPU:{cpu:4.1f}% MEM:{mem:4.1f}% {user}\n"
                 btns.data_button(f"✕ {i:02d}", f"stats {user_id} killproc {proc['pid']}")
-            msg += "</pre>\n⚑ Click number to terminate process"
+            msg += "</code>\n⚑ Click number to terminate process"
         else:
-            msg += "└─ No high usage processes found\n</pre>"
+            msg += "└─ No high usage processes found\n</code>"
 
         btns.data_button("↻ REFRESH", f"stats {user_id} systasks", "header", style=ButtonStyle.PRIMARY)
 
