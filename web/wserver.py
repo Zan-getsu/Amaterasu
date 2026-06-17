@@ -148,7 +148,7 @@ async def lifespan(app: FastAPI):
     global aria2, qbittorrent
     from bot.core.config_manager import Config
     from bot.helper.ext_utils.db_handler import database
-    from bot.core.tg_client import db_partition_id
+    from bot.core.tg_client import db_partition_id, TgClient
     
     Config.load()
     await database.connect()
@@ -160,11 +160,22 @@ async def lifespan(app: FastAPI):
         if db_config:
             Config.load_dict(db_config)
             
+    if Config.BOT_TOKEN:
+        TgClient.bot = TgClient.tgClient(
+            "Amaterasu-Web-Bot",
+            bot_token=Config.BOT_TOKEN,
+            no_updates=True,
+        )
+        await TgClient.bot.start()
+        await TgClient.start_stream_clients()
+            
     aria2 = Aria2HttpClient("http://localhost:6800/jsonrpc")
     qbittorrent = await create_client("http://localhost:8090/api/v2/")
     yield
     await aria2.close()
     await qbittorrent.close()
+    if Config.BOT_TOKEN:
+        await TgClient.stop()
     await database.disconnect()
 
 
