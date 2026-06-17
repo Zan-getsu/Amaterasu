@@ -265,6 +265,38 @@ class TgClient:
                 cls.user = None
 
     @classmethod
+    async def start_stream_clients(cls):
+        cls.stream_clients[0] = cls.bot
+        cls.stream_loads[0] = 0
+
+        tokens = [
+            (key, token)
+            for key, token in Config.MULTI_TOKENS.items()
+            if token and token != Config.BOT_TOKEN
+        ]
+        if not tokens:
+            return
+
+        def token_sort(item):
+            digits = "".join(ch for ch in item[0] if ch.isdigit())
+            return int(digits) if digits else 0
+
+        LOGGER.info("Generating stream clients from MULTI_TOKENs")
+        for no, (key, token) in enumerate(sorted(tokens, key=token_sort), start=1):
+            try:
+                client = cls.tgClient(
+                    f"Amaterasu-Stream{no}",
+                    bot_token=token,
+                    no_updates=True,
+                )
+                await client.start()
+                cls.stream_clients[no] = client
+                cls.stream_loads[no] = 0
+                LOGGER.info(f"Stream Bot [{key}] [@{client.me.username}] Started!")
+            except Exception as e:
+                LOGGER.error(f"Failed to start stream bot from {key}. {e}")
+
+    @classmethod
     async def stop(cls):
         async with cls._lock:
             clients = []

@@ -811,12 +811,13 @@ async def confirm_restart(_, query):
 
         THREAD_POOL.shutdown(wait=False)
 
-        await create_subprocess_exec(
+        proc_cleanup = await create_subprocess_exec(
             "pkill",
             "-9",
             "-f",
             f"gunicorn|cloudflared|{BinConfig.ARIA2_NAME}|{BinConfig.QBIT_NAME}|{BinConfig.FFMPEG_NAME}|{BinConfig.RCLONE_NAME}|java|{BinConfig.SABNZBD_NAME}|7z|split",
         )
+        await proc_cleanup.wait()
 
         proc_update = await create_subprocess_exec("python3", "update.py")
         await proc_update.wait()

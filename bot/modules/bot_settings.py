@@ -1193,7 +1193,7 @@ async def edit_bot_settings(client, query):
         elif data[2] in ("INCOMPLETE_TASK_NOTIFIER", "INC_TASK_RESUME"):
             await database.trunc_table("tasks")
         elif data[2] in ("JD_EMAIL", "JD_PASS"):
-            await create_subprocess_exec("pkill", "-9", "-f", "java")
+            await (await create_subprocess_exec("pkill", "-9", "-f", "java")).wait()
         elif data[2] == "USENET_SERVERS":
             for s in (Config.USENET_SERVERS if isinstance(Config.USENET_SERVERS, list) else []):
                 if isinstance(s, dict):

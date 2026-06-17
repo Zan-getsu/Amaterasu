@@ -61,6 +61,8 @@ class SabnzbdClient(JobFunctions):
         requests_args: dict = None,
         **kwargs,
     ):
+        if params is None:
+            params = {}
         if requests_args is None:
             requests_args = {}
         session = self._session()
