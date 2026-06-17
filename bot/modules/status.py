@@ -50,7 +50,7 @@ async def task_status(_, message):
 └─ {'Uptime':<9}: {currentTime}</code>
 
 <b>⋗ NOTE:</b>
-<code>Each user can get status for their tasks by adding "me" or user_id like "1234xxx" after cmd: /{BotCommands.StatusCommand[0]} me or /{BotCommands.StatusCommand[1]} me</code>"""
+Each user can get status for their tasks by adding "me" or user_id like "1234xxx" after cmd: <code>/{BotCommands.StatusCommand[0]} me</code> or <code>/{BotCommands.StatusCommand[1]} me</code>"""
         reply_message = await send_message(message, msg)
         await auto_delete_message(message, reply_message)
     else:

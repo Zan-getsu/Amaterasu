@@ -549,8 +549,8 @@ class TaskListener(TaskConfig):
             f"<b>❖ {escape(self.name)}</b>\n<code>"
             f"┌─ {'Task Size':<15}: {get_readable_file_size(self.size)}"
             f"\n├─ {'Time Taken':<15}: {get_readable_time(time() - self.message.date.timestamp())}"
-            f"\n├─ {'In Mode':<15}: {self.mode[0]}"
-            f"\n├─ {'Out Mode':<15}: {self.mode[1]}"
+            f"\n├─ {'In Mode':<15}: </code>{self.mode[0]}<code>"
+            f"\n├─ {'Out Mode':<15}: </code>{self.mode[1]}<code>"
         )
         LOGGER.info(f"Task Done: {self.name}")
         if self.is_yt:
@@ -571,7 +571,7 @@ class TaskListener(TaskConfig):
                     f"{self.tag}\nYour video has been uploaded to YouTube successfully!"
                 )
 
-            msg += f"\n</code>\n\n<b>Task By: </b>{self.tag}"
+            msg += f"\n└─ {'Task By':<15}: </code>{self.tag}\n\n"
 
             button = buttons.build_menu(1) if link else None
 
@@ -588,7 +588,7 @@ class TaskListener(TaskConfig):
             msg += f"\n├─ {'Total Files':<15}: {folders}"
             if mime_type != 0:
                 msg += f"\n├─ {'Corrupted Files':<15}: {mime_type}"
-            msg += f"\n└─ {'Task By':<15}: {self.tag}\n</code>\n"
+            msg += f"\n└─ {'Task By':<15}: </code>{self.tag}\n\n"
 
             if self.bot_pm:
                 pmsg = msg
@@ -716,7 +716,7 @@ class TaskListener(TaskConfig):
                 if not multi_link_msg and rclone_path:
                     msg += f"\n├─ {'Path':<15}: {rclone_path}"
                 button = None
-            msg += f"\n└─ {'Task By':<15}: {self.tag}\n</code>\n"
+            msg += f"\n└─ {'Task By':<15}: </code>{self.tag}\n\n"
             group_msg = (
                 msg + "〶 <b><u>Action Performed :</u></b>\n"
                 "⋗ <i>Cloud link(s) have been sent to User PM</i>\n\n"
@@ -769,8 +769,8 @@ class TaskListener(TaskConfig):
         msg = (
             f"""<b>❖ LIMIT BREACHED</b>
 <code>┌─ {'Task Size':<12}: {get_readable_file_size(self.size)}
-├─ {'In Mode':<12}: {self.mode[0]}
-├─ {'Out Mode':<12}: {self.mode[1]}
+├─ {'In Mode':<12}: </code>{self.mode[0]}<code>
+├─ {'Out Mode':<12}: </code>{self.mode[1]}<code>
 └─ {'Details':<12}: {error}
 </code>"""
             if is_limit
@@ -778,10 +778,10 @@ class TaskListener(TaskConfig):
 <code>┌─ {'Due To':<12}: {escape(str(error))}
 ├─ {'Task Size':<12}: {get_readable_file_size(self.size)}
 ├─ {'Time Taken':<12}: {get_readable_time(time() - self.message.date.timestamp())}
-├─ {'In Mode':<12}: {self.mode[0]}
-├─ {'Out Mode':<12}: {self.mode[1]}
-└─ {'Task By':<12}: {self.tag}
-</code>"""
+├─ {'In Mode':<12}: </code>{self.mode[0]}<code>
+├─ {'Out Mode':<12}: </code>{self.mode[1]}<code>
+└─ {'Task By':<12}: </code>{self.tag}
+"""
         )
 
         await send_message(self.message, msg, button)
