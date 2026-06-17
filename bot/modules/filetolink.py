@@ -144,6 +144,22 @@ async def prepare_stored_media(message):
         if not copied:
             raise RuntimeError("Failed to store media in BIN_CHANNEL.")
         media = get_media(copied) or media
+        
+        user = message.from_user or message.sender_chat
+        user_name = getattr(user, 'first_name', getattr(user, 'title', 'Unknown'))
+        if hasattr(user, 'last_name') and user.last_name:
+            user_name += f" {user.last_name}"
+            
+        user_id = user.id
+        file_id = getattr(media, "file_unique_id", "Unknown")
+        
+        reply_text = f"<b>Requested :</b> {user_name}\n<b>User ID :</b> <code>{user_id}</code>\n<b>File ID :</b> <code>{file_id}</code>"
+        
+        try:
+            await copied.reply(reply_text, quote=True)
+        except Exception as e:
+            LOGGER.error(f"Failed to reply to copied message in BIN_CHANNEL: {e}")
+            
         return Config.BIN_CHANNEL, copied.id, media
     return message.chat.id, message.id, media
 
