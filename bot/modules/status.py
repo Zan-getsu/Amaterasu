@@ -44,10 +44,12 @@ async def task_status(_, message):
         currentTime = get_readable_time(time() - bot_start_time)
         free = get_readable_file_size(disk_usage(DOWNLOAD_DIR).free)
         msg = f"""<b>❖ NO ACTIVE TASKS</b>
-<code>┌─ {'CPU':<9}: {cpu_percent()}%
+<pre>
+┌─ {'CPU':<9}: {cpu_percent()}%
 ├─ {'RAM':<9}: {virtual_memory().percent}%
 ├─ {'Free':<9}: {free} [{round(100 - disk_usage(DOWNLOAD_DIR).percent, 1)}%]
-└─ {'Uptime':<9}: {currentTime}</code>
+└─ {'Uptime':<9}: {currentTime}
+</pre>
 
 <b>⋗ NOTE:</b>
 Each user can get status for their tasks by adding "me" or user_id like "1234xxx" after cmd: <code>/{BotCommands.StatusCommand[0]} me</code> or <code>/{BotCommands.StatusCommand[1]} me</code>"""
