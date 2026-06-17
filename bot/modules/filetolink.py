@@ -153,7 +153,12 @@ async def prepare_stored_media(message):
         user_id = user.id
         file_id = getattr(media, "file_unique_id", "Unknown")
         
-        reply_text = f"<b>Requested :</b> {user_name}\n<b>User ID :</b> <code>{user_id}</code>\n<b>File ID :</b> <code>{file_id}</code>"
+        reply_text = (
+            f"<b>❖ FILETOLINK LOGGER</b>\n<code>"
+            f"┌─ {'Requested':<10}: {user_name}\n"
+            f"├─ {'User ID':<10}: {user_id}\n"
+            f"└─ {'File ID':<10}: {file_id}</code>"
+        )
         
         try:
             await copied.reply(reply_text, quote=True)
