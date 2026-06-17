@@ -150,7 +150,8 @@ async def lifespan(app: FastAPI):
     from bot.helper.ext_utils.db_handler import database
     from bot.core.tg_client import db_partition_id, TgClient
     
-    Config.load()
+    Config.load_config()
+    Config.load_env()
     await database.connect()
     
     if database.db is not None:
