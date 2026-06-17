@@ -3,7 +3,6 @@ from asyncio import (
     Lock,
     Queue,
     QueueFull,
-    QueueShutDown,
     Semaphore,
     create_task,
     gather,
@@ -30,6 +29,7 @@ _ul_slots_lock = Lock()
 
 KB = 1024
 PART_SIZE = 512 * KB
+_UL_STOP = object()
 
 
 class HypertgUpload(HypertgTransfer):
@@ -113,9 +113,8 @@ class HypertgUpload(HypertgTransfer):
                     await s.invoke(raw.functions.auth.ImportAuthorization(id=ea.id, bytes=ea.bytes))
                 try:
                     while True:
-                        try:
-                            data = await q.get()
-                        except QueueShutDown:
+                        data = await q.get()
+                        if data is _UL_STOP:
                             return
                         for attempt in range(5):
                             try:
@@ -177,7 +176,8 @@ class HypertgUpload(HypertgTransfer):
             if acc:
                 self._obj._processed_bytes += acc
 
-            q.shutdown()
+            for _ in workers:
+                await q.put(_UL_STOP)
             await gather(*workers)
 
             if is_big:
@@ -203,9 +203,10 @@ class HypertgUpload(HypertgTransfer):
                     self.work_loads[ul_ci] = max(0, self.work_loads.get(ul_ci, 0) - 1)
             if _slot_acquired:
                 _ul_slots[0].release()
-            if q:
-                q.shutdown(immediate=True)
             if workers:
+                for worker in workers:
+                    if not worker.done():
+                        worker.cancel()
                 await gather(*workers, return_exceptions=True)
             if fp:
                 try:

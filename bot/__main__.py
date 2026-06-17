@@ -110,7 +110,14 @@ async def main():
     create_tracked_task(search_images())
 
 
-bot_loop.run_until_complete(main())
+try:
+    bot_loop.run_until_complete(main())
+except Exception:
+    try:
+        bot_loop.run_until_complete(TgClient.stop())
+    except Exception as stop_error:
+        LOGGER.error(f"Failed to stop Telegram clients after startup error: {stop_error}")
+    raise
 
 
 def _handle_asyncio_exception(loop, context):
