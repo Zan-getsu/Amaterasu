@@ -44,15 +44,13 @@ async def task_status(_, message):
         currentTime = get_readable_time(time() - bot_start_time)
         free = get_readable_file_size(disk_usage(DOWNLOAD_DIR).free)
         msg = f"""<b>❖ NO ACTIVE TASKS</b>
-<pre>
-┌─ {'CPU':<9}: {cpu_percent()}%
+<pre>┌─ {'CPU':<9}: {cpu_percent()}%
 ├─ {'RAM':<9}: {virtual_memory().percent}%
 ├─ {'Free':<9}: {free} [{round(100 - disk_usage(DOWNLOAD_DIR).percent, 1)}%]
-└─ {'Uptime':<9}: {currentTime}
-</pre>
+└─ {'Uptime':<9}: {currentTime}</pre>
 
 <b>⋗ NOTE:</b>
-Each user can get status for their tasks by adding "me" or user_id like "1234xxx" after cmd: <code>/{BotCommands.StatusCommand[0]} me</code> or <code>/{BotCommands.StatusCommand[1]} me</code>"""
+Each user can get status for their tasks by using: /{BotCommands.StatusCommand[3]} or /{BotCommands.StatusCommand[4]}"""
         reply_message = await send_message(message, msg)
         await auto_delete_message(message, reply_message)
     else:
@@ -64,6 +62,8 @@ Each user can get status for their tasks by adding "me" or user_id like "1234xxx
                 user_id = int(text[1])
             else:
                 user_id = 0
+        elif text[0].split('@')[0].endswith("_me"):
+            user_id = message.from_user.id
         else:
             user_id = 0
             sid = message.chat.id
