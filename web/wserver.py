@@ -148,8 +148,18 @@ async def lifespan(app: FastAPI):
     global aria2, qbittorrent
     from bot.core.config_manager import Config
     from bot.helper.ext_utils.db_handler import database
+    from bot.core.tg_client import db_partition_id
+    
     Config.load()
     await database.connect()
+    
+    if database.db is not None:
+        bot_id = Config.BOT_TOKEN.split(":", 1)[0] if Config.BOT_TOKEN else "0"
+        PART = db_partition_id(bot_id)
+        db_config = await database.db.settings.deployConfig.find_one({"_id": PART}, {"_id": 0})
+        if db_config:
+            Config.load_dict(db_config)
+            
     aria2 = Aria2HttpClient("http://localhost:6800/jsonrpc")
     qbittorrent = await create_client("http://localhost:8090/api/v2/")
     yield
@@ -325,10 +335,12 @@ async def encode_profiles_page(request: Request):
 @app.get("/api/profiles")
 async def list_profiles(request: Request):
     from bot.helper.ext_utils.db_handler import database
+    from bot.core.config_manager import Config
 
     user_id = _require_profile_user(request)
     _require_profile_database(database)
-    doc_id = f"{_BOT_ID}_{user_id}"
+    bot_id = Config.BOT_TOKEN.split(":", 1)[0] if Config.BOT_TOKEN else "0"
+    doc_id = f"{bot_id}_{user_id}"
     profiles = await database.db.encode_profiles.find_one({"_id": doc_id})
     profiles = profiles or {}
     profiles.pop("_id", None)
@@ -337,13 +349,15 @@ async def list_profiles(request: Request):
 @app.post("/api/profiles")
 async def create_profile(request: Request):
     from bot.helper.ext_utils.db_handler import database
+    from bot.core.config_manager import Config
     import uuid
 
     user_id = _require_profile_user(request)
     _require_profile_database(database)
     data = await _read_profile_data(request)
     pid = uuid.uuid4().hex[:8]
-    doc_id = f"{_BOT_ID}_{user_id}"
+    bot_id = Config.BOT_TOKEN.split(":", 1)[0] if Config.BOT_TOKEN else "0"
+    doc_id = f"{bot_id}_{user_id}"
     await database.db.encode_profiles.update_one(
         {"_id": doc_id},
         {"$set": {pid: data}},
@@ -354,12 +368,14 @@ async def create_profile(request: Request):
 @app.put("/api/profiles/{pid}")
 async def update_profile(pid: str, request: Request):
     from bot.helper.ext_utils.db_handler import database
+    from bot.core.config_manager import Config
 
     user_id = _require_profile_user(request)
     _require_profile_database(database)
     pid = _validate_profile_id(pid)
     data = await _read_profile_data(request)
-    doc_id = f"{_BOT_ID}_{user_id}"
+    bot_id = Config.BOT_TOKEN.split(":", 1)[0] if Config.BOT_TOKEN else "0"
+    doc_id = f"{bot_id}_{user_id}"
     await database.db.encode_profiles.update_one(
         {"_id": doc_id},
         {"$set": {pid: data}},
@@ -370,11 +386,13 @@ async def update_profile(pid: str, request: Request):
 @app.delete("/api/profiles/{pid}")
 async def delete_profile(pid: str, request: Request):
     from bot.helper.ext_utils.db_handler import database
+    from bot.core.config_manager import Config
 
     user_id = _require_profile_user(request)
     _require_profile_database(database)
     pid = _validate_profile_id(pid)
-    doc_id = f"{_BOT_ID}_{user_id}"
+    bot_id = Config.BOT_TOKEN.split(":", 1)[0] if Config.BOT_TOKEN else "0"
+    doc_id = f"{bot_id}_{user_id}"
     await database.db.encode_profiles.update_one(
         {"_id": doc_id},
         {"$unset": {pid: ""}},
@@ -384,11 +402,13 @@ async def delete_profile(pid: str, request: Request):
 @app.post("/api/profiles/{pid}/default")
 async def set_default_profile(pid: str, request: Request):
     from bot.helper.ext_utils.db_handler import database
+    from bot.core.config_manager import Config
 
     user_id = _require_profile_user(request)
     _require_profile_database(database)
     pid = _validate_profile_id(pid)
-    doc_id = f"{_BOT_ID}_{user_id}"
+    bot_id = Config.BOT_TOKEN.split(":", 1)[0] if Config.BOT_TOKEN else "0"
+    doc_id = f"{bot_id}_{user_id}"
     profiles = await database.db.encode_profiles.find_one({"_id": doc_id})
     if not profiles or pid not in profiles:
         raise HTTPException(status_code=404, detail="Profile not found")
