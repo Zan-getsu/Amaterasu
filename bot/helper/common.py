@@ -607,12 +607,10 @@ class TaskConfig:
             with suppress(Exception):
                 await self.message.unpin()
         if self.user:
-            if username := self.user.username:
-                self.tag = f"@{username}"
-            elif hasattr(self.user, "mention"):
-                self.tag = self.user.mention
+            if hasattr(self.user, "mention"):
+                self.tag = self.user.mention(style="html")
             else:
-                self.tag = self.user.title
+                self.tag = getattr(self.user, "title", "Unknown")
 
     @new_task
     async def run_multi(self, input_list, obj):
