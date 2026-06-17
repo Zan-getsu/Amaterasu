@@ -296,13 +296,10 @@ async def get_readable_message(sid, is_user, page_no=1, status="All", page_step=
             msg += f"\n├─ {'Ratio':<9}: {task.ratio()}"
             msg += f"\n├─ {'Time':<9}: ◷ {task.seeding_time()}"
         else:
-            msg += f"\n┠ <b>Size</b> → <i>{task.size()}</i>"
-        msg += f"\n┠ <b>Engine</b> → <i>{task.engine}</i>"
-        msg += f"\n┠ <b>In Mode</b> → <i>{task.listener.mode[0]}</i>"
-        msg += f"\n┠ <b>Out Mode</b> → <i>{task.listener.mode[1]}</i>"
+            msg += f"\n├─ {'Size':<9}: {task.size()}"
+        msg += f"\n├─ {'Engine':<9}: {task.engine}"
+        msg += f"\n├─ {'Mode':<9}: {task.listener.mode[0]} / {task.listener.mode[1]}"
         from ..telegram_helper.bot_commands import BotCommands
-        msg += f"<code>\n├─ {'User':<9}: </code>{_user_mention}"
-        msg += f"<code>\n└─ {'Stop':<9}: </code>/{BotCommands.CancelTaskCommand[1]}_{task.gid()[:8]}\n\n"
 
         if tstatus in [
             MirrorStatus.STATUS_DOWNLOAD,
@@ -310,9 +307,10 @@ async def get_readable_message(sid, is_user, page_no=1, status="All", page_step=
             MirrorStatus.STATUS_QUEUEDL,
         ]:
             if not task.listener.is_nzb and not task.listener.is_jd:
-                msg += f"\n┠ <b>Select</b> → /{BotCommands.SelectCommand[1]}_{task.gid()[:8]}"
+                msg += f"\n├─ {'Select':<9}: </code>/{BotCommands.SelectCommand[1]}_{task.gid()[:8]}<code>"
 
-        msg += f"\n<b>┖ Stop</b> → <i>/{BotCommands.CancelTaskCommand[1]}_{task.gid()[:8]}</i>\n\n"
+        msg += f"\n├─ {'User':<9}: </code>{_user_mention}<code>"
+        msg += f"\n└─ {'Stop':<9}: </code>/{BotCommands.CancelTaskCommand[1]}_{task.gid()[:8]}\n\n"
 
     if len(msg) == 0:
         if status == "All":
@@ -326,9 +324,6 @@ async def get_readable_message(sid, is_user, page_no=1, status="All", page_step=
     if not is_user:
         buttons.data_button("📜 TSTATS", f"status {sid} ov", position="header", style=ButtonStyle.PRIMARY)
     if len(tasks) > STATUS_LIMIT:
-        msg += f"├─ {'Tasks':<9}: {tasks_no}\n"
-        msg += f"├─ {'Page':<9}: {page_no} / {pages}\n"
-        msg += f"├─ {'Step':<9}: {page_step}\n"
         buttons.data_button("❮ PREV", f"status {sid} pre", position="header")
         buttons.data_button("NEXT ❯", f"status {sid} nex", position="header")
         if tasks_no > 30:
@@ -340,8 +335,23 @@ async def get_readable_message(sid, is_user, page_no=1, status="All", page_step=
                 buttons.data_button(f"▸ {label.upper()}", f"status {sid} st {status_value}")
     buttons.data_button("↻ REFRESH", f"status {sid} ref", position="header", style=ButtonStyle.PRIMARY)
     button = buttons.build_menu(8)
-    msg += f"├─ {'CPU':<9}: {cpu_percent()}%\n"
-    msg += f"├─ {'RAM':<9}: {virtual_memory().percent}%\n"
-    msg += f"├─ {'Storage':<9}: 💾 {get_readable_file_size(disk_usage(DOWNLOAD_DIR).free)} Free\n"
-    msg += f"└─ {'Uptime':<9}: ◷ {get_readable_time(time() - bot_start_time)}\n</pre>"
+
+    metrics = []
+    if len(tasks) > STATUS_LIMIT:
+        metrics.append(f"{'Tasks':<9}: {tasks_no}")
+        metrics.append(f"{'Page':<9}: {page_no} / {pages}")
+        metrics.append(f"{'Step':<9}: {page_step}")
+
+    metrics.append(f"{'CPU':<9}: {cpu_percent()}%")
+    metrics.append(f"{'RAM':<9}: {virtual_memory().percent}%")
+    metrics.append(f"{'Storage':<9}: 💾 {get_readable_file_size(disk_usage(DOWNLOAD_DIR).free)} Free")
+    metrics.append(f"{'Uptime':<9}: ◷ {get_readable_time(time() - bot_start_time)}")
+
+    for i, m in enumerate(metrics):
+        if i == 0:
+            msg += f"┌─ {m}\n"
+        elif i == len(metrics) - 1:
+            msg += f"└─ {m}\n</pre>"
+        else:
+            msg += f"├─ {m}\n"
     return msg, button
