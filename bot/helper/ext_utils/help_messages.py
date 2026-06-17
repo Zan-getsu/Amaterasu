@@ -244,9 +244,9 @@ NOTE: You must add \ before any character, those are the characters: \^$.|?*+()[
 """
 
 transmission = """<b>Tg transmission</b>: -hl -ut -bt
-/cmd link -hl (leech by user and bot session with respect to size) (Hybrid Leech)
-/cmd link -bt (leech by bot session)
-/cmd link -ut (leech by user)"""
+/cmd link -hl (both: user for >2GB, bot for ≤2GB)
+/cmd link -bt (bot only)
+/cmd link -ut (user only)"""
 
 thumbnail_layout = """Thumbnail Layout: -tl
 /cmd link -tl 3x3 (widthxheight) 3 photos in row and 3 photos in column"""

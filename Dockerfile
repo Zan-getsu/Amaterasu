@@ -49,7 +49,10 @@ RUN apt-get update && apt-get upgrade -y && \
     && apt-get install -y --no-install-recommends megacmd \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/* \
-    # Install deno (required JS runtime for yt-dlp YouTube extraction)
+    && arch="$(dpkg --print-architecture)" \
+    && case "$arch" in amd64|arm64) cf_arch="$arch" ;; *) echo "Unsupported cloudflared arch: $arch" && exit 1 ;; esac \
+    && curl -fsSL "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-${cf_arch}" -o /usr/local/bin/cloudflared \
+    && chmod +x /usr/local/bin/cloudflared \
     && curl -fsSL https://deno.land/install.sh | DENO_INSTALL=/usr/local sh
 
 # Copy and install python requirements

@@ -12,6 +12,9 @@ from ..helper.telegram_helper.message_utils import edit_message, send_message
 
 @new_task
 async def hydra_search(_, message):
+    if Config.DISABLE_NZB:
+        await send_message(message, "SABnzbd is currently disabled by the Bot Owner.")
+        return
     key = message.text.split()
     if len(key) == 1:
         await send_message(

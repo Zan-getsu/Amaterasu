@@ -18,8 +18,7 @@ INCOMPLETE_TASK_SCHEMA = 2
 def _bot_id():
     if TgClient.ID:
         return str(TgClient.ID)
-    token = getattr(Config, "BOT_TOKEN", "") or ""
-    return token.split(":", 1)[0] or "0"
+    return Config.BOT_TOKEN.split(":", 1)[0]
 
 
 def _part():
@@ -37,6 +36,9 @@ class DbManager:
         self._return = True
         self._conn = None
         self.db = None
+
+    def _tasks(self):
+        return self.db.tasks[_bot_id()]
 
     async def connect(self):
         try:
@@ -196,7 +198,7 @@ class DbManager:
     async def update_nzb_config(self):
         if self._return:
             return
-        async with aiopen("sabnzbd/SABnzbd.ini", "rb+") as pf:
+        async with aiopen("configs/sabnzbd/SABnzbd.ini", "rb+") as pf:
             nzb_conf = await pf.read()
         await self.db.settings.nzb.replace_one(
             {"_id": _part()}, {"SABnzbd__ini": nzb_conf}, upsert=True
@@ -283,7 +285,7 @@ class DbManager:
     ):
         if self._return:
             return
-        await self.db.tasks[str(TgClient.ID)].update_one(
+        await self._tasks().update_one(
             {"_id": link},
             {"$setOnInsert": {
                 "cid": cid,
@@ -322,14 +324,14 @@ class DbManager:
             return
         # Normalize: ensure consistent format
         normalized = str(link).strip()
-        result = await self.db.tasks[str(TgClient.ID)].delete_one({"_id": normalized})
+        result = await self._tasks().delete_one({"_id": normalized})
         if result.deleted_count == 0:
             LOGGER.debug(f"rm_complete_task: no doc found for link={normalized!r}")
 
     async def discard_legacy_incomplete_tasks(self):
         if self._return:
             return 0
-        result = await self.db.tasks[str(TgClient.ID)].delete_many(
+        result = await self._tasks().delete_many(
             {"schema_version": {"$ne": INCOMPLETE_TASK_SCHEMA}}
         )
         return result.deleted_count
@@ -344,20 +346,20 @@ class DbManager:
             query["restart_notified"] = {"$ne": True}
         else:
             query["restart_notified"] = True
-        cursor = self.db.tasks[str(TgClient.ID)].find(query)
+        cursor = self._tasks().find(query)
         return await cursor.to_list(length=None)
 
     async def update_incomplete_task(self, link, data):
         if self._return:
             return
-        await self.db.tasks[TgClient.ID].update_one(
+        await self._tasks().update_one(
             {"_id": link}, {"$set": data}
         )
 
     async def mark_incomplete_tasks_notified(self, links):
         if self._return or not links:
             return
-        await self.db.tasks[TgClient.ID].update_many(
+        await self._tasks().update_many(
             {"_id": {"$in": links}}, {"$set": {"restart_notified": True}}
         )
 
@@ -366,7 +368,7 @@ class DbManager:
             return []
         return [
             row
-            async for row in self.db.tasks[TgClient.ID].find(
+            async for row in self._tasks().find(
                 {
                     "user_id": user_id,
                     "schema_version": INCOMPLETE_TASK_SCHEMA,
@@ -377,13 +379,13 @@ class DbManager:
     async def clear_user_incomplete_tasks(self, user_id):
         if self._return:
             return 0
-        result = await self.db.tasks[TgClient.ID].delete_many({"user_id": user_id})
+        result = await self._tasks().delete_many({"user_id": user_id})
         return result.deleted_count
 
     async def clear_incomplete_tasks_by_links(self, links):
         if self._return or not links:
             return 0
-        result = await self.db.tasks[TgClient.ID].delete_many(
+        result = await self._tasks().delete_many(
             {"_id": {"$in": links}}
         )
         return result.deleted_count
@@ -392,8 +394,8 @@ class DbManager:
         notifier_dict = {}
         if self._return:
             return notifier_dict
-        if await self.db.tasks[_part()].find_one():
-            rows = self.db.tasks[_part()].find({})
+        if await self._tasks().find_one():
+            rows = self._tasks().find({})
             async for row in rows:
                 link = row.get("link") or row.get("_id")
                 if not link:
@@ -414,8 +416,12 @@ class DbManager:
                         notifier_dict[cid][tag] = [task_data]
                 else:
                     notifier_dict[cid] = {tag: [task_data]}
-        await self.db.tasks[_part()].drop()
         return notifier_dict
+
+    async def drop_incomplete_tasks(self):
+        if self._return:
+            return
+        await self._tasks().drop()
 
     async def trunc_table(self, name):
         if self._return:

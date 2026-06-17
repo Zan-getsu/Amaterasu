@@ -1,7 +1,8 @@
-from asyncio import TimeoutError, gather
+from asyncio import TimeoutError, create_subprocess_exec, gather, sleep
 from contextlib import suppress
 from inspect import iscoroutinefunction
 from pathlib import Path
+from os import getcwd
 
 from aioaria2 import Aria2WebsocketClient
 from aiohttp import ClientError
@@ -14,7 +15,7 @@ from tenacity import (
 )
 
 from .. import LOGGER, aria2_options
-from .config_manager import Config
+from .config_manager import BinConfig, Config
 
 
 def wrap_with_retry(obj, max_retries=3):
@@ -36,6 +37,17 @@ def wrap_with_retry(obj, max_retries=3):
     return obj
 
 
+async def _connect_aria2(retries=5, delay=2):
+    from aioaria2.exceptions import Aria2rpcException
+    for i in range(retries):
+        try:
+            return await Aria2WebsocketClient.new("http://localhost:6800/jsonrpc")
+        except Aria2rpcException:
+            if i == retries - 1:
+                raise
+            await sleep(delay)
+
+
 class TorrentManager:
     aria2 = None
     qbittorrent = None
@@ -45,12 +57,18 @@ class TorrentManager:
         if cls.aria2:
             return
         try:
-            cls.aria2 = await Aria2WebsocketClient.new("http://localhost:6800/jsonrpc")
+            cls.aria2 = await _connect_aria2()
             LOGGER.info("Aria2 initialized successfully.")
 
             if Config.DISABLE_TORRENTS:
                 LOGGER.info("Torrents are disabled.")
                 return
+
+            proc = await create_subprocess_exec(
+                BinConfig.QBIT_NAME, "-d", f"--profile={getcwd()}/configs/qbittorrent"
+            )
+            await sleep(2)
+            LOGGER.info(f"qBittorrent started (PID: {proc.pid})")
 
             cls.qbittorrent = await create_client("http://localhost:8090/api/v2/")
             cls.qbittorrent = wrap_with_retry(cls.qbittorrent)

@@ -596,10 +596,16 @@ async def qb_mirror(client, message):
 
 
 async def jd_mirror(client, message):
+    if Config.DISABLE_JD:
+        await message.reply("JDownloader is currently disabled by the Bot Owner.")
+        return
     bot_loop.create_task(Mirror(client, message, is_jd=True).new_event())
 
 
 async def nzb_mirror(client, message):
+    if Config.DISABLE_NZB:
+        await message.reply("SABnzbd is currently disabled by the Bot Owner.")
+        return
     text_parts = message.text.split()
     nzb_id = None
     if len(text_parts) > 1 and not text_parts[1].startswith(("http", "ftp", "/")):
@@ -633,10 +639,16 @@ async def qb_leech(client, message):
 
 
 async def jd_leech(client, message):
+    if Config.DISABLE_JD:
+        await message.reply("JDownloader is currently disabled by the Bot Owner.")
+        return
     bot_loop.create_task(Mirror(client, message, is_leech=True, is_jd=True).new_event())
 
 
 async def nzb_leech(client, message):
+    if Config.DISABLE_NZB:
+        await message.reply("SABnzbd is currently disabled by the Bot Owner.")
+        return
     text_parts = message.text.split()
     nzb_id = None
     if len(text_parts) > 1 and not text_parts[1].startswith(("http", "ftp", "/")):

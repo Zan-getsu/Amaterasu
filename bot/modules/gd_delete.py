@@ -1,4 +1,3 @@
-from .. import LOGGER
 from ..helper.ext_utils.bot_utils import sync_to_async, new_task
 from ..helper.ext_utils.links_utils import is_gdrive_link
 from ..helper.mirror_leech_utils.gdrive_utils.delete import GoogleDriveDelete
@@ -16,7 +15,6 @@ async def delete_file(_, message):
     else:
         link = ""
     if is_gdrive_link(link):
-        LOGGER.info(link)
         msg = await sync_to_async(GoogleDriveDelete().deletefile, link, user.id)
     else:
         msg = (

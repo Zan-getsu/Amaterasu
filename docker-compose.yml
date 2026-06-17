@@ -10,11 +10,5 @@ services:
       - TZ=Asia/Dhaka
     volumes:
       - .:/usr/src/app:z
-    # Note: Network mode is set to host so ports 8080 (FileToLink API) 
+    # Note: Network mode is set to host so ports 8080 (FileToLink API)
     # and 80 (Torrent port mapping) will automatically map to the host system.
-
-  # tunnel:
-  #   image: cloudflare/cloudflared:latest
-  #   restart: unless-stopped
-  #   command: tunnel --no-autoupdate --url http://localhost:8080
-  #   network_mode: "host"

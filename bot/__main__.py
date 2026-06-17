@@ -27,6 +27,8 @@ for _h in getLogger().handlers:
         break
 from .core.tg_client import TgClient
 
+_clean_task = None
+
 
 async def main():
     from asyncio import gather
@@ -43,12 +45,15 @@ async def main():
 
     await load_settings()
 
-    from bot import _sabnzbd_key, _update_sabnzbd_ini, sabnzbd_client
-    derived_key = _sabnzbd_key()
-    _update_sabnzbd_ini(derived_key)
-    sabnzbd_client._default_params["apikey"] = derived_key
-    from .helper.ext_utils.db_handler import database
-    await database.update_nzb_config()
+    if not Config.DISABLE_NZB:
+        from bot import _sabnzbd_key, _update_sabnzbd_ini, sabnzbd_client
+
+        derived_key = _sabnzbd_key()
+        _update_sabnzbd_ini(derived_key)
+        sabnzbd_client._default_params["apikey"] = derived_key
+        from .helper.ext_utils.db_handler import database
+
+        await database.update_nzb_config()
 
     from .helper.telegram_helper.bot_commands import BotCommands
 
@@ -78,16 +83,13 @@ async def main():
     await TgClient.start_stream_clients()
     await gather(load_configurations(), update_variables())
 
-    from .core.torrent_manager import TorrentManager
-
-    await TorrentManager.initiate()
     await gather(
         update_qb_options(),
         update_aria2_options(),
         update_nzb_options(),
     )
     from .core.jdownloader_booter import jdownloader
-    from .helper.ext_utils.bot_utils import search_images
+    from .helper.ext_utils.bot_utils import create_tracked_task, search_images
     from .helper.ext_utils.files_utils import clean_all
     from .helper.ext_utils.telegraph_helper import telegraph
     from .helper.mirror_leech_utils.rclone_utils.serve import rclone_serve_booter
@@ -96,16 +98,16 @@ async def main():
         initiate_search_tools,
     )
 
-    await gather(
-        save_settings(),
-        jdownloader.boot(),
-        clean_all(),
-        initiate_search_tools(),
-        get_packages_version(),
-        telegraph.create_account(),
-        rclone_serve_booter(),
-    )
-    bot_loop.create_task(search_images())
+    await save_settings()
+    if not Config.DISABLE_JD:
+        create_tracked_task(jdownloader.boot())
+    global _clean_task
+    _clean_task = bot_loop.create_task(clean_all())
+    create_tracked_task(initiate_search_tools())
+    create_tracked_task(get_packages_version())
+    create_tracked_task(telegraph.create_account())
+    create_tracked_task(rclone_serve_booter())
+    create_tracked_task(search_images())
 
 
 bot_loop.run_until_complete(main())
@@ -134,6 +136,11 @@ add_handlers()
 
 from .modules import restart_notification
 
+if _clean_task is not None:
+    try:
+        bot_loop.run_until_complete(_clean_task)
+    except Exception as e:
+        LOGGER.error(f"clean_all error: {e}")
 bot_loop.run_until_complete(restart_notification())
 
 from .core.plugin_manager import get_plugin_manager

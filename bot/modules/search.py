@@ -18,7 +18,7 @@ TELEGRAPH_LIMIT = 300
 
 
 async def initiate_search_tools():
-    if Config.DISABLE_TORRENTS:
+    if Config.DISABLE_TORRENTS or Config.DISABLE_SEARCH:
         LOGGER.warning("Torrents are disabled. Skipping search plugin initialization.")
         return
     qb_plugins = await TorrentManager.qbittorrent.search.plugins()
@@ -225,6 +225,9 @@ async def plugin_buttons(user_id):
 
 @new_task
 async def torrent_search(_, message):
+    if Config.DISABLE_SEARCH:
+        await send_message(message, "Torrent search is currently disabled by the Bot Owner.")
+        return
     user_id = message.from_user.id
     buttons = ButtonMaker()
     key = message.text.split()

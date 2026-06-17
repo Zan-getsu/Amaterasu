@@ -134,7 +134,7 @@ def add_handlers():
     TgClient.bot.add_handler(
         MessageHandler(
             select,
-            filters=command(BotCommands.SelectCommand, case_sensitive=True)
+            filters=regex(rf"^/{BotCommands.SelectCommand[1]}?(?:_\w+).*$")
             & CustomFilters.authorized,
         )
     )
@@ -493,6 +493,16 @@ def add_handlers():
     )
     TgClient.bot.add_handler(
         CallbackQueryHandler(confirm_category, filters=regex("^scat"))
+    )
+    TgClient.bot.add_handler(
+        MessageHandler(
+            drive_clean,
+            filters=command(BotCommands.GDCleanCommand, case_sensitive=True)
+            & CustomFilters.authorized,
+        )
+    )
+    TgClient.bot.add_handler(
+        CallbackQueryHandler(confirm_drive_clean_cb, filters=regex("^gdccat"))
     )
 
     # Catch-all handlers go in group 1 so they don't swallow commands

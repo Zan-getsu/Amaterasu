@@ -7,7 +7,7 @@ from ...ext_utils.mega_sdk import MegaApi, MEGA_SDK_AVAILABLE, mega_sdk_missing_
 
 from .... import LOGGER, task_dict, task_dict_lock
 from ...telegram_helper.message_utils import update_status_message
-from ...listeners.mega_listener import AsyncMega, MegaAppListener, _mega_error_format
+from ...listeners.mega_listener import AsyncMega, MegaAppListener, _mega_error_format, _MEGA_SDK_LOCK
 from ...mirror_leech_utils.status_utils.mega_status import MegaDownloadStatus
 
 
@@ -99,11 +99,12 @@ async def add_mega_clone(listener, link, mega_email, mega_password, gid):
         await listener.on_upload_error(f"Mega clone error: {e}")
         return None, 0, 0
     finally:
-        try:
-            await async_api.logout()
-        except Exception:
-            pass
-        try:
-            api.removeListener(mega_listener)
-        except Exception:
-            pass
+        async with _MEGA_SDK_LOCK:
+            try:
+                await async_api.logout()
+            except Exception:
+                pass
+            try:
+                api.removeListener(mega_listener)
+            except Exception:
+                pass

@@ -667,7 +667,7 @@ def osdn(url):
             html = HTML(session.get(url).text)
         except Exception as e:
             raise DirectDownloadLinkException(f"ERROR: {e.__class__.__name__}") from e
-        if not (direct_link := html.xapth('//a[@class="mirror_link"]/@href')):
+        if not (direct_link := html.xpath('//a[@class="mirror_link"]/@href')):
             raise DirectDownloadLinkException("ERROR: Direct link not found")
         return f"https://osdn.net{direct_link[0]}"
 

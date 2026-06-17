@@ -18,12 +18,20 @@ class MegaDownloadStatus:
     def name(self):
         return self.listener.name
 
-    def _size(self):
-        if self._status == "up" and hasattr(self._obj, "_size") and self._obj._size:
+    def _size_str(self):
+        if self.listener.size > 0:
+            return self.listener.size
+        if self._status == "up" and hasattr(self._obj, "_size") and self._obj._size > 0:
             return self._obj._size
-        if hasattr(self._obj, "_total_folder_size") and self._obj._total_folder_size:
+        if hasattr(self._obj, "_total_folder_size") and self._obj._total_folder_size > 0:
             return self._obj._total_folder_size
-        return self._init_size
+        if self._init_size > 0:
+            return self._init_size
+        return None
+
+    def _size(self):
+        s = self._size_str()
+        return s if s else 1
 
     def progress_raw(self):
         try:
@@ -46,14 +54,17 @@ class MegaDownloadStatus:
         return get_readable_file_size(self._obj.downloaded_bytes)
 
     def eta(self):
+        if not self._obj.speed:
+            return "-"
         try:
-            seconds = (self._size() - self._obj.downloaded_bytes) / max(self._obj.speed, 1)
+            seconds = (self._size() - self._obj.downloaded_bytes) / self._obj.speed
             return get_readable_time(seconds)
-        except ZeroDivisionError:
+        except (ZeroDivisionError, ValueError):
             return "-"
 
     def size(self):
-        return get_readable_file_size(self._size())
+        s = self._size_str()
+        return "Unknown" if s is None else get_readable_file_size(s)
 
     def speed(self):
         return f"{get_readable_file_size(self._obj.speed)}/s"

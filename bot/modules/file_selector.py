@@ -9,6 +9,7 @@ from .. import (
     sabnzbd_client,
 )
 from ..core.config_manager import Config
+from ..core.tg_client import TgClient
 from ..core.torrent_manager import TorrentManager
 from ..helper.ext_utils.bot_utils import (
     bt_selection_buttons,
@@ -28,20 +29,29 @@ async def select(_, message):
         await send_message(message, "Base URL not defined!")
         return
     user_id = message.from_user.id
-    msg = message.text.split()
+    text = message.text
+    if " " in text.split("\n")[0]:
+        text = text.replace(" ", "_", 1)
+    msg = text.split("_", maxsplit=1)
+    gid = None
+    task = None
     if len(msg) > 1:
-        gid = msg[1]
-        task = await get_task_by_gid(gid)
-        if task is None:
-            await send_message(message, f"GID: <code>{gid}</code> Not Found.")
+        cmd_data = msg[1].split("@", maxsplit=1)
+        if len(cmd_data) > 1 and cmd_data[1].strip() != TgClient.BNAME:
             return
-    elif reply_to_id := message.reply_to_message_id:
+        gid = cmd_data[0].split()[0]
+        if gid:
+            task = await get_task_by_gid(gid)
+            if task is None:
+                await send_message(message, f"GID: <code>{gid}</code> Not Found.")
+                return
+    if task is None and (reply_to_id := message.reply_to_message_id):
         async with task_dict_lock:
             task = task_dict.get(reply_to_id)
         if task is None:
             await send_message(message, "This is not an active task!")
             return
-    elif len(msg) == 1:
+    if task is None:
         msg = (
             "Reply to an active /cmd which was used to start the download or add gid along with cmd\n\n"
             + "This command mainly for selection incase you decided to select files from already added torrent/nzb. "

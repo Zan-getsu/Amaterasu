@@ -1,4 +1,5 @@
 from asyncio import (
+    CancelledError,
     create_subprocess_exec,
     create_subprocess_shell,
     run_coroutine_threadsafe,
@@ -71,7 +72,7 @@ def derive_service_password(bot_id, service):
 
 
 def _resolve_bot_id():
-    token = getattr(Config, "BOT_TOKEN", "")
+    token = Config.BOT_TOKEN
     if not isinstance(token, str) or not token.strip():
         return "0"
     token = token.strip()
@@ -108,12 +109,28 @@ def verify_pin(gid, pin, bot_id):
 
 COMMAND_USAGE = {}
 
-THREAD_POOL = ThreadPoolExecutor(max_workers=500)
-DEFAULT_BROWSER_USER_AGENT = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-    "AppleWebKit/537.36 (KHTML, like Gecko) "
-    "Chrome/125.0.0.0 Safari/537.36"
-)
+THREAD_POOL = ThreadPoolExecutor(max_workers=1000)
+
+
+def _log_background_exception(task):
+    try:
+        exc = task.exception()
+    except CancelledError:
+        return
+    except Exception as error:
+        LOGGER.error(f"Failed to read background task result: {error}")
+        return
+    if exc:
+        LOGGER.error(
+            f"Background task failed: {task.get_name()}",
+            exc_info=(type(exc), exc, exc.__traceback__),
+        )
+
+
+def create_tracked_task(coro):
+    task = bot_loop.create_task(coro)
+    task.add_done_callback(_log_background_exception)
+    return task
 
 
 class SetInterval:
@@ -420,8 +437,7 @@ async def cmd_exec(cmd, shell=False):
 def new_task(func):
     @wraps(func)
     async def wrapper(*args, **kwargs):
-        task = bot_loop.create_task(func(*args, **kwargs))
-        return task
+        return create_tracked_task(func(*args, **kwargs))
 
     return wrapper
 

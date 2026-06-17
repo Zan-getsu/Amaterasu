@@ -72,6 +72,9 @@ async def update_rss_menu(query):
 
 @new_task
 async def get_rss_menu(_, message):
+    if Config.DISABLE_RSS:
+        await send_message(message, "RSS monitoring is currently disabled by the Bot Owner.")
+        return
     msg, button = await rss_menu(message)
     await send_message(message, msg, button)
 
@@ -822,4 +825,7 @@ def add_job():
 
 
 add_job()
-scheduler.start()
+if not Config.DISABLE_RSS:
+    scheduler.start()
+else:
+    LOGGER.info("RSS monitoring is disabled.")

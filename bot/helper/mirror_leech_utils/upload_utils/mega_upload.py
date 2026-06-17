@@ -8,13 +8,7 @@ from aiofiles.os import makedirs, path as aiopath
 from .... import LOGGER, task_dict, task_dict_lock
 from ...ext_utils.bot_utils import sync_to_async
 from ...ext_utils.files_utils import clean_download
-from ...ext_utils.mega_sdk import (
-    MEGA_SDK_AVAILABLE,
-    MegaApi,
-    MegaCancelToken,
-    mega_sdk_missing_message,
-)
-from ...listeners.mega_listener import AsyncMega, MegaAppListener, _mega_error_format
+from ...listeners.mega_listener import AsyncMega, MegaAppListener, _mega_error_format, _MEGA_SDK_LOCK
 from ...mirror_leech_utils.status_utils.mega_status import MegaDownloadStatus
 from ...telegram_helper.message_utils import update_status_message
 
@@ -280,9 +274,10 @@ async def add_mega_upload(listener, path, mega_email, mega_password, gid):
             await listener.on_upload_error(f"Internal error: {e}")
     finally:
         if async_api is not None:
-            with suppress(Exception):
-                await async_api.logout()
-            if async_api.api is not None and async_api._mega_listener is not None:
+            async with _MEGA_SDK_LOCK:
                 with suppress(Exception):
-                    async_api.api.removeListener(async_api._mega_listener)
+                    await async_api.logout()
+                if async_api.api is not None and async_api._mega_listener is not None:
+                    with suppress(Exception):
+                        async_api.api.removeListener(async_api._mega_listener)
         await clean_download(mega_base)

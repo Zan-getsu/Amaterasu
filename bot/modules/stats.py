@@ -24,6 +24,7 @@ from psutil import (
 
 from .. import LOGGER, bot_cache, bot_start_time, bot_loop
 from ..core.config_manager import Config, BinConfig
+from ..helper.ext_utils.bot_lock import get_system_resources_cached
 from ..helper.ext_utils.bot_utils import cmd_exec, compare_versions, new_task
 from ..helper.ext_utils.status_utils import (
     get_progress_bar_string,
@@ -78,41 +79,72 @@ async def get_stats(event, key="home"):
         swap = swap_memory()
         memory = virtual_memory()
         disk_io = disk_io_counters()
-        msg = f"""<b>❖ SYSTEM METRICS</b>
-<pre>
-├─ {'Uptime':<11}: ⏳ {get_readable_time(time() - bot_start_time)}
-├─ ─── MEMORY ────────────────────
-├─ {'Usage':<11}: {get_progress_bar_string(memory.percent)} {memory.percent}%
-├─ {'Allocation':<11}: {get_readable_file_size(memory.used)} / {get_readable_file_size(memory.total)}
-├─ ─── SWAP ──────────────────────
-├─ {'Usage':<11}: {get_progress_bar_string(swap.percent)} {swap.percent}%
-├─ {'Allocation':<11}: {get_readable_file_size(swap.used)} / {get_readable_file_size(swap.total)}
-├─ ─── STORAGE ───────────────────
-├─ {'Usage':<11}: {get_progress_bar_string(disk)} {disk}%
-├─ {'Read':<11}: ▼ {f"{get_readable_file_size(disk_io.read_bytes)} ({get_readable_time(disk_io.read_time / 1000)})" if disk_io else "Access Denied"}
-├─ {'Write':<11}: ▲ {f"{get_readable_file_size(disk_io.write_bytes)} ({get_readable_time(disk_io.write_time / 1000)})" if disk_io else "Access Denied"}
-└─ {'Allocation':<11}: {get_readable_file_size(used)} / {get_readable_file_size(total)}
-</pre>"""
+        res = get_system_resources_cached()
+        bot_ram_mb = res["ram_mb"]
+        bot_ram_total = bot_ram_mb * 1024 * 1024
+        user = Process().username()
+        bot_ram_used = sum(
+            p.memory_info().rss for p in process_iter() if p.username() == user
+        )
+        bot_ram_free = max(0, bot_ram_total - bot_ram_used)
+        bot_ram_pct = (
+            round((bot_ram_used / bot_ram_total * 100), 2) if bot_ram_total > 0 else 0
+        )
+        instance_cpu = res["cpu_count"]
+        sys_cpu = cpu_count(logical=True)
+        p_cores = cpu_count(logical=False)
+        v_cores = (sys_cpu or 0) - (p_cores or 0)
+        msg = f"""⌬ <b><i>BOT STATISTICS :</i></b>
+┖ <b>Bot Uptime :</b> {get_readable_time(time() - bot_start_time)}
+
+┎ <b><i>INSTANCE RAM ( BOT ) :</i></b>
+┃ {get_progress_bar_string(bot_ram_pct)} {bot_ram_pct}%
+┖ <b>U :</b> {get_readable_file_size(bot_ram_used)} | <b>F :</b> {get_readable_file_size(bot_ram_free)} | <b>T :</b> {get_readable_file_size(bot_ram_total)}
+
+┎ <b><i>SYSTEM RAM :</i></b>
+┃ {get_progress_bar_string(memory.percent)} {memory.percent}%
+┖ <b>U :</b> {get_readable_file_size(memory.used)} | <b>F :</b> {get_readable_file_size(memory.available)} | <b>T :</b> {get_readable_file_size(memory.total)}
+
+┎ <b><i>SWAP MEMORY :</i></b>
+┃ {get_progress_bar_string(swap.percent)} {swap.percent}%
+┖ <b>U :</b> {get_readable_file_size(swap.used)} | <b>F :</b> {get_readable_file_size(swap.free)} | <b>T :</b> {get_readable_file_size(swap.total)}
+
+┎ <b><i>INSTANCE CPU ( BOT ) :</i></b>
+┃ <b>Instance Core(s) :</b> {instance_cpu}
+┠ <b>Total Core(s) :</b> {sys_cpu} | <b>P-Core(s) :</b> {p_cores} | <b>V-Core(s) :</b> {v_cores}
+┖ <b>Usable CPU(s) :</b> {len(Process().cpu_affinity())}
+
+┎ <b><i>SYSTEM DISK :</i></b>
+┃ {get_progress_bar_string(disk)} {disk}%
+┃ <b>Total Disk Read :</b> {f"{get_readable_file_size(disk_io.read_bytes)} ({get_readable_time(disk_io.read_time / 1000)})" if disk_io else "Access Denied"}
+┃ <b>Total Disk Write :</b> {f"{get_readable_file_size(disk_io.write_bytes)} ({get_readable_time(disk_io.write_time / 1000)})" if disk_io else "Access Denied"}
+┖ <b>U :</b> {get_readable_file_size(used)} | <b>F :</b> {get_readable_file_size(free)} | <b>T :</b> {get_readable_file_size(total)}
+"""
     elif key == "stsys":
         cpu_usage = cpu_percent(interval=0.5)
-        msg = f"""<b>❖ OS SYSTEM</b>
-<pre>
-├─ {'Uptime':<11}: ⏳ {get_readable_time(time() - boot_time())}
-├─ {'Version':<11}: {version()}
-├─ {'Arch':<11}: {platform()}
-├─ ─── NETWORK ───────────────────
-├─ {'Upload':<11}: ▲ {get_readable_file_size(net_io_counters().bytes_sent)}
-├─ {'Download':<11}: ▼ {get_readable_file_size(net_io_counters().bytes_recv)}
-├─ {'Pkts Sent':<11}: {str(net_io_counters().packets_sent)[:-3]}k
-├─ {'Pkts Recv':<11}: {str(net_io_counters().packets_recv)[:-3]}k
-├─ {'Total I/O':<11}: ⇅ {get_readable_file_size(net_io_counters().bytes_recv + net_io_counters().bytes_sent)}
-├─ ─── CPU ───────────────────────
-├─ {'Usage':<11}: {get_progress_bar_string(cpu_usage)} {cpu_usage}%
-├─ {'Freq':<11}: {f"{cpu_freq().current / 1000:.2f} GHz" if cpu_freq() else "Access Denied"}
-├─ {'Avg Load':<11}: {"%, ".join(str(round((x / cpu_count() * 100), 2)) for x in getloadavg())}%
-├─ {'Cores':<11}: {cpu_count(logical=False)}P / {cpu_count(logical=True) - cpu_count(logical=False)}V / {cpu_count(logical=True)}T
-└─ {'Usable':<11}: {len(Process().cpu_affinity())}
-</pre>"""
+        sys_cpu = cpu_count(logical=True)
+        p_cores = cpu_count(logical=False)
+        v_cores = (sys_cpu or 0) - (p_cores or 0)
+        msg = f"""⌬ <b><i>SYSTEM OS :</i></b>
+╟ <b>OS Uptime :</b> {get_readable_time(time() - boot_time())}
+┠ <b>OS Version :</b> {version()}
+┖ <b>OS Arch :</b> {platform()}
+
+⌬ <b><i>SYSTEM NETWORK :</i></b>
+╟ <b>Upload Data:</b> {get_readable_file_size(net_io_counters().bytes_sent)}
+┠ <b>Download Data:</b> {get_readable_file_size(net_io_counters().bytes_recv)}
+┠ <b>Pkts Sent:</b> {str(net_io_counters().packets_sent)[:-3]}k
+┠ <b>Pkts Received:</b> {str(net_io_counters().packets_recv)[:-3]}k
+┖ <b>Total I/O Data:</b> {get_readable_file_size(net_io_counters().bytes_recv + net_io_counters().bytes_sent)}
+
+┎ <b><i>SYSTEM CPU :</i></b>
+┃ {get_progress_bar_string(cpu_usage)} {cpu_usage}%
+┠ <b>CPU Frequency :</b> {f"{cpu_freq().current / 1000:.2f} GHz" if cpu_freq() else "Access Denied"}
+┠ <b>System Avg Load :</b> {"%, ".join(str(round((x / (cpu_count() or 1) * 100), 2)) for x in getloadavg())}%, (1m, 5m, 15m)
+┠ <b>P-Core(s) :</b> {p_cores} | <b>V-Core(s) :</b> {v_cores}
+┠ <b>Total Core(s) :</b> {sys_cpu}
+┖ <b>Usable CPU(s) :</b> {len(Process().cpu_affinity())}
+"""
     elif key == "strepo":
         last_commit, changelog = "No Data", "N/A"
         if await aiopath.exists(".git"):

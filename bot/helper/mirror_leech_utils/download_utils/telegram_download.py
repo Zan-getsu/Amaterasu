@@ -3,7 +3,7 @@ from time import time
 from secrets import token_hex
 from pyrogram.errors import FloodWait, PeerIdInvalid, ChannelInvalid
 
-from bot.helper.ext_utils.hyperdl_utils import HyperTGDownload
+from bot.helper.ext_utils.hyperdl_utils import HypertgDownload
 
 try:
     from pyrogram.errors import FloodPremiumWait
@@ -33,7 +33,8 @@ class TelegramDownloadHelper:
         self._listener = listener
         self._id = ""
         self.session = ""
-        self._hyper_dl = len(TgClient.helper_bots) != 0 and Config.LEECH_DUMP_CHAT
+        self._hyper_dl = Config.USE_HYPER and len(TgClient.helper_bots) != 0 and Config.LEECH_DUMP_CHAT
+        self._hyper_dl_instance = None
 
     @property
     def speed(self):
@@ -49,7 +50,7 @@ class TelegramDownloadHelper:
         self._id = file_id
         async with task_dict_lock:
             task_dict[self._listener.mid] = TelegramStatus(
-                self._listener, self, gid, "dl", self._hyper_dl
+                self._listener, self, gid, "dl", "hdl" if self._hyper_dl else ""
             )
         if not from_queue:
             await self._listener.on_download_start()
@@ -87,14 +88,14 @@ class TelegramDownloadHelper:
             # TODO : Add support for user session ( Huh ??)
             if self._hyper_dl:
                 try:
-                    download = await HyperTGDownload().download_media(
+                    self._hyper_dl_instance = HypertgDownload(self)
+                    download = await self._hyper_dl_instance.download_media(
                         message,
                         file_name=path,
-                        progress=self._on_download_progress,
                         dump_chat=Config.LEECH_DUMP_CHAT,
                     )
                 except Exception:
-                    if getattr(Config, "USER_TRANSMISSION", False):
+                    if Config.TRANSMISSION_MODE in ("user", "both"):
                         try:
                             user_message = await TgClient.user.get_messages(
                                 chat_id=message.chat.id, message_ids=message.id
@@ -136,7 +137,7 @@ class TelegramDownloadHelper:
         if not self.session:
             if self._hyper_dl:
                 self.session = "hbots"
-            elif self._listener.user_transmission and self._listener.is_super_chat:
+            elif self._listener.transmission_mode in ("user", "both") and self._listener.is_super_chat:
                 self.session = "user"
                 try:
                     message = await TgClient.user.get_messages(

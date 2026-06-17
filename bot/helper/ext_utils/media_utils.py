@@ -464,13 +464,13 @@ async def get_audio_thumbnail(audio_file):
     try:
         _, err, code = await wait_for(cmd_exec(cmd), timeout=60)
         if code != 0 or not await aiopath.exists(output):
-            LOGGER.error(
-                f"Error while extracting thumbnail from audio. Name: {audio_file} stderr: {err}"
+            LOGGER.warning(
+                f"Could not extract thumbnail from audio. Name: {audio_file} stderr: {err}"
             )
             return None
     except Exception:
-        LOGGER.error(
-            f"Error while extracting thumbnail from audio. Name: {audio_file}. Error: Timeout some issues with ffmpeg with specific arch!"
+        LOGGER.warning(
+            f"Could not extract thumbnail from audio. Name: {audio_file}. Timeout or ffmpeg issue."
         )
         return None
     return output

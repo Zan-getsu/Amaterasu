@@ -1,4 +1,4 @@
-from asyncio import create_subprocess_exec, gather, sleep
+from asyncio import create_subprocess_exec, gather, get_event_loop, sleep
 from datetime import datetime
 from html import escape
 from os import execl as osexecl
@@ -16,9 +16,8 @@ from ..core.config_manager import Config, BinConfig
 from ..core.jdownloader_booter import jdownloader
 from ..core.tg_client import TgClient
 from ..core.torrent_manager import TorrentManager
-from ..helper.ext_utils.bot_utils import new_task, resolve_command
+from ..helper.ext_utils.bot_utils import THREAD_POOL, new_task, resolve_command
 from ..helper.ext_utils.db_handler import database
-from ..helper.ext_utils.files_utils import clean_all
 from ..helper.listeners.mega_listener import mega_cleanup
 from ..helper.telegram_helper.bot_commands import BotCommands
 from ..helper.telegram_helper import button_build
@@ -238,23 +237,27 @@ async def notify_incomplete_tasks():
 
     now = datetime.now(timezone(Config.TIMEZONE))
     for user_id, user_tasks in by_user.items():
+        delivered = False
         try:
             # Always attempt PM delivery first
-            await _send_recovery_message(user_id, user_tasks, now)
+            result = await _send_recovery_message(user_id, user_tasks, now)
+            delivered = result is not None and not isinstance(result, str)
         except Exception as e:
             LOGGER.warning(f"PM notify failed for {user_id}: {e}")
             # Fallback: try the original chat
             try:
                 cid = user_tasks[0]["cid"]
                 if cid != user_id and not any(t.get("is_pm") for t in user_tasks):  # don't retry same target
-                    await _send_recovery_message_to_chat(cid, user_id, user_tasks, now)
+                    result = await _send_recovery_message_to_chat(cid, user_id, user_tasks, now)
+                    delivered = result is not None and not isinstance(result, str)
             except Exception as e2:
                 LOGGER.error(f"Group fallback notify failed for {user_id}: {e2}")
-        finally:
-            # ALWAYS mark notified to prevent re-notification spam
+        if delivered:
             await database.mark_incomplete_tasks_notified(
                 [task["_id"] for task in user_tasks]
             )
+        else:
+            LOGGER.warning("Incomplete task recovery notice was not delivered to %s", user_id)
         await sleep(1)
 
 
@@ -364,21 +367,24 @@ async def auto_resume_incomplete_tasks():
     if not valid_tasks:
         return
 
-    await database.clear_incomplete_tasks_by_links([task["_id"] for task in valid_tasks])
     unique_tasks = _deduplicate_tasks(valid_tasks)
-    duplicates = len(tasks) - len(unique_tasks)
+    duplicates = len(valid_tasks) - len(unique_tasks)
     resumed = 0
     skipped = 0
     for task in unique_tasks:
         task = await _hydrate_incomplete_task(task)
+        queued = False
         if await _resume_from_command(task):
-            resumed += 1
+            queued = True
         else:
             message, client = await _get_task_message(task)
             if message and getattr(message, "text", None) and await _requeue_task(client, message):
-                resumed += 1
-            else:
-                skipped += 1
+                queued = True
+        if queued:
+            resumed += 1
+            await database.clear_incomplete_tasks_by_links([task["_id"]])
+        else:
+            skipped += 1
         await sleep(RECOVERY_TASK_DELAY)
     LOGGER.info(
         "Auto-resumed incomplete tasks: %s; skipped: %s; duplicates discarded: %s",
@@ -455,27 +461,28 @@ async def resume_incomplete_tasks(_, query):
             "⚠️ No incomplete tasks found.\nThey may have already been handled.",
         )
         return
-    await database.clear_incomplete_tasks_by_links([task["_id"] for task in tasks])
     unique_tasks = _deduplicate_tasks(tasks)
     duplicates = len(tasks) - len(unique_tasks)
     resumed = 0
     skipped = 0
     for task in unique_tasks:
         task = await _hydrate_incomplete_task(task)
+        queued = False
         # Try command-based resume first (no message fetch required)
         if await _resume_from_command(task):
+            queued = True
+        else:
+            # Fallback: original message
+            message, client = await _get_task_message(task)
+            if message and getattr(message, "text", None):
+                if await _requeue_task(client, message):
+                    queued = True
+        if queued:
             resumed += 1
+            await database.clear_incomplete_tasks_by_links([task["_id"]])
             await sleep(RECOVERY_TASK_DELAY)
             continue
-        # Fallback: original message
-        message, client = await _get_task_message(task)
-        if message and getattr(message, "text", None):
-            if await _requeue_task(client, message):
-                resumed += 1
-            else:
-                skipped += 1
-        else:
-            skipped += 1
+        skipped += 1
         await sleep(RECOVERY_TASK_DELAY)
     await edit_message(
         query.message,
@@ -572,7 +579,6 @@ async def single_resume_task(_, query):
     link = target_task["_id"]
     
     await query.answer()
-    await database.clear_incomplete_tasks_by_links([link])
     target_task = await _hydrate_incomplete_task(target_task)
     
     resumed = False
@@ -583,6 +589,9 @@ async def single_resume_task(_, query):
         if message and getattr(message, "text", None):
             if await _requeue_task(client, message):
                 resumed = True
+
+    if resumed:
+        await database.clear_incomplete_tasks_by_links([link])
                 
     query.data = f"manage_tasks_{user_id}_{page}"
     await manage_incomplete_tasks(_, query)
@@ -635,22 +644,21 @@ async def back_manage_tasks(_, query):
 
 async def restart_notification():
     if await aiopath.isfile(".restartmsg"):
-        with open(".restartmsg") as f:
-            chat_id, msg_id = map(int, f)
+        try:
+            with open(".restartmsg") as f:
+                chat_id, msg_id = map(int, f)
+        except Exception:
+            chat_id, msg_id = 0, 0
     else:
         chat_id, msg_id = 0, 0
 
     now = datetime.now(timezone(Config.TIMEZONE))
 
-    if Config.INC_TASK_RESUME or Config.INCOMPLETE_TASK_NOTIFIER:
-        discarded = await database.discard_legacy_incomplete_tasks()
-        if discarded:
-            LOGGER.warning(
-                "Discarded %s stale incomplete task record(s) created before "
-                "reliable completion tracking was enabled.",
-                discarded,
-            )
-        await notify_incomplete_tasks()
+    if Config.DATABASE_URL and (Config.INCOMPLETE_TASK_NOTIFIER or Config.INC_TASK_RESUME):
+        if Config.INC_TASK_RESUME:
+            await auto_resume_incomplete_tasks()
+        if Config.INCOMPLETE_TASK_NOTIFIER:
+            await notify_incomplete_tasks()
 
     if await aiopath.isfile(".restartmsg"):
         try:
@@ -668,6 +676,66 @@ async def restart_notification():
         await remove(".restartmsg")
 
 
+async def _notify_tasks(notifier_dict, restart_chat_id, now):
+    for cid, data in notifier_dict.items():
+        is_restart_chat = cid == restart_chat_id
+        header = _restart_header(now, is_restart_chat)
+        msg = header + "\n\n⌬ <b><i>Incomplete Tasks!</i></b>"
+        for tag, tasks in data.items():
+            entry = f"\n➲ <b>User:</b> {tag}\n┖ <b>Tasks:</b>"
+            for index, task in enumerate(tasks, start=1):
+                link = task.get("link", "")
+                entry += f" {index}. <a href='{link}'>L</a> |"
+            if len((msg + entry).encode()) > 4000:
+                await _send_msg(cid, msg)
+                msg = header
+            msg += entry
+        if msg:
+            await _send_msg(cid, msg)
+
+
+async def _resume_tasks(notifier_dict):
+    for cid, data in notifier_dict.items():
+        for tag, tasks in data.items():
+            for task in tasks:
+                command = task.get("command", "")
+                user_id = task.get("user_id", 0)
+                reply_to_msg_id = task.get("reply_to_msg_id", 0)
+                if not command or not user_id:
+                    continue
+                try:
+                    user = await TgClient.bot.get_users(user_id)
+                except Exception as e:
+                    LOGGER.warning(f"Resume: cannot get user {user_id}: {e}")
+                    continue
+                handler = resolve_command(command)
+                if handler is None:
+                    continue
+                try:
+                    msg = await TgClient.bot.send_message(
+                        chat_id=cid,
+                        text=command,
+                        disable_notification=True,
+                    )
+                    msg.text = command
+                    msg.from_user = user
+                    if reply_to_msg_id:
+                        try:
+                            reply_msg = await TgClient.bot.get_messages(
+                                chat_id=cid, message_ids=reply_to_msg_id
+                            )
+                            if reply_msg:
+                                msg.reply_to_message = reply_msg
+                        except Exception as e:
+                            LOGGER.warning(
+                                f"Resume: cannot fetch reply msg {reply_to_msg_id}: {e}"
+                            )
+                    await handler(TgClient.bot, msg)
+                    await sleep(1)
+                except Exception as e:
+                    LOGGER.error(f"Resume: failed for '{command}' in {cid}: {e}")
+
+
 @new_task
 async def confirm_restart(_, query):
     await query.answer()
@@ -678,10 +746,7 @@ async def confirm_restart(_, query):
     if data[1] == "confirm":
         intervals["stopAll"] = True
         restart_message = await send_message(reply_to, "<i>Restarting...</i>")
-        await delete_message(message)
-        await TgClient.stop()
-        if scheduler.running:
-            scheduler.shutdown(wait=False)
+
         if qb := intervals["qb"]:
             qb.cancel()
         if jd := intervals["jd"]:
@@ -691,19 +756,23 @@ async def confirm_restart(_, query):
         if st := intervals["status"]:
             for intvl in list(st.values()):
                 intvl.cancel()
+
+        if scheduler.running:
+            scheduler.shutdown(wait=False)
+
         await mega_cleanup()
-        await clean_all()
-        await TorrentManager.close_all()
-        if sabnzbd_client.LOGGED_IN:
-            await gather(
+
+        sabnzbd_task = None
+        jd_task = None
+        if not Config.DISABLE_NZB and sabnzbd_client.LOGGED_IN:
+            sabnzbd_task = gather(
                 sabnzbd_client.pause_all(),
                 sabnzbd_client.delete_job("all", True),
                 sabnzbd_client.purge_all(True),
                 sabnzbd_client.delete_history("all", delete_files=True),
             )
-            await sabnzbd_client.close()
-        if jdownloader.is_connected:
-            await gather(
+        if not Config.DISABLE_JD and jdownloader.is_connected:
+            jd_task = gather(
                 jdownloader.device.downloadcontroller.stop_downloads(),
                 jdownloader.device.linkgrabber.clear_list(),
                 jdownloader.device.downloads.cleanup(
@@ -712,17 +781,62 @@ async def confirm_restart(_, query):
                     "ALL",
                 ),
             )
-            await jdownloader.close()
-        proc1 = await create_subprocess_exec(
+
+        try:
+            await TorrentManager.remove_all()
+        except Exception:
+            pass
+        await TorrentManager.close_all()
+
+        if sabnzbd_task is not None:
+            try:
+                await sabnzbd_task
+            except Exception:
+                pass
+            try:
+                await sabnzbd_client.close()
+            except Exception:
+                pass
+        if jd_task is not None:
+            try:
+                await jd_task
+            except Exception:
+                pass
+            try:
+                await jdownloader.close()
+            except Exception:
+                pass
+
+        await TgClient.stop()
+
+        THREAD_POOL.shutdown(wait=False)
+
+        await create_subprocess_exec(
             "pkill",
             "-9",
             "-f",
-            f"gunicorn|{BinConfig.ARIA2_NAME}|{BinConfig.QBIT_NAME}|{BinConfig.FFMPEG_NAME}|{BinConfig.RCLONE_NAME}|java|{BinConfig.SABNZBD_NAME}|7z|split",
+            f"gunicorn|cloudflared|{BinConfig.ARIA2_NAME}|{BinConfig.QBIT_NAME}|{BinConfig.FFMPEG_NAME}|{BinConfig.RCLONE_NAME}|java|{BinConfig.SABNZBD_NAME}|7z|split",
         )
-        proc2 = await create_subprocess_exec("python3", "update.py")
-        await gather(proc1.wait(), proc2.wait())
-        async with aiopen(".restartmsg", "w") as f:
-            await f.write(f"{restart_message.chat.id}\n{restart_message.id}\n")
+
+        proc_update = await create_subprocess_exec("python3", "update.py")
+        await proc_update.wait()
+
+        try:
+            async with aiopen(".restartmsg", "w") as f:
+                await f.write(f"{restart_message.chat.id}\n{restart_message.id}\n")
+        except Exception:
+            pass
+
+        get_event_loop().create_task(_background_cleanup())
+
         osexecl(executable, executable, "-m", "bot")
     else:
         await delete_message(message, reply_to)
+
+
+async def _background_cleanup():
+    try:
+        proc = await create_subprocess_exec("rm", "-rf", "/usr/src/app/downloads/")
+        await proc.wait()
+    except Exception:
+        pass

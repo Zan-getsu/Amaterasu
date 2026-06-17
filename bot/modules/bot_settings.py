@@ -1,13 +1,12 @@
 from asyncio import (
     create_subprocess_exec,
-    create_subprocess_shell,
     gather,
     sleep,
 )
 from ast import literal_eval
 from functools import partial
 from io import BytesIO
-from os import getcwd, getenv
+from os import getcwd
 from shlex import quote as shlex_quote
 from time import time
 
@@ -22,6 +21,7 @@ from pyrogram.enums import ButtonStyle
 from .. import (
     LOGGER,
     aria2_options,
+    bot_loop,
     categories_dict,
     drives_ids,
     drives_names,
@@ -31,6 +31,7 @@ from .. import (
     nzb_options,
     qbit_options,
     sabnzbd_client,
+    scheduler,
     task_dict,
     shortener_dict,
     excluded_extensions,
@@ -44,7 +45,13 @@ from ..helper.ext_utils.bot_utils import (
 from ..core.config_manager import Config
 from ..core.tg_client import TgClient
 from ..core.torrent_manager import TorrentManager
-from ..core.startup import update_qb_options, update_nzb_options, update_variables
+from ..core.startup import (
+    start_web_server,
+    update_qb_options,
+    update_nzb_options,
+    update_variables,
+)
+from ..core.cloudflare_tunnel import cloudflare_tunnel_booter
 from ..helper.ext_utils.db_handler import database
 from ..core.jdownloader_booter import jdownloader
 from ..helper.ext_utils.task_manager import start_from_queued
@@ -64,6 +71,24 @@ from .search import initiate_search_tools
 start = 0
 state = "view"
 handler_dict = {}
+
+
+def _config_update_payload(key, value):
+    data = {key: value}
+    if key == "BASE_URL":
+        data.update(
+            {
+                "FQDN": "",
+                "HAS_SSL": True,
+                "NO_PORT": True,
+                "BASE_URL_PORT": Config.PORT,
+            }
+        )
+    elif key == "CLOUDFLARE_TUNNEL_AUTO_URL":
+        data["CLOUDFLARE_TUNNEL_AUTO_FQDN"] = None
+    return data
+
+
 DEFAULT_VALUES = {
     "LEECH_SPLIT_SIZE": TgClient.MAX_SPLIT_SIZE,
     "RSS_DELAY": 600,
@@ -100,16 +125,24 @@ BOOL_VARS = [
     "AS_DOCUMENT",
     "BOT_PM",
     "CLEAN_LOG_MSG",
+    "CLOUDFLARE_TUNNEL_AUTO_URL",
+    "CLOUDFLARE_TUNNEL_ENABLED",
     "COLORED_BTNS",
     "DELETE_LINKS",
+    "DRIVE_CATEGORY_MODE",
     "DISABLE_BULK",
     "DISABLE_FF_MODE",
+    "DISABLE_JD",
     "DISABLE_LEECH",
     "DISABLE_MULTI",
+    "DISABLE_NZB",
+    "DISABLE_RSS",
+    "DISABLE_SEARCH",
     "DISABLE_SEED",
     "DISABLE_TORRENTS",
+    "DISABLE_YTDLP",
+    "DISABLE_MEGA",
     "EQUAL_SPLITS",
-    "HYBRID_LEECH",
     "INC_TASK_RESUME",
     "INCOMPLETE_TASK_NOTIFIER",
     "IS_TEAM_DRIVE",
@@ -120,7 +153,6 @@ BOOL_VARS = [
     "STOP_DUPLICATE",
     "UPDATE_PKGS",
     "USE_IMAGES",
-    "USER_TRANSMISSION",
     "USE_SERVICE_ACCOUNTS",
     "WEB_PINCODE",
 ]
@@ -128,13 +160,18 @@ BOOL_VARS = [
 DEFAULT_DESP = {
     "AS_DOCUMENT": "Send files as document instead of media. Default: False.",
     "AUTHORIZED_CHATS": "User/Chat IDs authorized to use the bot. Space-separated. Supports thread IDs with | separator.",
-    "BASE_URL": "Public URL for torrent web file selection. Format: http://ip or http://ip:port.",
+    "BASE_URL": "Public URL for FileToLink and web UI links. Example: https://stream.example.com.",
     "BOT_TOKEN": "Telegram Bot Token from @BotFather.",
     "HELPER_TOKENS": "Additional bot tokens for parallel task handling.",
     "BOT_MAX_TASKS": "Max tasks (including queued) the bot runs in parallel. 0 = unlimited.",
     "BOT_PM": "Send files/links to bot owner PM. Default: False.",
     "CMD_SUFFIX": "Text appended to all bot commands. Useful for running multiple bot instances.",
     "COLORED_BTNS": "Use colored inline buttons. Default: False.",
+    "CLOUDFLARE_TUNNEL_ENABLED": "Start Cloudflare Tunnel from Amaterasu. If token is empty, a temporary quick tunnel is used.",
+    "CLOUDFLARE_TUNNEL_TOKEN": "Cloudflare named tunnel token. Leave empty to use a temporary trycloudflare.com quick tunnel.",
+    "CLOUDFLARE_TUNNEL_TARGET": "Local service URL exposed by Cloudflare Tunnel. Empty = http://127.0.0.1:PORT.",
+    "CLOUDFLARE_TUNNEL_METRICS": "Local cloudflared metrics listener. Default: 127.0.0.1:49312.",
+    "CLOUDFLARE_TUNNEL_AUTO_URL": "For quick tunnels, auto-fill BASE_URL from the generated trycloudflare.com URL.",
     "DEFAULT_LANG": "Default bot language code. Default: en.",
     "DATABASE_URL": "MongoDB connection string for persistent storage.",
     "DEFAULT_UPLOAD": "Default upload destination: gd (Google Drive) or rc (rclone). Default: rc.",
@@ -146,6 +183,12 @@ DEFAULT_DESP = {
     "DISABLE_MULTI": "Disable multi-part splits. Default: False.",
     "DISABLE_SEED": "Disable seeding after torrent download. Default: False.",
     "DISABLE_FF_MODE": "Disable FFmpeg processing mode. Default: False.",
+    "DISABLE_MEGA": "Disable Mega Processor for bot. Default: False.",
+    "DISABLE_JD": "Disable JDownloader downloads. Saves ~256-500MB RAM. Default: False.",
+    "DISABLE_NZB": "Disable SABnzbd/Usenet downloads. Saves ~100-200MB RAM. Default: False.",
+    "DISABLE_RSS": "Disable RSS feed monitoring. Saves CPU cycles. Default: False.",
+    "DISABLE_SEARCH": "Disable torrent search plugins. Saves network I/O. Default: False.",
+    "DISABLE_YTDLP": "Disable YouTube/YT-DLP downloads. Default: False.",
     "EQUAL_SPLITS": "Split files into equal parts of LEECH_SPLIT_SIZE. Default: False.",
     "EXCLUDED_EXTENSIONS": "File extensions to exclude from upload/clone. Space-separated.",
     "FFMPEG_CMDS": "Custom FFmpeg command presets. Dict format.",
@@ -204,8 +247,12 @@ DEFAULT_DESP = {
     "LEECH_FONT": "Font style for captions: b, i, u, s, code, spoiler.",
     "LEECH_SPLIT_SIZE": "Split size for Telegram uploads in bytes. Default: 2GB (4GB for premium).",
     "MEDIA_GROUP": "Upload split parts as media group. Default: False.",
-    "HYBRID_LEECH": "Use both premium and normal upload methods for speed. Default: True.",
-    "HYPER_THREADS": "Number of threads for aria2c downloads. 0 = auto.",
+    "USE_HYPER": "Enable HyperDL/HyperUP for faster Telegram transfers. Default: True.",
+    "HYPER_THREADS": "Number of parallel download parts (clients). 0 = auto.",
+    "HYPER_PIPELINE": "Concurrent GetFile requests per HyperDL part. Default: 4.",
+    "HYPER_CHUNK": "HyperDL working chunk size in bytes. Default: 512 * 1024 (512KB).",
+    "CPU_LIMIT": "CPU limit percentage for background services (SABnzbd, JDownloader). Default: 20.",
+    "THROTTLE_SERVICES": "Pause services during heavy ops (FFmpeg). auto=low-end only, always, never.",
     "HYDRA_IP": "Hydra API IP address for search.",
     "HYDRA_API_KEY": "Hydra API key for search.",
     "NAME_SWAP": "Rename files using pattern. Format: old:new|old2:new2.",
@@ -249,7 +296,7 @@ DEFAULT_DESP = {
     "UPDATE_PKGS": "Update pip packages on restart. Default: True.",
     "USENET_SERVERS": "Usenet server configurations. List of dicts.",
     "USER_SESSION_STRING": "Pyrogram session string for user account tasks.",
-    "USER_TRANSMISSION": "Use user account for transmission tasks. Default: True.",
+    "TRANSMISSION_MODE": "Transmission mode: bot, user, or both. Default: both.",
     "USE_SERVICE_ACCOUNTS": "Use Google Service Accounts. Default: False.",
     "WEB_ACCESS_PASSWORD": "Secret for deriving proxy passwords. Set once, use derived passwords in browser. Empty = auto-generated.",
     "WEB_PINCODE": "Ask for pincode in web file selection. Default: True.",
@@ -262,14 +309,12 @@ DEFAULT_DESP = {
 }
 
 PROTECTED_VARS = {
-    "TELEGRAM_HASH", "TELEGRAM_API", "OWNER_ID", "BOT_TOKEN",
-    "AUTHORIZED_CHATS", "DATABASE_URL", "DOWNLOAD_DIR",
-    "SUDO_USERS", "CMD_SUFFIX", "USER_SESSION_STRING", "TG_PROXY",
+    "TELEGRAM_HASH", "TELEGRAM_API", "OWNER_ID", "BOT_TOKEN", "AUTHORIZED_CHATS", "DATABASE_URL", "CLOUDFLARE_TUNNEL_TOKEN",
+    "SUDO_USERS", "USER_SESSION_STRING", "TG_PROXY",
 }
 RESTART_VARS = {
-    "CMD_SUFFIX", "OWNER_ID", "USER_SESSION_STRING",
-    "TELEGRAM_HASH", "TELEGRAM_API", "BOT_TOKEN",
-    "TG_PROXY", "AUTHORIZED_CHATS", "DATABASE_URL", "DOWNLOAD_DIR",
+    "CMD_SUFFIX", "OWNER_ID", "USER_SESSION_STRING", "TELEGRAM_HASH", "TELEGRAM_API", "BOT_TOKEN",
+    "TG_PROXY", "AUTHORIZED_CHATS", "DATABASE_URL"
 }
 
 ONOFF_VARS = [
@@ -279,6 +324,12 @@ ONOFF_VARS = [
     "DISABLE_MULTI",
     "DISABLE_SEED",
     "DISABLE_FF_MODE",
+    "DISABLE_MEGA",
+    "DISABLE_JD",
+    "DISABLE_NZB",
+    "DISABLE_RSS",
+    "DISABLE_SEARCH",
+    "DISABLE_YTDLP",
 ]
 
 
@@ -286,7 +337,7 @@ async def get_buttons(key=None, edit_type=None, edit_mode=False):
     buttons = ButtonMaker()
     if key is None:
         buttons.data_button("Config Variables", "botset var")
-        buttons.data_button("On/Off Settings", "botset setonoff")
+        buttons.data_button("Module Settings", "botset setonoff")
         buttons.data_button("Private Files", "botset private open")
         buttons.data_button("Qbit Settings", "botset qbit")
         buttons.data_button("Aria2c Settings", "botset aria")
@@ -357,6 +408,8 @@ async def get_buttons(key=None, edit_type=None, edit_mode=False):
             value = Config.get(key)
             if value == "":
                 value = "None"
+            elif key in PROTECTED_VARS:
+                value = "<hidden>"
             msg += f"<b>Current Value:</b> <code>{value}</code>\n\n"
             buttons.data_button(
                 "View Value", f"botset showvar {key}", position="header"
@@ -408,7 +461,7 @@ async def get_buttons(key=None, edit_type=None, edit_mode=False):
                 buttons.data_button(label, f"botset toggleonoff {k} off")
         buttons.data_button("Back", "botset back", position="footer")
         buttons.data_button("Close", "botset close", position="footer", style=ButtonStyle.DANGER)
-        msg = "⌬ <b><u>On/Off Settings</u></b>"
+        msg = "⌬ <b><u>Module Settings</u></b>"
     elif key == "private":
         if edit_mode:
             buttons.data_button("Stop Invoke File", "botset private stop", "header")
@@ -653,11 +706,14 @@ async def edit_variable(_, message, pre_message, key):
         BotCommands.refresh_commands()
     await update_buttons(pre_message, key, "editvar", False)
     await delete_message(message)
-    await database.update_config({key: value})
+    await database.update_config(_config_update_payload(key, value))
     if key in ["SEARCH_PLUGINS", "SEARCH_API_LINK"]:
         await initiate_search_tools()
     elif key in ["QUEUE_ALL", "QUEUE_DOWNLOAD", "QUEUE_UPLOAD"]:
         await start_from_queued()
+    elif key in ("PORT", "WEB_ACCESS_PASSWORD"):
+        await (await create_subprocess_exec("pkill", "-9", "-f", "gunicorn")).wait()
+        await start_web_server()
     elif key in [
         "RCLONE_SERVE_URL",
         "RCLONE_SERVE_PORT",
@@ -665,6 +721,8 @@ async def edit_variable(_, message, pre_message, key):
         "RCLONE_SERVE_PASS",
     ]:
         await rclone_serve_booter()
+    elif key.startswith("CLOUDFLARE_TUNNEL_"):
+        await cloudflare_tunnel_booter()
     elif key in ["JD_EMAIL", "JD_PASS"]:
         await jdownloader.boot()
     elif key == "RSS_DELAY":
@@ -680,11 +738,13 @@ async def toggle_bool_var(_, query, pre_message, key, value):
     bool_value = value == "on"
     Config.set(key, bool_value)
     await update_buttons(pre_message, key, "editvar", False)
-    await database.update_config({key: bool_value})
+    await database.update_config(_config_update_payload(key, bool_value))
     if key in ("INCOMPLETE_TASK_NOTIFIER", "INC_TASK_RESUME") and not bool_value and Config.DATABASE_URL:
         await database.trunc_table("tasks")
     elif key in ["QUEUE_ALL", "QUEUE_DOWNLOAD", "QUEUE_UPLOAD"]:
         await start_from_queued()
+    elif key.startswith("CLOUDFLARE_TUNNEL_"):
+        await cloudflare_tunnel_booter()
 
 
 @new_task
@@ -692,13 +752,71 @@ async def toggle_onoff_var(_, query, pre_message, key, value):
     handler_dict[query.message.chat.id] = False
     bool_value = value == "on"
     Config.set(key, bool_value)
-    await update_buttons(pre_message, "setonoff")
     await database.update_config({key: bool_value})
+    await _handle_service_toggle(key, bool_value)
+    await update_buttons(pre_message, "setonoff")
+
+
+async def _handle_service_toggle(key, disabled):
+    if key == "DISABLE_JD":
+        if disabled:
+            if jdownloader.is_connected:
+                try:
+                    await jdownloader.device.downloadcontroller.stop_downloads()
+                    await jdownloader.close()
+                except Exception:
+                    pass
+                try:
+                    await (
+                        await create_subprocess_exec("pkill", "-9", "-f", "java")
+                    ).wait()
+                except Exception:
+                    pass
+                LOGGER.info("JDownloader stopped via Module Settings")
+        else:
+            try:
+                from ..core.startup import load_configurations
+                await load_configurations()
+            except Exception:
+                pass
+            bot_loop.create_task(jdownloader.boot())
+            LOGGER.info("JDownloader starting via Module Settings")
+    elif key == "DISABLE_NZB":
+        if disabled:
+            if sabnzbd_client.LOGGED_IN:
+                try:
+                    await gather(
+                        sabnzbd_client.pause_all(),
+                        sabnzbd_client.close(),
+                    )
+                except Exception:
+                    pass
+                try:
+                    await (
+                        await create_subprocess_exec("pkill", "-9", "-f", "SABnzbd")
+                    ).wait()
+                except Exception:
+                    pass
+                LOGGER.info("SABnzbd stopped via Module Settings")
+        else:
+            LOGGER.info("SABnzbd requires restart to re-enable")
+    elif key == "DISABLE_RSS":
+        if disabled:
+            if scheduler.running:
+                scheduler.shutdown(wait=False)
+                LOGGER.info("RSS Scheduler stopped via Module Settings")
+        else:
+            if not scheduler.running:
+                try:
+                    scheduler.start()
+                    LOGGER.info("RSS Scheduler started via Module Settings")
+                except Exception:
+                    pass
 
 
 @new_task
 async def show_var_value(_, query, key):
-    value = f"{Config.get(key)}"
+    value = "<hidden>" if key in PROTECTED_VARS else f"{Config.get(key)}"
     if value == "":
         value = "None"
     if len(value) > 200:
@@ -1062,7 +1180,7 @@ async def edit_bot_settings(client, query):
         elif data[2] == "TORRENT_TIMEOUT":
             await TorrentManager.change_aria2_option("bt-stop-timeout", "0")
             await database.update_aria2("bt-stop-timeout", "0")
-        elif data[2] in ("BASE_URL","WEB_ACCESS_PASSWORD"):
+        elif data[2] in ("PORT", "WEB_ACCESS_PASSWORD"):
             await (await create_subprocess_exec("pkill", "-9", "-f", "gunicorn")).wait()
         elif data[2] == "GDRIVE_ID":
             if drives_names and drives_names[0] == "Main":
@@ -1088,7 +1206,7 @@ async def edit_bot_settings(client, query):
         await update_buttons(message, data[2], "editvar", False)
         if data[2] == "DATABASE_URL":
             await database.disconnect()
-        await database.update_config({data[2]: value})
+        await database.update_config(_config_update_payload(data[2], value))
         if data[2] in ("SEARCH_PLUGINS", "SEARCH_API_LINK"):
             await initiate_search_tools()
         elif data[2] in ("QUEUE_ALL", "QUEUE_DOWNLOAD", "QUEUE_UPLOAD"):
@@ -1100,6 +1218,10 @@ async def edit_bot_settings(client, query):
             "RCLONE_SERVE_PASS",
         ):
             await rclone_serve_booter()
+        elif data[2] in ("PORT", "WEB_ACCESS_PASSWORD"):
+            await start_web_server()
+        elif data[2].startswith("CLOUDFLARE_TUNNEL_"):
+            await cloudflare_tunnel_booter()
     elif data[1] == "resetnzb":
         await query.answer()
         res = await sabnzbd_client.set_config_default(data[2])
@@ -1132,7 +1254,7 @@ async def edit_bot_settings(client, query):
         await database.update_aria2(data[2], "")
     elif data[1] == "emptyqbit":
         await query.answer()
-        await TorrentManager.qbittorrent.app.set_preferences({data[2]: value})
+        await TorrentManager.qbittorrent.app.set_preferences({data[2]: ""})
         qbit_options[data[2]] = ""
         await update_buttons(message, "qbit")
         await database.update_qbittorrent(data[2], "")
@@ -1375,17 +1497,7 @@ async def load_config():
         await database.trunc_table("tasks")
 
     await (await create_subprocess_exec("pkill", "-9", "-f", "gunicorn")).wait()
-    if Config.BASE_URL:
-        port = getenv("PORT", "") or "8080"
-        access_pwd = getenv("WEB_ACCESS_PASSWORD", "") or Config.WEB_ACCESS_PASSWORD
-        if not access_pwd:
-            from secrets import token_bytes
-            access_pwd = token_bytes(32).hex()
-            Config.WEB_ACCESS_PASSWORD = access_pwd
-        env = f"WEB_ACCESS_PASSWORD={access_pwd} "
-        await create_subprocess_shell(
-            f"{env}gunicorn -k uvicorn.workers.UvicornWorker -w 1 web.wserver:app --bind 0.0.0.0:{port}"
-        )
+    await start_web_server()
 
     if Config.DATABASE_URL:
         await database.connect()

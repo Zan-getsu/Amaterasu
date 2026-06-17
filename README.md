@@ -42,12 +42,14 @@
   - [Step 4: Build & Launch](#step-4-build--launch)
   - [What Happens on Boot?](#what-happens-on-boot)
   - [Reverse Proxy Setup](#reverse-proxy-setup)
+  - [Cloudflare Tunnel Setup](#cloudflare-tunnel-setup)
   - [Maintenance & Operations](#maintenance--operations)
 - [🔧 Configuration Reference](#configuration-reference)
   - [1. Required](#1-required-mandatory)
   - [2. Telegram Client & Sessions](#2-telegram-client--sessions)
   - [3. Chat & Permissions](#3-chat--permissions)
   - [4. Leech & Upload Settings](#4-leech--upload-settings)
+  - [HyperDL / HyperUP Setup](#hyperdl--hyperup-setup)
   - [5. Google Drive](#5-google-drive)
   - [6. Rclone](#6-rclone)
   - [7. Download Size Limits](#7-download-size-limits)
@@ -433,9 +435,7 @@ If you want to serve the FileToLink streaming server over HTTPS with a custom do
 
   Then in `config.py`:
   ```python
-  FQDN = "stream.yourdomain.com"
-  HAS_SSL = True
-  NO_PORT = True   # Nginx handles the port
+  BASE_URL = "https://stream.yourdomain.com"
   PORT = 83        # Internal port (not exposed publicly)
   ```
 </details>
@@ -452,6 +452,67 @@ If you want to serve the FileToLink streaming server over HTTPS with a custom do
 
   Caddy automatically provisions and renews SSL certificates. Set the same `config.py` values as the Nginx example.
 </details>
+
+---
+
+<a id="cloudflare-tunnel-setup"></a>
+
+### Cloudflare Tunnel Setup
+
+Amaterasu can start `cloudflared` from its own config. This keeps Cloudflare Tunnel controlled by `config.py`, environment variables, MongoDB-backed `/bsetting`, and the normal bot settings UI.
+
+Use a **quick tunnel** only for testing. Cloudflare gives a temporary `trycloudflare.com` URL, and that URL changes whenever the tunnel restarts.
+
+```python
+CLOUDFLARE_TUNNEL_ENABLED = True
+CLOUDFLARE_TUNNEL_TOKEN = ""
+CLOUDFLARE_TUNNEL_TARGET = ""
+CLOUDFLARE_TUNNEL_AUTO_URL = True
+```
+
+With `CLOUDFLARE_TUNNEL_AUTO_URL = True`, Amaterasu watches the `cloudflared` logs, captures the generated `trycloudflare.com` URL, and updates `BASE_URL` in memory. If MongoDB is configured, it also saves the new `BASE_URL`.
+
+For production, use a **named tunnel** with your own domain:
+
+1. Open the Cloudflare dashboard.
+2. Go to **Zero Trust** -> **Networks** -> **Tunnels**.
+3. Create a Cloudflared tunnel and copy its token.
+4. Add a public hostname pointing to `http://localhost:8080`.
+5. Set the token in `config.py` or `/bsetting`:
+
+```python
+CLOUDFLARE_TUNNEL_ENABLED = True
+CLOUDFLARE_TUNNEL_TOKEN = "eyJ..."
+CLOUDFLARE_TUNNEL_TARGET = ""
+BASE_URL = "https://stream.yourdomain.com"
+PORT = 8080
+```
+
+The Cloudflare config variables are:
+
+| Variable | Purpose |
+|---|---|
+| `CLOUDFLARE_TUNNEL_ENABLED` | Starts or stops `cloudflared` with Amaterasu |
+| `CLOUDFLARE_TUNNEL_TOKEN` | Named tunnel token. Empty means quick tunnel |
+| `CLOUDFLARE_TUNNEL_TARGET` | Local URL to expose. Empty means `http://127.0.0.1:PORT` |
+| `CLOUDFLARE_TUNNEL_METRICS` | Local metrics listener, default `127.0.0.1:49312` |
+| `CLOUDFLARE_TUNNEL_AUTO_URL` | Auto-save the generated quick tunnel URL |
+
+Why this is safer than always-on tunnel containers or separate `.env` files:
+
+- Normal deployments are unchanged unless `CLOUDFLARE_TUNNEL_ENABLED` is set.
+- The tunnel token lives in the same config path as the rest of Amaterasu.
+- `/bsetting` can enable, disable, or restart the tunnel without editing Compose.
+- Quick tunnel URLs can be captured automatically, while named tunnels stay stable for production.
+
+Troubleshooting:
+
+| Symptom | Fix |
+|---|---|
+| Tunnel starts but links still point to an IP or old domain | Update `BASE_URL` to your public Cloudflare URL |
+| Named tunnel refuses to start | Confirm `CLOUDFLARE_TUNNEL_TOKEN` is set correctly in config |
+| Quick tunnel URL changed after restart | Expected behavior. Use a named tunnel for stable links |
+| FileToLink or player page loads but streams fail | Make sure the Cloudflare public hostname points to `http://localhost:8080` and `PORT=8080` matches the bot web port |
 
 ---
 
@@ -495,7 +556,10 @@ All variables go inside `config.py`. Copy `config_sample.py` as your starting te
 | Variable | Type | Default | Description |
 |---|---|---|---|
 | `USER_SESSION_STRING` | `str` | `""` | Pyrogram string session for a user account. Required for restricted content downloads and uploads >2 GB |
-| `HELPER_TOKENS` | `str` | `""` | Additional bot tokens for FileToLink load balancing (space-separated) |
+| `HELPER_TOKENS` | `str` | `""` | Space-separated helper bot tokens used by HyperDL/HyperUP parallel Telegram transfers |
+| `HELPER_STRINGS` | `str` | `""` | Space-separated helper user session strings. These clients can start with the bot, but HyperDL/HyperUP currently uses helper bot tokens as its active worker pool |
+| `HELPER_BOT_PROXIES` | `str` | `""` | Optional newline-separated proxy dictionaries for `HELPER_TOKENS`, one proxy per helper bot |
+| `HELPER_USER_PROXIES` | `str` | `""` | Optional newline-separated proxy dictionaries for `HELPER_STRINGS`, one proxy per helper user |
 | `DEFAULT_LANG` | `str` | `""` | Default language code for the bot |
 | `TG_PROXY` | `dict` | `{}` | Proxy config for Pyrogram (`{"scheme": "socks5", "hostname": "...", "port": ...}`) |
 | `BOT_PM` | `bool` | `False` | If `True`, bot sends task completion messages in PM |
@@ -526,14 +590,81 @@ All variables go inside `config.py`. Copy `config_sample.py` as your starting te
 | `AS_DOCUMENT` | `bool` | `False` | Upload files as documents instead of media (preserves original filename) |
 | `EQUAL_SPLITS` | `bool` | `False` | Split files into equal-sized parts instead of Telegram's default |
 | `MEDIA_GROUP` | `bool` | `False` | Send split files as a media group (album) |
-| `USER_TRANSMISSION` | `bool` | `False` | Use user session for uploads by default |
-| `HYBRID_LEECH` | `bool` | `False` | Upload via both bot and user session based on file size |
+| `TRANSMISSION_MODE` | `str` | `both` | Telegram upload mode: `bot`, `user`, or `both` |
+| `USE_HYPER` | `bool` | `True` | Enable HyperDL/HyperUP acceleration when helper bots and `LEECH_DUMP_CHAT` are configured |
+| `HYPER_THREADS` | `int` | `0` | Number of helper workers used for HyperDL. `0` lets Amaterasu choose automatically |
+| `HYPER_PIPELINE` | `int` | `4` | Concurrent Telegram `GetFile` request depth per HyperDL worker group |
+| `HYPER_CHUNK` | `int` | `524288` | HyperDL chunk size in bytes. Default is 512 KiB |
 | `LEECH_PREFIX` | `str` | `""` | Text prepended to every uploaded filename |
 | `LEECH_SUFFIX` | `str` | `""` | Text appended to every uploaded filename |
 | `LEECH_FONT` | `str` | `""` | Font style for leech filenames |
 | `LEECH_CAPTION` | `str` | `""` | Custom caption template for uploaded files |
 | `THUMBNAIL_LAYOUT` | `str` | `""` | Default thumbnail layout (e.g., `3x3`) |
 | `EXCLUDED_EXTENSIONS` | `str` | `""` | Space-separated file extensions to skip during upload |
+
+### HyperDL / HyperUP Setup
+
+HyperDL and HyperUP accelerate Telegram-to-server downloads and server-to-Telegram uploads by using extra helper bot clients in parallel. They are enabled only when all required runtime pieces are available; otherwise Amaterasu falls back to the normal Pyrogram transfer path.
+
+Minimum working config:
+
+```python
+USE_HYPER = True
+LEECH_DUMP_CHAT = "-1001234567890"
+HELPER_TOKENS = "123456:AA... 234567:BB... 345678:CC..."
+```
+
+Required setup:
+
+1. Create one or more extra Telegram bots with [@BotFather](https://t.me/BotFather). Do not reuse `BOT_TOKEN`.
+2. Add the main bot and every helper bot to `LEECH_DUMP_CHAT`.
+3. Give the bots permission to send messages/files in that chat. For channels, make them admins.
+4. Put the helper bot tokens in `HELPER_TOKENS`, separated by spaces.
+5. Restart the bot and check logs for lines like `Helper Bot [...] Started!`.
+
+How it is used:
+
+| Path | Requirement | Behavior |
+|---|---|---|
+| HyperDL | `USE_HYPER=True`, `HELPER_TOKENS`, `LEECH_DUMP_CHAT` | Telegram source media is copied to `LEECH_DUMP_CHAT`, then helper bots download different byte ranges in parallel |
+| HyperUP | `USE_HYPER=True`, `HELPER_TOKENS`, `LEECH_DUMP_CHAT` | Helper bots upload file parts in parallel before the main client sends the final Telegram media |
+| Normal transfer | Missing helper bots, missing dump chat, or `USE_HYPER=False` | Amaterasu uses the regular Telegram download/upload path |
+
+Recommended helper count:
+
+| Server / workload | Suggested helpers |
+|---|---|
+| Small VPS, 1-2 vCPU | 2-3 helper bots |
+| Normal VPS, 2-4 vCPU | 3-5 helper bots |
+| Heavy Telegram leech workload | 5-8 helper bots, then tune based on FloodWait logs |
+
+Optional tuning:
+
+```python
+HYPER_THREADS = 0        # 0 = auto. Set 2, 4, 6... to cap parallel download parts.
+HYPER_PIPELINE = 4       # Higher can be faster, but may increase FloodWaits.
+HYPER_CHUNK = 512 * 1024 # Keep 512 KiB unless you are testing carefully.
+```
+
+Optional per-helper proxy config uses one Python dictionary per line. Blank lines mean "no proxy" for that helper index.
+
+```python
+HELPER_BOT_PROXIES = """
+{"scheme": "socks5", "hostname": "1.2.3.4", "port": 1080, "username": "user", "password": "pass"}
+
+{"scheme": "http", "hostname": "5.6.7.8", "port": 8080}
+"""
+```
+
+Troubleshooting:
+
+| Symptom | Check |
+|---|---|
+| Hyper never starts | Confirm `USE_HYPER=True`, `HELPER_TOKENS` is not empty, and `LEECH_DUMP_CHAT` is set |
+| `Cannot copy to dump chat` | Main bot cannot copy the source message into `LEECH_DUMP_CHAT`; check chat ID and bot permissions |
+| Helper bot failed at startup | Token may be wrong, bot may be banned/limited, or proxy syntax may be invalid |
+| Many FloodWait logs | Reduce helper count, lower `HYPER_THREADS`, or lower `HYPER_PIPELINE` |
+| Upload works but not faster | Add more helper bots, use a nearby VPS region, and ensure `LEECH_DUMP_CHAT` is a supergroup/channel where all helper bots can send |
 
 ### 5. Google Drive
 
@@ -586,8 +717,7 @@ All limits are in **GB**. Set `0` to disable the limit.
 | `DISABLE_TORRENTS` | `bool` | `False` | Completely disable torrent functionality |
 | `DISABLE_SEED` | `bool` | `False` | Disable seeding after torrent download |
 | `TORRENT_TIMEOUT` | `int` | `0` | Timeout for torrent downloads in seconds |
-| `BASE_URL` | `str` | `""` | Base URL for the web server (e.g., `http://your-ip:8080`) |
-| `BASE_URL_PORT` | `int` | `0` | Port for the web server |
+| `BASE_URL` | `str` | `""` | Public URL for FileToLink and web UI links, e.g. `https://stream.example.com` |
 | `WEB_PINCODE` | `bool` | `False` | Enable pincode verification for torrent file selection |
 | `AMATERASU_WEB_SECRET` | `str` | `""` | Secret used to sign and verify web interface tokens. Set a long random value so file-selector and web auth links keep working after restarts |
 | `QUEUE_ALL` | `int` | `0` | Max total tasks in queue (0 = unlimited) |
@@ -665,10 +795,12 @@ All limits are in **GB**. Set `0` to disable the limit.
 
 | Variable | Type | Default | Description |
 |---|---|---|---|
-| `FQDN` | `str` | `""` | Fully Qualified Domain Name for the streaming server |
-| `HAS_SSL` | `bool` | `False` | Set `True` if using HTTPS |
-| `PORT` | `int` | `0` | Server port |
-| `NO_PORT` | `bool` | `False` | If `True`, don't append port to URLs (when behind reverse proxy) |
+| `PORT` | `int` | `8080` | Local web server port. Public links use `BASE_URL` |
+| `CLOUDFLARE_TUNNEL_ENABLED` | `bool` | `False` | Start Cloudflare Tunnel from Amaterasu |
+| `CLOUDFLARE_TUNNEL_TOKEN` | `str` | `""` | Named tunnel token. Empty uses a temporary quick tunnel |
+| `CLOUDFLARE_TUNNEL_TARGET` | `str` | `""` | Local URL exposed by the tunnel. Empty uses `http://127.0.0.1:PORT` |
+| `CLOUDFLARE_TUNNEL_METRICS` | `str` | `"127.0.0.1:49312"` | Local cloudflared metrics listener |
+| `CLOUDFLARE_TUNNEL_AUTO_URL` | `bool` | `True` | Auto-fill quick tunnel URL into `BASE_URL` |
 | `WORKERS` | `int` | `0` | Number of Uvicorn worker processes |
 
 ### 15. Miscellaneous
@@ -1411,9 +1543,8 @@ This auto-leeches new anime releases in 1080p (mkv or mp4), excluding batch pack
   <summary><b>FileToLink stream URLs not working</b></summary>
   <br>
 
-  - Set `FQDN` to your server's public IP or domain.
-  - Set `PORT` to match your Docker port mapping.
-  - If behind a reverse proxy (Nginx/Caddy), set `HAS_SSL = True` and `NO_PORT = True`.
+  - Set `BASE_URL` to your public URL, for example `https://stream.example.com`.
+  - Set `PORT` to the local web server port Amaterasu should bind.
 </details>
 
 <details>

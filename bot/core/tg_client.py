@@ -1,10 +1,11 @@
+from ast import literal_eval
 from pyrogram import Client, enums
 from pyrogram.errors import FloodWait
-from asyncio import Lock, gather, get_event_loop, sleep
+from asyncio import Lock, gather, sleep
 from hashlib import sha256
 from inspect import signature
 
-from .. import LOGGER
+from .. import LOGGER, bot_loop
 from .config_manager import Config
 
 _DB_PARTITION_SALT = b"wzmlx_v3_db_partition_salt"
@@ -36,10 +37,10 @@ class TgClient:
     MAX_SPLIT_SIZE = 2097152000
 
     @classmethod
-    def tgClient(cls, *args, **kwargs):
+    def AmaterasutgClient(cls, *args, proxy=None, **kwargs):
         kwargs["api_id"] = Config.TELEGRAM_API
         kwargs["api_hash"] = Config.TELEGRAM_HASH
-        kwargs["proxy"] = Config.TG_PROXY
+        kwargs["proxy"] = Config.TG_PROXY if proxy is None else proxy
         kwargs["parse_mode"] = enums.ParseMode.HTML
         kwargs["in_memory"] = True
         for param, value in {
@@ -50,14 +51,34 @@ class TgClient:
                 kwargs[param] = value
         return Client(*args, **kwargs)
 
+    tgClient = AmaterasutgClient
+
     @classmethod
-    async def _retry_hclient(cls, no, b_token, delay):
+    def _parse_proxies(cls, raw):
+        if not raw:
+            return []
+        proxies = []
+        for line in raw.split("\n"):
+            line = line.strip()
+            if not line:
+                proxies.append(None)
+                continue
+            try:
+                parsed = literal_eval(line)
+                proxies.append(parsed if isinstance(parsed, dict) else None)
+            except (ValueError, SyntaxError):
+                proxies.append(None)
+        return proxies
+
+    @classmethod
+    async def _retry_hclient(cls, no, b_token, delay, proxy=None):
         await sleep(delay)
         try:
             hbot = cls.tgClient(
                 f"Amaterasu-HBot{no}",
                 bot_token=b_token,
                 no_updates=True,
+                proxy=proxy,
             )
             await hbot.start()
             LOGGER.info(f"Helper Bot [@{hbot.me.username}] Started!")
@@ -66,17 +87,18 @@ class TgClient:
             LOGGER.warning(
                 f"Helper Bot{no} FloodWait: Retrying in {e.value}s..."
             )
-            get_event_loop().create_task(cls._retry_hclient(no, b_token, e.value))
+            bot_loop.create_task(cls._retry_hclient(no, b_token, e.value, proxy))
         except Exception as e:
             LOGGER.error(f"Failed to start helper bot {no} from HELPER_TOKENS. {e}")
 
     @classmethod
-    async def start_hclient(cls, no, b_token):
+    async def start_hclient(cls, no, b_token, proxy=None):
         try:
             hbot = cls.tgClient(
                 f"Amaterasu-HBot{no}",
                 bot_token=b_token,
                 no_updates=True,
+                proxy=proxy,
             )
             await hbot.start()
             LOGGER.info(f"Helper Bot [@{hbot.me.username}] Started!")
@@ -85,7 +107,7 @@ class TgClient:
             LOGGER.warning(
                 f"Helper Bot{no} FloodWait: Retrying in {e.value}s (non-blocking)..."
             )
-            get_event_loop().create_task(cls._retry_hclient(no, b_token, e.value))
+            bot_loop.create_task(cls._retry_hclient(no, b_token, e.value, proxy))
         except Exception as e:
             LOGGER.error(f"Failed to start helper bot {no} from HELPER_TOKENS. {e}")
             cls.helper_bots.pop(no, None)
@@ -95,57 +117,20 @@ class TgClient:
         if not Config.HELPER_TOKENS:
             return
         LOGGER.info("Generating helper client from HELPER_TOKENS")
+        bot_proxies = cls._parse_proxies(Config.HELPER_BOT_PROXIES)
         async with cls._hlock:
             await gather(
                 *(
-                    cls.start_hclient(no, b_token)
+                    cls.start_hclient(
+                        no, b_token,
+                        bot_proxies[no - 1] if bot_proxies and no - 1 < len(bot_proxies) else None,
+                    )
                     for no, b_token in enumerate(Config.HELPER_TOKENS.split(), start=1)
                 )
             )
 
     @classmethod
-    async def start_stream_clients(cls):
-        cls.stream_clients[0] = cls.bot
-        cls.stream_loads[0] = 0
-
-        if not Config.MULTI_TOKENS:
-            LOGGER.info("No MULTI_TOKENs found. Only primary bot will be used for stream requests.")
-            return
-
-        sorted_tokens = sorted(
-            Config.MULTI_TOKENS.items(),
-            key=lambda item: int(''.join(filter(str.isdigit, item[0])) or 0)
-        )
-
-        async def start_sclient(client_id, token):
-            try:
-                client = await cls.tgClient(
-                    f"Amaterasu-StreamBot{client_id}",
-                    bot_token=token,
-                    no_updates=True,
-                ).start()
-                LOGGER.info(f"Stream Bot Client {client_id} [@{client.me.username}] Started!")
-                return client_id, client
-            except Exception as e:
-                LOGGER.error(f"Failed to start stream client {client_id} from MULTI_TOKENs. {e}")
-                return None
-
-        clients = await gather(
-            *(
-                start_sclient(i, token)
-                for i, (_, token) in enumerate(sorted_tokens, start=1)
-                if token
-            )
-        )
-        for res in clients:
-            if res:
-                cid, client = res
-                cls.stream_clients[cid] = client
-                cls.stream_loads[cid] = 0
-        LOGGER.info(f"Total Stream Clients: {len(cls.stream_clients)}")
-
-    @classmethod
-    async def _retry_huser(cls, no, session_string, delay):
+    async def _retry_huser(cls, no, session_string, delay, proxy=None):
         await sleep(delay)
         try:
             huser = cls.tgClient(
@@ -153,6 +138,7 @@ class TgClient:
                 session_string=session_string,
                 sleep_threshold=60,
                 no_updates=True,
+                proxy=proxy,
             )
             await huser.start()
             uname = huser.me.username or huser.me.first_name
@@ -160,18 +146,19 @@ class TgClient:
             cls.helper_users[no], cls.helper_user_loads[no] = huser, 0
         except FloodWait as e:
             LOGGER.warning(f"Helper User{no} FloodWait: Retrying in {e.value}s...")
-            get_event_loop().create_task(cls._retry_huser(no, session_string, e.value))
+            bot_loop.create_task(cls._retry_huser(no, session_string, e.value, proxy))
         except Exception as e:
             LOGGER.error(f"Failed to start helper user {no} from HELPER_STRINGS. {e}")
 
     @classmethod
-    async def start_huser(cls, no, session_string):
+    async def start_huser(cls, no, session_string, proxy=None):
         try:
             huser = cls.tgClient(
                 f"Amaterasu-HUser{no}",
                 session_string=session_string,
                 sleep_threshold=60,
                 no_updates=True,
+                proxy=proxy,
             )
             await huser.start()
             uname = huser.me.username or huser.me.first_name
@@ -181,7 +168,7 @@ class TgClient:
             LOGGER.warning(
                 f"Helper User{no} FloodWait: Retrying in {e.value}s (non-blocking)..."
             )
-            get_event_loop().create_task(cls._retry_huser(no, session_string, e.value))
+            bot_loop.create_task(cls._retry_huser(no, session_string, e.value, proxy))
         except Exception as e:
             LOGGER.error(f"Failed to start helper user {no} from HELPER_STRINGS. {e}")
             cls.helper_users.pop(no, None)
@@ -191,10 +178,14 @@ class TgClient:
         if not Config.HELPER_STRINGS:
             return
         LOGGER.info("Generating helper client from HELPER_STRINGS")
+        user_proxies = cls._parse_proxies(Config.HELPER_USER_PROXIES)
         async with cls._ulock:
             await gather(
                 *(
-                    cls.start_huser(no, session_string)
+                    cls.start_huser(
+                        no, session_string,
+                        user_proxies[no - 1] if user_proxies and no - 1 < len(user_proxies) else None,
+                    )
                     for no, session_string in enumerate(
                         Config.HELPER_STRINGS.split(), start=1
                     )
@@ -240,7 +231,7 @@ class TgClient:
             LOGGER.info(f"WZ User : [{uname}] Started!")
         except FloodWait as e:
             LOGGER.warning(f"User client FloodWait: Retrying in {e.value}s...")
-            get_event_loop().create_task(cls._retry_user(e.value))
+            bot_loop.create_task(cls._retry_user(e.value))
         except Exception as e:
             LOGGER.error(f"Failed to start client from USER_SESSION_STRING. {e}")
             cls.IS_PREMIUM_USER = False
@@ -267,7 +258,7 @@ class TgClient:
                 LOGGER.warning(
                     f"User client FloodWait: Retrying in {e.value}s (non-blocking)..."
                 )
-                get_event_loop().create_task(cls._retry_user(e.value))
+                bot_loop.create_task(cls._retry_user(e.value))
             except Exception as e:
                 LOGGER.error(f"Failed to start client from USER_SESSION_STRING. {e}")
                 cls.IS_PREMIUM_USER = False
@@ -276,14 +267,15 @@ class TgClient:
     @classmethod
     async def stop(cls):
         async with cls._lock:
+            clients = []
             if cls.bot:
-                await cls.bot.stop()
+                clients.append(cls.bot.stop())
                 cls.bot = None
             if cls.user:
-                await cls.user.stop()
+                clients.append(cls.user.stop())
                 cls.user = None
             if cls.helper_bots:
-                await gather(*[h_bot.stop() for h_bot in cls.helper_bots.values()])
+                clients.extend(h_bot.stop() for h_bot in cls.helper_bots.values())
                 cls.helper_bots = {}
             if cls.stream_clients:
                 stop_tasks = [
@@ -296,8 +288,10 @@ class TgClient:
                 cls.stream_clients = {}
                 cls.stream_loads = {}
             if cls.helper_users:
-                await gather(*[h_user.stop() for h_user in cls.helper_users.values()])
+                clients.extend(h_user.stop() for h_user in cls.helper_users.values())
                 cls.helper_users = {}
+            if clients:
+                await gather(*clients, return_exceptions=True)
             LOGGER.info("All Client(s) stopped")
 
     @classmethod

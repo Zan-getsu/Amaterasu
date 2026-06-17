@@ -2,18 +2,27 @@ from ast import literal_eval
 from importlib import import_module
 from os import getenv
 
-
 class Config:
+    _LEGACY_URL_VARS = {
+        "FQDN",
+        "HAS_SSL",
+        "NO_PORT",
+        "BASE_URL_PORT",
+        "CLOUDFLARE_TUNNEL_AUTO_FQDN",
+    }
+
     AS_DOCUMENT = False
     AUTHORIZED_CHATS = ""
     BASE_URL = ""
     BOT_TOKEN = ""
     HELPER_TOKENS = ""
     HELPER_STRINGS = ""
+    HELPER_BOT_PROXIES = ""
+    HELPER_USER_PROXIES = ""
     BOT_MAX_TASKS = 0
     BOT_PM = False
     CMD_SUFFIX = ""
-    COLORED_BTNS = False
+    COLORED_BTNS = True
     DEFAULT_LANG = "en"
     DATABASE_URL = ""
     DEFAULT_UPLOAD = "rc"
@@ -25,6 +34,12 @@ class Config:
     DISABLE_MULTI = False
     DISABLE_SEED = False
     DISABLE_FF_MODE = False
+    DISABLE_MEGA = False
+    DISABLE_JD = False
+    DISABLE_NZB = False
+    DISABLE_RSS = False
+    DISABLE_SEARCH = False
+    DISABLE_YTDLP = False
     EQUAL_SPLITS = False
     EXCLUDED_EXTENSIONS = ""
     FFMPEG_CMDS = {}
@@ -85,8 +100,12 @@ class Config:
     LEECH_FONT = ""
     LEECH_SPLIT_SIZE = 2097152000
     MEDIA_GROUP = False
-    HYBRID_LEECH = True
+    USE_HYPER = True
     HYPER_THREADS = 0
+    HYPER_PIPELINE = 4
+    HYPER_CHUNK = 512 * 1024
+    CPU_LIMIT = 20
+    THROTTLE_SERVICES = "auto"
     HYDRA_IP = ""
     HYDRA_API_KEY = ""
     NAME_SWAP = ""
@@ -132,7 +151,7 @@ class Config:
     UPDATE_PKGS = True
     USENET_SERVERS = []
     USER_SESSION_STRING = ""
-    USER_TRANSMISSION = True
+    TRANSMISSION_MODE = "both"
     USE_SERVICE_ACCOUNTS = False
     WEB_ACCESS_PASSWORD = ""
     WEB_PINCODE = True
@@ -170,6 +189,12 @@ class Config:
     HAS_SSL = True
     PORT = 8080
     NO_PORT = True
+    CLOUDFLARE_TUNNEL_ENABLED = False
+    CLOUDFLARE_TUNNEL_TOKEN = ""
+    CLOUDFLARE_TUNNEL_TARGET = ""
+    CLOUDFLARE_TUNNEL_METRICS = "127.0.0.1:49312"
+    CLOUDFLARE_TUNNEL_AUTO_URL = True
+    CLOUDFLARE_TUNNEL_AUTO_FQDN = None
     NAME = "Amaterasu"
     SLEEP_THRESHOLD = 600
     WORKERS = 8
@@ -185,7 +210,20 @@ class Config:
         if hasattr(cls, key):
             value = cls._convert_env_type(key, value)
             setattr(cls, key, value)
-            if key in ["PORT", "BASE_URL_PORT", "FQDN", "HAS_SSL", "NO_PORT", "BASE_URL"]:
+            if key == "BASE_URL":
+                cls.FQDN = ""
+                cls.HAS_SSL = True
+                cls.NO_PORT = True
+            elif key == "CLOUDFLARE_TUNNEL_AUTO_URL":
+                cls.CLOUDFLARE_TUNNEL_AUTO_FQDN = None
+            if key in [
+                "PORT",
+                "BASE_URL_PORT",
+                "FQDN",
+                "HAS_SSL",
+                "NO_PORT",
+                "BASE_URL",
+            ]:
                 cls.construct_base_url()
         elif key.startswith("MULTI_TOKEN"):
             cls.MULTI_TOKENS[key] = value.strip() if isinstance(value, str) else str(value)
@@ -197,7 +235,9 @@ class Config:
         d = {
             key: getattr(cls, key)
             for key in cls.__dict__.keys()
-            if not key.startswith("__") and not callable(getattr(cls, key))
+            if not key.startswith("_")
+            and key not in cls._LEGACY_URL_VARS
+            and not callable(getattr(cls, key))
         }
         d.pop("MULTI_TOKENS", None)
         d.update(cls.MULTI_TOKENS)
@@ -229,12 +269,14 @@ class Config:
             base_port_val = getattr(cls, "BASE_URL_PORT", 0)
             p_val = int(port_val) if str(port_val).isdigit() else 0
             bp_val = int(base_port_val) if str(base_port_val).isdigit() else 0
-            resolved_port = p_val or bp_val or 80
+            resolved_port = p_val or bp_val or 8080
             
         cls.PORT = resolved_port
         cls.BASE_URL_PORT = resolved_port
 
-        if cls.FQDN:
+        if cls.BASE_URL:
+            cls.BASE_URL = str(cls.BASE_URL).strip().rstrip("/")
+        elif cls.FQDN:
             protocol = "https" if cls.HAS_SSL else "http"
             if cls.NO_PORT or cls.PORT in [80, 443]:
                 cls.BASE_URL = f"{protocol}://{cls.FQDN}"
@@ -288,6 +330,10 @@ class Config:
                 else:
                     converted_value = cls._convert_env_type(key, env_value)
                     cls.set(key, converted_value)
+        for key in cls._LEGACY_URL_VARS:
+            env_value = getenv(key)
+            if env_value is not None:
+                cls.set(key, env_value)
         # Also load extra MULTI_TOKENs that might not be in config_vars
         from os import environ
         for key, value in environ.items():

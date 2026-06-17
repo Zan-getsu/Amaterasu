@@ -9,8 +9,6 @@ from asyncio import new_event_loop, set_event_loop
 bot_loop = new_event_loop()
 set_event_loop(bot_loop)
 
-from subprocess import run as srun
-from os import getcwd
 from asyncio import Lock
 from logging import (
     ERROR,
@@ -26,13 +24,12 @@ from time import time
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
-from .core.config_manager import BinConfig, Config
+from .core.config_manager import Config
 from sabnzbdapi import SabnzbdClient
 
 getLogger("requests").setLevel(WARNING)
 getLogger("urllib3").setLevel(WARNING)
 getLogger("pyrogram").setLevel(ERROR)
-getLogger("aiohttp").setLevel(ERROR)
 getLogger("apscheduler").setLevel(ERROR)
 getLogger("httpx").setLevel(WARNING)
 getLogger("pymongo").setLevel(WARNING)
@@ -50,9 +47,15 @@ basicConfig(
 )
 
 LOGGER = getLogger(__name__)
-cpu_no = cpu_count()
+cpu_no = cpu_count() or 1
 threads = max(1, cpu_no // 2)
-cores = ",".join(str(i) for i in range(threads))
+cores = ",".join(str(i) for i in range(1, threads + 1))
+
+if cpu_no <= 1 or cpu_no == 2:
+    service_cores = ""
+else:
+    service_start = threads + 1
+    service_cores = ",".join(str(i) for i in range(service_start, cpu_no + 1))
 
 bot_cache = {}
 DOWNLOAD_DIR = "/usr/src/app/downloads/"
@@ -79,6 +82,13 @@ var_list = [
     "OWNER_ID",
     "DATABASE_URL",
     "BASE_URL",
+    "PORT",
+    "CLOUDFLARE_TUNNEL_ENABLED",
+    "CLOUDFLARE_TUNNEL_TOKEN",
+    "CLOUDFLARE_TUNNEL_TARGET",
+    "CLOUDFLARE_TUNNEL_METRICS",
+    "CLOUDFLARE_TUNNEL_AUTO_URL",
+    "CLOUDFLARE_TUNNEL_AUTO_FQDN",
     "UPSTREAM_REPO",
     "UPSTREAM_BRANCH",
     "UPDATE_PKGS",
@@ -97,7 +107,6 @@ queue_dict_lock = Lock()
 qb_listener_lock = Lock()
 nzb_listener_lock = Lock()
 jd_listener_lock = Lock()
-ff_lock = Lock()
 same_directory_lock = Lock()
 
 def _sabnzbd_key():
@@ -114,7 +123,7 @@ def _update_sabnzbd_ini(api_key):
     pat_key = _re(r"^api_key\s*=.*$", MULTILINE)
     pat_pwd = _re(r'^password\s*=.*$', MULTILINE)
     try:
-        with open("sabnzbd/SABnzbd.ini", "r+") as f:
+        with open("configs/sabnzbd/SABnzbd.ini", "r+") as f:
             content = f.read()
             new = content
             new = pat_key.sub(f"api_key = {api_key}", new)
@@ -142,6 +151,5 @@ sabnzbd_client = SabnzbdClient(
     api_key=_sabnzbd_api_key,
     port="8070",
 )
-srun([BinConfig.QBIT_NAME, "-d", f"--profile={getcwd()}"], check=False)
 
 scheduler = AsyncIOScheduler(event_loop=bot_loop)

@@ -17,6 +17,7 @@ from pyrogram.errors import (
     MediaCaptionTooLong,
     EntityBoundsInvalid,
     MessageIdInvalid,
+    PeerIdInvalid,
 )
 
 try:
@@ -145,6 +146,12 @@ async def send_message(message, text, buttons=None, block=True, photo=None, **kw
         return await send_message(message, text, None)
     except (MessageEmpty, EntityBoundsInvalid):
         return await send_message(message, text, parse_mode=ParseMode.DISABLED)
+    except PeerIdInvalid:
+        LOGGER.warning(f"PeerIdInvalid {type(message)}") # My Debug Style
+        if isinstance(message, (int, str)):
+            return await send_message(int(message), text, buttons, block, photo)
+    except ConnectionError:
+        return
     except Exception as e:
         if "PeerIdInvalid" in str(type(e).__name__):
             LOGGER.warning(f"PeerIdInvalid {type(message)}")
@@ -248,6 +255,8 @@ async def edit_message(message, text, buttons=None, block=True, photo=None):
             return str(f)
         await sleep(f.value * 1.2)
         return await edit_message(message, text, buttons, block, photo)
+    except ConnectionError:
+        return
     except Exception as e:
         LOGGER.error(str(e), exc_info=True)
         return str(e)
@@ -262,6 +271,8 @@ async def edit_reply_markup(message, buttons):
         LOGGER.warning(str(f))
         await sleep(f.value * 1.2)
         return await edit_reply_markup(message, buttons)
+    except ConnectionError:
+        return
     except Exception as e:
         LOGGER.error(str(e), exc_info=True)
         return str(e)
@@ -280,6 +291,8 @@ async def send_file(message, file, caption="", buttons=None):
         LOGGER.warning(str(f))
         await sleep(f.value * 1.2)
         return await send_file(message, file, caption)
+    except ConnectionError:
+        return
     except Exception as e:
         LOGGER.error(str(e), exc_info=True)
         return str(e)
@@ -299,6 +312,8 @@ async def send_rss(text, chat_id, thread_id):
         LOGGER.warning(str(f))
         await sleep(f.value * 1.2)
         return await send_rss(text, chat_id, thread_id)
+    except ConnectionError:
+        return
     except Exception as e:
         LOGGER.error(str(e), exc_info=True)
         return str(e)
@@ -574,3 +589,52 @@ async def open_category_btns(message):
         await edit_message(prompt, "<b>Task Cancelled</b>")
     del bot_cache[msg_id]
     return drive_id, index_link, is_cancelled
+
+
+async def open_drive_clean(message):
+    user_id = message.from_user.id
+    msg_id = message.id
+    buttons = ButtonMaker()
+    dcats = fetch_drive_cat(user_id)
+    default_id = user_data.get(user_id, {}).get("GDRIVE_ID") or Config.GDRIVE_ID
+    default_index = user_data.get(user_id, {}).get("INDEX_URL") or Config.INDEX_URL
+    merged = {
+        "Default": {"drive_id": default_id, "index_link": default_index},
+        **dcats,
+        **categories_dict,
+    }
+    first_cat = None
+    for i, name in enumerate(merged):
+        if i == 0:
+            first_cat = name
+        buttons.data_button(
+            f'{"✓️" if i == 0 else ""} {name}',
+            f"gdccat {user_id} {msg_id} {name.replace(' ', '_')}",
+        )
+    buttons.data_button(
+        "Cancel",
+        f"gdccat {user_id} {msg_id} ccancel",
+        position="footer",
+        style=ButtonStyle.DANGER,
+    )
+    prompt = await send_message(
+        message,
+        f"<b>Select Drive Category to Clean</b>\n\n"
+        f"<b>Category:</b> <code>{first_cat or 'None'}</code>\n\n"
+        f"<b>Timeout:</b> 60 sec",
+        buttons.build_menu(3),
+    )
+    start_time = time()
+    bot_cache[msg_id] = [None, False, False, start_time]
+    while time() - start_time <= 60:
+        await sleep(0.5)
+        if bot_cache[msg_id][1] or bot_cache[msg_id][2]:
+            break
+    drive_id = bot_cache[msg_id][0]
+    is_cancelled = bot_cache[msg_id][1]
+    if not is_cancelled:
+        await delete_message(prompt)
+    else:
+        await edit_message(prompt, "<b>Task Cancelled</b>")
+    del bot_cache[msg_id]
+    return drive_id, is_cancelled

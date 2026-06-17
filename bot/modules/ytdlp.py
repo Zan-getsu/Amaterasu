@@ -538,8 +538,14 @@ class YtDlp(TaskListener):
 
 
 async def ytdl(client, message):
+    if Config.DISABLE_YTDLP:
+        await message.reply("YT-DLP downloads are currently disabled by the Bot Owner.")
+        return
     bot_loop.create_task(YtDlp(client, message).new_event())
 
 
 async def ytdl_leech(client, message):
+    if Config.DISABLE_YTDLP:
+        await message.reply("YT-DLP downloads are currently disabled by the Bot Owner.")
+        return
     bot_loop.create_task(YtDlp(client, message, is_leech=True).new_event())

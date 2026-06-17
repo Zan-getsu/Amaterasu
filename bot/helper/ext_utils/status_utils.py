@@ -133,6 +133,8 @@ def get_raw_file_size(size):
 def get_readable_file_size(size_in_bytes):
     if not size_in_bytes:
         return "0B"
+    if size_in_bytes < 0:
+        return "Unknown"
 
     index = 0
     while size_in_bytes >= 1024 and index < len(SIZE_UNITS) - 1:
@@ -294,17 +296,25 @@ async def get_readable_message(sid, is_user, page_no=1, status="All", page_step=
             msg += f"\n├─ {'Ratio':<9}: {task.ratio()}"
             msg += f"\n├─ {'Time':<9}: ◷ {task.seeding_time()}"
         else:
-            msg += f"\n├─ {'Status':<9}: {tstatus}"
-            msg += f"\n├─ {'Size':<9}: {task.size()}"
-            
-        msg += f"\n├─ {'Engine':<9}: {task.engine}</code>"
-        msg += f"<code>\n├─ {'Mode':<9}: </code>{task.listener.mode[0]} / {task.listener.mode[1]}"
-        
+            msg += f"\n┠ <b>Size</b> → <i>{task.size()}</i>"
+        msg += f"\n┠ <b>Engine</b> → <i>{task.engine}</i>"
+        msg += f"\n┠ <b>In Mode</b> → <i>{task.listener.mode[0]}</i>"
+        msg += f"\n┠ <b>Out Mode</b> → <i>{task.listener.mode[1]}</i>"
         from ..telegram_helper.bot_commands import BotCommands
         msg += f"<code>\n├─ {'User':<9}: </code>{_user_mention}"
         msg += f"<code>\n└─ {'Stop':<9}: </code>/{BotCommands.CancelTaskCommand[1]}_{task.gid()[:8]}\n\n"
 
-    if tasks_no == 0:
+        if tstatus in [
+            MirrorStatus.STATUS_DOWNLOAD,
+            MirrorStatus.STATUS_PAUSED,
+            MirrorStatus.STATUS_QUEUEDL,
+        ]:
+            if not task.listener.is_nzb and not task.listener.is_jd:
+                msg += f"\n┠ <b>Select</b> → /{BotCommands.SelectCommand[1]}_{task.gid()[:8]}"
+
+        msg += f"\n<b>┖ Stop</b> → <i>/{BotCommands.CancelTaskCommand[1]}_{task.gid()[:8]}</i>\n\n"
+
+    if len(msg) == 0:
         if status == "All":
             return None, None
         else:

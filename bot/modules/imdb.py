@@ -192,7 +192,7 @@ def get_poster(query, bulk=False, id=False, file=None):
             ]
         )
         or "N/A",
-        "release_date": getattr(movie, "release_date", "N/A") or "N/A",
+        "release_date": getattr(movie, "release_date", "N/A") or date or "N/A",
         "year": str(getattr(movie, "year", "N/A") or "N/A"),
         "genres": list_to_hash(getattr(movie, "genres", []) or [], emoji=True) or "N/A",
         "poster": getattr(
