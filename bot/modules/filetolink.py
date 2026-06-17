@@ -154,10 +154,10 @@ def build_caption(title, filename, readable_size, stream_link, download_link):
         f"<b>❖ {title}</b>\n"
         f"<pre>\n"
         f"┌─ {'Name':<6} : {filename}\n"
-        f"├─ {'Size':<6} : {readable_size}\n"
-        f"├─ {'DL':<6} : {download_link}\n"
-        f"└─ {'Play':<6} : {stream_link}\n"
-        f"</pre>"
+        f"└─ {'Size':<6} : {readable_size}\n"
+        f"</pre>\n"
+        f"<b>DL:</b>\n<code>{download_link}</code>\n\n"
+        f"<b>Play:</b>\n<code>{stream_link}</code>"
     )
     return caption
 
