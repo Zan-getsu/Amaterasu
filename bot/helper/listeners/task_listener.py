@@ -577,20 +577,20 @@ class TaskListener(TaskConfig):
 
             button = buttons.build_menu(1) if link else None
 
-            await send_message(self.user_id, msg, button)
+            await send_message(self.user_id, msg, button, photo=self.thumb or "IMAGES")
             if Config.LEECH_DUMP_CHAT:
                 try:
                     dump_chat = int(Config.LEECH_DUMP_CHAT)
                 except (ValueError, TypeError):
                     dump_chat = Config.LEECH_DUMP_CHAT
-                await send_message(dump_chat, msg, button)
-            await send_message(self.message, user_message, button)
+                await send_message(dump_chat, msg, button, photo=self.thumb or "IMAGES")
+            await send_message(self.message, user_message, button, photo=self.thumb or "IMAGES")
 
         elif self.is_leech:
-            msg += f"\n├─ {{'Total Files':<15}}: {folders}"
+            msg += f"\n├─ {'Total Files':<15}: {folders}"
             if mime_type != 0:
-                msg += f"\n├─ {{'Corrupted Files':<15}}: {mime_type}"
-            msg += f"\n└─ {{'Task By':<15}}: {self.tag}\n</code>\n"
+                msg += f"\n├─ {'Corrupted Files':<15}: {mime_type}"
+            msg += f"\n└─ {'Task By':<15}: {self.tag}\n</code>\n"
 
             if self.bot_pm:
                 pmsg = msg
@@ -600,7 +600,7 @@ class TaskListener(TaskConfig):
                     await send_message(self.message, pmsg)
 
             if not files and not self.is_super_chat:
-                await send_message(self.message, msg)
+                await send_message(self.message, msg, photo=self.thumb or "IMAGES")
             else:
                 log_chat = self.user_id if self.bot_pm else self.message
                 msg += "〶 <b><u>Files List :</u></b>\n"
@@ -639,16 +639,16 @@ class TaskListener(TaskConfig):
                         fmsg += f"\n┖ <b>Get Media</b> → <a href='{flink}'>Store Link</a> | <a href='https://t.me/share/url?url={flink}'>Share Link</a>"
                     fmsg += "\n"
                     if len(fmsg.encode() + msg.encode()) > 4000:
-                        await send_message(log_chat, msg + fmsg)
+                        await send_message(log_chat, msg + fmsg, photo=self.thumb or "IMAGES")
                         await sleep(1)
                         fmsg = ""
                 if fmsg != "":
                     await send_message(log_chat, msg + fmsg)
         else:
-            msg += f"\n├─ {{'Type':<15}}: {mime_type}"
+            msg += f"\n├─ {'Type':<15}: {mime_type}"
             if mime_type == "Folder":
-                msg += f"\n├─ {{'SubFolders':<15}}: {folders}"
-                msg += f"\n├─ {{'Files':<15}}: {files}"
+                msg += f"\n├─ {'SubFolders':<15}: {folders}"
+                msg += f"\n├─ {'Files':<15}: {files}"
 
             multi_link_msg = ""
             multi_links = []
@@ -716,9 +716,9 @@ class TaskListener(TaskConfig):
                 button = buttons.build_menu(2)
             else:
                 if not multi_link_msg and rclone_path:
-                    msg += f"\n├─ {{'Path':<15}}: {rclone_path}"
+                    msg += f"\n├─ {'Path':<15}: {rclone_path}"
                 button = None
-            msg += f"\n└─ {{'Task By':<15}}: {self.tag}\n</code>\n"
+            msg += f"\n└─ {'Task By':<15}: {self.tag}\n</code>\n"
             group_msg = (
                 msg + "〶 <b><u>Action Performed :</u></b>\n"
                 "⋗ <i>Cloud link(s) have been sent to User PM</i>\n\n"
@@ -729,12 +729,12 @@ class TaskListener(TaskConfig):
                 msg += multi_link_msg + "\n"
 
             if self.bot_pm and self.is_super_chat:
-                await send_message(self.user_id, msg, button)
+                await send_message(self.user_id, msg, button, photo=self.thumb or "IMAGES")
 
             if hasattr(Config, "MIRROR_LOG_ID") and Config.MIRROR_LOG_ID:
-                await send_message(Config.MIRROR_LOG_ID, msg, button)
+                await send_message(Config.MIRROR_LOG_ID, msg, button, photo=self.thumb or "IMAGES")
 
-            await send_message(self.message, group_msg, button)
+            await send_message(self.message, group_msg, button, photo=self.thumb or "IMAGES")
         if self.seed:
             await clean_target(self.up_dir)
             async with queue_dict_lock:
