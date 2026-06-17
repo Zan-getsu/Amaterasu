@@ -117,7 +117,7 @@ class YtSelection:
             buttons.data_button("❖ BEST AUDIOS", "ytq ba/b")
             buttons.data_button("✕ CANCEL", "ytq cancel", "footer")
             self._main_buttons = buttons.build_menu(3)
-            msg = f"<b>❖ PLAYLIST QUALITY</b>\n<code>\n└─ {'Timeout':<7} : ◷ {get_readable_time(self._timeout - (time() - self._time))}\n</code>"
+            msg = f"<b>❖ PLAYLIST QUALITY</b>\n<code>└─ {'Timeout':<7} : ◷ {get_readable_time(self._timeout - (time() - self._time))}\n</code>"
         else:
             format_dict = result.get("formats")
             if format_dict is not None:
@@ -170,7 +170,7 @@ class YtSelection:
             buttons.data_button("❖ BEST AUDIO", "ytq ba/b")
             buttons.data_button("✕ CANCEL", "ytq cancel", "footer")
             self._main_buttons = buttons.build_menu(2)
-            msg = f"<b>❖ VIDEO QUALITY</b>\n<code>\n└─ {'Timeout':<7} : ◷ {get_readable_time(self._timeout - (time() - self._time))}\n</code>"
+            msg = f"<b>❖ VIDEO QUALITY</b>\n<code>└─ {'Timeout':<7} : ◷ {get_readable_time(self._timeout - (time() - self._time))}\n</code>"
         self._reply_to = await send_message(
             self.listener.message, msg, self._main_buttons
         )
@@ -181,9 +181,9 @@ class YtSelection:
 
     async def back_to_main(self):
         if self._is_playlist:
-            msg = f"<b>❖ PLAYLIST QUALITY</b>\n<code>\n└─ {'Timeout':<7} : ◷ {get_readable_time(self._timeout - (time() - self._time))}\n</code>"
+            msg = f"<b>❖ PLAYLIST QUALITY</b>\n<code>└─ {'Timeout':<7} : ◷ {get_readable_time(self._timeout - (time() - self._time))}\n</code>"
         else:
-            msg = f"<b>❖ VIDEO QUALITY</b>\n<code>\n└─ {'Timeout':<7} : ◷ {get_readable_time(self._timeout - (time() - self._time))}\n</code>"
+            msg = f"<b>❖ VIDEO QUALITY</b>\n<code>└─ {'Timeout':<7} : ◷ {get_readable_time(self._timeout - (time() - self._time))}\n</code>"
         await edit_message(self._reply_to, msg, self._main_buttons)
 
     async def qual_subbuttons(self, b_name):
@@ -195,7 +195,7 @@ class YtSelection:
         buttons.data_button("↩ BACK", "ytq back", "footer")
         buttons.data_button("✕ CANCEL", "ytq cancel", "footer")
         subbuttons = buttons.build_menu(2)
-        msg = f"<b>❖ BITRATE : {b_name}</b>\n<code>\n└─ {'Timeout':<7} : ◷ {get_readable_time(self._timeout - (time() - self._time))}\n</code>"
+        msg = f"<b>❖ BITRATE : {b_name}</b>\n<code>└─ {'Timeout':<7} : ◷ {get_readable_time(self._timeout - (time() - self._time))}\n</code>"
         await edit_message(self._reply_to, msg, subbuttons)
 
     async def mp3_subbuttons(self):
@@ -208,7 +208,7 @@ class YtSelection:
         buttons.data_button("↩ BACK", "ytq back")
         buttons.data_button("✕ CANCEL", "ytq cancel")
         subbuttons = buttons.build_menu(3)
-        msg = f"<b>❖ MP3 BITRATE</b>\n<code>\n└─ {'Timeout':<7} : ◷ {get_readable_time(self._timeout - (time() - self._time))}\n</code>"
+        msg = f"<b>❖ MP3 BITRATE</b>\n<code>└─ {'Timeout':<7} : ◷ {get_readable_time(self._timeout - (time() - self._time))}\n</code>"
         await edit_message(self._reply_to, msg, subbuttons)
 
     async def audio_format(self):
@@ -220,7 +220,7 @@ class YtSelection:
         buttons.data_button("↩ BACK", "ytq back", "footer")
         buttons.data_button("✕ CANCEL", "ytq cancel", "footer")
         subbuttons = buttons.build_menu(3)
-        msg = f"<b>❖ AUDIO FORMAT</b>\n<code>\n└─ {'Timeout':<7} : ◷ {get_readable_time(self._timeout - (time() - self._time))}\n</code>"
+        msg = f"<b>❖ AUDIO FORMAT</b>\n<code>└─ {'Timeout':<7} : ◷ {get_readable_time(self._timeout - (time() - self._time))}\n</code>"
         await edit_message(self._reply_to, msg, subbuttons)
 
     async def audio_quality(self, format):
@@ -232,7 +232,7 @@ class YtSelection:
         buttons.data_button("↩ BACK", "ytq aq back")
         buttons.data_button("✕ CANCEL", "ytq cancel")
         subbuttons = buttons.build_menu(5)
-        msg = f"<b>❖ AUDIO QUALITY</b>\n<code>\n├─ {'Info':<7} : 0 (Best) - 10 (Worst)\n└─ {'Timeout':<7} : ◷ {get_readable_time(self._timeout - (time() - self._time))}\n</code>"
+        msg = f"<b>❖ AUDIO QUALITY</b>\n<code>├─ {'Info':<7} : 0 (Best) - 10 (Worst)\n└─ {'Timeout':<7} : ◷ {get_readable_time(self._timeout - (time() - self._time))}\n</code>"
         await edit_message(self._reply_to, msg, subbuttons)
 
 
@@ -549,3 +549,4 @@ async def ytdl_leech(client, message):
         await message.reply("YT-DLP downloads are currently disabled by the Bot Owner.")
         return
     bot_loop.create_task(YtDlp(client, message, is_leech=True).new_event())
+

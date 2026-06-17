@@ -151,11 +151,11 @@ async def prepare_stored_media(message):
 def build_caption(title, filename, readable_size, stream_link, download_link):
     title = title.replace("❖ ", "").strip()
     caption = (
-        f"<b>❖ {title}</b>\n\n"
+        f"<b>❖ {title}</b>\n"
         f"<code>┌─ {'Name':<6} : {filename}\n"
         f"└─ {'Size':<6} : {readable_size}</code>\n\n"
-        f"<b>DL:</b>\n<code>{download_link}</code>\n\n"
-        f"<b>Play:</b>\n<code>{stream_link}</code>"
+        f"<b>⋗ Download Link:</b>\n<code>{download_link}</code>\n\n"
+        f"<b>⋗ Stream Link:</b>\n<code>{stream_link}</code>"
     )
     return caption
 
@@ -295,3 +295,4 @@ async def channel_media_handler(client, message):
             await send_message(message, caption, markup)
     except Exception as e:
         LOGGER.error(f"Error in channel FileToLink processing: {e}")
+

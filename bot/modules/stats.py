@@ -95,8 +95,7 @@ async def get_stats(event, key="home"):
         p_cores = cpu_count(logical=False)
         v_cores = (sys_cpu or 0) - (p_cores or 0)
         msg = f"""<b>❖ BOT STATISTICS</b>
-<code>
-├─ {'Uptime':<9}: {get_readable_time(time() - bot_start_time)}
+<code>├─ {'Uptime':<9}: {get_readable_time(time() - bot_start_time)}
 ├─ ─── INSTANCE RAM ─────────────
 ├─ {'Progress':<9}: {get_progress_bar_string(bot_ram_pct)} {bot_ram_pct}%
 ├─ {'Used':<9}: {get_readable_file_size(bot_ram_used)}
@@ -133,8 +132,7 @@ async def get_stats(event, key="home"):
         p_cores = cpu_count(logical=False)
         v_cores = (sys_cpu or 0) - (p_cores or 0)
         msg = f"""<b>❖ SYSTEM OS</b>
-<code>
-├─ {'Uptime':<9}: {get_readable_time(time() - boot_time())}
+<code>├─ {'Uptime':<9}: {get_readable_time(time() - boot_time())}
 ├─ {'Version':<9}: {version()}
 ├─ {'Arch':<9}: {platform()}
 ├─ ─── SYSTEM NETWORK ───────────
@@ -175,8 +173,7 @@ async def get_stats(event, key="home"):
         )[0]
         official_v = official_v.strip() or "N/A"
         msg = f"""<b>❖ REPO METRICS</b>
-<code>
-├─ {'Updated':<10}: {last_commit}
+<code>├─ {'Updated':<10}: {last_commit}
 ├─ {'Current':<10}: {get_version()}
 ├─ {'Latest':<10}: {official_v}
 ├─ {'ChangeLog':<10}: {changelog}
@@ -185,8 +182,7 @@ async def get_stats(event, key="home"):
     elif key == "stpkgs":
         ver = bot_cache.get("eng_versions", {})
         msg = f"""<b>❖ PACKAGES</b>
-<code>
-├─ {'Python':<11}: {ver.get("python", "N/A")}
+<code>├─ {'Python':<11}: {ver.get("python", "N/A")}
 ├─ {'Aria2':<11}: {ver.get("aria2", "N/A")}
 ├─ {'qBittorrent':<11}: {ver.get("qBittorrent", "N/A")}
 ├─ {'SABnzbd+':<11}: {ver.get("SABnzbd+", "N/A")}
@@ -201,8 +197,7 @@ async def get_stats(event, key="home"):
 </code>"""
     elif key == "tlimits":
         msg = f"""<b>❖ TASK LIMITS</b>
-<code>
-├─ {'Direct':<11}: {Config.DIRECT_LIMIT or "∞"} GB
+<code>├─ {'Direct':<11}: {Config.DIRECT_LIMIT or "∞"} GB
 ├─ {'Torrent':<11}: {Config.TORRENT_LIMIT or "∞"} GB
 ├─ {'GDrive':<11}: {Config.GD_DL_LIMIT or "∞"} GB
 ├─ {'RClone':<11}: {Config.RC_DL_LIMIT or "∞"} GB
@@ -247,7 +242,7 @@ async def get_stats(event, key="home"):
         except Exception:
             processes = []
 
-        msg = "<b>❖ SYSTEM TASKS</b>\n<code>\n"
+        msg = "<b>❖ SYSTEM TASKS</b>\n<code>"
 
         if processes:
             for i, proc in enumerate(processes, 1):
@@ -371,3 +366,4 @@ async def get_packages_version():
         bot_loop.create_task(retry_mega_version())
 
     LOGGER.info("Fetched Package Versions!")
+

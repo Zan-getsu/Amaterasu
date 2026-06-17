@@ -113,8 +113,7 @@ class TaskListener(TaskConfig):
             self.pm_msg = await send_message(
                 self.user_id,
                 f"""<b>❖ TASK STARTED</b>
-<code>
-└─ {'Link':<9}: {self.source_url}
+<code>└─ {'Link':<9}: {self.source_url}
 </code>
 """,
             )
@@ -122,8 +121,7 @@ class TaskListener(TaskConfig):
             await send_message(
                 Config.LINKS_LOG_ID,
                 f"""<b>❖ {mode_name.upper()} STARTED</b>
-<code>
-┌─ {'User':<15}: {self.tag} ( #ID{self.user_id} )
+<code>┌─ {'User':<15}: {self.tag} ( #ID{self.user_id} )
 ├─ {'Message Link':<15}: {self.message.link}
 └─ {'Link':<15}: {self.source_url}
 </code>
@@ -549,7 +547,7 @@ class TaskListener(TaskConfig):
             )
         msg = (
             f"<b>❖ {escape(self.name)}</b>\n<code>"
-            f"\n┌─ {'Task Size':<15}: {get_readable_file_size(self.size)}"
+            f"┌─ {'Task Size':<15}: {get_readable_file_size(self.size)}"
             f"\n├─ {'Time Taken':<15}: {get_readable_time(time() - self.message.date.timestamp())}"
             f"\n├─ {'In Mode':<15}: {self.mode[0]}"
             f"\n├─ {'Out Mode':<15}: {self.mode[1]}"
@@ -559,7 +557,7 @@ class TaskListener(TaskConfig):
             buttons = ButtonMaker()
             if mime_type == "Folder/Playlist":
                 msg += "\n├─ {'Type':<15}: Playlist"
-                msg += f"\n└─ {{'Total Videos':<15}}: {files}"
+                msg += f"\n└─ {'Total Videos':<15}: {files}"
                 if link:
                     buttons.url_button(
                         "🔗 View Playlist", link, style=ButtonStyle.PRIMARY
@@ -770,16 +768,14 @@ class TaskListener(TaskConfig):
         await self.remove_from_same_dir()
         msg = (
             f"""<b>❖ LIMIT BREACHED</b>
-<code>
-┌─ {'Task Size':<12}: {get_readable_file_size(self.size)}
+<code>┌─ {'Task Size':<12}: {get_readable_file_size(self.size)}
 ├─ {'In Mode':<12}: {self.mode[0]}
 ├─ {'Out Mode':<12}: {self.mode[1]}
 └─ {'Details':<12}: {error}
 </code>"""
             if is_limit
             else f"""<b>❖ DOWNLOAD STOPPED</b>
-<code>
-┌─ {'Due To':<12}: {escape(str(error))}
+<code>┌─ {'Due To':<12}: {escape(str(error))}
 ├─ {'Task Size':<12}: {get_readable_file_size(self.size)}
 ├─ {'Time Taken':<12}: {get_readable_time(time() - self.message.date.timestamp())}
 ├─ {'In Mode':<12}: {self.mode[0]}
@@ -862,3 +858,4 @@ class TaskListener(TaskConfig):
             await clean_download(self.up_dir)
         if self.thumb and await aiopath.exists(self.thumb):
             await remove(self.thumb)
+

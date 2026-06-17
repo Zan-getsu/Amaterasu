@@ -29,8 +29,7 @@ async def picture_add(_, message):
         pic_add = resm.photo.file_id
     else:
         help_msg = f"""<b>❖ ADD IMAGE USAGE</b>
-<code>
-├─ Reply to Link : /{BotCommands.AddImageCommand} {{link}}
+<code>├─ Reply to Link : /{BotCommands.AddImageCommand} {{link}}
 ├─ Reply to Photo: /{BotCommands.AddImageCommand}
 └─ Supported     : Telegra.ph, DDL links, Telegram photos
 </code>"""
@@ -41,7 +40,7 @@ async def picture_add(_, message):
         await database.update_config({"IMAGES": Config.IMAGES, "USE_IMAGES": True})
     await edit_message(
         editable,
-        f"<b>❖ IMAGE ADDED</b>\n<code>\n├─ Total Images          : {len(Config.IMAGES)}\n└─ Random Message Images : Enabled\n</code>",
+        f"<b>❖ IMAGE ADDED</b>\n<code>├─ Total Images          : {len(Config.IMAGES)}\n└─ Random Message Images : Enabled\n</code>",
     )
 
 
@@ -69,7 +68,7 @@ async def pictures(_, message):
         total = len(Config.IMAGES)
         await send_message(
             message,
-            f"<b>❖ IMAGE GALLERY</b>\n<code>\n└─ \U0001f304 No. : 1 / {total}\n</code>",
+            f"<b>❖ IMAGE GALLERY</b>\n<code>└─ \U0001f304 No. : 1 / {total}\n</code>",
             buttons.build_menu(2),
             photo=Config.IMAGES[0],
         )
@@ -95,7 +94,7 @@ async def pics_callback(_, query):
         ind = handleIndex(int(data[3]), Config.IMAGES)
         total = len(Config.IMAGES)
         no = ind + 1
-        pic_info = f"<b>❖ IMAGE GALLERY</b>\n<code>\n└─ \U0001f304 No. : {no} / {total}\n</code>"
+        pic_info = f"<b>❖ IMAGE GALLERY</b>\n<code>└─ \U0001f304 No. : {no} / {total}\n</code>"
         buttons = ButtonMaker()
         buttons.data_button("\u00ab", f"images {data[1]} turn {ind - 1}")
         buttons.data_button("\u00bb", f"images {data[1]} turn {ind + 1}")
@@ -128,7 +127,7 @@ async def pics_callback(_, query):
         ind = min(ind, len(Config.IMAGES) - 1)
         total = len(Config.IMAGES)
         no = ind + 1
-        pic_info = f"<b>❖ IMAGE GALLERY</b>\n<code>\n└─ \U0001f304 No. : {no} / {total}\n</code>"
+        pic_info = f"<b>❖ IMAGE GALLERY</b>\n<code>└─ \U0001f304 No. : {no} / {total}\n</code>"
         buttons = ButtonMaker()
         buttons.data_button("\u00ab", f"images {data[1]} turn {ind - 1}")
         buttons.data_button("\u00bb", f"images {data[1]} turn {ind + 1}")
@@ -160,3 +159,4 @@ async def pics_callback(_, query):
         await delete_message(message)
         if message.reply_to_message:
             await delete_message(message.reply_to_message)
+

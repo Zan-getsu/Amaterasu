@@ -547,8 +547,7 @@ async def get_user_settings(from_user, stype="main"):
         btns = buttons.build_menu(2)
 
         text = f"""<b>❖ LEECH SETTINGS</b>
-<code>
-┌─ {'Name':<15}: {user_name}
+<code>┌─ {'Name':<15}: {user_name}
 ├─ {'Type':<15}: {ltype}
 ├─ {'Thumbnail':<15}: {thumbmsg}
 ├─ {'Split Size':<15}: {get_readable_file_size(split_size)}
@@ -580,8 +579,7 @@ async def get_user_settings(from_user, stype="main"):
 
         destinations = [_display_value(s.capitalize()) for s in uphoster_service.split(",")]
         text = f"""<b>❖ UPHOSTER SETTINGS</b>
-<code>
-┌─ {'Name':<11}: {user_name}
+<code>┌─ {'Name':<11}: {user_name}
 └─ {'Destination':<11}: {', '.join(destinations)}
 </code>
 """
@@ -601,8 +599,7 @@ async def get_user_settings(from_user, stype="main"):
         pdtoken = _display_value(pdtoken)
 
         text = f"""<b>❖ PIXELDRAIN SETTINGS</b>
-<code>
-┌─ {'Name':<9}: {user_name}
+<code>┌─ {'Name':<9}: {user_name}
 └─ {'API Key':<9}: {pdtoken}
 </code>
 """
@@ -624,8 +621,7 @@ async def get_user_settings(from_user, stype="main"):
         )
 
         text = f"""<b>❖ DEVUPLOADS SETTINGS</b>
-<code>
-┌─ {'Name':<11}: {user_name}
+<code>┌─ {'Name':<11}: {user_name}
 ├─ {'API Key':<11}: {dukey}
 └─ {'Folder ID':<11}: {dufolder}
 </code>
@@ -648,8 +644,7 @@ async def get_user_settings(from_user, stype="main"):
         )
 
         text = f"""<b>❖ VIKINGFILE SETTINGS</b>
-<code>
-┌─ {'Name':<9}: {user_name}
+<code>┌─ {'Name':<9}: {user_name}
 ├─ {'Hash':<9}: {vfhash}
 └─ {'Folder':<9}: {vffolder}
 </code>
@@ -681,8 +676,7 @@ async def get_user_settings(from_user, stype="main"):
         bzfolder = _display_value(bzfolder)
 
         text = f"""<b>❖ BUZZHEAVIER SETTINGS</b>
-<code>
-┌─ {'Name':<11}: {user_name}
+<code>┌─ {'Name':<11}: {user_name}
 ├─ {'Token':<11}: {bztoken}
 └─ {'Folder ID':<11}: {bzfolder}
 </code>
@@ -714,8 +708,7 @@ async def get_user_settings(from_user, stype="main"):
         gffolder = _display_value(gffolder)
 
         text = f"""<b>❖ GOFILE SETTINGS</b>
-<code>
-┌─ {'Name':<11}: {user_name}
+<code>┌─ {'Name':<11}: {user_name}
 ├─ {'Token':<11}: {gftoken}
 └─ {'Folder ID':<11}: {gffolder}
 </code>
@@ -750,8 +743,7 @@ async def get_user_settings(from_user, stype="main"):
         rcflags = _display_value(rcflags)
 
         text = f"""<b>❖ RCLONE SETTINGS</b>
-<code>
-┌─ {'Name':<9}: {user_name}
+<code>┌─ {'Name':<9}: {user_name}
 ├─ {'Config':<9}: {rccmsg}
 ├─ {'Flags':<9}: {rcflags}
 └─ {'Path':<9}: {rccpath}
@@ -816,8 +808,7 @@ async def get_user_settings(from_user, stype="main"):
         btns = buttons.build_menu(2)
 
         text = f"""<b>❖ GDRIVE SETTINGS</b>
-<code>
-┌─ {'Name':<11}: {user_name}
+<code>┌─ {'Name':<11}: {user_name}
 ├─ {'Token':<11}: {tokenmsg}
 ├─ {'GDrive ID':<11}: {gdrive_id}
 ├─ {'Index URL':<11}: {index}
@@ -875,8 +866,7 @@ async def get_user_settings(from_user, stype="main"):
         btns = buttons.build_menu(1)
 
         text = f"""<b>❖ MIRROR SETTINGS</b>
-<code>
-┌─ {'Name':<11}: {user_name}
+<code>┌─ {'Name':<11}: {user_name}
 ├─ {'Rclone Conf':<11}: {rccmsg}
 ├─ {'Rclone Path':<11}: {rccpath}
 ├─ {'Gdrive Tok':<11}: {tokenmsg}
@@ -919,8 +909,7 @@ async def get_user_settings(from_user, stype="main"):
         pass_display = _display_value(masked_pass if mega_password else None, "Not Set")
         account_status = "✅ Configured" if has_creds else "❌ Not Configured"
         text = f"""<b>❖ MEGA SETTINGS</b>
-<code>
-┌─ {'Name':<9}: {user_name}
+<code>┌─ {'Name':<9}: {user_name}
 ├─ {'Account':<9}: {account_status}
 ├─ {'Email':<9}: {email_display}
 └─ {'Password':<9}: {pass_display}
@@ -994,8 +983,7 @@ async def get_user_settings(from_user, stype="main"):
         btns = buttons.build_menu(2)
 
         text = f"""<b>❖ FF SETTINGS</b>
-<code>
-┌─ {'Name':<11}: {user_name}
+<code>┌─ {'Name':<11}: {user_name}
 ├─ {'FFmpeg CMDs':<11}: {ffc}
 ├─ {'Def Meta':<11}: {display_meta_val}
 ├─ {'Audio Meta':<11}: {display_audio_meta}
@@ -1070,8 +1058,7 @@ async def get_user_settings(from_user, stype="main"):
         btns = buttons.build_menu(1)
 
         text = f"""<b>❖ ADVANCED SETTINGS</b>
-<code>
-┌─ {'Name':<11}: {user_name}
+<code>┌─ {'Name':<11}: {user_name}
 ├─ {'Name Swap':<11}: {ns_msg}
 ├─ {'Auto-Rename':<11}: {ar_msg}
 ├─ {'Auto F2Link':<11}: {auto_ftl}
@@ -1123,8 +1110,7 @@ async def get_user_settings(from_user, stype="main"):
         btns = buttons.build_menu(2)
 
         text = f"""<b>❖ YOUTUBE TOOLS</b>
-<code>
-┌─ {'Name':<13}: {user_name}
+<code>┌─ {'Name':<13}: {user_name}
 ├─ {'Description':<13}: {escape(str(yt_desp_val))}
 ├─ {'Tags':<13}: {escape(str(yt_tags_val))}
 ├─ {'Category ID':<13}: {escape(str(yt_cat_id_val))}
@@ -1136,7 +1122,7 @@ async def get_user_settings(from_user, stype="main"):
         
         buttons.data_button("➕ Create Profile", f"userset {user_id} enc_create", position="header")
         
-        text = "<b>❖ ENCODE PROFILES</b>\n<code>\n"
+        text = "<b>❖ ENCODE PROFILES</b>\n<code>"
         if not profiles or len(profiles) <= 1:
             text += "└─ No custom profiles found.\n</code>"
         else:
@@ -1595,7 +1581,7 @@ async def edit_user_settings(client, query):
         buttons.data_button("↩ BACK", f"userset {user_id} back encode", "footer")
         buttons.data_button("✕ CLOSE", f"userset {user_id} close", "footer", style=ButtonStyle.DANGER)
         
-        text = f"<b>❖ ENCODE PROFILE: {pdata.get('name', pid)}</b>\n<code>\n"
+        text = f"<b>❖ ENCODE PROFILE: {pdata.get('name', pid)}</b>\n<code>"
         text += f"<b>Video Codec:</b> {pdata.get('video_codec', 'libsvtav1')}\n"
         text += f"<b>Audio Codec:</b> {pdata.get('audio_codec', 'libopus')}\n"
         text += f"<b>Video Params:</b> {pdata.get('video_params', {})}\n"
@@ -1697,7 +1683,7 @@ async def edit_user_settings(client, query):
         buttons.data_button("↩ BACK", f"userset {user_id} menu {data[3]}", "footer")
         buttons.data_button("✕ CLOSE", f"userset {user_id} close", "footer", style=ButtonStyle.DANGER)
         prompt_title = data[3].replace("_", " ").title()
-        new_message_text = f"<b>❖ SET {prompt_title.upper()}</b>\n<code>\n{text}"
+        new_message_text = f"<b>❖ SET {prompt_title.upper()}</b>\n<code>{text}"
         await edit_message(message, new_message_text, buttons.build_menu(1))
         rfunc = partial(get_menu, data[3], message, user_id)
         pfunc = partial(add_file, ftype=data[3], rfunc=rfunc)
@@ -1833,3 +1819,4 @@ async def get_users_settings(_, message):
             await send_message(message, msg)
     else:
         await send_message(message, "No users data!")
+

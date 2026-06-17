@@ -27,8 +27,7 @@ async def speedtest(_, message):
 
     result = speed_results.results.dict()
     string_speed = f"""<b>❖ SPEEDTEST INFO</b>
-<code>
-┌─ {'Upload':<9}: {get_readable_file_size(result['upload'] / 8)}/s
+<code>┌─ {'Upload':<9}: {get_readable_file_size(result['upload'] / 8)}/s
 ├─ {'Download':<9}: {get_readable_file_size(result['download'] / 8)}/s
 ├─ {'Ping':<9}: {result['ping']} ms
 ├─ {'Time':<9}: {result['timestamp']}
@@ -49,3 +48,4 @@ async def speedtest(_, message):
     except Exception as e:
         LOGGER.error(str(e))
         await edit_message(speed, string_speed)
+

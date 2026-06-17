@@ -666,8 +666,7 @@ async def restart_notification():
                 chat_id=chat_id,
                 message_id=msg_id,
                 text=f"""<b>❖ RESTARTED SUCCESSFULLY!</b>
-<code>
-┌─ {'Date':<9}: {now.strftime("%d/%m/%y")}
+<code>┌─ {'Date':<9}: {now.strftime("%d/%m/%y")}
 ├─ {'Time':<9}: {now.strftime("%I:%M:%S %p")}
 ├─ {'TimeZone':<9}: {Config.TIMEZONE}
 └─ {'Version':<9}: {get_version()}
@@ -843,3 +842,4 @@ async def _background_cleanup():
         await proc.wait()
     except Exception:
         pass
+

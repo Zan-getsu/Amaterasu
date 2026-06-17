@@ -32,8 +32,7 @@ async def get_plugins_menu(user_id: int, stype: str = "main"):
         buttons.data_button("✕ CLOSE", f"plugins {user_id} close", position="footer", style=ButtonStyle.DANGER)
 
         text = f"""<b>❖ PLUGIN MANAGEMENT</b>
-<code>
-┌─ {'Loaded Plugins':<17}: {len(loaded_plugins)}
+<code>┌─ {'Loaded Plugins':<17}: {len(loaded_plugins)}
 ├─ {'Available Plugins':<17}: {len(available_plugins)}
 └─ {'Total Plugins':<17}: {len(loaded_plugins) + len(available_plugins)}
 </code>"""
@@ -53,8 +52,7 @@ async def get_plugins_menu(user_id: int, stype: str = "main"):
         buttons.data_button("✕ CLOSE", f"plugins {user_id} close", position="footer", style=ButtonStyle.DANGER)
 
         text = f"""<b>❖ LOADED PLUGINS</b>
-<code>
-└─ {'Total Loaded':<12}: {len(loaded_plugins)}
+<code>└─ {'Total Loaded':<12}: {len(loaded_plugins)}
 </code>"""
 
         btns = buttons.build_menu(1)
@@ -72,8 +70,7 @@ async def get_plugins_menu(user_id: int, stype: str = "main"):
 
         unloaded_count = len([p for p in available_plugins if p not in loaded_plugins])
         text = f"""<b>❖ AVAILABLE PLUGINS</b>
-<code>
-└─ {'Unloaded Plugins':<16}: {unloaded_count}
+<code>└─ {'Unloaded Plugins':<16}: {unloaded_count}
 </code>"""
 
         btns = buttons.build_menu(1)
@@ -81,7 +78,7 @@ async def get_plugins_menu(user_id: int, stype: str = "main"):
     elif stype == "info":
         loaded_plugins = plugin_manager.list_plugins()
 
-        text = "<b>❖ PLUGIN INFORMATION</b>\n<code>\n"
+        text = "<b>❖ PLUGIN INFORMATION</b>\n<code>"
         for i, plugin in enumerate(loaded_plugins):
             status = "✅ Enabled" if plugin.enabled else "❌ Disabled"
             prefix1 = "┌─"
@@ -115,8 +112,7 @@ async def get_plugins_menu(user_id: int, stype: str = "main"):
             buttons.data_button("✕ CLOSE", f"plugins {user_id} close", position="footer", style=ButtonStyle.DANGER)
 
             text = f"""<b>❖ PLUGIN: {plugin_name}</b>
-<code>
-┌─ {'Version':<11}: {plugin_info.version}
+<code>┌─ {'Version':<11}: {plugin_info.version}
 ├─ {'Author':<11}: {plugin_info.author}
 ├─ {'Status':<11}: {status}
 ├─ {'Commands':<11}: {', '.join(plugin_info.commands) if plugin_info.commands else 'None'}
@@ -287,3 +283,4 @@ def register_plugin_commands():
     TgClient.bot.add_handler(
         CallbackQueryHandler(edit_plugins_menu, filters=regex("^plugins"))
     )
+

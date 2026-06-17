@@ -183,8 +183,7 @@ async def add_blacklist(_, message):
 
     if id_ is None:
         help_msg = f"""<b>❖ BLACKLIST USAGE</b>
-<code>
-├─ Permanent   : /bl {{user_id}}
+<code>├─ Permanent   : /bl {{user_id}}
 ├─ Temporary   : /bl {{user_id}} -t 1d
 ├─ Reply       : /bl -t 2h (reply to user)
 └─ Time Format : 3d | 12h | 20m (any digit)
@@ -203,8 +202,7 @@ async def add_blacklist(_, message):
         update_user_ldata(id_, "BLACKLIST", bl_value)
         await database.update_user_data(id_)
         msg = f"""<b>❖ BLACKLIST APPLIED</b>
-<code>
-┌─ {'User':<9}: {id_}
+<code>┌─ {'User':<9}: {id_}
 ├─ {'Type':<9}: Temporary
 ├─ {'Duration':<9}: {remaining}
 └─ {'Expires':<9}: {remaining} from now
@@ -213,8 +211,7 @@ async def add_blacklist(_, message):
         update_user_ldata(id_, "BLACKLIST", True)
         await database.update_user_data(id_)
         msg = f"""<b>❖ BLACKLIST APPLIED</b>
-<code>
-┌─ {'User':<9}: {id_}
+<code>┌─ {'User':<9}: {id_}
 ├─ {'Type':<9}: Permanent
 └─ {'Status':<9}: Restricted from Bot
 </code>"""
@@ -246,8 +243,7 @@ async def remove_blacklist(_, message):
     update_user_ldata(id_, "BLACKLIST", False)
     await database.update_user_data(id_)
     await send_message(message, f"""<b>❖ BLACKLIST REMOVED</b>
-<code>
-┌─ {'User':<9}: {id_}
+<code>┌─ {'User':<9}: {id_}
 └─ {'Status':<9}: User Set Free!
 </code>""")
 
@@ -255,3 +251,4 @@ async def remove_blacklist(_, message):
 @new_task
 async def black_listed(_, message):
     await send_message(message, "<b>BlackListed Detected</b> \u2192 <i>Restricted from Bot</i>")
+

@@ -41,8 +41,7 @@ async def delete_broadcast(bc_id, message):
     return await edit_message(
         temp_wait,
         f"""<b>❖ BROADCAST DELETED STATS</b>
-<code>
-┌─ {'Total Users':<15}: {total}
+<code>┌─ {'Total Users':<15}: {total}
 ├─ {'Success':<15}: {success}
 └─ {'Failed Attempts':<15}: {failed}
 </code>
@@ -88,8 +87,7 @@ async def edit_broadcast(bc_id, message, rply):
     return await edit_message(
         temp_wait,
         f"""<b>❖ BROADCAST EDITED STATS</b>
-<code>
-┌─ {'Total Users':<15}: {total}
+<code>┌─ {'Total Users':<15}: {total}
 ├─ {'Success':<15}: {success}
 └─ {'Failed Attempts':<15}: {failed}
 </code>
@@ -154,8 +152,7 @@ async def broadcast(_, message):
     # Broadcasting logic
     start_time = time()
     status = """<b>❖ BROADCAST STATS</b>
-<code>
-┌─ {'Total Users':<17}: {t}
+<code>┌─ {'Total Users':<17}: {t}
 ├─ {'Success':<17}: {s}
 ├─ {'Blocked Users':<17}: {b}
 ├─ {'Deleted Accounts':<17}: {d}
@@ -201,3 +198,4 @@ async def broadcast(_, message):
         pls_wait,
         f"{status.format(t=t, s=s, b=b, d=d, u=u)}\n\n<b>Elapsed Time:</b> <code>{get_readable_time(time() - start_time)}</code>\n<b>Broadcast ID:</b> <code>{bc_hash}</code>",
     )
+
