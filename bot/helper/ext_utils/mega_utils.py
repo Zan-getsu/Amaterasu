@@ -228,28 +228,26 @@ def _get_mega_account_info_sync(email: str, password: str) -> str:
         pro_name = pro_names.get(pro_level, f"Level {pro_level}")
 
         text = (
-            f"⌬ <b>Mega Account Info</b>\n"
-            f"│\n"
-            f"┠ <b>Email</b> → <code>{email}</code>\n"
-            f"┠ <b>Account Type</b> → {pro_name}\n"
+            f"<b>❖ MEGA ACCOUNT INFO</b>\n<pre>\n"
+            f"├─ {'Email':<15}: {email}\n"
+            f"├─ {'Account Type':<15}: {pro_name}\n"
         )
         if pro_expiration > 0:
-            text += f"┠ <b>Pro Expires</b> → {strftime('%Y-%m-%d', gmtime(pro_expiration))}\n"
+            text += f"├─ {'Pro Expires':<15}: {strftime('%Y-%m-%d', gmtime(pro_expiration))}\n"
 
         text += (
-            f"┃\n"
-            f"┠ <b>Storage</b> → {get_readable_file_size(storage_used)} / "
+            f"├─ {'Storage':<15}: {get_readable_file_size(storage_used)} / "
             f"{get_readable_file_size(storage_max)} ({storage_pct}%)\n"
         )
 
         if transfer_pct is not None:
             text += (
-                f"┠ <b>Transfer</b> → {get_readable_file_size(transfer_used)} / "
+                f"├─ {'Transfer':<15}: {get_readable_file_size(transfer_used)} / "
                 f"{get_readable_file_size(transfer_max)} ({transfer_pct}%)\n"
             )
         else:
             text += (
-                f"┠ <b>Transfer</b> → {get_readable_file_size(transfer_used)} / Unlimited\n"
+                f"├─ {'Transfer':<15}: {get_readable_file_size(transfer_used)} / Unlimited\n"
             )
 
         if listener.root_handle is not None:
@@ -257,14 +255,14 @@ def _get_mega_account_info_sync(email: str, password: str) -> str:
                 num_files = info["num_files"]
                 num_folders = info["num_folders"]
                 text += (
-                    f"┃\n"
-                    f"┠ <b>Files</b> → {num_files}\n"
-                    f"┖ <b>Folders</b> → {num_folders}"
+                    f"├─ {'Files':<15}: {num_files}\n"
+                    f"└─ {'Folders':<15}: {num_folders}\n"
+                    f"</pre>"
                 )
             except Exception:
-                text += "┃\n┖ <b>Files/Folders</b> → N/A"
+                text += "└─ {'Files/Folders':<15}: N/A\n</pre>"
         else:
-            text += "┖ <b>Files/Folders</b> → N/A"
+            text += "└─ {'Files/Folders':<15}: N/A\n</pre>"
 
         return text
 

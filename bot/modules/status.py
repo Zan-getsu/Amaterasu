@@ -204,20 +204,21 @@ async def status_pages(_, query):
                 case _:
                     tasks["Download"] += 1
 
-        msg = f"""㊂ <b>Tasks Overview</b> :
-        
-┎ <b>Download:</b> {tasks["Download"]} | <b>Upload:</b> {tasks["Upload"]}
-┠ <b>Seed:</b> {tasks["Seed"]} | <b>Archive:</b> {tasks["Archive"]}
-┠ <b>Extract:</b> {tasks["Extract"]} | <b>Split:</b> {tasks["Split"]}
-┠ <b>QueueDL:</b> {tasks["QueueDl"]} | <b>QueueUP:</b> {tasks["QueueUp"]}
-┠ <b>Clone:</b> {tasks["Clone"]} | <b>CheckUp:</b> {tasks["CheckUp"]}
-┠ <b>Paused:</b> {tasks["Pause"]} | <b>SamVideo:</b> {tasks["SamVid"]}
-┠ <b>Convert:</b> {tasks["ConvertMedia"]} | <b>FFmpeg:</b> {tasks["FFmpeg"]}
-┞ <b>Encode:</b> {tasks["Encode"]}
-│
-┟ <b>Total Download Speed:</b> {get_readable_file_size(dl_speed)}/s
-┠ <b>Total Upload Speed:</b> {get_readable_file_size(up_speed)}/s
-┖ <b>Total Seeding Speed:</b> {get_readable_file_size(seed_speed)}/s
+        msg = f"""<b>❖ TASKS OVERVIEW</b>
+<pre>
+┌─ {'Download':<9}: {tasks["Download"]} | {'Upload':<9}: {tasks["Upload"]}
+├─ {'Seed':<9}: {tasks["Seed"]} | {'Archive':<9}: {tasks["Archive"]}
+├─ {'Extract':<9}: {tasks["Extract"]} | {'Split':<9}: {tasks["Split"]}
+├─ {'QueueDL':<9}: {tasks["QueueDl"]} | {'QueueUP':<9}: {tasks["QueueUp"]}
+├─ {'Clone':<9}: {tasks["Clone"]} | {'CheckUp':<9}: {tasks["CheckUp"]}
+├─ {'Paused':<9}: {tasks["Pause"]} | {'SamVideo':<9}: {tasks["SamVid"]}
+├─ {'Convert':<9}: {tasks["ConvertMedia"]} | {'FFmpeg':<9}: {tasks["FFmpeg"]}
+├─ {'Encode':<9}: {tasks["Encode"]}
+├─ ─── TOTAL SPEEDS ─────────────
+├─ {'Download':<9}: {get_readable_file_size(dl_speed)}/s
+├─ {'Upload':<9}: {get_readable_file_size(up_speed)}/s
+└─ {'Seeding':<9}: {get_readable_file_size(seed_speed)}/s
+</pre>
 """
         button = ButtonMaker()
         button.data_button("↩ BACK", f"status {data[1]} ref")

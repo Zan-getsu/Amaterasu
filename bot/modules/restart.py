@@ -665,11 +665,13 @@ async def restart_notification():
             await TgClient.bot.edit_message_text(
                 chat_id=chat_id,
                 message_id=msg_id,
-                text=f"""⌬ <b><i>Restarted Successfully!</i></b>
-┟ <b>Date:</b> {now.strftime("%d/%m/%y")}
-┠ <b>Time:</b> {now.strftime("%I:%M:%S %p")}
-┠ <b>TimeZone:</b> {Config.TIMEZONE}
-┖ <b>Version:</b> {get_version()}""",
+                text=f"""<b>❖ RESTARTED SUCCESSFULLY!</b>
+<pre>
+┌─ {'Date':<9}: {now.strftime("%d/%m/%y")}
+├─ {'Time':<9}: {now.strftime("%I:%M:%S %p")}
+├─ {'TimeZone':<9}: {Config.TIMEZONE}
+└─ {'Version':<9}: {get_version()}
+</pre>""",
             )
         except Exception as e:
             LOGGER.error(e)

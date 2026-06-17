@@ -182,12 +182,13 @@ async def add_blacklist(_, message):
         id_ = (message.reply_to_message.from_user or message.reply_to_message.sender_chat).id
 
     if id_ is None:
-        help_msg = f"""⌬ <b><u>BlackList Usage</u></b>
-│
-┠ <b>Permanent:</b> <code>/bl {{user_id}}</code>
-┠ <b>Temporary:</b> <code>/bl {{user_id}} -t 1d</code>
-┠ <b>Reply:</b> <code>/bl -t 2h</code> <i>(reply to user)</i>
-┖ <b>Time Format:</b> <code>3d</code> | <code>12h</code> | <code>20m</code> <i>(any digit)</i>"""
+        help_msg = f"""<b>❖ BLACKLIST USAGE</b>
+<pre>
+├─ Permanent   : /bl {{user_id}}
+├─ Temporary   : /bl {{user_id}} -t 1d
+├─ Reply       : /bl -t 2h (reply to user)
+└─ Time Format : 3d | 12h | 20m (any digit)
+</pre>"""
         return await send_message(message, help_msg)
 
     if id_ in user_data and _get_blacklist_info(user_data[id_].get("BLACKLIST"))[0]:
@@ -201,20 +202,22 @@ async def add_blacklist(_, message):
         remaining = _format_remaining(seconds)
         update_user_ldata(id_, "BLACKLIST", bl_value)
         await database.update_user_data(id_)
-        msg = f"""⌬ <b><u>BlackList Applied</u></b>
-│
-┟ <b>User</b> \u2192 <code>{id_}</code>
-┠ <b>Type</b> \u2192 <b>Temporary</b>
-┠ <b>Duration</b> \u2192 <code>{remaining}</code>
-┖ <b>Expires</b> \u2192 <b>{remaining} from now</b>"""
+        msg = f"""<b>❖ BLACKLIST APPLIED</b>
+<pre>
+┌─ {'User':<9}: {id_}
+├─ {'Type':<9}: Temporary
+├─ {'Duration':<9}: {remaining}
+└─ {'Expires':<9}: {remaining} from now
+</pre>"""
     else:
         update_user_ldata(id_, "BLACKLIST", True)
         await database.update_user_data(id_)
-        msg = f"""⌬ <b><u>BlackList Applied</u></b>
-│
-┟ <b>User</b> \u2192 <code>{id_}</code>
-┠ <b>Type</b> \u2192 <b>Permanent</b>
-┖ <b>Status</b> \u2192 <i>Restricted from Bot</i>"""
+        msg = f"""<b>❖ BLACKLIST APPLIED</b>
+<pre>
+┌─ {'User':<9}: {id_}
+├─ {'Type':<9}: Permanent
+└─ {'Status':<9}: Restricted from Bot
+</pre>"""
 
     await send_message(message, msg)
 
@@ -242,10 +245,11 @@ async def remove_blacklist(_, message):
 
     update_user_ldata(id_, "BLACKLIST", False)
     await database.update_user_data(id_)
-    await send_message(message, f"""⌬ <b><u>BlackList Removed</u></b>
-│
-┟ <b>User</b> \u2192 <code>{id_}</code>
-┖ <b>Status</b> \u2192 <i>User Set Free!</i>""")
+    await send_message(message, f"""<b>❖ BLACKLIST REMOVED</b>
+<pre>
+┌─ {'User':<9}: {id_}
+└─ {'Status':<9}: User Set Free!
+</pre>""")
 
 
 @new_task

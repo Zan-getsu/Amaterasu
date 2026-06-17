@@ -94,56 +94,64 @@ async def get_stats(event, key="home"):
         sys_cpu = cpu_count(logical=True)
         p_cores = cpu_count(logical=False)
         v_cores = (sys_cpu or 0) - (p_cores or 0)
-        msg = f"""⌬ <b><i>BOT STATISTICS :</i></b>
-┖ <b>Bot Uptime :</b> {get_readable_time(time() - bot_start_time)}
-
-┎ <b><i>INSTANCE RAM ( BOT ) :</i></b>
-┃ {get_progress_bar_string(bot_ram_pct)} {bot_ram_pct}%
-┖ <b>U :</b> {get_readable_file_size(bot_ram_used)} | <b>F :</b> {get_readable_file_size(bot_ram_free)} | <b>T :</b> {get_readable_file_size(bot_ram_total)}
-
-┎ <b><i>SYSTEM RAM :</i></b>
-┃ {get_progress_bar_string(memory.percent)} {memory.percent}%
-┖ <b>U :</b> {get_readable_file_size(memory.used)} | <b>F :</b> {get_readable_file_size(memory.available)} | <b>T :</b> {get_readable_file_size(memory.total)}
-
-┎ <b><i>SWAP MEMORY :</i></b>
-┃ {get_progress_bar_string(swap.percent)} {swap.percent}%
-┖ <b>U :</b> {get_readable_file_size(swap.used)} | <b>F :</b> {get_readable_file_size(swap.free)} | <b>T :</b> {get_readable_file_size(swap.total)}
-
-┎ <b><i>INSTANCE CPU ( BOT ) :</i></b>
-┃ <b>Instance Core(s) :</b> {instance_cpu}
-┠ <b>Total Core(s) :</b> {sys_cpu} | <b>P-Core(s) :</b> {p_cores} | <b>V-Core(s) :</b> {v_cores}
-┖ <b>Usable CPU(s) :</b> {len(Process().cpu_affinity())}
-
-┎ <b><i>SYSTEM DISK :</i></b>
-┃ {get_progress_bar_string(disk)} {disk}%
-┃ <b>Total Disk Read :</b> {f"{get_readable_file_size(disk_io.read_bytes)} ({get_readable_time(disk_io.read_time / 1000)})" if disk_io else "Access Denied"}
-┃ <b>Total Disk Write :</b> {f"{get_readable_file_size(disk_io.write_bytes)} ({get_readable_time(disk_io.write_time / 1000)})" if disk_io else "Access Denied"}
-┖ <b>U :</b> {get_readable_file_size(used)} | <b>F :</b> {get_readable_file_size(free)} | <b>T :</b> {get_readable_file_size(total)}
+        msg = f"""<b>❖ BOT STATISTICS</b>
+<pre>
+├─ {'Uptime':<9}: {get_readable_time(time() - bot_start_time)}
+├─ ─── INSTANCE RAM ─────────────
+├─ {'Progress':<9}: {get_progress_bar_string(bot_ram_pct)} {bot_ram_pct}%
+├─ {'Used':<9}: {get_readable_file_size(bot_ram_used)}
+├─ {'Free':<9}: {get_readable_file_size(bot_ram_free)}
+├─ {'Total':<9}: {get_readable_file_size(bot_ram_total)}
+├─ ─── SYSTEM RAM ───────────────
+├─ {'Progress':<9}: {get_progress_bar_string(memory.percent)} {memory.percent}%
+├─ {'Used':<9}: {get_readable_file_size(memory.used)}
+├─ {'Free':<9}: {get_readable_file_size(memory.available)}
+├─ {'Total':<9}: {get_readable_file_size(memory.total)}
+├─ ─── SWAP MEMORY ──────────────
+├─ {'Progress':<9}: {get_progress_bar_string(swap.percent)} {swap.percent}%
+├─ {'Used':<9}: {get_readable_file_size(swap.used)}
+├─ {'Free':<9}: {get_readable_file_size(swap.free)}
+├─ {'Total':<9}: {get_readable_file_size(swap.total)}
+├─ ─── INSTANCE CPU ─────────────
+├─ {'Inst Core':<9}: {instance_cpu}
+├─ {'Sys Core':<9}: {sys_cpu}
+├─ {'P-Core':<9}: {p_cores}
+├─ {'V-Core':<9}: {v_cores}
+├─ {'Use CPU':<9}: {len(Process().cpu_affinity())}
+├─ ─── SYSTEM DISK ──────────────
+├─ {'Progress':<9}: {get_progress_bar_string(disk)} {disk}%
+├─ {'Read':<9}: {f"{get_readable_file_size(disk_io.read_bytes)} ({get_readable_time(disk_io.read_time / 1000)})" if disk_io else "Access Denied"}
+├─ {'Write':<9}: {f"{get_readable_file_size(disk_io.write_bytes)} ({get_readable_time(disk_io.write_time / 1000)})" if disk_io else "Access Denied"}
+├─ {'Used':<9}: {get_readable_file_size(used)}
+├─ {'Free':<9}: {get_readable_file_size(free)}
+└─ {'Total':<9}: {get_readable_file_size(total)}
+</pre>
 """
     elif key == "stsys":
         cpu_usage = cpu_percent(interval=0.5)
         sys_cpu = cpu_count(logical=True)
         p_cores = cpu_count(logical=False)
         v_cores = (sys_cpu or 0) - (p_cores or 0)
-        msg = f"""⌬ <b><i>SYSTEM OS :</i></b>
-╟ <b>OS Uptime :</b> {get_readable_time(time() - boot_time())}
-┠ <b>OS Version :</b> {version()}
-┖ <b>OS Arch :</b> {platform()}
-
-⌬ <b><i>SYSTEM NETWORK :</i></b>
-╟ <b>Upload Data:</b> {get_readable_file_size(net_io_counters().bytes_sent)}
-┠ <b>Download Data:</b> {get_readable_file_size(net_io_counters().bytes_recv)}
-┠ <b>Pkts Sent:</b> {str(net_io_counters().packets_sent)[:-3]}k
-┠ <b>Pkts Received:</b> {str(net_io_counters().packets_recv)[:-3]}k
-┖ <b>Total I/O Data:</b> {get_readable_file_size(net_io_counters().bytes_recv + net_io_counters().bytes_sent)}
-
-┎ <b><i>SYSTEM CPU :</i></b>
-┃ {get_progress_bar_string(cpu_usage)} {cpu_usage}%
-┠ <b>CPU Frequency :</b> {f"{cpu_freq().current / 1000:.2f} GHz" if cpu_freq() else "Access Denied"}
-┠ <b>System Avg Load :</b> {"%, ".join(str(round((x / (cpu_count() or 1) * 100), 2)) for x in getloadavg())}%, (1m, 5m, 15m)
-┠ <b>P-Core(s) :</b> {p_cores} | <b>V-Core(s) :</b> {v_cores}
-┠ <b>Total Core(s) :</b> {sys_cpu}
-┖ <b>Usable CPU(s) :</b> {len(Process().cpu_affinity())}
+        msg = f"""<b>❖ SYSTEM OS</b>
+<pre>
+├─ {'Uptime':<9}: {get_readable_time(time() - boot_time())}
+├─ {'Version':<9}: {version()}
+├─ {'Arch':<9}: {platform()}
+├─ ─── SYSTEM NETWORK ───────────
+├─ {'Upload':<9}: {get_readable_file_size(net_io_counters().bytes_sent)}
+├─ {'Download':<9}: {get_readable_file_size(net_io_counters().bytes_recv)}
+├─ {'Pkts Sent':<9}: {str(net_io_counters().packets_sent)[:-3]}k
+├─ {'Pkts Recv':<9}: {str(net_io_counters().packets_recv)[:-3]}k
+├─ {'Total I/O':<9}: {get_readable_file_size(net_io_counters().bytes_recv + net_io_counters().bytes_sent)}
+├─ ─── SYSTEM CPU ───────────────
+├─ {'Progress':<9}: {get_progress_bar_string(cpu_usage)} {cpu_usage}%
+├─ {'Freq':<9}: {f"{cpu_freq().current / 1000:.2f} GHz" if cpu_freq() else "Access Denied"}
+├─ {'Load Avg':<9}: {"%, ".join(str(round((x / (cpu_count() or 1) * 100), 2)) for x in getloadavg())}%, (1m, 5m, 15m)
+├─ {'P-Core':<9}: {p_cores}
+├─ {'V-Core':<9}: {v_cores}
+├─ {'Total':<9}: {sys_cpu}
+└─ {'Usable':<9}: {len(Process().cpu_affinity())}
+</pre>
 """
     elif key == "strepo":
         last_commit, changelog = "No Data", "N/A"
@@ -252,11 +260,9 @@ async def get_stats(event, key="home"):
                 msg += f"{prefix_top} {i:02d} {name} (PID:{proc['pid']})\n"
                 msg += f"{prefix_bot}    CPU:{cpu:4.1f}% MEM:{mem:4.1f}% {user}\n"
                 btns.data_button(f"✕ {i:02d}", f"stats {user_id} killproc {proc['pid']}")
-            msg += "\n⚑ Click number to terminate process\n"
+            msg += "</pre>\n⚑ Click number to terminate process"
         else:
-            msg += "└─ No high usage processes found\n"
-            
-        msg += "</pre>"
+            msg += "└─ No high usage processes found\n</pre>"
 
         btns.data_button("↻ REFRESH", f"stats {user_id} systasks", "header", style=ButtonStyle.PRIMARY)
 

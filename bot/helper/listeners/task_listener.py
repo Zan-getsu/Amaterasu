@@ -112,20 +112,22 @@ class TaskListener(TaskConfig):
         if self.bot_pm and self.is_super_chat:
             self.pm_msg = await send_message(
                 self.user_id,
-                f"""➲ <b><u>Task Started :</u></b>
-┃
-┖ <b>Link:</b> <a href='{self.source_url}'>Click Here</a>
+                f"""<b>❖ TASK STARTED</b>
+<pre>
+└─ {'Link':<9}: {self.source_url}
+</pre>
 """,
             )
         if Config.LINKS_LOG_ID:
             await send_message(
                 Config.LINKS_LOG_ID,
-                f"""➲  <b><u>{mode_name} Started:</u></b>
- ┃
- ┠ <b>User :</b> {self.tag} ( #ID{self.user_id} )
- ┠ <b>Message Link :</b> <a href='{self.message.link}'>Click Here</a>
- ┗ <b>Link:</b> <a href='{self.source_url}'>Click Here</a>
- """,
+                f"""<b>❖ {mode_name.upper()} STARTED</b>
+<pre>
+┌─ {'User':<15}: {self.tag} ( #ID{self.user_id} )
+├─ {'Message Link':<15}: {self.message.link}
+└─ {'Link':<15}: {self.source_url}
+</pre>
+""",
             )
         if (
             (Config.INCOMPLETE_TASK_NOTIFIER or Config.INC_TASK_RESUME)
@@ -546,25 +548,25 @@ class TaskListener(TaskConfig):
                 self.message.link or f"pm:{self.user_id}:{self.message.id}"
             )
         msg = (
-            f"<b><i>{escape(self.name)}</i></b>\n│"
-            f"\n┟ <b>Task Size</b> → {get_readable_file_size(self.size)}"
-            f"\n┠ <b>Time Taken</b> → {get_readable_time(time() - self.message.date.timestamp())}"
-            f"\n┠ <b>In Mode</b> → {self.mode[0]}"
-            f"\n┠ <b>Out Mode</b> → {self.mode[1]}"
+            f"<b>❖ {escape(self.name)}</b>\n<pre>"
+            f"\n┌─ {'Task Size':<15}: {get_readable_file_size(self.size)}"
+            f"\n├─ {'Time Taken':<15}: {get_readable_time(time() - self.message.date.timestamp())}"
+            f"\n├─ {'In Mode':<15}: {self.mode[0]}"
+            f"\n├─ {'Out Mode':<15}: {self.mode[1]}"
         )
         LOGGER.info(f"Task Done: {self.name}")
         if self.is_yt:
             buttons = ButtonMaker()
             if mime_type == "Folder/Playlist":
-                msg += "\n┠ <b>Type</b> → Playlist"
-                msg += f"\n┖ <b>Total Videos</b> → {files}"
+                msg += "\n├─ {'Type':<15}: Playlist"
+                msg += f"\n└─ {{'Total Videos':<15}}: {files}"
                 if link:
                     buttons.url_button(
                         "🔗 View Playlist", link, style=ButtonStyle.PRIMARY
                     )
                 user_message = f"{self.tag}\nYour playlist ({files} videos) has been uploaded to YouTube successfully!"
             else:
-                msg += "\n┖ <b>Type</b> → Video"
+                msg += "\n└─ {'Type':<15}: Video"
                 if link:
                     buttons.url_button("🔗 View Video", link, style=ButtonStyle.PRIMARY)
                 user_message = (
@@ -585,10 +587,10 @@ class TaskListener(TaskConfig):
             await send_message(self.message, user_message, button)
 
         elif self.is_leech:
-            msg += f"\n┠ <b>Total Files: </b>{folders}"
+            msg += f"\n├─ {{'Total Files':<15}}: {folders}"
             if mime_type != 0:
-                msg += f"\n┠ <b>Corrupted Files</b> → {mime_type}"
-            msg += f"\n┖ <b>Task By</b> → {self.tag}\n\n"
+                msg += f"\n├─ {{'Corrupted Files':<15}}: {mime_type}"
+            msg += f"\n└─ {{'Task By':<15}}: {self.tag}\n</pre>\n"
 
             if self.bot_pm:
                 pmsg = msg
@@ -643,10 +645,10 @@ class TaskListener(TaskConfig):
                 if fmsg != "":
                     await send_message(log_chat, msg + fmsg)
         else:
-            msg += f"\n│\n┟ <b>Type</b> → {mime_type}"
+            msg += f"\n├─ {{'Type':<15}}: {mime_type}"
             if mime_type == "Folder":
-                msg += f"\n┠ <b>SubFolders</b> → {folders}"
-                msg += f"\n┠ <b>Files</b> → {files}"
+                msg += f"\n├─ {{'SubFolders':<15}}: {folders}"
+                msg += f"\n├─ {{'Files':<15}}: {files}"
 
             multi_link_msg = ""
             multi_links = []
@@ -714,9 +716,9 @@ class TaskListener(TaskConfig):
                 button = buttons.build_menu(2)
             else:
                 if not multi_link_msg and rclone_path:
-                    msg += f"\n┃\n┠ Path: <code>{rclone_path}</code>"
+                    msg += f"\n├─ {{'Path':<15}}: {rclone_path}"
                 button = None
-            msg += f"\n┃\n┖ <b>Task By</b> → {self.tag}\n\n"
+            msg += f"\n└─ {{'Task By':<15}}: {self.tag}\n</pre>\n"
             group_msg = (
                 msg + "〶 <b><u>Action Performed :</u></b>\n"
                 "⋗ <i>Cloud link(s) have been sent to User PM</i>\n\n"
@@ -767,21 +769,23 @@ class TaskListener(TaskConfig):
             count = len(task_dict)
         await self.remove_from_same_dir()
         msg = (
-            f"""〶 <b><i><u>Limit Breached:</u></i></b>
-│
-┟ <b>Task Size</b> → {get_readable_file_size(self.size)}
-┠ <b>In Mode</b> → {self.mode[0]}
-┠ <b>Out Mode</b> → {self.mode[1]}
-{error}"""
+            f"""<b>❖ LIMIT BREACHED</b>
+<pre>
+┌─ {'Task Size':<12}: {get_readable_file_size(self.size)}
+├─ {'In Mode':<12}: {self.mode[0]}
+├─ {'Out Mode':<12}: {self.mode[1]}
+└─ {'Details':<12}: {error}
+</pre>"""
             if is_limit
-            else f"""<i><b>〶 Download Stopped!</b></i>
-│
-┟ <b>Due To</b> → {escape(str(error))}
-┠ <b>Task Size</b> → {get_readable_file_size(self.size)}
-┠ <b>Time Taken</b> → {get_readable_time(time() - self.message.date.timestamp())}
-┠ <b>In Mode</b> → {self.mode[0]}
-┠ <b>Out Mode</b> → {self.mode[1]}
-┖ <b>Task By</b> → {self.tag}"""
+            else f"""<b>❖ DOWNLOAD STOPPED</b>
+<pre>
+┌─ {'Due To':<12}: {escape(str(error))}
+├─ {'Task Size':<12}: {get_readable_file_size(self.size)}
+├─ {'Time Taken':<12}: {get_readable_time(time() - self.message.date.timestamp())}
+├─ {'In Mode':<12}: {self.mode[0]}
+├─ {'Out Mode':<12}: {self.mode[1]}
+└─ {'Task By':<12}: {self.tag}
+</pre>"""
         )
 
         await send_message(self.message, msg, button)

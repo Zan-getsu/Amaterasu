@@ -149,16 +149,15 @@ async def prepare_stored_media(message):
 
 
 def build_caption(title, filename, readable_size, stream_link, download_link):
+    title = title.replace("❖ ", "").strip()
     caption = (
         f"<b>❖ {title}</b>\n"
-        f"┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄\n"
-        f"├ 📂 <b>Name :</b> <code>{filename}</code>\n"
-        f"│\n"
-        f"├ 📦 <b>Size :</b> <code>{readable_size}</code>\n"
-        f"│\n"
-        f"├ 📥 <b>DL   :</b> <code>{download_link}</code>\n"
-        f"│\n"
-        f"└ 🖥 <b>Play :</b> <code>{stream_link}</code>"
+        f"<pre>\n"
+        f"┌─ {'Name':<6} : {filename}\n"
+        f"├─ {'Size':<6} : {readable_size}\n"
+        f"├─ {'DL':<6} : {download_link}\n"
+        f"└─ {'Play':<6} : {stream_link}\n"
+        f"</pre>"
     )
     return caption
 
@@ -244,7 +243,7 @@ async def link_command_handler(client, message):
                 LOGGER.error(f"Failed to process batch message {msg_id}: {e}")
                 failed += 1
                 
-        await edit_message(status_msg, f"<b>❖ BATCH COMPLETED</b>\n┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄\n├ Processed: <code>{processed}</code>\n└ Failed   : <code>{failed}</code>")
+        await edit_message(status_msg, f"<b>❖ BATCH COMPLETED</b>\n<pre>\n┌─ {'Processed':<9} : {processed}\n└─ {'Failed':<9} : {failed}\n</pre>")
     else:
         await process_media_message(client, message, message.reply_to_message)
 

@@ -117,7 +117,7 @@ class YtSelection:
             buttons.data_button("❖ BEST AUDIOS", "ytq ba/b")
             buttons.data_button("✕ CANCEL", "ytq cancel", "footer")
             self._main_buttons = buttons.build_menu(3)
-            msg = f"<b>❖ PLAYLIST QUALITY</b>\n┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄\n└ Timeout: <i>◷ {get_readable_time(self._timeout - (time() - self._time))}</i>"
+            msg = f"<b>❖ PLAYLIST QUALITY</b>\n<pre>\n└─ {'Timeout':<7} : ◷ {get_readable_time(self._timeout - (time() - self._time))}\n</pre>"
         else:
             format_dict = result.get("formats")
             if format_dict is not None:
@@ -170,7 +170,7 @@ class YtSelection:
             buttons.data_button("❖ BEST AUDIO", "ytq ba/b")
             buttons.data_button("✕ CANCEL", "ytq cancel", "footer")
             self._main_buttons = buttons.build_menu(2)
-            msg = f"<b>❖ VIDEO QUALITY</b>\n┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄\n└ Timeout: <i>◷ {get_readable_time(self._timeout - (time() - self._time))}</i>"
+            msg = f"<b>❖ VIDEO QUALITY</b>\n<pre>\n└─ {'Timeout':<7} : ◷ {get_readable_time(self._timeout - (time() - self._time))}\n</pre>"
         self._reply_to = await send_message(
             self.listener.message, msg, self._main_buttons
         )
@@ -181,9 +181,9 @@ class YtSelection:
 
     async def back_to_main(self):
         if self._is_playlist:
-            msg = f"<b>❖ PLAYLIST QUALITY</b>\n┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄\n└ Timeout: <i>◷ {get_readable_time(self._timeout - (time() - self._time))}</i>"
+            msg = f"<b>❖ PLAYLIST QUALITY</b>\n<pre>\n└─ {'Timeout':<7} : ◷ {get_readable_time(self._timeout - (time() - self._time))}\n</pre>"
         else:
-            msg = f"<b>❖ VIDEO QUALITY</b>\n┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄\n└ Timeout: <i>◷ {get_readable_time(self._timeout - (time() - self._time))}</i>"
+            msg = f"<b>❖ VIDEO QUALITY</b>\n<pre>\n└─ {'Timeout':<7} : ◷ {get_readable_time(self._timeout - (time() - self._time))}\n</pre>"
         await edit_message(self._reply_to, msg, self._main_buttons)
 
     async def qual_subbuttons(self, b_name):
@@ -195,7 +195,7 @@ class YtSelection:
         buttons.data_button("↩ BACK", "ytq back", "footer")
         buttons.data_button("✕ CANCEL", "ytq cancel", "footer")
         subbuttons = buttons.build_menu(2)
-        msg = f"<b>❖ BITRATE : {b_name}</b>\n┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄\n└ Timeout: <i>◷ {get_readable_time(self._timeout - (time() - self._time))}</i>"
+        msg = f"<b>❖ BITRATE : {b_name}</b>\n<pre>\n└─ {'Timeout':<7} : ◷ {get_readable_time(self._timeout - (time() - self._time))}\n</pre>"
         await edit_message(self._reply_to, msg, subbuttons)
 
     async def mp3_subbuttons(self):
@@ -208,7 +208,7 @@ class YtSelection:
         buttons.data_button("↩ BACK", "ytq back")
         buttons.data_button("✕ CANCEL", "ytq cancel")
         subbuttons = buttons.build_menu(3)
-        msg = f"<b>❖ MP3 BITRATE</b>\n┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄\n└ Timeout: <i>◷ {get_readable_time(self._timeout - (time() - self._time))}</i>"
+        msg = f"<b>❖ MP3 BITRATE</b>\n<pre>\n└─ {'Timeout':<7} : ◷ {get_readable_time(self._timeout - (time() - self._time))}\n</pre>"
         await edit_message(self._reply_to, msg, subbuttons)
 
     async def audio_format(self):
@@ -220,7 +220,7 @@ class YtSelection:
         buttons.data_button("↩ BACK", "ytq back", "footer")
         buttons.data_button("✕ CANCEL", "ytq cancel", "footer")
         subbuttons = buttons.build_menu(3)
-        msg = f"<b>❖ AUDIO FORMAT</b>\n┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄\n└ Timeout: <i>◷ {get_readable_time(self._timeout - (time() - self._time))}</i>"
+        msg = f"<b>❖ AUDIO FORMAT</b>\n<pre>\n└─ {'Timeout':<7} : ◷ {get_readable_time(self._timeout - (time() - self._time))}\n</pre>"
         await edit_message(self._reply_to, msg, subbuttons)
 
     async def audio_quality(self, format):
@@ -232,7 +232,7 @@ class YtSelection:
         buttons.data_button("↩ BACK", "ytq aq back")
         buttons.data_button("✕ CANCEL", "ytq cancel")
         subbuttons = buttons.build_menu(5)
-        msg = f"<b>❖ AUDIO QUALITY</b>\n┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄\n├ Info   : <code>0 (Best) - 10 (Worst)</code>\n└ Timeout: <i>◷ {get_readable_time(self._timeout - (time() - self._time))}</i>"
+        msg = f"<b>❖ AUDIO QUALITY</b>\n<pre>\n├─ {'Info':<7} : 0 (Best) - 10 (Worst)\n└─ {'Timeout':<7} : ◷ {get_readable_time(self._timeout - (time() - self._time))}\n</pre>"
         await edit_message(self._reply_to, msg, subbuttons)
 
 
