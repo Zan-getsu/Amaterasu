@@ -146,16 +146,14 @@ async def prepare_stored_media(message):
         media = get_media(copied) or media
         
         user = message.from_user or message.sender_chat
-        user_name = getattr(user, 'first_name', getattr(user, 'title', 'Unknown'))
-        if hasattr(user, 'last_name') and user.last_name:
-            user_name += f" {user.last_name}"
+        user_mention = user.mention(style="html") if hasattr(user, "mention") else getattr(user, "title", "Unknown")
             
         user_id = user.id
         file_id = getattr(media, "file_unique_id", "Unknown")
         
         reply_text = (
             f"<b>❖ FILETOLINK LOGGER</b>\n<code>"
-            f"┌─ {'Requested':<10}: {user_name}\n"
+            f"┌─ {'Requested':<10}: </code>{user_mention}<code>\n"
             f"├─ {'User ID':<10}: {user_id}\n"
             f"└─ {'File ID':<10}: {file_id}</code>"
         )
