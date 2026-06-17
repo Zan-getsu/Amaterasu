@@ -146,7 +146,9 @@ SERVICES = {
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global aria2, qbittorrent
+    from bot.core.config_manager import Config
     from bot.helper.ext_utils.db_handler import database
+    Config.load()
     await database.connect()
     aria2 = Aria2HttpClient("http://localhost:6800/jsonrpc")
     qbittorrent = await create_client("http://localhost:8090/api/v2/")
