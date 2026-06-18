@@ -380,11 +380,12 @@ class TelegramUploader:
         except Exception as err:
             if self._listener.is_cancelled:
                 return None
+            is_retry_error = isinstance(err, RetryError)
             if isinstance(err, RetryError):
                 LOGGER.info(f"Total Attempts: {err.last_attempt.attempt_number}")
                 err = err.last_attempt.exception()
             err_msg = str(err) or repr(err)
-            LOGGER.error(f"{err_msg}. Path: {f_path}", exc_info=True)
+            LOGGER.error(f"{err_msg}. Path: {f_path}", exc_info=not is_retry_error)
             self._error = err_msg
             self._corrupted += 1
             return None
@@ -582,9 +583,8 @@ class TelegramUploader:
             return sent_msg
         except Exception as err:
             if not self._listener.is_cancelled:
-                LOGGER.error(
-                    f"Telegram upload failed: {file} | {type(err).__name__}: {str(err) or repr(err)}",
-                    exc_info=True,
+                LOGGER.warning(
+                    f"Telegram upload attempt failed: {file} | {type(err).__name__}: {str(err) or repr(err)}"
                 )
             raise
 
@@ -775,7 +775,7 @@ class TelegramUploader:
                 await remove(thumb)
             err_type = "RPCError: " if isinstance(err, RPCError) else ""
             err_msg = str(err) or repr(err)
-            LOGGER.error(f"{err_type}{err_msg}. Path: {o_path}", exc_info=True)
+            LOGGER.warning(f"{err_type}{err_msg}. Retrying upload. Path: {o_path}")
             if isinstance(err, BadRequest) and key != "documents":
                 LOGGER.error(f"Retrying as document. Path: {o_path}")
                 return await self._upload_file(cap_mono, file, o_path, True)

@@ -102,7 +102,29 @@ def _task_title(message, task):
     return task["_id"]
 
 
+def _parse_pm_task_id(task_id):
+    parts = str(task_id).split(":")
+    if len(parts) == 3 and parts[0] == "pm" and parts[1].isdigit() and parts[2].isdigit():
+        return int(parts[1]), int(parts[2])
+    return None, None
+
+
+def _task_line(index, task):
+    type_str = _get_task_type(task.get("command", ""))
+    title = escape(_truncate(task.get("name") or task.get("command") or task["_id"]))
+    task_id = str(task["_id"])
+    if task_id.startswith("pm:"):
+        return f"\n{index}. {type_str} {title}"
+    return f"\n{index}. {type_str} <a href='{task_id}'>{title}</a>"
+
+
 async def _get_task_message(task):
+    if str(task["_id"]).startswith("pm:") and not TgClient.user:
+        LOGGER.warning(
+            "Skipping private incomplete task message fetch without USER_SESSION_STRING: %s",
+            task["_id"],
+        )
+        return None, None
     try:
         message, client_name = await get_tg_link_message(task["_id"])
     except Exception as e:
@@ -117,6 +139,11 @@ async def _get_task_message(task):
 async def _hydrate_incomplete_task(task):
     update = {}
     message = None
+    pm_user_id, _ = _parse_pm_task_id(task["_id"])
+    if not task.get("user_id") and pm_user_id:
+        update["user_id"] = pm_user_id
+    if not task.get("name") and task.get("command"):
+        update["name"] = task["command"].split("\n", 1)[0]
     if not task.get("user_id") or not task.get("name"):
         message, _ = await _get_task_message(task)
     if not task.get("user_id") and message:
@@ -162,9 +189,7 @@ async def _send_recovery_message_ui(message_or_target, user_id, tasks, now, is_e
         f"You had <code>{len(tasks)}</code> incomplete task(s):"
     )
     for index, task in enumerate(tasks[:20], start=1):
-        type_str = _get_task_type(task.get("command", ""))
-        title = escape(_truncate(task.get("name") or task["_id"]))
-        msg += f"\n{index}. {type_str} <a href='{task['_id']}'>{title}</a>"
+        msg += _task_line(index, task)
     if len(tasks) > 20:
         msg += f"\n...and {len(tasks) - 20} more."
     msg += (
@@ -194,9 +219,7 @@ async def _send_recovery_message_to_chat(cid, user_id, tasks, now):
         f"You had <code>{len(tasks)}</code> incomplete task(s):"
     )
     for index, task in enumerate(tasks[:20], start=1):
-        type_str = _get_task_type(task.get("command", ""))
-        title = escape(_truncate(task.get("name") or task["_id"]))
-        msg += f"\n{index}. {type_str} <a href='{task['_id']}'>{title}</a>"
+        msg += _task_line(index, task)
     if len(tasks) > 20:
         msg += f"\n...and {len(tasks) - 20} more."
     msg += (
