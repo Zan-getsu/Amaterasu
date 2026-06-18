@@ -120,8 +120,7 @@ def _fetch_config_from_db(config_file, db_part):
     db_config = run(_fetch_db_config(database_url, db_part))
     if db_config is not None:
         for key, value in db_config.items():
-            if key not in config_file or config_file[key] is None:
-                config_file[key] = value
+            config_file[key] = value
         _LOGGER.info("Config imported from MongoDB")
     else:
         _LOGGER.warning("No saved config found in MongoDB, using defaults")
