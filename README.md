@@ -775,7 +775,7 @@ All limits are in **GB**. Set `0` to disable the limit.
 | `CLEAN_LOG_MSG` | `bool` | `False` | Clean log messages after task completion |
 | `DELETE_LINKS` | `bool` | `False` | Delete user's link message after processing |
 | `MEDIA_STORE` | `bool` | `False` | Store media metadata |
-| `COLORED_BTNS` | `bool` | `False` | Enable colored inline button styles where Telegram supports them |
+| `COLORED_BTNS` | `bool` | `True` | Enable colored inline button styles where Telegram supports them |
 
 ### 13. FileToLink Streaming
 

@@ -166,7 +166,7 @@ DEFAULT_DESP = {
     "BOT_MAX_TASKS": "Max tasks (including queued) the bot runs in parallel. 0 = unlimited.",
     "BOT_PM": "Send files/links to bot owner PM. Default: False.",
     "CMD_SUFFIX": "Text appended to all bot commands. Useful for running multiple bot instances.",
-    "COLORED_BTNS": "Use colored inline buttons. Default: False.",
+    "COLORED_BTNS": "Use colored inline buttons. Default: True.",
     "CLOUDFLARE_TUNNEL_ENABLED": "Start Cloudflare Tunnel from Amaterasu. If token is empty, a temporary quick tunnel is used.",
     "CLOUDFLARE_TUNNEL_TOKEN": "Cloudflare named tunnel token. Leave empty to use a temporary trycloudflare.com quick tunnel.",
     "CLOUDFLARE_TUNNEL_TARGET": "Local service URL exposed by Cloudflare Tunnel. Empty = http://127.0.0.1:PORT.",

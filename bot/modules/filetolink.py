@@ -3,14 +3,15 @@ from datetime import datetime
 from urllib.parse import quote
 
 from pyrogram import ContinuePropagation
+from pyrogram.enums import ButtonStyle
 from pyrogram.errors import FloodWait
-from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 from bot import LOGGER
 from bot.core.config_manager import Config
 from bot.helper.ext_utils.bot_utils import get_web_secret
 from bot.helper.ext_utils.status_utils import get_readable_file_size
 from bot.helper.ext_utils.shortener_utils import short_url
+from bot.helper.telegram_helper.button_build import ButtonMaker
 from bot.helper.telegram_helper.message_utils import edit_message, send_message
 from web.security import make_route_token
 
@@ -98,12 +99,11 @@ async def generate_link_markup(chat_id, message_id, filename, secure_hash=""):
     stream_link = await maybe_shorten(f"{base_url}/watch{token_path}")
     download_link = await maybe_shorten(f"{base_url}/dl{token_path}")
     
-    buttons = [[
-        InlineKeyboardButton("❖ STREAM ONLINE", url=stream_link),
-        InlineKeyboardButton("❖ DIRECT DOWNLOAD", url=download_link),
-    ]]
+    buttons = ButtonMaker()
+    buttons.url_button("▶️ STREAM", stream_link, style=ButtonStyle.PRIMARY)
+    buttons.url_button("⬇️ DOWNLOAD", download_link, style=ButtonStyle.SUCCESS)
         
-    return InlineKeyboardMarkup(buttons), stream_link, download_link
+    return buttons.build_menu(2), stream_link, download_link
 
 
 def _stream_token(chat_id, message_id, unique_id):

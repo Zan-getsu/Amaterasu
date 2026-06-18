@@ -171,7 +171,7 @@ INC_TASK_RESUME = False
 CLEAN_LOG_MSG = False
 DELETE_LINKS = False
 MEDIA_STORE = False
-COLORED_BTNS = False
+COLORED_BTNS = True
 
 # ==========================================
 # 14. DYNAMIC FILE-TO-LINK STREAMING
