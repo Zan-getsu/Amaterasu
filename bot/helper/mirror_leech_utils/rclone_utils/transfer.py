@@ -19,6 +19,9 @@ from ...ext_utils.files_utils import (
 
 LOGGER = getLogger(__name__)
 
+RCLONE_SOURCE_ARG_INDEX = 6
+RCLONE_DEST_ARG_INDEX = 7
+
 
 class RcloneTransferHelper:
     def __init__(self, listener):
@@ -93,6 +96,13 @@ class RcloneTransferHelper:
         LOGGER.info(f"Switching to {remote} remote")
         return remote
 
+    @staticmethod
+    def _with_remote_at_arg(cmd, arg_index, remote):
+        return [
+            f"{remote}:{arg.split(':', 1)[1]}" if index == arg_index else arg
+            for index, arg in enumerate(cmd)
+        ]
+
     async def _create_rc_sa(self, remote, remote_opts):
         sa_conf_dir = "rclone_sa"
         sa_conf_file = f"{sa_conf_dir}/{remote}.conf"
@@ -142,7 +152,9 @@ class RcloneTransferHelper:
             ):
                 if self._sa_count < self._sa_number:
                     remote = self._switch_service_account()
-                    cmd[6] = f"{remote}:{cmd[6].split(':', 1)[1]}"
+                    cmd = self._with_remote_at_arg(
+                        cmd, RCLONE_SOURCE_ARG_INDEX, remote
+                    )
                     if self._listener.is_cancelled:
                         return
                     return await self._start_download(cmd, remote_type)
@@ -256,7 +268,9 @@ class RcloneTransferHelper:
             ):
                 if self._sa_count < self._sa_number:
                     remote = self._switch_service_account()
-                    cmd[7] = f"{remote}:{cmd[7].split(':', 1)[1]}"
+                    cmd = self._with_remote_at_arg(
+                        cmd, RCLONE_DEST_ARG_INDEX, remote
+                    )
                     return (
                         False
                         if self._listener.is_cancelled

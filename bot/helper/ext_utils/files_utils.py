@@ -361,20 +361,20 @@ class SevenZ:
         self._percentage = "0%"
 
     async def extract(self, f_path, t_path, pswd):
-        cmd = [
-            "7z",
-            "x",
-            f"-p{pswd}",
-            f_path,
-            f"-o{t_path}",
-            "-aot",
-            "-xr!@PaxHeader",
-            "-bsp1",
-            "-bse1",
-            "-bb3",
-        ]
-        if not pswd:
-            del cmd[2]
+        cmd = ["7z", "x"]
+        if pswd:
+            cmd.append(f"-p{pswd}")
+        cmd.extend(
+            [
+                f_path,
+                f"-o{t_path}",
+                "-aot",
+                "-xr!@PaxHeader",
+                "-bsp1",
+                "-bse1",
+                "-bb3",
+            ]
+        )
         if self._listener.is_cancelled:
             return False
         self._listener.subproc = await create_subprocess_exec(
@@ -405,28 +405,16 @@ class SevenZ:
             split_size = (size // parts) + (size % parts)
         else:
             split_size = self._listener.split_size
-        cmd = [
-            "7z",
-            f"-v{split_size}b",
-            "a",
-            "-mx=0",
-            "-mmt=on",
-            f"-p{pswd}",
-            up_path,
-            dl_path,
-            "-bsp1",
-            "-bse1",
-            "-bb3",
-        ]
+        cmd = ["7z"]
         if self._listener.is_leech and int(size) > self._listener.split_size:
-            if not pswd:
-                del cmd[4]
+            cmd.append(f"-v{split_size}b")
             LOGGER.info(f"Zip: orig_path: {dl_path}, zip_path: {up_path}.0*")
         else:
-            del cmd[1]
-            if not pswd:
-                del cmd[3]
             LOGGER.info(f"Zip: orig_path: {dl_path}, zip_path: {up_path}")
+        cmd.extend(["a", "-mx=0", "-mmt=on"])
+        if pswd:
+            cmd.append(f"-p{pswd}")
+        cmd.extend([up_path, dl_path, "-bsp1", "-bse1", "-bb3"])
         if self._listener.is_cancelled:
             return False
         self._listener.subproc = await create_subprocess_exec(

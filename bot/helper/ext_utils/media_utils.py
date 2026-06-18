@@ -1024,16 +1024,14 @@ class FFMpeg:
                 "libx264",
                 "-c:a",
                 "aac",
-                "-threads",
-                f"{threads}",
-                output,
             ]
             if ext == "mp4":
-                cmd[17:17] = ["-c:s", "mov_text"]
+                cmd.extend(["-c:s", "mov_text"])
             elif ext == "mkv":
-                cmd[17:17] = ["-c:s", "ass"]
+                cmd.extend(["-c:s", "ass"])
             else:
-                cmd[17:17] = ["-c:s", "copy"]
+                cmd.extend(["-c:s", "copy"])
+            cmd.extend(["-threads", f"{threads}", output])
         else:
             cmd = [
                 "taskset",
@@ -1242,23 +1240,24 @@ class FFMpeg:
                 f_path,
                 "-fs",
                 str(split_size),
-                "-map",
-                "0",
-                "-map_chapters",
-                "-1",
-                "-async",
-                "1",
-                "-strict",
-                "-2",
-                "-c",
-                "copy",
-                "-threads",
-                f"{threads}",
-                out_path,
             ]
-            if not multi_streams:
-                del cmd[15]
-                del cmd[15]
+            if multi_streams:
+                cmd.extend(["-map", "0"])
+            cmd.extend(
+                [
+                    "-map_chapters",
+                    "-1",
+                    "-async",
+                    "1",
+                    "-strict",
+                    "-2",
+                    "-c",
+                    "copy",
+                    "-threads",
+                    f"{threads}",
+                    out_path,
+                ]
+            )
             if self._listener.is_cancelled:
                 return False
             self._listener.subproc = await create_subprocess_exec(
