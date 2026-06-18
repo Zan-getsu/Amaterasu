@@ -65,7 +65,6 @@ class TelegramUploader:
         self._processed_bytes = 0
         self._completed_bytes = 0
         self._is_finalizing_upload = False
-        self._last_progress_at = time()
         self._listener = listener
         self._path = path
         self._client = None
@@ -102,37 +101,11 @@ class TelegramUploader:
         self._last_uploaded = current
         self._processed_bytes = self._completed_bytes + min(current, total)
         self._is_finalizing_upload = total > 0 and current >= total
-        self._last_progress_at = time()
 
     async def _reset_upload_attempt(self, path):
         self._last_uploaded = 0
         self._processed_bytes = self._completed_bytes
         self._is_finalizing_upload = False
-        self._last_progress_at = time()
-
-    async def _await_pyrogram_upload(self, coro, target_client, file):
-        upload_task = ensure_future(coro)
-        try:
-            while not upload_task.done():
-                await sleep(10)
-                if self._listener.is_cancelled:
-                    target_client.stop_transmission()
-                    raise StopTransmission()
-                idle = time() - self._last_progress_at
-                timeout = 180 if self._is_finalizing_upload else 120
-                if idle > timeout:
-                    stage = "finalizing" if self._is_finalizing_upload else "uploading"
-                    target_client.stop_transmission()
-                    upload_task.cancel()
-                    await gather(upload_task, return_exceptions=True)
-                    raise TimeoutError(
-                        f"Telegram upload stalled for {int(idle)}s while {stage}: {file}"
-                    )
-            return await upload_task
-        finally:
-            if not upload_task.done():
-                upload_task.cancel()
-                await gather(upload_task, return_exceptions=True)
 
     async def _user_settings(self):
         settings_map = {
@@ -613,9 +586,7 @@ class TelegramUploader:
                         reply_to_message_id=self._sent_msg.id,
                         progress=self._upload_progress,
                     )
-                sent_msg = await self._await_pyrogram_upload(
-                    upload_coro, target_client, file
-                )
+                sent_msg = await upload_coro
             else:
                 sent_msg = await self._hu.upload(
                     target_client=target_client,
