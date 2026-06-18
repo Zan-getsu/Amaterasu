@@ -146,7 +146,7 @@ class Config:
     UPLOAD_PATHS = {}
     DRIVE_CATEGORY_MODE = False
     DRIVE_CATEGORY_SA = ""
-    UPSTREAM_REPO = "https://github.com/its-niloy/Amaterasu"
+    UPSTREAM_REPO = ""
     UPSTREAM_BRANCH = "main"
     UPDATE_PKGS = True
     USENET_SERVERS = []

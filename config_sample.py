@@ -234,7 +234,7 @@ DISABLE_SEARCH = False
 DISABLE_YTDLP = False
 CPU_LIMIT = 20
 THROTTLE_SERVICES = "auto"
-UPSTREAM_REPO = "https://github.com/its-niloy/Amaterasu"
+UPSTREAM_REPO = ""
 UPSTREAM_BRANCH = "main"
 UPDATE_PKGS = True
 

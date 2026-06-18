@@ -192,7 +192,7 @@ def main():
 
     _fetch_config_from_db(config_file, db_part)
 
-    upstream_repo = config_file.get("UPSTREAM_REPO", "").strip() or "https://github.com/its-niloy/Amaterasu"
+    upstream_repo = config_file.get("UPSTREAM_REPO", "").strip()
     upstream_branch = config_file.get("UPSTREAM_BRANCH", "").strip() or "main"
 
     _run_update(upstream_repo, upstream_branch, version)

@@ -27,7 +27,7 @@ pillow
 psutil
 pycountry
 pymongo
-pyrotgfork
+pyrotgfork==2.2.19
 python-magic
 pytz
 qbittorrent-api

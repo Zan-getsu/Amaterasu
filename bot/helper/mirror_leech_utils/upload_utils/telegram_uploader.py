@@ -28,6 +28,13 @@ from pyrogram.types import (
     InputMediaPhoto,
     InputMediaVideo,
 )
+from tenacity import (
+    RetryError,
+    retry,
+    retry_if_exception_type,
+    stop_after_attempt,
+    wait_exponential,
+)
 
 from ....core.config_manager import Config
 from ....core.tg_client import TgClient
@@ -373,6 +380,9 @@ class TelegramUploader:
         except Exception as err:
             if self._listener.is_cancelled:
                 return None
+            if isinstance(err, RetryError):
+                LOGGER.info(f"Total Attempts: {err.last_attempt.attempt_number}")
+                err = err.last_attempt.exception()
             err_msg = str(err) or repr(err)
             LOGGER.error(f"{err_msg}. Path: {f_path}", exc_info=True)
             self._error = err_msg
@@ -578,6 +588,11 @@ class TelegramUploader:
                 )
             raise
 
+    @retry(
+        wait=wait_exponential(multiplier=2, min=4, max=8),
+        stop=stop_after_attempt(3),
+        retry=retry_if_exception_type(Exception),
+    )
     async def _upload_file(self, cap_mono, file, o_path, force_document=False):
         if self._listener.is_cancelled:
             raise StopTransmission()
