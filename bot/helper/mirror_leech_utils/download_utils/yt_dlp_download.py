@@ -24,6 +24,10 @@ from ..status_utils.yt_dlp_status import YtDlpStatus
 LOGGER = getLogger(__name__)
 
 
+def _bin_path(name):
+    return name if ospath.isabs(name) else f"/bin/{name}"
+
+
 class MyLogger:
     def __init__(self, obj, listener):
         self._obj = obj
@@ -58,6 +62,7 @@ class YoutubeDLHelper:
         self._download_speed = 0
         self._eta = "-"
         self._listener = listener
+        self._active = False
         self._gid = ""
         self._ext = ""
         self.is_playlist = False
@@ -75,13 +80,13 @@ class YoutubeDLHelper:
             "overwrites": True,
             "writethumbnail": True,
             "trim_file_name": 220,
-            "ffmpeg_location": f"/bin/{BinConfig.FFMPEG_NAME}",
+            "ffmpeg_location": _bin_path(BinConfig.FFMPEG_NAME),
             "concurrent_fragments": 8,
             "impersonate": ImpersonateTarget.from_str("chrome"),
             "socket_timeout": 30,
             "downloader": {
-                "http": f"/bin/{BinConfig.ARIA2_NAME}",
-                "https": f"/bin/{BinConfig.ARIA2_NAME}",
+                "http": _bin_path(BinConfig.ARIA2_NAME),
+                "https": _bin_path(BinConfig.ARIA2_NAME),
             },
             "downloader_args": {
                 BinConfig.ARIA2_NAME: [
@@ -322,25 +327,29 @@ class YoutubeDLHelper:
                     self._ext = ext
 
     def _download(self, path):
-        with suppress(Exception):
-            with YoutubeDL(self.opts) as ydl:
-                try:
-                    ydl.download([self._listener.link])
-                except DownloadError as e:
-                    if not self._listener.is_cancelled:
-                        self._on_download_error(str(e))
+        self._active = True
+        try:
+            with suppress(Exception):
+                with YoutubeDL(self.opts) as ydl:
+                    try:
+                        ydl.download([self._listener.link])
+                    except DownloadError as e:
+                        if not self._listener.is_cancelled:
+                            self._on_download_error(str(e))
+                        return
+                self._repair_unknown_video_name(path)
+                if self.is_playlist and (
+                    not ospath.exists(path) or len(listdir(path)) == 0
+                ):
+                    self._on_download_error(
+                        "No video available to download from this playlist. Check logs for more details"
+                    )
                     return
-            self._repair_unknown_video_name(path)
-            if self.is_playlist and (
-                not ospath.exists(path) or len(listdir(path)) == 0
-            ):
-                self._on_download_error(
-                    "No video available to download from this playlist. Check logs for more details"
-                )
-                return
-            if self._listener.is_cancelled:
-                return
-            async_to_sync(self._listener.on_download_complete)
+                if self._listener.is_cancelled:
+                    return
+                async_to_sync(self._listener.on_download_complete)
+        finally:
+            self._active = False
         return
 
     async def add_download(
@@ -507,6 +516,10 @@ class YoutubeDLHelper:
     async def cancel_task(self):
         self._listener.is_cancelled = True
         LOGGER.info(f"Cancelling Download: {self._listener.name}")
+        for _ in range(30):
+            if not self._active:
+                break
+            await sleep(0.5)
         await self._listener.on_download_error("Stopped by User!")
 
     def _set_options(self, options):
