@@ -5,7 +5,7 @@ from pathlib import Path
 from os import getcwd
 
 from aioaria2 import Aria2WebsocketClient
-from aiohttp import ClientError
+from aiohttp import ClientError, ClientSession, ClientTimeout
 from aioqbt.client import create_client
 from tenacity import (
     retry,
@@ -48,6 +48,29 @@ async def _connect_aria2(retries=5, delay=2):
             await sleep(delay)
 
 
+async def _connect_qbittorrent(retries=30, delay=2):
+    base_url = "http://localhost:8090/api/v2/"
+    last_error = None
+    for i in range(retries):
+        try:
+            timeout = ClientTimeout(total=5)
+            async with ClientSession(timeout=timeout) as session:
+                async with session.get(f"{base_url}app/webapiVersion") as response:
+                    if response.status == 200:
+                        return await create_client(base_url)
+                    last_error = RuntimeError(
+                        f"unexpected status {response.status}"
+                    )
+        except (ClientError, OSError, TimeoutError) as e:
+            last_error = e
+        LOGGER.warning(
+            f"qBittorrent WebUI not ready, retrying ({i + 1}/{retries}): {last_error}"
+        )
+        if i == retries - 1:
+            raise last_error
+        await sleep(delay)
+
+
 class TorrentManager:
     aria2 = None
     qbittorrent = None
@@ -70,7 +93,7 @@ class TorrentManager:
             await sleep(2)
             LOGGER.info(f"qBittorrent started (PID: {proc.pid})")
 
-            cls.qbittorrent = await create_client("http://localhost:8090/api/v2/")
+            cls.qbittorrent = await _connect_qbittorrent()
             cls.qbittorrent = wrap_with_retry(cls.qbittorrent)
 
         except Exception as e:
