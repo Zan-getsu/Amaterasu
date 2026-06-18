@@ -32,6 +32,7 @@ from tenacity import (
     RetryError,
     retry,
     retry_if_exception_type,
+    retry_if_not_exception_type,
     stop_after_attempt,
     wait_exponential,
 )
@@ -62,6 +63,9 @@ class TelegramUploader:
     def __init__(self, listener, path):
         self._last_uploaded = 0
         self._processed_bytes = 0
+        self._completed_bytes = 0
+        self._is_finalizing_upload = False
+        self._last_progress_at = time()
         self._listener = listener
         self._path = path
         self._client = None
@@ -88,15 +92,47 @@ class TelegramUploader:
         self._upload_tasks = []
         self._hu = HypertgUpload(self) if Config.USE_HYPER and Config.LEECH_DUMP_CHAT else None
 
-    async def _upload_progress(self, current, _):
+    async def _upload_progress(self, current, total):
         if self._listener.is_cancelled:
             client = TgClient.user if self._user_session else self._listener.client
             client.stop_transmission()
             raise StopTransmission()
-        chunk_size = current - self._last_uploaded
-        if chunk_size > 0:
-            self._last_uploaded = current
-            self._processed_bytes += chunk_size
+        current = max(0, current)
+        total = total or current
+        self._last_uploaded = current
+        self._processed_bytes = self._completed_bytes + min(current, total)
+        self._is_finalizing_upload = total > 0 and current >= total
+        self._last_progress_at = time()
+
+    async def _reset_upload_attempt(self, path):
+        self._last_uploaded = 0
+        self._processed_bytes = self._completed_bytes
+        self._is_finalizing_upload = False
+        self._last_progress_at = time()
+
+    async def _await_pyrogram_upload(self, coro, target_client, file):
+        upload_task = ensure_future(coro)
+        try:
+            while not upload_task.done():
+                await sleep(10)
+                if self._listener.is_cancelled:
+                    target_client.stop_transmission()
+                    raise StopTransmission()
+                idle = time() - self._last_progress_at
+                timeout = 180 if self._is_finalizing_upload else 120
+                if idle > timeout:
+                    stage = "finalizing" if self._is_finalizing_upload else "uploading"
+                    target_client.stop_transmission()
+                    upload_task.cancel()
+                    await gather(upload_task, return_exceptions=True)
+                    raise TimeoutError(
+                        f"Telegram upload stalled for {int(idle)}s while {stage}: {file}"
+                    )
+            return await upload_task
+        finally:
+            if not upload_task.done():
+                upload_task.cancel()
+                await gather(upload_task, return_exceptions=True)
 
     async def _user_settings(self):
         settings_map = {
@@ -368,9 +404,11 @@ class TelegramUploader:
         up_path = None
         try:
             up_path, cap_mono = await self._prepare_file(file_, dirpath)
-            self._last_uploaded = 0
             sent = await self._upload_file(cap_mono, file_, up_path)
             if sent and not self._is_corrupted:
+                self._completed_bytes += await aiopath.getsize(up_path)
+                self._processed_bytes = self._completed_bytes
+                self._is_finalizing_upload = False
                 if self._listener.is_super_chat or self._listener.up_dest:
                     if not self._is_private:
                         self._msgs_dict[sent.link] = file_
@@ -380,6 +418,7 @@ class TelegramUploader:
         except Exception as err:
             if self._listener.is_cancelled:
                 return None
+            self._is_finalizing_upload = False
             is_retry_error = isinstance(err, RetryError)
             if isinstance(err, RetryError):
                 LOGGER.info(f"Total Attempts: {err.last_attempt.attempt_number}")
@@ -527,45 +566,55 @@ class TelegramUploader:
         )
         try:
             if self._hu is None:
-                sent_msg = await target_client.send_video(
-                    chat_id=self._sent_msg.chat.id,
-                    video=upload_path,
-                    caption=cap_mono,
-                    duration=duration or 0,
-                    width=width or 480,
-                    height=height or 320,
-                    thumb=thumb if thumb and thumb != "none" else None,
-                    supports_streaming=True,
-                    disable_notification=True,
-                    reply_to_message_id=self._sent_msg.id,
-                    progress=self._upload_progress,
-                ) if key == "videos" else await target_client.send_audio(
-                    chat_id=self._sent_msg.chat.id,
-                    audio=upload_path,
-                    caption=cap_mono,
-                    duration=duration or 0,
-                    performer=artist or "",
-                    title=title or "",
-                    thumb=thumb if thumb and thumb != "none" else None,
-                    disable_notification=True,
-                    reply_to_message_id=self._sent_msg.id,
-                    progress=self._upload_progress,
-                ) if key == "audios" else await target_client.send_document(
-                    chat_id=self._sent_msg.chat.id,
-                    document=upload_path,
-                    caption=cap_mono,
-                    thumb=thumb if thumb and thumb != "none" else None,
-                    disable_content_type_detection=True,
-                    disable_notification=True,
-                    reply_to_message_id=self._sent_msg.id,
-                    progress=self._upload_progress,
-                ) if key == "documents" else await target_client.send_photo(
-                    chat_id=self._sent_msg.chat.id,
-                    photo=upload_path,
-                    caption=cap_mono,
-                    disable_notification=True,
-                    reply_to_message_id=self._sent_msg.id,
-                    progress=self._upload_progress,
+                if key == "videos":
+                    upload_coro = target_client.send_video(
+                        chat_id=self._sent_msg.chat.id,
+                        video=upload_path,
+                        caption=cap_mono,
+                        duration=duration or 0,
+                        width=width or 480,
+                        height=height or 320,
+                        thumb=thumb if thumb and thumb != "none" else None,
+                        supports_streaming=True,
+                        disable_notification=True,
+                        reply_to_message_id=self._sent_msg.id,
+                        progress=self._upload_progress,
+                    )
+                elif key == "audios":
+                    upload_coro = target_client.send_audio(
+                        chat_id=self._sent_msg.chat.id,
+                        audio=upload_path,
+                        caption=cap_mono,
+                        duration=duration or 0,
+                        performer=artist or "",
+                        title=title or "",
+                        thumb=thumb if thumb and thumb != "none" else None,
+                        disable_notification=True,
+                        reply_to_message_id=self._sent_msg.id,
+                        progress=self._upload_progress,
+                    )
+                elif key == "documents":
+                    upload_coro = target_client.send_document(
+                        chat_id=self._sent_msg.chat.id,
+                        document=upload_path,
+                        caption=cap_mono,
+                        thumb=thumb if thumb and thumb != "none" else None,
+                        disable_content_type_detection=True,
+                        disable_notification=True,
+                        reply_to_message_id=self._sent_msg.id,
+                        progress=self._upload_progress,
+                    )
+                else:
+                    upload_coro = target_client.send_photo(
+                        chat_id=self._sent_msg.chat.id,
+                        photo=upload_path,
+                        caption=cap_mono,
+                        disable_notification=True,
+                        reply_to_message_id=self._sent_msg.id,
+                        progress=self._upload_progress,
+                    )
+                sent_msg = await self._await_pyrogram_upload(
+                    upload_coro, target_client, file
                 )
             else:
                 sent_msg = await self._hu.upload(
@@ -591,13 +640,17 @@ class TelegramUploader:
     @retry(
         wait=wait_exponential(multiplier=2, min=4, max=8),
         stop=stop_after_attempt(3),
-        retry=retry_if_exception_type(Exception),
+        retry=(
+            retry_if_exception_type(Exception)
+            & retry_if_not_exception_type((StopTransmission, CancelledError))
+        ),
     )
     async def _upload_file(self, cap_mono, file, o_path, force_document=False):
         if self._listener.is_cancelled:
             raise StopTransmission()
         if not await aiopath.exists(o_path):
             raise FileNotFoundError(o_path)
+        await self._reset_upload_attempt(o_path)
 
         if self._sent_msg is None:
             LOGGER.error("Cannot upload: _sent_msg is None")

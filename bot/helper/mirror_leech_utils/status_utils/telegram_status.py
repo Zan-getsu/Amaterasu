@@ -19,7 +19,7 @@ class TelegramStatus:
         }.get(hyper, "")
 
     def processed_bytes(self):
-        return get_readable_file_size(self._obj.processed_bytes)
+        return get_readable_file_size(min(self._obj.processed_bytes, self._size))
 
     def size(self):
         return get_readable_file_size(self._size)
@@ -34,7 +34,7 @@ class TelegramStatus:
 
     def progress(self):
         try:
-            progress_raw = self._obj.processed_bytes / self._size * 100
+            progress_raw = min(self._obj.processed_bytes, self._size) / self._size * 100
         except ZeroDivisionError:
             progress_raw = 0
         return f"{round(progress_raw, 2)}%"
@@ -43,8 +43,11 @@ class TelegramStatus:
         return f"{get_readable_file_size(self._obj.speed)}/s"
 
     def eta(self):
+        if getattr(self._obj, "_is_finalizing_upload", False):
+            return "finalizing"
         try:
-            seconds = (self._size - self._obj.processed_bytes) / self._obj.speed
+            remaining = max(self._size - self._obj.processed_bytes, 0)
+            seconds = remaining / self._obj.speed
             return get_readable_time(seconds)
         except ZeroDivisionError:
             return "-"
