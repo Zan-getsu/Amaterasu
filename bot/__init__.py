@@ -12,6 +12,7 @@ set_event_loop(bot_loop)
 from asyncio import Lock
 from logging import (
     ERROR,
+    Filter,
     INFO,
     WARNING,
     FileHandler,
@@ -39,12 +40,29 @@ getLogger("aiohttp").setLevel(WARNING)
 bot_start_time = time()
 
 
+class _NonEmptyErrorFilter(Filter):
+    def filter(self, record):
+        if record.levelno >= ERROR and not record.getMessage().strip():
+            if record.exc_info and record.exc_info[1] is not None:
+                exc = record.exc_info[1]
+                record.msg = f"{record.name}: {type(exc).__name__}: {exc!r}"
+            elif record.msg:
+                record.msg = f"{record.name}: {type(record.msg).__name__}: {record.msg!r}"
+            else:
+                record.msg = f"{record.name}: empty error log"
+            record.args = ()
+        return True
+
+
 basicConfig(
     format="[%(asctime)s] [%(levelname)s] - %(message)s",  #  [%(filename)s:%(lineno)d]
     datefmt="%d-%b-%y %I:%M:%S %p",
     handlers=[FileHandler("log.txt"), StreamHandler()],
     level=INFO,
 )
+
+for handler in getLogger().handlers:
+    handler.addFilter(_NonEmptyErrorFilter())
 
 LOGGER = getLogger(__name__)
 cpu_no = cpu_count() or 1

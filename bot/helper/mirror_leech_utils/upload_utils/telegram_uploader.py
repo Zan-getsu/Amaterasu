@@ -8,7 +8,11 @@ from aioshutil import rmtree
 from natsort import natsorted
 from PIL import Image
 from pyrogram import StopTransmission
-from pyrogram.errors import RPCError
+from pyrogram.errors import BadRequest, FloodWait, RPCError
+try:
+    from pyrogram.errors import FloodPremiumWait
+except ImportError:
+    FloodPremiumWait = FloodWait
 from pyrogram.raw.types import (
     DocumentAttributeAudio,
     DocumentAttributeFilename,
@@ -76,6 +80,16 @@ class TelegramUploader:
         self._error = ""
         self._upload_tasks = []
         self._hu = HypertgUpload(self) if Config.USE_HYPER and Config.LEECH_DUMP_CHAT else None
+
+    async def _upload_progress(self, current, _):
+        if self._listener.is_cancelled:
+            client = TgClient.user if self._user_session else self._listener.client
+            client.stop_transmission()
+            raise StopTransmission()
+        chunk_size = current - self._last_uploaded
+        if chunk_size > 0:
+            self._last_uploaded = current
+            self._processed_bytes += chunk_size
 
     async def _user_settings(self):
         settings_map = {
@@ -347,6 +361,7 @@ class TelegramUploader:
         up_path = None
         try:
             up_path, cap_mono = await self._prepare_file(file_, dirpath)
+            self._last_uploaded = 0
             sent = await self._upload_file(cap_mono, file_, up_path)
             if sent and not self._is_corrupted:
                 if self._listener.is_super_chat or self._listener.up_dest:
@@ -426,6 +441,7 @@ class TelegramUploader:
                         self._upload_file_task(file_, f_path, dirpath)
                     )
                     self._upload_tasks.append(task)
+                    await task
                     if self._log_msg and not is_log_del and Config.CLEAN_LOG_MSG:
                         await delete_message(self._log_msg)
                         is_log_del = True
@@ -438,12 +454,7 @@ class TelegramUploader:
                     self._corrupted += 1
                     if self._listener.is_cancelled:
                         return
-        if self._upload_tasks:
-            results = await gather(*self._upload_tasks, return_exceptions=True)
-            for r in results:
-                if isinstance(r, Exception) and not self._listener.is_cancelled:
-                    LOGGER.error(f"Upload task error: {str(r) or repr(r)}")
-            await sleep(1)
+        await sleep(1)
         for key, value in list(self._media_dict.items()):
             for subkey, msgs in list(value.items()):
                 if len(msgs) > 1:
@@ -498,53 +509,74 @@ class TelegramUploader:
             mtype = "photo"
             attrs = None
         target_client = TgClient.user if self._user_session else self._listener.client
-        if self._hu is None:
-            return await target_client.send_video(
-                chat_id=self._sent_msg.chat.id,
-                video=f_path or self._up_path,
-                caption=cap_mono,
-                duration=duration or 0,
-                width=width or 480,
-                height=height or 320,
-                thumb=thumb if thumb and thumb != "none" else None,
-                supports_streaming=True,
-                disable_notification=True,
-                reply_to_message_id=self._sent_msg.id,
-            ) if key == "videos" else await target_client.send_audio(
-                chat_id=self._sent_msg.chat.id,
-                audio=f_path or self._up_path,
-                caption=cap_mono,
-                duration=duration or 0,
-                performer=artist or "",
-                title=title or "",
-                thumb=thumb if thumb and thumb != "none" else None,
-                disable_notification=True,
-                reply_to_message_id=self._sent_msg.id,
-            ) if key == "audios" else await target_client.send_document(
-                chat_id=self._sent_msg.chat.id,
-                document=f_path or self._up_path,
-                caption=cap_mono,
-                thumb=thumb if thumb and thumb != "none" else None,
-                disable_notification=True,
-                reply_to_message_id=self._sent_msg.id,
-            ) if key == "documents" else await target_client.send_photo(
-                chat_id=self._sent_msg.chat.id,
-                photo=f_path or self._up_path,
-                caption=cap_mono,
-                disable_notification=True,
-                reply_to_message_id=self._sent_msg.id,
-            )
-        return await self._hu.upload(
-            target_client=target_client,
-            target_chat_id=self._sent_msg.chat.id,
-            file_path=f_path or self._up_path,
-            dump_chat_id=Config.LEECH_DUMP_CHAT,
-            media_type=mtype,
-            attributes=attrs,
-            thumb_path=thumb if thumb and thumb != "none" else None,
-            caption=cap_mono,
-            reply_to_message_id=self._sent_msg.id,
+        upload_path = f_path or self._up_path
+        LOGGER.info(
+            f"Telegram upload started: {file} as {mtype} "
+            f"via {'HyperTG' if self._hu else 'Pyrogram'}"
         )
+        try:
+            if self._hu is None:
+                sent_msg = await target_client.send_video(
+                    chat_id=self._sent_msg.chat.id,
+                    video=upload_path,
+                    caption=cap_mono,
+                    duration=duration or 0,
+                    width=width or 480,
+                    height=height or 320,
+                    thumb=thumb if thumb and thumb != "none" else None,
+                    supports_streaming=True,
+                    disable_notification=True,
+                    reply_to_message_id=self._sent_msg.id,
+                    progress=self._upload_progress,
+                ) if key == "videos" else await target_client.send_audio(
+                    chat_id=self._sent_msg.chat.id,
+                    audio=upload_path,
+                    caption=cap_mono,
+                    duration=duration or 0,
+                    performer=artist or "",
+                    title=title or "",
+                    thumb=thumb if thumb and thumb != "none" else None,
+                    disable_notification=True,
+                    reply_to_message_id=self._sent_msg.id,
+                    progress=self._upload_progress,
+                ) if key == "audios" else await target_client.send_document(
+                    chat_id=self._sent_msg.chat.id,
+                    document=upload_path,
+                    caption=cap_mono,
+                    thumb=thumb if thumb and thumb != "none" else None,
+                    disable_content_type_detection=True,
+                    disable_notification=True,
+                    reply_to_message_id=self._sent_msg.id,
+                    progress=self._upload_progress,
+                ) if key == "documents" else await target_client.send_photo(
+                    chat_id=self._sent_msg.chat.id,
+                    photo=upload_path,
+                    caption=cap_mono,
+                    disable_notification=True,
+                    reply_to_message_id=self._sent_msg.id,
+                    progress=self._upload_progress,
+                )
+            else:
+                sent_msg = await self._hu.upload(
+                    target_client=target_client,
+                    target_chat_id=self._sent_msg.chat.id,
+                    file_path=upload_path,
+                    dump_chat_id=Config.LEECH_DUMP_CHAT,
+                    media_type=mtype,
+                    attributes=attrs,
+                    thumb_path=thumb if thumb and thumb != "none" else None,
+                    caption=cap_mono,
+                    reply_to_message_id=self._sent_msg.id,
+                )
+            LOGGER.info(f"Telegram upload completed: {file}")
+            return sent_msg
+        except Exception as err:
+            if not self._listener.is_cancelled:
+                LOGGER.error(
+                    f"Telegram upload failed: {file} | {type(err).__name__}: {str(err) or repr(err)}",
+                    exc_info=True,
+                )
+            raise
 
     async def _upload_file(self, cap_mono, file, o_path, force_document=False):
         if self._listener.is_cancelled:
@@ -574,6 +606,7 @@ class TelegramUploader:
             self._thumb = None
         thumb = self._thumb
         self._is_corrupted = False
+        key = None
         try:
             is_video, is_audio, is_image = await get_document_type(o_path)
 
@@ -703,6 +736,17 @@ class TelegramUploader:
             ):
                 await remove(thumb)
             return sent_msg
+        except (FloodWait, FloodPremiumWait) as flood:
+            if (
+                self._thumb is None
+                and thumb is not None
+                and await aiopath.exists(thumb)
+            ):
+                await remove(thumb)
+            wait_time = getattr(flood, "value", 5)
+            LOGGER.warning(f"{str(flood) or repr(flood)}. Retrying in {wait_time}s")
+            await sleep(wait_time * 1.3)
+            return await self._upload_file(cap_mono, file, o_path, force_document)
         except (StopTransmission, CancelledError):
             raise
         except Exception as err:
@@ -717,6 +761,9 @@ class TelegramUploader:
             err_type = "RPCError: " if isinstance(err, RPCError) else ""
             err_msg = str(err) or repr(err)
             LOGGER.error(f"{err_type}{err_msg}. Path: {o_path}", exc_info=True)
+            if isinstance(err, BadRequest) and key != "documents":
+                LOGGER.error(f"Retrying as document. Path: {o_path}")
+                return await self._upload_file(cap_mono, file, o_path, True)
             raise err
 
     @property
