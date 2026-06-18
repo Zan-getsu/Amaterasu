@@ -2422,3 +2422,4 @@ def instagram(link: str) -> str:
 
     except Exception as e:
         raise DirectDownloadLinkException(f"ERROR: {e}")
+

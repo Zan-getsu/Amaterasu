@@ -182,3 +182,4 @@ async def cancel_all_update(_, query):
         res = await cancel_all(data[1], user_id)
         if not res:
             await send_message(reply_to, f"No matching tasks for {data[1]}!")
+

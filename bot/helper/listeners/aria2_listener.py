@@ -212,3 +212,4 @@ def add_aria2_callbacks():
     TorrentManager.aria2.onDownloadError(_on_download_error)
     TorrentManager.aria2.onDownloadStart(_on_download_started)
     TorrentManager.aria2.onDownloadStop(_on_download_stopped)
+

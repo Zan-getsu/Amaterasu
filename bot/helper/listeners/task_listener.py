@@ -447,9 +447,12 @@ class TaskListener(TaskConfig):
                 up_path,
                 gid,
             )
-            self.is_file = await aiopath.isfile(up_path)
             if self.is_cancelled:
                 return
+            if not up_path:
+                await self.on_upload_error(f"Unable to zip: {self.name}")
+                return
+            self.is_file = await aiopath.isfile(up_path)
             self.clear()
 
         self.name = up_path.replace(f"{up_dir}/", "").split("/", 1)[0]

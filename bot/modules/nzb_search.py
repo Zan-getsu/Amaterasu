@@ -133,3 +133,4 @@ async def create_telegraph_page(query, items):
     )
     LOGGER.info(f"Telegraph page created for search: {query}")
     return f"https://telegra.ph/{response['path']}"
+

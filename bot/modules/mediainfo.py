@@ -150,3 +150,4 @@ async def minfo_callback(_, query):
 TgClient.bot.add_handler(
     CallbackQueryHandler(minfo_callback, filters=regex("^minfo$"))
 )
+

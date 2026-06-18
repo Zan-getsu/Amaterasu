@@ -638,3 +638,4 @@ async def open_drive_clean(message):
         await edit_message(prompt, "<b>Task Cancelled</b>")
     del bot_cache[msg_id]
     return drive_id, is_cancelled
+

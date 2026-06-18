@@ -451,4 +451,4 @@ class SevenZ:
             except Exception:
                 stderr = "Unable to decode the error!"
             LOGGER.error(f"{stderr}. Unable to zip this path: {dl_path}")
-            return dl_path
+            return False

@@ -59,3 +59,4 @@ async def telegraph_upload(_, message):
     finally:
         if file_path and os.path.exists(file_path):
             os.remove(file_path)
+

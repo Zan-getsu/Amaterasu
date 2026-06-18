@@ -391,3 +391,4 @@ class RcloneList:
         if self.config_path != "rclone.conf" and not self.listener.is_cancelled:
             return f"mrcc:{self.remote}{self.path}"
         return f"{self.remote}{self.path}"
+

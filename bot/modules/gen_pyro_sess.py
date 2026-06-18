@@ -398,3 +398,4 @@ async def gen_pyro_string(_, message):
                 await aioremove(path)
             except Exception:
                 pass
+

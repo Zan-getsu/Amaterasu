@@ -114,3 +114,4 @@ async def confirm_drive_clean_cb(_, query):
         f"<b>Timeout:</b> 60 sec",
         buttons.build_menu(3),
     )
+

@@ -1507,3 +1507,4 @@ async def load_config():
         await database.disconnect()
     await gather(initiate_search_tools(), start_from_queued(), rclone_serve_booter())
     add_job()
+

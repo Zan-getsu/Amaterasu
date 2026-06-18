@@ -716,3 +716,4 @@ async def purge_callback(client, query):
         await _show_plan(query.message, session, "all", dry=True)
     elif action == "mode" and len(data) > 3:
         await _show_plan(query.message, session, data[3])
+

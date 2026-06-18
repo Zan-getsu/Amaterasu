@@ -166,3 +166,4 @@ async def confirm_selection(_, query):
     else:
         await delete_message(message)
         await task.cancel_task()
+

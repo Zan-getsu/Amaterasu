@@ -180,3 +180,4 @@ class GoogleDriveSearch(GoogleDriveHelper):
         user_dict = user_data.get(user_id, {})
         INDEX = user_dict["index_url"] if user_dict.get("index_url") else ""
         return [("User Choice", dest_id, INDEX)]
+

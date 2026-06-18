@@ -302,3 +302,4 @@ async def torrent_search_update(_, query):
     else:
         await query.answer()
         await edit_message(message, "Search has been canceled!")
+

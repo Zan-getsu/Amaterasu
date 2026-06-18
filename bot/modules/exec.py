@@ -116,3 +116,4 @@ async def clear(_, message):
     if message.chat.id in namespaces:
         del namespaces[message.chat.id]
     await send("Locals Cleared.", message)
+

@@ -380,3 +380,4 @@ class GoogleDriveClean(GoogleDriveHelper):
             await self._event_handler()
         if self._reply_to:
             await delete_message(self._reply_to)
+
