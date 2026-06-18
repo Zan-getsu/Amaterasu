@@ -1,16 +1,18 @@
 from asyncio import (
+    FIRST_COMPLETED,
     CancelledError,
     Lock,
     Queue,
     create_task,
+    ensure_future,
     gather,
     sleep,
     to_thread,
     wait,
 )
 from datetime import datetime
-from math import ceil, floor
 from mimetypes import guess_extension
+import os
 from os import cpu_count
 from pathlib import Path
 from re import sub
@@ -486,19 +488,9 @@ class HypertgDownload(HypertgTransfer):
         try:
             fd = await to_thread(os.open, final, os.O_WRONLY | os.O_CREAT)
             try:
-                async with aiopen(part_file_path, "wb") as f:
-                    async for chunk in self.get_file(
-                        offset, first_part_cut, last_part_cut, part_count
-                    ):
-                        if self._cancel_event.is_set():
-                            raise CancelledError("Download cancelled")
-                        await f.write(chunk)
-                return part_index, part_file_path
-            except (AsyncTimeoutError, ConnectionError):
-                if attempt == max_retries - 1:
-                    raise
-                await sleep((attempt + 1) * 2)
-                self._processed_bytes = 0
+                pass  # placeholder for file descriptor opened above
+            finally:
+                await to_thread(os.close, fd)
 
             all_failed_offsets = set()
             for i, (s, e) in enumerate(ranges):
@@ -649,7 +641,7 @@ class HypertgDownload(HypertgTransfer):
         except (CancelledError, StopTransmission):
             return None
         except Exception as e:
-            LOGGER.error(f"HypertgDL: {e}")
+            LOGGER.error(f"HypertgDL: {e}", exc_info=True)
             return None
         finally:
             self._cancel.set()
@@ -704,7 +696,7 @@ class HypertgDownload(HypertgTransfer):
             if not os.path.isabs(self.file_name):
                 self.directory = Path(argv[0]).parent / (self.directory or self.download_dir)
             if not self.file_name:
-                ext = self._ext(ftype, mime)
+                ext = self.get_extension(ftype, mime)
                 self.file_name = (
                     f"{FileType(ftype).name.lower()}_"
                     f"{(dt or datetime.now()).strftime('%Y-%m-%d_%H-%M-%S')}_"
@@ -716,11 +708,11 @@ class HypertgDownload(HypertgTransfer):
             raise
 
     @staticmethod
-    async def get_extension(file_type, mime_type):
+    def get_extension(file_type, mime_type):
         if file_type in PHOTO_TYPES:
             return ".jpg"
-        if mime:
-            e = guess_extension(mime)
+        if mime_type:
+            e = guess_extension(mime_type)
             if e:
                 return e
         return {
@@ -730,4 +722,4 @@ class HypertgDownload(HypertgTransfer):
             FileType.VIDEO_NOTE: ".mp4",
             FileType.AUDIO: ".mp3",
             FileType.STICKER: ".webp",
-        }.get(ft, ".bin")
+        }.get(file_type, ".bin")

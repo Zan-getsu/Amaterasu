@@ -636,7 +636,7 @@ def mediafire(url, session=None):
         if not _password:
             session.close()
             raise DirectDownloadLinkException(
-                f"ERROR: {PASSWORD_ERROR_MESSAGE}".format(url)
+                f"ERROR:\n{PASSWORD_ERROR_MESSAGE}"
             )
         try:
             html = HTML(session.post(url, data={"downloadp": _password}).text)
@@ -860,7 +860,7 @@ def fichier(link):
                 )
         elif "protect access" in str_2.lower():
             raise DirectDownloadLinkException(
-                f"ERROR:\n{PASSWORD_ERROR_MESSAGE.format(link)}"
+                f"ERROR:\n{PASSWORD_ERROR_MESSAGE}"
             )
         else:
             raise DirectDownloadLinkException(
@@ -1589,7 +1589,7 @@ def gofile(url):
             raise DirectDownloadLinkException(f"ERROR: {e.__class__.__name__}")
         if _json["status"] in "error-passwordRequired":
             raise DirectDownloadLinkException(
-                f"ERROR:\n{PASSWORD_ERROR_MESSAGE.format(url)}"
+                f"ERROR:\n{PASSWORD_ERROR_MESSAGE}"
             )
         if _json["status"] in "error-passwordWrong":
             raise DirectDownloadLinkException("ERROR: This password is wrong !")
@@ -1721,7 +1721,7 @@ def mediafireFolder(url):
         if html.xpath("//div[@class='passwordPrompt']"):
             if not _password:
                 raise DirectDownloadLinkException(
-                    f"ERROR: {PASSWORD_ERROR_MESSAGE}".format(url)
+                    f"ERROR:\n{PASSWORD_ERROR_MESSAGE}"
                 )
             try:
                 html = HTML(session.post(url, data={"downloadp": _password}).text)
@@ -1859,7 +1859,7 @@ def send_cm_file(url, file_id=None):
             raise DirectDownloadLinkException(f"ERROR: {e.__class__.__name__}") from e
         if _passwordNeed:
             raise DirectDownloadLinkException(
-                f"ERROR:\n{PASSWORD_ERROR_MESSAGE.format(url)}"
+                f"ERROR:\n{PASSWORD_ERROR_MESSAGE}"
             )
         raise DirectDownloadLinkException("ERROR: Direct link not found")
 
@@ -1935,7 +1935,7 @@ def send_cm(url):
         for file in files:
             if not (link := __getFile_link(file["file_id"])):
                 continue
-            item = {"url": link, "filename": file["filename"], "path": folderPath}
+            item = {"url": link, "filename": file["file_name"], "path": folderPath}
             details["total_size"] += file["size"]
             details["contents"].append(item)
 
@@ -2009,7 +2009,7 @@ def easyupload(url):
             and not _password
         ):
             raise DirectDownloadLinkException(
-                f"ERROR:\n{PASSWORD_ERROR_MESSAGE.format(url)}"
+                f"ERROR:\n{PASSWORD_ERROR_MESSAGE}"
             )
         if not (
             match := search(

@@ -188,6 +188,7 @@ class Config:
     FQDN = ""
     HAS_SSL = True
     PORT = 8080
+    BASE_URL_PORT = 0
     NO_PORT = True
     CLOUDFLARE_TUNNEL_ENABLED = False
     CLOUDFLARE_TUNNEL_TOKEN = ""

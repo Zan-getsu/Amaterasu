@@ -1,6 +1,5 @@
 from ast import literal_eval
 from base64 import b64encode
-from ast import literal_eval
 from asyncio import sleep
 from re import match as re_match
 

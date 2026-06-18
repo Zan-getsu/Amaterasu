@@ -135,7 +135,7 @@ async def start_from_queued():
                             break
         return
 
-    if up_limit := Config.QUEUE_UPLOAD:
+    if up_limit := safe_int(Config.QUEUE_UPLOAD):
         async with queue_dict_lock:
             up = len(non_queued_up)
             if queued_up and up < up_limit:
@@ -150,7 +150,7 @@ async def start_from_queued():
                 for mid in list(queued_up.keys()):
                     await start_up_from_queued(mid)
 
-    if dl_limit := Config.QUEUE_DOWNLOAD:
+    if dl_limit := safe_int(Config.QUEUE_DOWNLOAD):
         async with queue_dict_lock:
             dl = len(non_queued_dl)
             if queued_dl and dl < dl_limit:

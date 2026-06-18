@@ -8,6 +8,12 @@ from aiofiles.os import makedirs, path as aiopath
 from .... import LOGGER, task_dict, task_dict_lock
 from ...ext_utils.bot_utils import sync_to_async
 from ...ext_utils.files_utils import clean_download
+from ...ext_utils.mega_sdk import (
+    MEGA_SDK_AVAILABLE,
+    MegaApi,
+    MegaCancelToken,
+    mega_sdk_missing_message,
+)
 from ...listeners.mega_listener import AsyncMega, MegaAppListener, _mega_error_format, _MEGA_SDK_LOCK
 from ...mirror_leech_utils.status_utils.mega_status import MegaDownloadStatus
 from ...telegram_helper.message_utils import update_status_message

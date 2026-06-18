@@ -17,7 +17,7 @@ except (ImportError, ModuleNotFoundError) as e:
 
     MegaApi = None
     MegaCancelToken = None
-    MegaTransfer = object
+    MegaTransfer = type("MegaTransfer", (), {"TYPE_DOWNLOAD": 0, "TYPE_UPLOAD": 1})
     MegaUploadOptions = None
 
     class MegaListener:
@@ -37,6 +37,8 @@ except (ImportError, ModuleNotFoundError) as e:
         TYPE_LOGOUT = 4
         TYPE_ACCOUNT_DETAILS = 5
         TYPE_EXPORT = 6
+        TYPE_CREATE_FOLDER = 7
+        TYPE_IMPORT_LINK = 8
 
 
 def mega_sdk_missing_message():

@@ -2,7 +2,7 @@ from asyncio import sleep
 from pyrogram.enums import ButtonStyle
 
 from .. import task_dict, task_dict_lock, user_data, multi_tags
-from ..core.tg_client import Config
+from ..core.config_manager import Config
 from ..helper.ext_utils.bot_utils import new_task
 from ..helper.ext_utils.status_utils import (
     get_task_by_gid,

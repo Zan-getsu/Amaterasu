@@ -703,18 +703,18 @@ async def protected_proxy(
 
 @app.api_route("/nzb/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH"])
 async def sabnzbd_proxy(path: str = "", request: Request = None):
-    password = request.query_params.get("pass") or request.cookies.get("proxy_pass")
+    password = request.query_params.get("pass") or request.cookies.get("nzb_pass")
     if not password:
         raise HTTPException(status_code=403, detail="Missing password")
-    response = await protected_proxy("nzb", path, request, password)
-    if "pass" in request.query_params:
-        response.set_cookie("proxy_pass", password, httponly=True, samesite="strict")
-    return response
+    return await protected_proxy("nzb", path, request, password)
 
 
 @app.api_route("/qbit/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH"])
 async def qbittorrent_proxy(path: str = "", request: Request = None):
-    return await protected_proxy("qbit", path, request)
+    password = request.query_params.get("pass") or request.cookies.get("qbit_pass")
+    if not password:
+        raise HTTPException(status_code=403, detail="Missing password")
+    return await protected_proxy("qbit", path, request, password)
 
 
 # FileToLink dynamic load-balanced streaming endpoints

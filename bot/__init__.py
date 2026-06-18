@@ -1,8 +1,16 @@
 # ruff: noqa: E402
 
-from uvloop import install
+import sys
 
-install()
+if sys.platform != "win32":
+    from uvloop import install
+
+    install()
+else:
+    import asyncio
+
+    if not hasattr(asyncio, "uvloop"):
+        asyncio.set_event_loop_policy(asyncio.DefaultEventLoopPolicy())
 
 from asyncio import new_event_loop, set_event_loop
 
