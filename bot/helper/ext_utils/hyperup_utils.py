@@ -276,6 +276,11 @@ class HypertgUpload(HypertgTransfer):
             fp.close()
 
     async def _reupload_part(self, client, file_path, input_file, part_num):
+        if self._listener.is_cancelled:
+            raise StopTransmission()
+        if not ospath.exists(file_path):
+            raise FileNotFoundError(file_path)
+
         offset = part_num * PART_SIZE
         fp = open(file_path, "rb")
         try:
@@ -304,6 +309,8 @@ class HypertgUpload(HypertgTransfer):
         media_type, attributes, thumb_path=None, caption="", reply_to_message_id=None,
     ):
         self._cancel.clear()
+        if self._listener.is_cancelled:
+            raise StopTransmission()
         self._obj._processed_bytes = 0
         self._up_file = ospath.basename(file_path)
         self._up_size = ospath.getsize(file_path)
@@ -333,10 +340,14 @@ class HypertgUpload(HypertgTransfer):
         send_retries = 0
         missing_fixed = 0
         while True:
+            if self._listener.is_cancelled:
+                raise StopTransmission()
             try:
                 r_updates = await target_client.invoke(rpc)
                 break
             except FilePartMissing as e:
+                if self._listener.is_cancelled:
+                    raise StopTransmission()
                 part = self._parse_missing_part(e)
                 missing_fixed += 1
                 LOGGER.warning(
@@ -348,6 +359,8 @@ class HypertgUpload(HypertgTransfer):
                 if send_retries >= 100:
                     raise RuntimeError(f"SendMedia exhausted after fixing {missing_fixed} missing parts")
             except (FloodWait, FloodPremiumWait) as e:
+                if self._listener.is_cancelled:
+                    raise StopTransmission()
                 val = e.value if hasattr(e, "value") else 5
                 send_retries += 1
                 LOGGER.warning(
@@ -357,10 +370,15 @@ class HypertgUpload(HypertgTransfer):
                 if send_retries >= 10:
                     raise
                 await sleep(val + 1)
+            except StopTransmission:
+                raise
             except Exception as e:
+                if self._listener.is_cancelled:
+                    raise StopTransmission()
                 send_retries += 1
+                err_msg = str(e) or repr(e)
                 LOGGER.error(
-                    f"HypertgUL SendMedia {type(e).__name__}: {e} "
+                    f"HypertgUL SendMedia {type(e).__name__}: {err_msg} "
                     f"(retry {send_retries}) {self._up_file}"
                 )
                 if send_retries >= 10:

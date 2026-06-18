@@ -1,4 +1,4 @@
-from asyncio import ensure_future, gather, sleep
+from asyncio import CancelledError, ensure_future, gather, sleep
 from logging import getLogger
 from os import path as ospath, walk
 from re import match as re_match, sub as re_sub
@@ -41,6 +41,7 @@ from ...ext_utils.media_utils import (
     get_md5_hash,
     generate_telegraph_mediainfo,
 )
+from ...telegram_helper.button_build import ButtonMaker
 from ...telegram_helper.message_utils import delete_message
 
 LOGGER = getLogger(__name__)
@@ -73,6 +74,7 @@ class TelegramUploader:
         self._log_msg = None
         self._user_session = self._listener.transmission_mode in ("user", "both")
         self._error = ""
+        self._upload_tasks = []
         self._hu = HypertgUpload(self) if Config.USE_HYPER and Config.LEECH_DUMP_CHAT else None
 
     async def _user_settings(self):
@@ -351,11 +353,14 @@ class TelegramUploader:
                     if not self._is_private:
                         self._msgs_dict[sent.link] = file_
             return sent
-        except StopTransmission:
+        except (StopTransmission, CancelledError):
             return None
         except Exception as err:
-            LOGGER.error(f"{err}. Path: {f_path}", exc_info=True)
-            self._error = str(err)
+            if self._listener.is_cancelled:
+                return None
+            err_msg = str(err) or repr(err)
+            LOGGER.error(f"{err_msg}. Path: {f_path}", exc_info=True)
+            self._error = err_msg
             self._corrupted += 1
             return None
         finally:
@@ -369,7 +374,7 @@ class TelegramUploader:
         if not res:
             return
         is_log_del = False
-        upload_tasks = []
+        self._upload_tasks = []
         for dirpath, _, files in natsorted(await sync_to_async(walk, self._path)):
             if dirpath.strip().endswith("/yt-dlp-thumb"):
                 continue
@@ -420,23 +425,24 @@ class TelegramUploader:
                     task = ensure_future(
                         self._upload_file_task(file_, f_path, dirpath)
                     )
-                    upload_tasks.append(task)
+                    self._upload_tasks.append(task)
                     if self._log_msg and not is_log_del and Config.CLEAN_LOG_MSG:
                         await delete_message(self._log_msg)
                         is_log_del = True
                     if self._listener.is_cancelled:
                         return
                 except Exception as err:
-                    LOGGER.error(f"{err}. Path: {f_path}", exc_info=True)
-                    self._error = str(err)
+                    err_msg = str(err) or repr(err)
+                    LOGGER.error(f"{err_msg}. Path: {f_path}", exc_info=True)
+                    self._error = err_msg
                     self._corrupted += 1
                     if self._listener.is_cancelled:
                         return
-        if upload_tasks:
-            results = await gather(*upload_tasks, return_exceptions=True)
+        if self._upload_tasks:
+            results = await gather(*self._upload_tasks, return_exceptions=True)
             for r in results:
-                if isinstance(r, Exception):
-                    LOGGER.error(f"Upload task error: {r}")
+                if isinstance(r, Exception) and not self._listener.is_cancelled:
+                    LOGGER.error(f"Upload task error: {str(r) or repr(r)}")
             await sleep(1)
         for key, value in list(self._media_dict.items()):
             for subkey, msgs in list(value.items()):
@@ -466,6 +472,8 @@ class TelegramUploader:
         return
 
     async def _hyperul_upload(self, cap_mono, file, thumb, key, f_path=None, duration=0, width=0, height=0, artist="", title=""):
+        if self._listener.is_cancelled:
+            raise StopTransmission()
         attr_base = [DocumentAttributeFilename(file_name=file)]
         if key == "videos":
             attrs = [
@@ -539,6 +547,11 @@ class TelegramUploader:
         )
 
     async def _upload_file(self, cap_mono, file, o_path, force_document=False):
+        if self._listener.is_cancelled:
+            raise StopTransmission()
+        if not await aiopath.exists(o_path):
+            raise FileNotFoundError(o_path)
+
         if self._sent_msg is None:
             LOGGER.error("Cannot upload: _sent_msg is None")
             await self._listener.on_upload_error(
@@ -567,10 +580,10 @@ class TelegramUploader:
             self._telegraph_url = None
             if not is_image:
                 try:
-                    f_size = await aiopath.getsize(self._up_path)
-                    self._telegraph_url = await generate_telegraph_mediainfo(self._up_path, f_size)
+                    f_size = await aiopath.getsize(o_path)
+                    self._telegraph_url = await generate_telegraph_mediainfo(o_path, f_size)
                 except Exception as e:
-                    LOGGER.error(f"Failed to generate telegraph URL: {e}")
+                    LOGGER.error(f"Failed to generate telegraph URL: {str(e) or repr(e)}")
 
             if not is_image and thumb is None:
                 file_name = ospath.splitext(file)[0]
@@ -690,9 +703,11 @@ class TelegramUploader:
             ):
                 await remove(thumb)
             return sent_msg
-        except StopTransmission:
+        except (StopTransmission, CancelledError):
             raise
         except Exception as err:
+            if self._listener.is_cancelled:
+                raise StopTransmission()
             if (
                 self._thumb is None
                 and thumb is not None
@@ -700,7 +715,8 @@ class TelegramUploader:
             ):
                 await remove(thumb)
             err_type = "RPCError: " if isinstance(err, RPCError) else ""
-            LOGGER.error(f"{err_type}{err}. Path: {o_path}", exc_info=True)
+            err_msg = str(err) or repr(err)
+            LOGGER.error(f"{err_type}{err_msg}. Path: {o_path}", exc_info=True)
             raise err
 
     @property
@@ -715,6 +731,18 @@ class TelegramUploader:
         return self._processed_bytes
 
     async def cancel_task(self):
+        if self._listener.is_cancelled:
+            return
         self._listener.is_cancelled = True
         LOGGER.info(f"Cancelling Upload: {self._listener.name}")
+        for task in self._upload_tasks:
+            if not task.done():
+                task.cancel()
+        if self._hu is not None:
+            try:
+                await self._hu.cancel()
+            except Exception as err:
+                LOGGER.warning(f"Failed to cancel hypertg upload cleanly: {str(err) or repr(err)}")
+        if self._upload_tasks:
+            await gather(*self._upload_tasks, return_exceptions=True)
         await self._listener.on_upload_error("your upload has been stopped!")

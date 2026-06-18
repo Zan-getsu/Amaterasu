@@ -1346,6 +1346,8 @@ def parseinfo(out, size):
 async def generate_telegraph_mediainfo(des_path, file_size):
     from shlex import split
     from .telegraph_helper import telegraph
+    if not des_path or not await aiopath.exists(des_path):
+        return None
     try:
         stdout, _, _ = await cmd_exec(split(f'mediainfo "{des_path}"'))
         tc = f"<h4>📌 {ospath.basename(des_path)}</h4><br><br>"
