@@ -160,11 +160,13 @@ async def get_stats(event, key="home"):
                     True,
                 )
             )[0]
-            changelog = (
+            from html import escape
+            changelog_raw = (
                 await cmd_exec(
-                    "git log -1 --pretty=format:'<code>%s</code> <i>By %an</i>'", True
+                    "git log -1 --pretty=format:'%s By %an'", True
                 )
             )[0]
+            changelog = escape(changelog_raw)
         official_v = (
             await cmd_exec(
                 f"curl -o latestversion.py https://raw.githubusercontent.com/its-niloy/Amaterasu/{Config.UPSTREAM_BRANCH}/bot/version.py -s && python3 latestversion.py && rm latestversion.py",
