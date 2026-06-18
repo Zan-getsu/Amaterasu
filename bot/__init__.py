@@ -11,6 +11,7 @@ set_event_loop(bot_loop)
 
 from asyncio import Lock
 from logging import (
+    CRITICAL,
     ERROR,
     Filter,
     INFO,
@@ -31,6 +32,7 @@ from sabnzbdapi import SabnzbdClient
 getLogger("requests").setLevel(WARNING)
 getLogger("urllib3").setLevel(WARNING)
 getLogger("pyrogram").setLevel(ERROR)
+getLogger("pyrogram.methods.advanced.save_file").setLevel(CRITICAL)
 getLogger("apscheduler").setLevel(ERROR)
 getLogger("httpx").setLevel(WARNING)
 getLogger("pymongo").setLevel(WARNING)
