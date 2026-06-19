@@ -210,12 +210,29 @@ class TgClient:
             bot_token=Config.BOT_TOKEN,
             workdir="/usr/src/app",
         )
-        while True:
+        # Cap retries so we don't loop forever if Telegram is permanently
+        # rate-limiting the token (e.g. banned token, persistent network
+        # issue). After MAX_RETRIES attempts, raise so the caller can
+        # decide whether to exit or continue without the main bot.
+        MAX_RETRIES = 10
+        attempt = 0
+        while attempt < MAX_RETRIES:
             try:
                 await cls.bot.start()
                 break
             except FloodWait as e:
-                LOGGER.warning(f"FloodWait: Sleeping for {e.value} seconds...")
+                attempt += 1
+                if attempt >= MAX_RETRIES:
+                    LOGGER.error(
+                        f"Main bot FloodWait exhausted after {MAX_RETRIES} "
+                        f"attempts (last wait: {e.value}s). Giving up — "
+                        "check your BOT_TOKEN and network, then restart."
+                    )
+                    raise
+                LOGGER.warning(
+                    f"Main bot FloodWait: attempt {attempt}/{MAX_RETRIES}, "
+                    f"sleeping {e.value}s before retry..."
+                )
                 await sleep(e.value)
         cls.BNAME = cls.bot.me.username
         cls.ID = Config.BOT_TOKEN.split(":", 1)[0]

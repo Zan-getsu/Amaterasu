@@ -84,12 +84,24 @@ async def main():
 
     Formatter.converter = changetz
 
-    await gather(
-        TgClient.start_bot(),
-        TgClient.start_user(),
-        TgClient.start_helper_bots(),
-        TgClient.start_helper_users(),
-    )
+    # Start the MAIN bot in the foreground — it's required for handlers
+    # to register and for the bot to function. Block until it's up
+    # (with FloodWait retries inside start_bot).
+    await TgClient.start_bot()
+
+    # Start the user session, helper bots, and helper users in the
+    # BACKGROUND (non-blocking). Each of these already has its own
+    # FloodWait retry logic that schedules a background task via
+    # bot_loop.create_task(), so they won't block main() even if
+    # Telegram rate-limits them. The bot works fine without them —
+    # they just add capacity (more upload slots, premium-tier splits).
+    # We use create_tracked_task (which wraps bot_loop.create_task)
+    # so failures are logged instead of silently dropped.
+    from .helper.ext_utils.bot_utils import create_tracked_task as _ctt
+    _ctt(TgClient.start_user())
+    _ctt(TgClient.start_helper_bots())
+    _ctt(TgClient.start_helper_users())
+
     await TgClient.start_stream_clients()
     await gather(load_configurations(), update_variables())
 
