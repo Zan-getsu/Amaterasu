@@ -213,7 +213,15 @@ class TaskConfig:
             if config_path != "rclone.conf" and status == "up":
                 self.private_link = True
             if not await aiopath.exists(config_path):
-                raise ValueError(f"Rclone Config: {config_path} not Exists!")
+                if config_path.startswith("rclone/"):
+                    raise ValueError(
+                        f"Your rclone config ({config_path}) was not found. "
+                        "Upload it via /userset > Rclone Tools > RCLONE CONFIG."
+                    )
+                raise ValueError(
+                    f"Rclone config not found: {config_path}. "
+                    "Ask the bot owner to provide one, or upload your own via /userset."
+                )
         elif (
             status == "dl"
             and is_gdrive_link(path)
@@ -224,7 +232,15 @@ class TaskConfig:
             if token_path.startswith("tokens/") and status == "up":
                 self.private_link = True
             if not await aiopath.exists(token_path):
-                raise ValueError(f"NO TOKEN! {token_path} not Exists!")
+                if token_path.startswith("tokens/"):
+                    raise ValueError(
+                        f"Your token.pickle ({token_path}) was not found. "
+                        "Upload it via /userset > GDrive Tools > TOKEN.PICKLE."
+                    )
+                raise ValueError(
+                    f"token.pickle not found: {token_path}. "
+                    "Ask the bot owner to provide one, or upload your own via /userset."
+                )
 
     async def before_start(self):
         self.name_swap = (
@@ -250,15 +266,32 @@ class TaskConfig:
         if self.link not in ["rcl", "gdl"]:
             if not self.is_jd:
                 if is_rclone_path(self.link):
-                    if not self.link.startswith("mrcc:") and self.user_dict.get(
-                        "USER_TOKENS", False
+                    if not self.link.startswith("mrcc:") and (
+                        self.user_dict.get("USER_TOKENS", False)
+                        or (
+                            # Auto-detect: if the user has uploaded their
+                            # own rclone.conf, use mrcc: mode automatically.
+                            # Same UX trap as GDRIVE_ID — see upload path
+                            # comment below for details.
+                            self.user_id
+                            and await aiopath.exists(f"rclone/{self.user_id}.conf")
+                        )
                     ):
                         self.link = f"mrcc:{self.link}"
                     await self.is_token_exists(self.link, "dl")
                 elif is_gdrive_link(self.link):
                     if not self.link.startswith(
                         ("mtp:", "tp:", "sa:")
-                    ) and self.user_dict.get("USER_TOKENS", False):
+                    ) and (
+                        self.user_dict.get("USER_TOKENS", False)
+                        or (
+                            # Auto-detect: if the user has uploaded their
+                            # own token.pickle, use mtp: mode for downloads
+                            # too (mirror of the upload-side fix).
+                            self.user_id
+                            and await aiopath.exists(f"tokens/{self.user_id}.pickle")
+                        )
+                    ):
                         self.link = f"mtp:{self.link}"
                     await self.is_token_exists(self.link, "dl")
         elif self.link == "rcl":
@@ -367,34 +400,73 @@ class TaskConfig:
                             if not (
                                 self.user_dict.get("GOFILE_TOKEN") or Config.GOFILE_API
                             ):
-                                raise ValueError("No Gofile Token Found!")
+                                raise ValueError(
+                                    "No Gofile API token found. Set GOFILE_API in "
+                                    "config or add your own via /userset."
+                                )
                         elif service == "buzzheavier":
                             if not (
                                 self.user_dict.get("BUZZHEAVIER_TOKEN")
                                 or Config.BUZZHEAVIER_API
                             ):
-                                raise ValueError("No BuzzHeavier Token Found!")
+                                raise ValueError(
+                                    "No BuzzHeavier API key found. Set BUZZHEAVIER_API "
+                                    "in config or add your own via /userset."
+                                )
                         elif service == "pixeldrain":
                             if not (
                                 self.user_dict.get("PIXELDRAIN_KEY")
                                 or Config.PIXELDRAIN_KEY
                             ):
-                                raise ValueError("No PixelDrain Key Found!")
+                                raise ValueError(
+                                    "No PixelDrain API key found. Set PIXELDRAIN_KEY "
+                                    "in config or add your own via /userset."
+                                )
                     self.up_dest = "Uphoster"
 
             if not self.up_dest:
-                raise ValueError("No Upload Destination!")
+                raise ValueError(
+                    "No upload destination set. Use /mirror <link> -up <destination> "
+                    "or set a default via /userset."
+                )
 
             if is_gdrive_id(self.up_dest):
                 if not self.up_dest.startswith(
                     ("mtp:", "tp:", "sa:")
-                ) and self.user_dict.get("USER_TOKENS", False):
+                ) and (
+                    self.user_dict.get("USER_TOKENS", False)
+                    or (
+                        # Auto-detect: if the user has uploaded their own
+                        # token.pickle AND set their own GDRIVE_ID, use
+                        # mtp: mode automatically. Previously the user
+                        # had to manually toggle "Swap to USER token" in
+                        # /userset, which was a UX trap — they'd upload
+                        # token.pickle + GDRIVE_ID and still get "File
+                        # not found" because the bot used the operator's
+                        # token against the user's drive folder.
+                        self.user_dict.get("GDRIVE_ID")
+                        and self.user_dict.get("GDRIVE_ID") != Config.GDRIVE_ID
+                        and self.user_id
+                    )
+                ):
+                    if not self.user_dict.get("USER_TOKENS", False):
+                        LOGGER.info(
+                            f"Auto-detected user GDRIVE_ID for user_id={self.user_id}; "
+                            "switching to user token.pickle (mtp: mode)."
+                        )
                     self.up_dest = f"mtp:{self.up_dest}"
             elif self.up_dest == "mega:":
                 pass
             elif is_rclone_path(self.up_dest):
-                if not self.up_dest.startswith("mrcc:") and self.user_dict.get(
-                    "USER_TOKENS", False
+                if not self.up_dest.startswith("mrcc:") and (
+                    self.user_dict.get("USER_TOKENS", False)
+                    or (
+                        # Auto-detect: if the user has uploaded their own
+                        # rclone.conf, use mrcc: mode automatically. Same
+                        # UX trap fix as the GDRIVE_ID case above.
+                        self.user_id
+                        and await aiopath.exists(f"rclone/{self.user_id}.conf")
+                    )
                 ):
                     self.up_dest = f"mrcc:{self.up_dest}"
                 self.up_dest = self.up_dest.strip("/")
@@ -403,7 +475,11 @@ class TaskConfig:
             elif self.is_uphoster:
                 pass
             else:
-                raise ValueError("Wrong Upload Destination!")
+                raise ValueError(
+                    f"Wrong upload destination: {self.up_dest!r}. "
+                    "Use a GDrive ID, rclone path (remote:path), 'gdl', 'rcl', "
+                    "or 'mega:'. Run /help mirror for details."
+                )
 
             if self.up_dest not in ["rcl", "gdl"] and not self.is_uphoster and self.up_dest != "mega:":
                 await self.is_token_exists(self.up_dest, "up")

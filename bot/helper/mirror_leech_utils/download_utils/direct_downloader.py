@@ -20,7 +20,12 @@ from ...telegram_helper.message_utils import send_status_message
 async def add_direct_download(listener, path):
     details = listener.link
     if not (contents := details.get("contents")):
-        await listener.on_download_error("There is nothing to download!")
+        await listener.on_download_error(
+            "Could not find any downloadable content at the provided URL. "
+            "The link may be expired, behind a paywall, or unsupported. "
+            "Supported sources: gdrive, mega, magnet, direct URL, telegram. "
+            "Run /help mirror for the full list."
+        )
         return
     listener.size = details["total_size"]
 

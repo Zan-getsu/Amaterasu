@@ -17,7 +17,8 @@ async def add_mega_clone(listener, link, mega_email, mega_password, gid):
         return None, 0, 0
     if not mega_email or not mega_password:
         await listener.on_upload_error(
-            "Mega credentials not configured for this user."
+            "Mega credentials not configured for this user. "
+            "Set MEGA_EMAIL and MEGA_PASSWORD in config, or add your own via /userset."
         )
         return None, 0, 0
 
