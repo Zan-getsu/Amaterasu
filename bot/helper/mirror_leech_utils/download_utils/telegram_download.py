@@ -87,6 +87,7 @@ class TelegramDownloadHelper:
         try:
             # TODO : Add support for user session ( Huh ??)
             if self._hyper_dl:
+                download = None
                 try:
                     self._hyper_dl_instance = HypertgDownload(self)
                     download = await self._hyper_dl_instance.download_media(
@@ -94,7 +95,20 @@ class TelegramDownloadHelper:
                         file_name=path,
                         dump_chat=Config.LEECH_DUMP_CHAT,
                     )
-                except Exception:
+                except Exception as hyper_err:
+                    LOGGER.warning(
+                        f"HypertgDL failed ({type(hyper_err).__name__}: "
+                        f"{hyper_err}); falling back to standard Pyrogram download"
+                    )
+                    download = None
+                # If HypertgDL returned None, the download was incomplete
+                # (failed offsets or size mismatch). Fall back to standard
+                # Pyrogram download instead of uploading a corrupt file.
+                if download is None and not self._listener.is_cancelled:
+                    LOGGER.info(
+                        "HypertgDL returned incomplete download; falling back "
+                        "to standard Pyrogram download (slower but reliable)"
+                    )
                     if Config.TRANSMISSION_MODE in ("user", "both"):
                         try:
                             user_message = await TgClient.user.get_messages(
@@ -129,7 +143,11 @@ class TelegramDownloadHelper:
         if download is not None:
             await self._on_download_complete()
         elif not self._listener.is_cancelled:
-            await self._on_download_error("Internal error occurred")
+            await self._on_download_error(
+                "Download failed: HypertgDL produced an incomplete file and "
+                "the standard Pyrogram fallback also failed. Try again, or "
+                "ask the bot owner to check the logs."
+            )
         return
 
     async def add_download(self, message, path, session):

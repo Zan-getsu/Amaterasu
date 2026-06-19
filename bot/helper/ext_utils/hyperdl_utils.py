@@ -18,7 +18,7 @@ from pathlib import Path
 from re import sub
 from sys import argv
 
-from aiofiles.os import makedirs
+from aiofiles.os import makedirs, path as aiopath, remove as aremove
 from pyrogram import StopTransmission, raw
 from pyrogram.crypto.aes import ctr256_decrypt
 from pyrogram.errors import (
@@ -631,9 +631,42 @@ class HypertgDownload(HypertgTransfer):
                 bad_detail = f" ({n_bad} bot{'s' if n_bad != 1 else ''} exhausted)" if n_bad else ""
                 LOGGER.error(
                     f"HypertgDL {len(all_failed_offsets)} offsets still failed "
-                    f"after {max_retries} retry rounds — file may be incomplete"
+                    f"after {max_retries} retry rounds — file is incomplete"
                     f"{bad_detail}"
                 )
+                # The download is INCOMPLETE. Returning the file path here
+                # would cause the caller to upload a truncated/corrupt file.
+                # Delete the partial file and return None so the caller
+                # (telegram_download.py) falls back to standard Pyrogram
+                # download, which is slower but reliable.
+                try:
+                    if await aiopath.exists(final):
+                        await aremove(final)
+                        LOGGER.info(f"HypertgDL removed incomplete file: {final}")
+                except Exception as cleanup_err:
+                    LOGGER.warning(f"HypertgDL cleanup of incomplete file failed: {cleanup_err}")
+                return None
+
+            # Final integrity check: verify the downloaded file size matches
+            # the expected media size. Catches edge cases where offset
+            # tracking missed a failure (e.g. a chunk wrote 0 bytes but
+            # didn't raise).
+            try:
+                actual_size = await aiopath.getsize(final)
+            except Exception:
+                actual_size = -1
+            if actual_size != self.file_size:
+                LOGGER.error(
+                    f"HypertgDL size mismatch: expected {self.file_size} bytes, "
+                    f"got {actual_size} bytes. File is incomplete — falling "
+                    f"back to standard Pyrogram download."
+                )
+                try:
+                    if await aiopath.exists(final):
+                        await aremove(final)
+                except Exception:
+                    pass
+                return None
 
             return final
         except FloodWait:
