@@ -39,7 +39,12 @@ _SAFE_PATH = re_compile(r"^[A-Za-z0-9_./-]+$")
 _SAFE_GID = re_compile(r"^[A-Za-z0-9_-]{1,64}$")
 _SAFE_PIN = re_compile(r"^\d{4}$")
 _SAFE_PROFILE_ID = re_compile(r"^[A-Za-z0-9_-]{1,64}$")
-_PIN_SALT = b"wzmlx_v3_pin_salt"
+# PIN salt loaded from per-deployment secrets module (env var or .amaterasu_secrets).
+# Backward-compat: if neither is set, falls back to legacy constant.
+try:
+    from bot.helper.ext_utils.secrets import PIN_SALT as _PIN_SALT
+except Exception:  # pragma: no cover — import-time fallback
+    _PIN_SALT = b"wzmlx_v3_pin_salt"
 _PIN_LEN = 4
 _PIN_RATE_LIMIT = 5
 _PIN_RATE_WINDOW = 60
@@ -203,8 +208,19 @@ def _get_config():
 
 
 def _web_secret() -> str:
+    # Priority: AMATERASU_WEB_SECRET env var > Config.AMATERASU_WEB_SECRET
+    # > Config.LOGIN_PASS > Config.BOT_TOKEN. Matches the priority in
+    # bot.helper.ext_utils.secrets.get_web_secret so the bot process and
+    # the gunicorn web process agree on the same secret.
+    env_val = environ.get("AMATERASU_WEB_SECRET")
+    if env_val and env_val.strip():
+        return env_val.strip()
     config = _get_config()
-    return config.AMATERASU_WEB_SECRET or config.LOGIN_PASS or config.BOT_TOKEN
+    return (
+        config.AMATERASU_WEB_SECRET
+        or config.LOGIN_PASS
+        or config.BOT_TOKEN
+    )
 
 
 def _service_password() -> str:
@@ -258,13 +274,83 @@ async def get_bot_status():
     from bot.helper.ext_utils.status_utils import get_readable_time
     from psutil import cpu_percent, virtual_memory
     from time import time
-    
+
     return JSONResponse({
         "active_tasks": len(task_dict),
         "uptime": get_readable_time(time() - bot_start_time),
         "cpu": cpu_percent(),
         "ram": virtual_memory().percent
     })
+
+
+@app.get("/healthz")
+async def healthz():
+    """Lightweight health check for k8s/LB probes.
+
+    Returns 200 if the FastAPI app is up and the DB is reachable (if
+    configured). Returns 503 if the DB is configured but unreachable.
+    """
+    try:
+        from bot.helper.ext_utils.db_handler import database
+        from bot.core.config_manager import Config
+        if Config.DATABASE_URL and database.db is None:
+            return JSONResponse(
+                {"status": "degraded", "reason": "database not connected"},
+                status_code=503,
+            )
+    except Exception as e:
+        # If the import itself fails, the bot is in a bad state but the
+        # web server is up — return 200 with a warning so the probe
+        # doesn't kill the pod before the bot can recover.
+        return JSONResponse({"status": "degraded", "reason": str(e)[:200]})
+    return JSONResponse({"status": "ok"})
+
+
+@app.get("/metrics")
+async def metrics():
+    """Prometheus-format metrics endpoint.
+
+    Exposes: active tasks, uptime, CPU%, RAM%, DB connection state.
+    No PII. Intended for scraping by Prometheus/Grafana.
+    """
+    from time import time as _time
+    from psutil import cpu_percent, virtual_memory
+    try:
+        from bot import task_dict, bot_start_time
+        active_tasks = len(task_dict)
+        uptime_seconds = _time() - bot_start_time
+    except Exception:
+        active_tasks = 0
+        uptime_seconds = 0
+    try:
+        from bot.helper.ext_utils.db_handler import database
+        db_connected = 1 if getattr(database, "db", None) is not None else 0
+    except Exception:
+        db_connected = 0
+    cpu = cpu_percent()
+    ram = virtual_memory().percent
+    lines = [
+        "# HELP amaterasu_active_tasks Number of tasks currently in task_dict.",
+        "# TYPE amaterasu_active_tasks gauge",
+        f"amaterasu_active_tasks {active_tasks}",
+        "# HELP amaterasu_uptime_seconds Uptime of the bot process in seconds.",
+        "# TYPE amaterasu_uptime_seconds gauge",
+        f"amaterasu_uptime_seconds {uptime_seconds:.0f}",
+        "# HELP amaterasu_cpu_percent CPU usage percent (psutil).",
+        "# TYPE amaterasu_cpu_percent gauge",
+        f"amaterasu_cpu_percent {cpu}",
+        "# HELP amaterasu_ram_percent RAM usage percent (psutil).",
+        "# TYPE amaterasu_ram_percent gauge",
+        f"amaterasu_ram_percent {ram}",
+        "# HELP amaterasu_db_connected 1 if MongoDB is connected, 0 otherwise.",
+        "# TYPE amaterasu_db_connected gauge",
+        f"amaterasu_db_connected {db_connected}",
+        "",
+    ]
+    return Response(
+        text="\n".join(lines),
+        media_type="text/plain; version=0.0.4; charset=utf-8",
+    )
 
 
 def _require_profile_database(database) -> None:

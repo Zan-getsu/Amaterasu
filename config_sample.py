@@ -18,8 +18,8 @@ HELPER_USER_PROXIES = ""
 DEFAULT_LANG = ""
 TG_PROXY = {}
 BOT_PM = False
-BOT_MAX_TASKS = 0
-USER_MAX_TASKS = 0
+BOT_MAX_TASKS = 10
+USER_MAX_TASKS = 3
 USER_TIME_INTERVAL = 0
 VERIFY_TIMEOUT = 0
 LOGIN_PASS = ""
@@ -236,7 +236,7 @@ CPU_LIMIT = 20
 THROTTLE_SERVICES = "auto"
 UPSTREAM_REPO = ""
 UPSTREAM_BRANCH = "main"
-UPDATE_PKGS = True
+UPDATE_PKGS = False
 
 # RSS
 RSS_DELAY = 600
@@ -288,3 +288,19 @@ DEFAULT_ENCODE_PRESET = {
     "audio_params": {"bitrate": "128k", "channels": 2, "vbr": True},
 }
 DISABLE_ENCODE = False
+
+# ==========================================
+# 18. SECURITY (DANGEROUS COMMANDS)
+# ==========================================
+# Disabled by default. Enable ONLY if you trust every sudo user
+# AND understand these commands grant root-equivalent access in
+# the container. With shell=True (shell) or exec() (exec), a
+# compromised sudo account can exfiltrate config.py, BOT_TOKEN,
+# DATABASE_URL, rclone.conf, and all service-account JSONs.
+ENABLE_SHELL_COMMAND = False
+ENABLE_EXEC_COMMAND = False
+
+# Hosts for which TLS verification is skipped (e.g. internal mirrors
+# with self-signed certs). Empty by default — all outbound HTTPS
+# requests verify the server certificate.
+INSECURE_HOSTS = []

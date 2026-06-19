@@ -49,11 +49,21 @@ async def main():
         from bot import _sabnzbd_key, _update_sabnzbd_ini, sabnzbd_client
 
         derived_key = _sabnzbd_key()
-        _update_sabnzbd_ini(derived_key)
-        sabnzbd_client._default_params["apikey"] = derived_key
-        from .helper.ext_utils.db_handler import database
+        patched_ok = _update_sabnzbd_ini(derived_key)
+        if not patched_ok:
+            # Refuse to start SABnzbd with default credentials. Disable
+            # the NZB engine for this boot and warn loudly.
+            LOGGER.error(
+                "SABnzbd.ini patching failed — disabling NZB engine for "
+                "this boot. Set DISABLE_NZB=True to silence, or fix the "
+                "ini file (see logs above)."
+            )
+            Config.DISABLE_NZB = True
+        else:
+            sabnzbd_client._default_params["apikey"] = derived_key
+            from .helper.ext_utils.db_handler import database
 
-        await database.update_nzb_config()
+            await database.update_nzb_config()
 
     from .helper.telegram_helper.bot_commands import BotCommands
 
@@ -198,13 +208,117 @@ TgClient.bot.add_handler(
     )
 )
 
-from .helper.ext_utils.bot_utils import derive_service_password
+from .helper.ext_utils.bot_utils import create_tracked_task, derive_service_password
 
 _bot_id = (Config.BOT_TOKEN or "").split(":", 1)[0] or "0"
 qbit_pwd = derive_service_password(_bot_id, "qbit")
 nzb_pwd = derive_service_password(_bot_id, "sabnzbd")
-LOGGER.info(f"Web UI: qBittorrent: /qbit/?pass={qbit_pwd}")
-LOGGER.info(f"Web UI: SABnzbd: /nzb/?pass={nzb_pwd}")
 
+# Do NOT log derived service passwords in plaintext — log.txt is exposed
+# via /log to every sudo user. Send the credentials to the owner via DM
+# instead. If the DM fails (owner hasn't /start'd the bot, etc.), fall
+# back to a one-line log hint and let the operator retrieve the password
+# from the running process via /shell (which is owner-only).
+async def _send_service_credentials_to_owner():
+    try:
+        await TgClient.bot.send_message(
+            Config.OWNER_ID,
+            "🔐 <b>Service credentials (rotated on every restart)</b>\n\n"
+            f"qBittorrent: <code>/qbit/?pass={qbit_pwd}</code>\n"
+            f"SABnzbd: <code>/nzb/?pass={nzb_pwd}</code>\n\n"
+            "<i>Delete this message after saving. These passwords are "
+            "derived from your AMATERASU_SERVICE_PWD_SALT — see the docs "
+            "for rotation instructions.</i>",
+        )
+        LOGGER.info("Service credentials sent to owner via DM.")
+    except Exception as e:
+        LOGGER.warning(
+            f"Could not DM service credentials to owner: {e}. "
+            "Run /shell 'echo qbit=$QBIT_PWD nzb=$NZB_PWD' to retrieve, "
+            "or set AMATERASU_SERVICE_PWD_SALT explicitly in config."
+        )
+
+create_tracked_task(_send_service_credentials_to_owner())
+LOGGER.info("Web UI: qBittorrent available at /qbit/ (password sent to owner via DM)")
+LOGGER.info("Web UI: SABnzbd available at /nzb/ (password sent to owner via DM)")
+
+# --- Graceful shutdown -------------------------------------------------
+# Install signal handlers so SIGTERM/SIGINT trigger a clean shutdown
+# instead of being dropped (Pyrogram's run_forever ignores them by default).
+# The shutdown sequence:
+#   1. Stop accepting new Telegram updates (TgClient.stop)
+#   2. Cancel pending status-update intervals
+#   3. Persist Config to MongoDB (so next boot picks up where we left off)
+#   4. Close MongoDB connection
+#   5. Close httpx AsyncClient singletons (if any)
+# Download daemons (aria2, qBittorrent, SABnzbd, JD) are NOT paused —
+# they continue in their own processes and resume on next boot via
+# INCOMPLETE_TASK_NOTIFIER.
+import signal
+import asyncio as _asyncio
+
+_shutdown_event = _asyncio.Event()
+
+
+def _signal_handler(signum, _frame):
+    LOGGER.info(f"Received signal {signum} ({signal.Signals(signum).name}), "
+                "initiating graceful shutdown...")
+    _shutdown_event.set()
+
+
+def _install_signal_handlers():
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        try:
+            bot_loop.add_signal_handler(sig, _signal_handler, sig)
+        except (NotImplementedError, RuntimeError):
+            # add_signal_handler is not available on Windows — fall back
+            # to the default KeyboardInterrupt behavior.
+            signal.signal(sig, _signal_handler)
+
+
+async def _graceful_shutdown():
+    LOGGER.info("Shutdown: stopping Telegram clients...")
+    try:
+        await TgClient.stop()
+    except Exception as e:
+        LOGGER.error(f"Shutdown: TgClient.stop error: {e}")
+
+    LOGGER.info("Shutdown: cancelling status intervals...")
+    try:
+        from . import intervals
+        for interval in intervals.get("status", {}).values():
+            if hasattr(interval, "cancel"):
+                try:
+                    interval.cancel()
+                except Exception:
+                    pass
+    except Exception as e:
+        LOGGER.error(f"Shutdown: interval cancel error: {e}")
+
+    LOGGER.info("Shutdown: persisting Config to MongoDB...")
+    try:
+        from .helper.ext_utils.db_handler import database
+        if database.db is not None:
+            await database.update_config(Config.get_all())
+            await database.disconnect()
+    except Exception as e:
+        LOGGER.error(f"Shutdown: config persist error: {e}")
+
+    LOGGER.info("Shutdown complete.")
+
+
+_install_signal_handlers()
 LOGGER.info("Amaterasu Client(s) & Services Started !")
-bot_loop.run_forever()
+
+# Run forever, but wake up when a shutdown signal arrives so we can
+# drain cleanly before the process exits.
+async def _main_loop():
+    await _shutdown_event.wait()
+    await _graceful_shutdown()
+
+
+try:
+    bot_loop.run_until_complete(_main_loop())
+except (KeyboardInterrupt, SystemExit):
+    LOGGER.info("Hard interrupt received, exiting.")
+    bot_loop.run_until_complete(_graceful_shutdown())

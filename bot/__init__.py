@@ -24,11 +24,11 @@ from logging import (
     Filter,
     INFO,
     WARNING,
-    FileHandler,
     StreamHandler,
     basicConfig,
     getLogger,
 )
+from logging.handlers import RotatingFileHandler
 from os import cpu_count
 from time import time
 
@@ -67,7 +67,12 @@ class _NonEmptyErrorFilter(Filter):
 basicConfig(
     format="[%(asctime)s] [%(levelname)s] - %(message)s",  #  [%(filename)s:%(lineno)d]
     datefmt="%d-%b-%y %I:%M:%S %p",
-    handlers=[FileHandler("log.txt"), StreamHandler()],
+    handlers=[
+        RotatingFileHandler(
+            "log.txt", maxBytes=10 * 1024 * 1024, backupCount=5, encoding="utf-8"
+        ),
+        StreamHandler(),
+    ],
     level=INFO,
 )
 
@@ -147,9 +152,19 @@ def _sabnzbd_key():
 
 
 def _update_sabnzbd_ini(api_key):
+    """Patch SABnzbd.ini with the derived api_key and password.
+
+    Returns True on success (or no-op when already patched), False on
+    failure. Caller should refuse to start SABnzbd if this returns
+    False — otherwise the service runs with a default or placeholder
+    credential.
+    """
     from re import compile as _re, MULTILINE
+
     pat_key = _re(r"^api_key\s*=.*$", MULTILINE)
     pat_pwd = _re(r'^password\s*=.*$', MULTILINE)
+    # Known-bad credentials that must NEVER be left in the ini at boot:
+    _BAD_MARKERS = ("sabpassword", "REPLACED_AT_BOOT_BY_AMATERASU", "CHANGEME")
     try:
         with open("configs/sabnzbd/SABnzbd.ini", "r+") as f:
             content = f.read()
@@ -157,15 +172,38 @@ def _update_sabnzbd_ini(api_key):
             new = pat_key.sub(f"api_key = {api_key}", new)
             new = pat_pwd.sub(f"password = {api_key}", new)
             if new == content:
-                return
+                # No substitution happened. Either (a) the file was
+                # already patched with this exact key (idempotent — OK),
+                # or (b) the regex didn't match and we're about to ship
+                # a default/placeholder credential. Distinguish by
+                # checking for known-bad markers.
+                for marker in _BAD_MARKERS:
+                    if marker in content:
+                        LOGGER.error(
+                            f"SABnzbd.ini still contains the marker '{marker}' "
+                            "but the regex pattern didn't match — refusing to "
+                            "start SABnzbd. Delete configs/sabnzbd/SABnzbd.ini "
+                            "and redeploy to regenerate from the template."
+                        )
+                        return False
+                return True
             f.seek(0)
             f.truncate()
             f.write(new)
             LOGGER.info("SABnzbd.ini Updated with derived api_key")
+            return True
     except FileNotFoundError:
-        LOGGER.warning("SABnzbd.ini not found, skipping patch")
+        LOGGER.error(
+            "configs/sabnzbd/SABnzbd.ini not found. Refusing to start SABnzbd "
+            "with default credentials. Restore the file from the repo."
+        )
+        return False
     except Exception as e:
-        LOGGER.error(f"SABnzbd.ini patch failed: {e}")
+        LOGGER.error(
+            f"SABnzbd.ini patch failed: {e}. Refusing to start SABnzbd with "
+            "potentially default credentials."
+        )
+        return False
 
 
 if not Config.WEB_ACCESS_PASSWORD:

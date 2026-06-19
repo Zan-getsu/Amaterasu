@@ -8,7 +8,15 @@ from inspect import signature
 from .. import LOGGER, bot_loop
 from .config_manager import Config
 
-_DB_PARTITION_SALT = b"wzmlx_v3_db_partition_salt"
+# DB partition salt loaded from per-deployment secrets module.
+# Backward-compat: if neither env var nor .amaterasu_secrets is set,
+# falls back to the legacy constant so existing deployments keep their
+# partition name (and thus their data). Set AMATERASU_DB_PARTITION_SALT
+# explicitly to migrate to a fresh per-deployment value.
+try:
+    from ..helper.ext_utils.secrets import DB_PARTITION_SALT as _DB_PARTITION_SALT
+except Exception:  # pragma: no cover
+    _DB_PARTITION_SALT = b"wzmlx_v3_db_partition_salt"
 
 
 def db_partition_id(bot_id):

@@ -27,3 +27,11 @@ graphify-out/*
 .agent*
 __pycache__/
 *.pyc
+# Per-deployment secrets (auto-generated on first boot)
+.amaterasu_secrets
+.secrets
+# Test artifacts
+.pytest_cache/
+.coverage
+htmlcov/
+.ruff_cache/

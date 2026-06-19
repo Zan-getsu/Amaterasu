@@ -32,6 +32,8 @@ from .help_messages import (
     MIRROR_HELP_DICT,
     YT_HELP_DICT,
 )
+from .secrets import PIN_SALT as _PIN_SALT
+from .secrets import SERVICE_PWD_SALT as _SERVICE_PWD_SALT
 from .telegraph_helper import telegraph
 
 DEFAULT_BROWSER_USER_AGENT = (
@@ -40,8 +42,8 @@ DEFAULT_BROWSER_USER_AGENT = (
     "Chrome/131.0.0.0 Safari/537.36"
 )
 
-_SERVICE_PWD_SALT = b"wzmlx_v3_service_pwd_salt"
-_PIN_SALT = b"wzmlx_v3_pin_salt"
+# Salts are now loaded from env vars or .amaterasu_secrets file (per-deployment).
+# See bot/helper/ext_utils/secrets.py for migration / rotation instructions.
 _PIN_LEN = 4
 _PIN_RATE_LIMIT = 5
 _PIN_RATE_WINDOW = 60
@@ -50,7 +52,8 @@ _cached_secret_bytes = None
 
 
 def get_web_secret():
-    return Config.AMATERASU_WEB_SECRET or Config.LOGIN_PASS or Config.BOT_TOKEN
+    from .secrets import get_web_secret as _gws
+    return _gws() or Config.AMATERASU_WEB_SECRET or Config.LOGIN_PASS or Config.BOT_TOKEN
 
 
 def _shared_secret():
@@ -115,7 +118,15 @@ def verify_pin(gid, pin, bot_id):
 
 COMMAND_USAGE = {}
 
-THREAD_POOL = ThreadPoolExecutor(max_workers=1000)
+# Thread pool for sync_to_async offload (ffmpeg, mega, yt-dlp subprocess calls).
+# Previously max_workers=1000 which reserved ~8GB of virtual memory for thread
+# stacks and added scheduler overhead. min(32, cpu+4) is the Python 3.8+ default
+# for concurrent.futures.ThreadPoolExecutor — tuned for I/O-bound work.
+import os as _os
+_THREAD_WORKERS = min(32, (_os.cpu_count() or 1) + 4)
+THREAD_POOL = ThreadPoolExecutor(
+    max_workers=_THREAD_WORKERS, thread_name_prefix="amaterasu-worker"
+)
 
 
 def _log_background_exception(task):
@@ -391,7 +402,18 @@ def get_filename_from_headers(headers, url=""):
 async def get_content_info(url):
     headers = {"User-Agent": DEFAULT_BROWSER_USER_AGENT}
     try:
-        async with AsyncClient(verify=False, follow_redirects=True) as client:
+        # TLS verification is ON by default. If you genuinely need to bypass
+        # for an internal host with a self-signed cert, add the host to
+        # Config.INSECURE_HOSTS (a list) and we'll disable verify only for
+        # that host.
+        from urllib.parse import urlparse as _urlparse
+
+        parsed = _urlparse(url)
+        insecure_hosts = getattr(Config, "INSECURE_HOSTS", None) or []
+        verify = parsed.hostname not in insecure_hosts
+        async with AsyncClient(
+            verify=verify, follow_redirects=True, timeout=30.0
+        ) as client:
             async with client.stream("GET", url, headers=headers) as response:
                 return (
                     response.headers.get("Content-Type"),

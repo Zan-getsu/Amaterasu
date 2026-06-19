@@ -5,10 +5,40 @@ services:
     build: .
     container_name: amaterasu-bot
     restart: always
-    network_mode: "host"
+    # NOTE: previous config used network_mode: "host" which exposed
+    # qBittorrent (8090), SABnzbd (8070), aria2 RPC (6800), the FastAPI
+    # streaming server (8080), and rclone serve (8081) directly on the
+    # host LAN — anyone on the network could reach them. The derived
+    # qBittorrent/SABnzbd passwords were the only protection, and they
+    # were logged in plaintext at startup (since fixed).
+    #
+    # Now: only the FastAPI streaming server (8080) is exposed, and it
+    # binds to 127.0.0.1 by default — operators should put it behind a
+    # TLS-terminating reverse proxy (nginx, Caddy, Cloudflare Tunnel).
+    # The other services remain container-internal and unreachable from
+    # the host LAN.
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      # Mount the entire repo so config.py, accounts/, rclone/, tokens/,
+      # cookies/, thumbnails/, downloads/, log.txt, .amaterasu_secrets
+      # are all persisted on the host and editable without rebuilding
+      # the image. Matches the original behavior.
+      - .:/usr/src/app:z
     environment:
       - TZ=Asia/Dhaka
-    volumes:
-      - .:/usr/src/app:z
-    # Note: Network mode is set to host so ports 8080 (FileToLink API)
-    # and 80 (Torrent port mapping) will automatically map to the host system.
+    # Capabilities needed by the non-root amaterasu user:
+    #   - SYS_ADMIN: required by cpulimit (uses ptrace via /proc)
+    #   - DAC_READ_SEARCH: needed if reading files owned by other UIDs
+    #     (e.g. files created by a previous root-running container)
+    # If you don't use cpulimit (CPU_LIMIT=0 or THROTTLE_SERVICES=none),
+    # you can drop SYS_ADMIN for a tighter security profile.
+    cap_add:
+      - SYS_ADMIN
+      - DAC_READ_SEARCH
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s

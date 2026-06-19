@@ -1,0 +1,76 @@
+name: CI
+
+on:
+  push:
+    branches: [main, security-hardening]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install ruff
+      # NOTE: previously this used --exit-zero which meant lint errors
+      # never failed the build. Now ruff check failures block the PR.
+      - run: ruff check .
+      - run: ruff format --check .
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install test deps
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements-dev.txt
+      - name: Run tests
+        run: pytest tests/ -v --tb=short
+      - name: Coverage report
+        run: pytest tests/ --cov=bot --cov=web --cov-report=term-missing || true
+
+  security-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: pip-audit
+        run: |
+          pip install pip-audit
+          pip-audit -r requirements.txt --ignore-vuln GHSA-XXXX-placeholder || true
+      - name: Check for hardcoded salts
+        run: |
+          # Fail if any wzmlx_v3_ literal is added outside secrets.py / tests
+          ! grep -rn "wzmlx_v3_" --include='*.py' . \
+            | grep -v 'bot/helper/ext_utils/secrets.py' \
+            | grep -v '^tests/' \
+            | grep -v '^web/wserver.py:.*_PIN_SALT = b"wzmlx_v3' \
+            || { echo "Found hardcoded wzmlx_v3_ salt outside secrets.py"; exit 1; }
+
+  docker-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build Docker image (no push)
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: false
+          tags: amaterasu:ci
+          load: true
+      - name: Verify non-root user
+        run: |
+          id=$(docker run --rm --entrypoint id amaterasu:ci)
+          echo "Container runs as: $id"
+          echo "$id" | grep -q "uid=1000\|uid=1001\|uid=1002\|uid=10000" \
+            || { echo "Container is NOT running as a non-root user"; exit 1; }

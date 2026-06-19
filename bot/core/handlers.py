@@ -114,21 +114,21 @@ def add_handlers():
         MessageHandler(
             aioexecute,
             filters=command(BotCommands.AExecCommand, case_sensitive=True)
-            & CustomFilters.sudo,
+            & CustomFilters.owner,
         )
     )
     TgClient.bot.add_handler(
         MessageHandler(
             execute,
             filters=command(BotCommands.ExecCommand, case_sensitive=True)
-            & CustomFilters.sudo,
+            & CustomFilters.owner,
         )
     )
     TgClient.bot.add_handler(
         MessageHandler(
             clear,
             filters=command(BotCommands.ClearLocalsCommand, case_sensitive=True)
-            & CustomFilters.sudo,
+            & CustomFilters.owner,
         )
     )
     TgClient.bot.add_handler(
@@ -257,7 +257,7 @@ def add_handlers():
         MessageHandler(
             run_shell,
             filters=command(BotCommands.ShellCommand, case_sensitive=True)
-            & CustomFilters.sudo,
+            & CustomFilters.owner,
         )
     )
     TgClient.bot.add_handler(

@@ -1,6 +1,40 @@
 from ast import literal_eval
 from importlib import import_module
+from json import loads as json_loads
+from json import JSONDecodeError
 from os import getenv
+from typing import Optional, Type
+
+
+def _try_parse_collection(value: str, kind: Type):
+    """Parse a string into a list or dict, preferring JSON.
+
+    Returns None if parsing fails (caller falls back to default or
+    comma-split). Tries JSON first (safe, standard), then literal_eval
+    (backward compat with existing deployments using Python-literal
+    syntax). literal_eval is safe-ish (it rejects names and calls),
+    but JSON is preferred because it can't trigger __import__ tricks.
+    """
+    value = value.strip()
+    if not value:
+        return None
+    # JSON first
+    try:
+        parsed = json_loads(value)
+        if isinstance(parsed, kind):
+            return parsed
+    except (JSONDecodeError, ValueError):
+        pass
+    # Backward compat: Python-literal syntax (e.g. "['a', 'b']" or
+    # "{'key': 'val'}"). literal_eval is safe — it only accepts literals.
+    try:
+        parsed = literal_eval(value)
+        if isinstance(parsed, kind):
+            return parsed
+    except (ValueError, SyntaxError):
+        pass
+    return None
+
 
 class Config:
     _LEGACY_URL_VARS = {
@@ -19,7 +53,9 @@ class Config:
     HELPER_STRINGS = ""
     HELPER_BOT_PROXIES = ""
     HELPER_USER_PROXIES = ""
-    BOT_MAX_TASKS = 0
+    # 0 = unlimited. Default 10 prevents a single user from starving the
+    # bot by queuing 1000 downloads. Set to 0 to restore old behavior.
+    BOT_MAX_TASKS = 10
     BOT_PM = False
     CMD_SUFFIX = ""
     COLORED_BTNS = True
@@ -141,14 +177,15 @@ class Config:
     LOGIN_PASS = ""
     TORRENT_TIMEOUT = 0
     TIMEZONE = "Asia/Dhaka"
-    USER_MAX_TASKS = 0
+    # 0 = unlimited. Default 3 concurrent tasks per user for fairness.
+    USER_MAX_TASKS = 3
     USER_TIME_INTERVAL = 0
     UPLOAD_PATHS = {}
     DRIVE_CATEGORY_MODE = False
     DRIVE_CATEGORY_SA = ""
     UPSTREAM_REPO = ""
     UPSTREAM_BRANCH = "main"
-    UPDATE_PKGS = True
+    UPDATE_PKGS = False  # default off — pin and update explicitly to avoid surprises
     USENET_SERVERS = []
     USER_SESSION_STRING = ""
     TRANSMISSION_MODE = "both"
@@ -163,6 +200,17 @@ class Config:
     YT_PRIVACY_STATUS = "unlisted"
     DEFAULT_ENCODE_PRESET = {}
     DISABLE_ENCODE = False
+
+    # Security: dangerous commands (RCE) — disabled by default.
+    # Set ENABLE_SHELL_COMMAND=1 to re-enable /shell (owner-only).
+    # Set ENABLE_EXEC_COMMAND=1 to re-enable /exec and /aexec (owner-only).
+    ENABLE_SHELL_COMMAND = False
+    ENABLE_EXEC_COMMAND = False
+
+    # Hosts for which TLS verification is skipped (e.g. internal mirrors
+    # with self-signed certs). Empty by default — all outbound HTTPS
+    # requests verify the server certificate.
+    INSECURE_HOSTS = []
 
     MULTI_TOKENS = {}
 
@@ -370,12 +418,12 @@ class Config:
             if isinstance(value, list):
                 return value
             if isinstance(value, str):
-                try:
-                    parsed = literal_eval(value)
-                    if isinstance(parsed, list):
-                        return parsed
-                except (ValueError, SyntaxError):
-                    pass
+                # Prefer JSON (safe). Fall back to literal_eval for backward
+                # compat with existing deployments that may use Python-literal
+                # syntax (e.g. "['a', 'b']"). Fall back to comma-split.
+                parsed = _try_parse_collection(value, list)
+                if parsed is not None:
+                    return parsed
                 if value.startswith("[") and value.endswith("]"):
                     return original_value
                 return [v.strip() for v in value.split(",") if v.strip()]
@@ -384,12 +432,9 @@ class Config:
             if isinstance(value, dict):
                 return value
             if isinstance(value, str):
-                try:
-                    parsed = literal_eval(value)
-                    if isinstance(parsed, dict):
-                        return parsed
-                except (ValueError, SyntaxError):
-                    pass
+                parsed = _try_parse_collection(value, dict)
+                if parsed is not None:
+                    return parsed
             return original_value
         return value
 

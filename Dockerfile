@@ -1,9 +1,10 @@
-FROM python:3.11-slim
+FROM python:3.11-slim-bookworm
 
 ENV LANG=C.UTF-8 \
     DEBIAN_FRONTEND=noninteractive \
     TZ=Asia/Dhaka \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1
 
 WORKDIR /usr/src/app
 
@@ -65,6 +66,17 @@ COPY . .
 
 # Setup permissions
 RUN chmod +x start.sh
+
+# Create a non-root user for the bot process. The user owns /usr/src/app
+# so it can write downloads, logs, and config files. We still need
+# cap_add SYS_ADMIN if cpulimit is used on child processes — operators
+# who need that should add it via docker-compose.
+RUN groupadd -r amaterasu \
+    && useradd -r -g amaterasu -m -d /home/amaterasu amaterasu \
+    && mkdir -p /usr/src/app/downloads \
+    && chown -R amaterasu:amaterasu /usr/src/app
+
+USER amaterasu
 
 # Start the bot
 CMD ["bash", "start.sh"]

@@ -1,4 +1,3 @@
-from aiofiles import open as aiopen
 from contextlib import redirect_stdout, suppress
 from io import StringIO, BytesIO
 from os import path as ospath, getcwd, chdir
@@ -7,6 +6,7 @@ from traceback import format_exc
 from re import match
 
 from .. import LOGGER
+from ..core.config_manager import Config
 from ..core.tg_client import TgClient
 from ..helper.ext_utils.bot_utils import sync_to_async, new_task
 from ..helper.telegram_helper.message_utils import send_file, send_message
@@ -37,7 +37,7 @@ def log_input(message):
 
 async def send(msg, message):
     if len(str(msg)) > 2000:
-        with BytesIO(str.encode(msg)) as out_file:
+        with BytesIO(str.encode(str(msg))) as out_file:
             out_file.name = "output.txt"
             await send_file(message, out_file)
     else:
@@ -51,11 +51,38 @@ async def send(msg, message):
 
 @new_task
 async def aioexecute(_, message):
+    if not Config.ENABLE_EXEC_COMMAND:
+        await send_message(
+            message,
+            "Python exec command is disabled.\n\n"
+            "To enable, set <code>ENABLE_EXEC_COMMAND=1</code> in config or env "
+            "and restart.\n\n"
+            "<b>Warning:</b> /aexec runs arbitrary Python in the bot process and "
+            "can read every credential in config.py. Only enable if you trust "
+            "every sudo user.",
+        )
+        return
+    user = message.from_user or message.sender_chat
+    if user is None or user.id != Config.OWNER_ID:
+        await send_message(message, "Owner only.")
+        return
     await send(await do("aexec", message), message)
 
 
 @new_task
 async def execute(_, message):
+    if not Config.ENABLE_EXEC_COMMAND:
+        await send_message(
+            message,
+            "Python exec command is disabled.\n\n"
+            "To enable, set <code>ENABLE_EXEC_COMMAND=1</code> in config or env "
+            "and restart.",
+        )
+        return
+    user = message.from_user or message.sender_chat
+    if user is None or user.id != Config.OWNER_ID:
+        await send_message(message, "Owner only.")
+        return
     await send(await do("exec", message), message)
 
 
@@ -72,8 +99,10 @@ async def do(func, message):
     env = namespace_of(message)
 
     chdir(getcwd())
-    async with aiopen(ospath.join(getcwd(), "bot/modules/temp.txt"), "w") as temp:
-        await temp.write(body)
+    # NOTE: The original code wrote `body` to bot/modules/temp.txt here,
+    # but never read the file back. The write served no purpose other
+    # than leaving a stale file on disk that raced between concurrent
+    # /exec invocations. Removed entirely.
 
     stdout = StringIO()
 
@@ -112,8 +141,14 @@ async def do(func, message):
 
 @new_task
 async def clear(_, message):
+    if not Config.ENABLE_EXEC_COMMAND:
+        await send_message(message, "Python exec command is disabled.")
+        return
+    user = message.from_user or message.sender_chat
+    if user is None or user.id != Config.OWNER_ID:
+        await send_message(message, "Owner only.")
+        return
     log_input(message)
     if message.chat.id in namespaces:
         del namespaces[message.chat.id]
     await send("Locals Cleared.", message)
-

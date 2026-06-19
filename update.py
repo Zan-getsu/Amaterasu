@@ -10,6 +10,7 @@ from logging import (
     ERROR,
 )
 from os import path, remove, environ
+from pathlib import Path
 from shutil import rmtree
 from pymongo import AsyncMongoClient
 from pymongo.errors import PyMongoError
@@ -29,7 +30,45 @@ def as_bool(value):
         return value.strip().lower() in ("true", "1", "yes", "on")
     return bool(value)
 
-_DB_PARTITION_SALT = b"wzmlx_v3_db_partition_salt"
+
+def _load_db_partition_salt():
+    """Load the DB partition salt WITHOUT triggering bot/__init__.py.
+
+    update.py runs as the very first thing in start.sh, before the bot
+    is booted. Importing bot.helper.ext_utils.secrets via the normal
+    import chain triggers bot/__init__.py which installs uvloop, creates
+    an event loop, imports Config, etc. — heavy and may fail if deps
+    aren't installed yet. We load the secrets module directly via
+    importlib instead, which only triggers stdlib imports.
+    """
+    # Env var takes priority
+    env_val = environ.get("AMATERASU_DB_PARTITION_SALT")
+    if env_val and env_val.strip():
+        try:
+            return bytes.fromhex(env_val.strip())
+        except ValueError:
+            return env_val.strip().encode("utf-8")
+    # Read from .amaterasu_secrets file if it exists
+    secrets_file = Path(".amaterasu_secrets")
+    if secrets_file.exists():
+        try:
+            for line in secrets_file.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if line.startswith("DB_PARTITION_SALT="):
+                    val = line.split("=", 1)[1].strip()
+                    if val:
+                        try:
+                            return bytes.fromhex(val)
+                        except ValueError:
+                            return val.encode("utf-8")
+        except OSError:
+            pass
+    # Legacy fallback (preserves existing deployments' partition names)
+    return b"wzmlx_v3_db_partition_salt"
+
+
+_DB_PARTITION_SALT = _load_db_partition_salt()
+
 _ALLOWED_UPSTREAM = re_compile(
     r"^https://("
     r"github\.com/[\w.-]+/[\w.-]+/?|"
@@ -133,8 +172,9 @@ def _run_update(upstream_repo, upstream_branch, version):
 
     if not _ALLOWED_UPSTREAM.match(upstream_repo):
         _LOGGER.error(
-            "UPSTREAM_REPO rejected (must be github.com, raw.githubusercontent.com, "
-            f"or git.nbmirror.qzz.io): {upstream_repo}"
+            "UPSTREAM_REPO rejected (must be github.com, "
+            "raw.githubusercontent.com, or git.nbmirror.qzz.io): "
+            f"{upstream_repo}"
         )
         exit(1)
 

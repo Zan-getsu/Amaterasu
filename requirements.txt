@@ -40,5 +40,5 @@ urllib3
 uvicorn
 uvloop
 xattr
-yt-dlp[default,curl-cffi] @ git+https://github.com/yt-dlp/yt-dlp.git@master
+yt-dlp[default,curl-cffi]==2024.10.7
 yt-dlp-ejs

@@ -327,13 +327,39 @@ class HypertgUpload(HypertgTransfer):
         mime_type = self._mime(file_path)
         input_media = self._build_media(input_file, mime_type, media_type, attributes, thumb_file)
 
+        # Parse HTML entities from the caption. The raw SendMedia RPC
+        # treats `message` as plain text — without explicit `entities`,
+        # tags like <b>filename</b> appear literally instead of being
+        # rendered as bold. Pyrogram's high-level send_video/send_document
+        # methods do this parsing automatically; we have to do it manually
+        # here because we're using the raw RPC.
+        message_text = caption or ""
+        entities = None
+        if message_text:
+            try:
+                parsed = await target_client.parser.parse(
+                    message_text, target_client.parse_mode
+                )
+                message_text = parsed["message"]
+                entities = parsed["entities"]
+            except Exception as e:
+                LOGGER.warning(
+                    f"HypertgUL caption parse failed ({type(e).__name__}: {e}); "
+                    "sending as plain text"
+                )
+                # Fall back to stripping tags so the user doesn't see
+                # literal <b>...</b> in the caption.
+                from re import sub as _re_sub
+                message_text = _re_sub(r"<[^>]+>", "", message_text)
+
         peer = await target_client.resolve_peer(target_chat_id)
         rpc = raw.functions.messages.SendMedia(
-            peer=peer, media=input_media, message=caption or "",
+            peer=peer, media=input_media, message=message_text,
             random_id=target_client.rnd_id(),
             reply_to=raw.types.InputReplyToMessage(reply_to_msg_id=reply_to_message_id)
             if reply_to_message_id else None,
             silent=True,
+            entities=entities,
         )
 
         r_updates = None

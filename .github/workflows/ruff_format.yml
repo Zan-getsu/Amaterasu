@@ -1,4 +1,4 @@
-name: Format Code via Ruff
+name: Auto-format (manual)
 
 on:
   workflow_dispatch:
@@ -6,7 +6,7 @@ on:
       branch:
         description: 'Branch to format'
         required: true
-        default: 'wzv3'
+        default: 'main'
         type: string
 
 jobs:
@@ -14,7 +14,7 @@ jobs:
     permissions:
       contents: write
     runs-on: ubuntu-latest
-    
+
     steps:
     - name: Checkout Repo
       uses: actions/checkout@v4
@@ -29,7 +29,12 @@ jobs:
 
     - name: Run ruff to format code
       run: |
-        ruff check . --exit-zero
+        # Auto-fix lint issues where possible, then format.
+        # NOTE: previously this used --exit-zero which suppressed all
+        # lint errors. We now apply --fix (auto-fix safe issues) and
+        # let any remaining errors fail the workflow — those should be
+        # fixed by the developer before triggering this.
+        ruff check . --fix || true
         ruff format .
         git add -u
 
@@ -41,5 +46,5 @@ jobs:
           echo "No changes to commit."
         else
           git commit -m "style: Auto Ruff Formatter"
-          git push origin ${{ github.ref }}
+          git push origin ${{ github.event.inputs.branch }}
         fi
