@@ -71,10 +71,15 @@ RUN chmod +x start.sh
 # so it can write downloads, logs, and config files. We still need
 # cap_add SYS_ADMIN if cpulimit is used on child processes — operators
 # who need that should add it via docker-compose.
+#
+# Also create /JDownloader (owned by amaterasu) so the bot can extract
+# cfg.zip there on first boot if JDownloader is enabled. Without this,
+# startup.py's `7z x cfg.zip -o/JDownloader` fails with permission
+# denied when running as non-root.
 RUN groupadd -r amaterasu \
     && useradd -r -g amaterasu -m -d /home/amaterasu amaterasu \
-    && mkdir -p /usr/src/app/downloads \
-    && chown -R amaterasu:amaterasu /usr/src/app
+    && mkdir -p /usr/src/app/downloads /JDownloader \
+    && chown -R amaterasu:amaterasu /usr/src/app /JDownloader
 
 USER amaterasu
 

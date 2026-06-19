@@ -405,7 +405,29 @@ async def load_configurations():
 
     from bot import service_cores
 
-    cmd = f"chmod 600 .netrc && cp .netrc /root/.netrc && chmod +x setpkgs.sh && ./setpkgs.sh {BinConfig.ARIA2_NAME} \"{service_cores}\" {Config.CPU_LIMIT}"
+    # Resolve the current user's HOME so we copy .netrc to a directory
+    # we actually own. The original code hardcoded /root/.netrc, which
+    # only works when the container runs as root. With the non-root
+    # amaterasu user, that cp fails with 'Permission denied' and the
+    # && chain short-circuits — setpkgs.sh never runs, aria2c never
+    # starts, and the bot crashes with 'Cannot connect to host
+    # localhost:6800'.
+    from os import path as _ospath, environ as _environ, getuid as _getuid
+    from pwd import getpwuid as _getpwuid
+    try:
+        _home = _environ.get("HOME") or _getpwuid(_getuid()).pw_dir
+    except Exception:
+        _home = _environ.get("HOME", "/root")
+    # Use ';' instead of '&&' so a failed cp (e.g. /home/amaterasu
+    # already has a .netrc) doesn't prevent setpkgs.sh from running.
+    # The aria2/sabnzbd daemons are the critical part; .netrc is only
+    # used by rclone for some auth flows.
+    cmd = (
+        f"chmod 600 .netrc; "
+        f"cp .netrc '{_home}/.netrc' 2>/dev/null || true; "
+        f"chmod +x setpkgs.sh && ./setpkgs.sh {BinConfig.ARIA2_NAME} "
+        f"\"{service_cores}\" {Config.CPU_LIMIT}"
+    )
     if not Config.DISABLE_NZB:
         cmd += f" {BinConfig.SABNZBD_NAME}"
     await (
