@@ -12,7 +12,7 @@ from urllib.parse import parse_qs, urlparse, unquote
 from urllib3.util.retry import Retry
 from uuid import uuid4
 from base64 import b64decode, b64encode
-from curl_cffi import Session as CurlSession
+from curl_cffi.requests import Session as CurlSession
 
 from ....core.config_manager import Config
 from ...ext_utils.exceptions import DirectDownloadLinkException

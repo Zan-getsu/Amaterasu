@@ -700,64 +700,13 @@ async def restart_notification():
         await remove(".restartmsg")
 
 
-async def _notify_tasks(notifier_dict, restart_chat_id, now):
-    for cid, data in notifier_dict.items():
-        is_restart_chat = cid == restart_chat_id
-        header = _restart_header(now, is_restart_chat)
-        msg = header + "\n\n⌬ <b><i>Incomplete Tasks!</i></b>"
-        for tag, tasks in data.items():
-            entry = f"\n➲ <b>User:</b> {tag}\n┖ <b>Tasks:</b>"
-            for index, task in enumerate(tasks, start=1):
-                link = task.get("link", "")
-                entry += f" {index}. <a href='{link}'>L</a> |"
-            if len((msg + entry).encode()) > 4000:
-                await _send_msg(cid, msg)
-                msg = header
-            msg += entry
-        if msg:
-            await _send_msg(cid, msg)
-
-
-async def _resume_tasks(notifier_dict):
-    for cid, data in notifier_dict.items():
-        for tag, tasks in data.items():
-            for task in tasks:
-                command = task.get("command", "")
-                user_id = task.get("user_id", 0)
-                reply_to_msg_id = task.get("reply_to_msg_id", 0)
-                if not command or not user_id:
-                    continue
-                try:
-                    user = await TgClient.bot.get_users(user_id)
-                except Exception as e:
-                    LOGGER.warning(f"Resume: cannot get user {user_id}: {e}")
-                    continue
-                handler = resolve_command(command)
-                if handler is None:
-                    continue
-                try:
-                    msg = await TgClient.bot.send_message(
-                        chat_id=cid,
-                        text=command,
-                        disable_notification=True,
-                    )
-                    msg.text = command
-                    msg.from_user = user
-                    if reply_to_msg_id:
-                        try:
-                            reply_msg = await TgClient.bot.get_messages(
-                                chat_id=cid, message_ids=reply_to_msg_id
-                            )
-                            if reply_msg:
-                                msg.reply_to_message = reply_msg
-                        except Exception as e:
-                            LOGGER.warning(
-                                f"Resume: cannot fetch reply msg {reply_to_msg_id}: {e}"
-                            )
-                    await handler(TgClient.bot, msg)
-                    await sleep(1)
-                except Exception as e:
-                    LOGGER.error(f"Resume: failed for '{command}' in {cid}: {e}")
+# NOTE: _notify_tasks and _resume_tasks were previously defined here
+# but were DEAD CODE — they referenced undefined names (_restart_header,
+# _send_msg) and were never called by any code path. The actual
+# implementations that get called are notify_incomplete_tasks() and
+# auto_resume_incomplete_tasks() above. Removed to avoid confusion
+# and to clear F821 (undefined name) warnings that would mask real
+# bugs.
 
 
 @new_task

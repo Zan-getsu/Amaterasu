@@ -5,6 +5,7 @@ from re import search as re_search
 from contextlib import suppress
 from secrets import token_hex
 from zipfile import ZipFile, is_zipfile
+from asyncio import sleep
 from yt_dlp import YoutubeDL, DownloadError
 from yt_dlp.networking.impersonate import ImpersonateTarget
 

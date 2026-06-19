@@ -8,6 +8,7 @@ aioaria2
 aioqbt
 imdbinfo
 cloudscraper
+curl_cffi>=0.7.0
 dnspython
 fastapi
 feedparser
