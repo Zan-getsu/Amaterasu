@@ -93,10 +93,14 @@ async def add_qb_torrent(listener, path, ratio, seed_time):
         # prioritize first and last pieces (for fast seek/preview).
         if getattr(listener, "is_stream", False):
             try:
-                await TorrentManager.qbittorrent.torrents.set_preferences(
-                    ext_hash,
-                    sequential_download=True,
-                    first_last_piece_priority=True,
+                # aioqbt exposes set_sequential_download and
+                # set_first_last_piece_prio as separate methods that
+                # take (hash, bool) — not a single set_preferences call.
+                await TorrentManager.qbittorrent.torrents.set_sequential_download(
+                    ext_hash, True
+                )
+                await TorrentManager.qbittorrent.torrents.set_first_last_piece_prio(
+                    ext_hash, True
                 )
                 LOGGER.info(
                     f"Sequential streaming enabled for torrent {ext_hash} ({listener.name})"

@@ -39,14 +39,18 @@ yt-dlp-ejs
 # Phase 6.3 — pinned critical dependencies. These are pinned with ==
 # for reproducible builds. Other deps are unpinned for flexibility.
 # Update pinned versions deliberately — run tests after updating.
+# Versions verified against PyPI (2026-06-20).
+# NOTE: aioaria2 and aioqbt are left unpinned because their APIs vary
+# across versions and the codebase was tested against whatever PyPI
+# resolves. Pinning them risks breaking the download engines.
 pyrotgfork==2.2.19
 yt-dlp[default,curl-cffi]==2026.6.9
 fastapi==0.115.0
 uvicorn==0.32.0
 motor==3.5.1
 pymongo==4.9.2
-aioaria2==2.5.4
-aioqbt==2.0.5
+aioaria2
+aioqbt
 apscheduler==3.10.4
 rapidfuzz==3.10.1
 httpx==0.27.2

@@ -325,22 +325,22 @@ INSECURE_HOSTS = []
 # 19. v1.6.1 NEW FEATURES
 # ==========================================
 
-# Phase 3.1 — FFmpeg hardware acceleration. 'auto' detects NVENC/QSV/
+# FFmpeg hardware acceleration. 'auto' detects NVENC/QSV/
 # VAAPI/VideoToolbox at startup. Options: auto, nvenc, qsv, vaapi, none.
 FFMPEG_HW_ACCEL = "auto"
 
-# Phase 3.5 — upload queue parallelism. Number of concurrent uploads.
+# upload queue parallelism. Number of concurrent uploads.
 UPLOAD_PARALLELISM = 3
 
-# Phase 3.7 — yt-dlp playlist parallelism (max 6).
+# yt-dlp playlist parallelism (max 6).
 PLAYLIST_PARALLELISM = 3
 
-# Phase 4.4 — automatic subtitle download. Requires OPENSUBTITLES_API.
+# Automatic subtitle download. Requires OPENSUBTITLES_API.
 AUTO_SUBTITLES = False
 SUBTITLE_LANGS = "en"
 OPENSUBTITLES_API = ""
 
-# Phase 4.5-4.7 — additional rclone upload remotes. Set to the rclone
+# Additional rclone upload remotes. Set to the rclone
 # remote name configured via `rclone config`.
 RCLONE_SFTP_REMOTE = ""
 RCLONE_WEBDAV_REMOTE = ""
@@ -348,12 +348,12 @@ RCLONE_B2_REMOTE = ""
 RCLONE_ONEDRIVE_REMOTE = ""
 RCLONE_DROPBOX_REMOTE = ""
 
-# Phase 4.8 — auto-detected at startup. Do NOT set manually.
+# Auto-detected at startup. Do NOT set manually.
 IS_PREMIUM_BOT = False
 
-# Phase 5.5 — per-user quota (0 = unlimited).
+# Per-user quota (0 = unlimited).
 USER_DAILY_QUOTA_GB = 0
 USER_MONTHLY_QUOTA_GB = 0
 
-# Phase 6.4 — structured logging format: 'text' or 'json'.
+# Structured logging format: 'text' or 'json'.
 LOG_FORMAT = "text"
