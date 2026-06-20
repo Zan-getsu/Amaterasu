@@ -717,7 +717,11 @@ async def set_aria2(gid, selected_files):
 
 @app.get("/", response_class=HTMLResponse)
 async def homepage(request: Request):
-    response = templates.TemplateResponse(request, "landing.html")
+    from bot.version import get_version
+
+    response = templates.TemplateResponse(
+        request, "landing.html", {"version": get_version()}
+    )
     response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
     response.headers["Pragma"] = "no-cache"
     response.headers["Expires"] = "0"
@@ -768,9 +772,9 @@ button:hover { background: #155a7e; }
 </html>"""
 
 # Admin routes that require login when LOGIN_PASS is set
-_ADMIN_PATH_PREFIXES = ("/app/", "/api/profiles", "/api/status", "/qbit/", "/nzb/")
+_ADMIN_PATH_PREFIXES = ("/app/", "/api/profiles", "/qbit/", "/nzb/")
 # Public routes that never require login
-_PUBLIC_PATHS = frozenset({"/", "/healthz", "/metrics", "/login"})
+_PUBLIC_PATHS = frozenset({"/", "/api/status", "/healthz", "/metrics", "/login"})
 
 
 def _make_session_cookie() -> str:
@@ -850,7 +854,7 @@ async def login_submit(request: Request):
 async def login_gate(request: Request, call_next):
     """Middleware that enforces LOGIN_PASS on admin routes.
 
-    Public routes (/, /healthz, /metrics, /stream/*, /dl/*, /watch/*,
+    Public routes (/, /api/status, /healthz, /metrics, /stream/*, /dl/*, /watch/*,
     /login) are always allowed. Admin routes (/app/*, /api/profiles*,
     /qbit/*, /nzb/*) require a valid session cookie when LOGIN_PASS is
     set. When LOGIN_PASS is not set, all routes are public (v1.5.0).
