@@ -72,6 +72,7 @@ async def _propagate_url(url):
     # DM the owner with the new URL
     try:
         from ...core.tg_client import TgClient
+        from ...helper.telegram_helper.message_utils import send_message
         if TgClient.bot and Config.OWNER_ID:
             await TgClient.bot.send_message(
                 Config.OWNER_ID,

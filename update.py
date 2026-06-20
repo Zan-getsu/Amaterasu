@@ -287,6 +287,18 @@ def main():
 
     _fetch_config_from_db(config_file, db_part)
 
+    # Re-apply env vars AFTER MongoDB fetch so they always win.
+    # This allows operators to override MongoDB-stored config via
+    # docker run -e KEY=VALUE without editing MongoDB.
+    env_overrides = {
+        key: value.strip() if isinstance(value, str) else value
+        for key, value in environ.items()
+        if key in _VAR_LIST
+    }
+    if env_overrides:
+        config_file.update(env_overrides)
+        _LOGGER.info("Config env vars re-applied over MongoDB (operator override)")
+
     upstream_repo = config_file.get("UPSTREAM_REPO", "").strip()
     upstream_branch = config_file.get("UPSTREAM_BRANCH", "").strip() or "main"
 

@@ -101,7 +101,7 @@ async def get_engine_health_snapshot():
     Returns None if engine_health module isn't loaded yet (during startup).
     """
     try:
-        from .engine_health import get_health_states
+        from ....helper.ext_utils.engine_health import get_health_states
         return get_health_states()
     except Exception:
         return None
