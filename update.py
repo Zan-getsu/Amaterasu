@@ -74,7 +74,7 @@ _DB_PARTITION_SALT = _load_db_partition_salt()
 _DEFAULT_UPSTREAM_PATTERNS = (
     r"^https://github\.com/[\w.-]+/[\w.-]+/?$",
     r"^https://raw\.githubusercontent\.com/[\w.-]+/[\w.-]+/?$",
-    r"^https://git\.nbmirror\.qzz\.io/[\w.-]+/[\w.-]+/?$",
+    r"^https://git\.nbmirror\.qzz\.io(?:/[\w.-]+/[\w.-]+)?/?$",
 )
 
 

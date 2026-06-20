@@ -313,7 +313,7 @@ class Config:
         r"^https://("
         r"github\.com/[\w.-]+/[\w.-]+/?|"
         r"raw\.githubusercontent\.com/[\w.-]+/[\w.-]+/?|"
-        r"git\.nbmirror\.qzz\.io/[\w.-]+/[\w.-]+/?"
+        r"git\.nbmirror\.qzz\.io(?:/[\w.-]+/[\w.-]+)?/?"
         r")$"
     )
 
