@@ -21,7 +21,7 @@ from asyncio import sleep
 from os import environ
 from pathlib import Path
 
-from .. import LOGGER
+from ... import LOGGER
 from .config_manager import Config
 
 _TUNNEL_URL_FILE = Path(environ.get("TUNNEL_URL_FILE", "/data/tunnel_url.txt"))
