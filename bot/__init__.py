@@ -183,7 +183,7 @@ def _sabnzbd_key():
 
 
 def _update_sabnzbd_ini(api_key):
-    """Patch SABnzbd.ini with the derived api_key and password.
+    """Patch SABnzbd.ini with its derived credentials and API URL base.
 
     Returns True on success (or no-op when already patched), False on
     failure. Caller should refuse to start SABnzbd if this returns
@@ -212,8 +212,10 @@ def _update_sabnzbd_ini(api_key):
                 content = f.read()
                 pat_key = _re(r"^api_key\s*=.*$", MULTILINE)
                 pat_pwd = _re(r'^password\s*=.*$', MULTILINE)
+                pat_url_base = _re(r"^url_base\s*=.*$", MULTILINE)
                 new = pat_key.sub(f"api_key = {api_key}", content)
                 new = pat_pwd.sub(f"password = {api_key}", new)
+                new = pat_url_base.sub("url_base = /sabnzbd", new)
                 if new != content:
                     f.seek(0)
                     f.truncate()
@@ -225,6 +227,7 @@ def _update_sabnzbd_ini(api_key):
 
     pat_key = _re(r"^api_key\s*=.*$", MULTILINE)
     pat_pwd = _re(r'^password\s*=.*$', MULTILINE)
+    pat_url_base = _re(r"^url_base\s*=.*$", MULTILINE)
     # Known-bad credentials that must NEVER be left in the ini at boot:
     _BAD_MARKERS = ("sabpassword", "REPLACED_AT_BOOT_BY_AMATERASU", "CHANGEME")
     try:
@@ -233,6 +236,10 @@ def _update_sabnzbd_ini(api_key):
             new = content
             new = pat_key.sub(f"api_key = {api_key}", new)
             new = pat_pwd.sub(f"password = {api_key}", new)
+            # sabnzbdapi always uses /sabnzbd/api. Older MongoDB-backed
+            # configuration can retain an empty url_base and redirect that
+            # endpoint to HTML instead of returning JSON.
+            new = pat_url_base.sub("url_base = /sabnzbd", new)
             if new == content:
                 # No substitution happened. Either (a) the file was
                 # already patched with this exact key (idempotent — OK),

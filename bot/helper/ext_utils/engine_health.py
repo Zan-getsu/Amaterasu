@@ -39,18 +39,16 @@ _CHECK_INTERVAL = 300  # 5 minutes
 async def _check_aria2():
     """Check aria2 RPC health. Returns (state, detail)."""
     try:
-        from aioaria2 import Aria2HttpClient
-        from ... import aria2_options
         from ...core.config_manager import Config
+        from ...core.torrent_manager import TorrentManager
+
         if Config.DISABLE_TORRENTS:
             return HEALTHY, "torrents disabled"
-        # Try a lightweight RPC call
-        client = Aria2HttpClient(
-            "http://localhost:6800/jsonrpc",
-            secret=aria2_options.get("secret", ""),
-        )
-        version = await client.getVersion()
-        await client.close()
+        if TorrentManager.aria2 is None:
+            return UNAVAILABLE, "aria2 client is not connected"
+        # Reuse the configured WebSocket client. Aria2HttpClient does not
+        # accept the ``secret`` argument in the bundled aioaria2 version.
+        version = await TorrentManager.aria2.getVersion()
         return HEALTHY, f"aria2 {version.get('version', '?')}"
     except Exception as e:
         return UNAVAILABLE, str(e)
@@ -59,17 +57,15 @@ async def _check_aria2():
 async def _check_qbit():
     """Check qBittorrent health. Returns (state, detail)."""
     try:
-        from aioqbt.client import create_client
-        from ... import qbit_options
         from ...core.config_manager import Config
+        from ...core.torrent_manager import TorrentManager
+
         if Config.DISABLE_TORRENTS:
             return HEALTHY, "torrents disabled"
-        host = qbit_options.get("host", "http://localhost:8090")
-        user = qbit_options.get("username", "")
-        pwd = qbit_options.get("password", "")
-        client = await create_client(host, username=user, password=pwd)
-        version = await client.app.version()
-        await client.close()
+        if TorrentManager.qbittorrent is None:
+            return UNAVAILABLE, "qBittorrent client is not connected"
+        # The active client is already authenticated against /api/v2/.
+        version = await TorrentManager.qbittorrent.app.version()
         return HEALTHY, f"qBittorrent {version}"
     except Exception as e:
         return UNAVAILABLE, str(e)

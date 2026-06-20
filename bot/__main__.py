@@ -234,39 +234,8 @@ TgClient.bot.add_handler(
     )
 )
 
-from .helper.ext_utils.bot_utils import create_tracked_task, derive_service_password
-
-_bot_id = (Config.BOT_TOKEN or "").split(":", 1)[0] or "0"
-qbit_pwd = derive_service_password(_bot_id, "qbit")
-nzb_pwd = derive_service_password(_bot_id, "sabnzbd")
-
-# Do NOT log derived service passwords in plaintext — log.txt is exposed
-# via /log to every sudo user. Send the credentials to the owner via DM
-# instead. If the DM fails (owner hasn't /start'd the bot, etc.), fall
-# back to a one-line log hint and let the operator retrieve the password
-# from the running process via /shell (which is owner-only).
-async def _send_service_credentials_to_owner():
-    try:
-        await TgClient.bot.send_message(
-            Config.OWNER_ID,
-            "🔐 <b>Service credentials (rotated on every restart)</b>\n\n"
-            f"qBittorrent: <code>/qbit/?pass={qbit_pwd}</code>\n"
-            f"SABnzbd: <code>/nzb/?pass={nzb_pwd}</code>\n\n"
-            "<i>Delete this message after saving. These passwords are "
-            "derived from your AMATERASU_SERVICE_PWD_SALT — see the docs "
-            "for rotation instructions.</i>",
-        )
-        LOGGER.info("Service credentials sent to owner via DM.")
-    except Exception as e:
-        LOGGER.warning(
-            f"Could not DM service credentials to owner: {e}. "
-            "Run /shell 'echo qbit=$QBIT_PWD nzb=$NZB_PWD' to retrieve, "
-            "or set AMATERASU_SERVICE_PWD_SALT explicitly in config."
-        )
-
-create_tracked_task(_send_service_credentials_to_owner())
-LOGGER.info("Web UI: qBittorrent available at /qbit/ (password sent to owner via DM)")
-LOGGER.info("Web UI: SABnzbd available at /nzb/ (password sent to owner via DM)")
+LOGGER.info("Web UI: qBittorrent available at /qbit/")
+LOGGER.info("Web UI: SABnzbd available at /nzb/")
 
 # --- Graceful shutdown -------------------------------------------------
 # Install signal handlers so SIGTERM/SIGINT trigger a clean shutdown
