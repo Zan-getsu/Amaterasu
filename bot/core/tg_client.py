@@ -236,6 +236,29 @@ class TgClient:
                 await sleep(e.value)
         cls.BNAME = cls.bot.me.username
         cls.ID = Config.BOT_TOKEN.split(":", 1)[0]
+        # Phase 4.8 — detect Telegram Premium on the bot account. Bots
+        # can have premium if they're associated with a premium user.
+        # Premium bots get 4 GB upload limit (vs 2 GB standard) and
+        # higher rate limits. Store in Config.IS_PREMIUM_BOT for the
+        # uploader to check. Also bump TgClient.MAX_SPLIT_SIZE if premium.
+        try:
+            bot_me = cls.bot.me
+            is_premium = getattr(bot_me, "is_premium", False)
+            Config.IS_PREMIUM_BOT = is_premium
+            if is_premium:
+                cls.MAX_SPLIT_SIZE = 4 * 1024 * 1024 * 1024  # 4 GB
+                LOGGER.info(
+                    f"Telegram Premium: enabled on bot account. "
+                    f"File size limit: 4 GB"
+                )
+            else:
+                LOGGER.info(
+                    f"Telegram Premium: disabled on bot account. "
+                    f"File size limit: 2 GB"
+                )
+        except Exception as e:
+            LOGGER.warning(f"Could not detect bot premium status: {e}")
+            Config.IS_PREMIUM_BOT = False
         LOGGER.info(f"Amaterasu Bot : [@{cls.BNAME}] Started!")
 
     @classmethod

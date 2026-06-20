@@ -5,28 +5,35 @@ services:
     build: .
     container_name: amaterasu-bot
     restart: always
-    # NOTE: previous config used network_mode: "host" which exposed
-    # qBittorrent (8090), SABnzbd (8070), aria2 RPC (6800), the FastAPI
-    # streaming server (8080), and rclone serve (8081) directly on the
-    # host LAN — anyone on the network could reach them. The derived
-    # qBittorrent/SABnzbd passwords were the only protection, and they
-    # were logged in plaintext at startup (since fixed).
+    # ────────────────────────────────────────────────────────────────────
+    # Web UI port binding (Phase 0.1 — configurable via BIND_TO_LOOPBACK)
+    # ────────────────────────────────────────────────────────────────────
+    # Default: 127.0.0.1 only (loopback). Operators should put a
+    # TLS-terminating reverse proxy (nginx, Caddy, Cloudflare Tunnel) in
+    # front. The other engine daemons (qBittorrent 8090, SABnzbd 8070,
+    # aria2 RPC 6800, rclone serve 8081) remain container-internal.
     #
-    # Now: only the FastAPI streaming server (8080) is exposed, and it
-    # binds to 127.0.0.1 by default — operators should put it behind a
-    # TLS-terminating reverse proxy (nginx, Caddy, Cloudflare Tunnel).
-    # The other services remain container-internal and unreachable from
-    # the host LAN.
+    # To expose the web UI directly on the host LAN (no reverse proxy),
+    # set in your .env file or shell before `docker compose up`:
+    #   BIND_TO_LOOPBACK=false
+    # This rewrites the bind address to 0.0.0.0:8080:8080. Trade-off: the
+    # web UI is reachable by anyone who can reach the host on port 8080.
+    # Recommended only for trusted LANs or SSH-tunnel workflows.
+    environment:
+      - TZ=Asia/Dhaka
+      - BIND_TO_LOOPBACK=${BIND_TO_LOOPBACK:-true}
     ports:
-      - "127.0.0.1:8080:8080"
+      - "${BIND_ADDRESS:-127.0.0.1}:8080:8080"
     volumes:
       # Mount the entire repo so config.py, accounts/, rclone/, tokens/,
       # cookies/, thumbnails/, downloads/, log.txt, .amaterasu_secrets
       # are all persisted on the host and editable without rebuilding
       # the image. Matches the original behavior.
       - .:/usr/src/app:z
-    environment:
-      - TZ=Asia/Dhaka
+      # Persistent volume for Cloudflare quick tunnel URL (Phase 1.7).
+      # tunnel_monitor.py watches /data/tunnel_url.txt for changes and
+      # propagates the new URL to the bot + owner DM.
+      - tunnel_data:/data
     # Capabilities needed by the non-root amaterasu user:
     #   - SYS_ADMIN: required by cpulimit (uses ptrace via /proc)
     #   - SYS_PTRACE: required by cpulimit to attach to sabnzbd
@@ -46,3 +53,97 @@ services:
       timeout: 5s
       retries: 3
       start_period: 60s
+
+  # ────────────────────────────────────────────────────────────────────
+  # Cloudflare Quick Tunnel (Phase 1.7)
+  # ────────────────────────────────────────────────────────────────────
+  # Runs cloudflared in quick-tunnel mode. The trycloudflare.com URL is
+  # written to /data/tunnel_url.txt, which tunnel_monitor.py (inside the
+  # amaterasu container) watches and propagates to the bot + owner DM.
+  # The tunnel rotates on every restart — for a persistent URL, use a
+  # named tunnel (see Cloudflare docs) and set CLOUDFLARE_TUNNEL_TOKEN
+  # in your config instead.
+  tunnel:
+    build:
+      context: .
+      dockerfile: tunnel.Dockerfile
+    container_name: amaterasu-tunnel
+    restart: always
+    network_mode: "service:amaterasu"
+    volumes:
+      - tunnel_data:/data
+    depends_on:
+      - amaterasu
+
+  # ────────────────────────────────────────────────────────────────────
+  # OPTIONAL: Gluetun VPN (Phase 1.9)
+  # ────────────────────────────────────────────────────────────────────
+  # Uncomment to route ALL bot traffic through a VPN. Set your VPN
+  # provider credentials below (see https://github.com/qdm12/gluetun for
+  # supported providers). When enabled, also uncomment `network_mode:
+  # "service:gluetun"` on the amaterasu service above and remove the
+  # `ports:` block (the VPN container exposes the ports instead).
+  # ────────────────────────────────────────────────────────────────────
+  # gluetun:
+  #   image: qmcgaw/gluetun
+  #   container_name: amaterasu-vpn
+  #   cap_add:
+  #     - NET_ADMIN
+  #   environment:
+  #     - VPN_SERVICE_PROVIDER=mullvad   # or nordvpn, expressvpn, etc.
+  #     - OPENVPN_USER=your_vpn_username
+  #     - OPENVPN_PASSWORD=your_vpn_password
+  #     - SERVER_COUNTRIES=Netherlands
+  #   ports:
+  #     - "8080:8080"   # expose web UI through the VPN container
+  #   restart: always
+
+  # ────────────────────────────────────────────────────────────────────
+  # OPTIONAL: Second Amaterasu Instance (Phase 1.8)
+  # ────────────────────────────────────────────────────────────────────
+  # Uncomment to run a second bot on the same host. Each instance needs:
+  #   - A DIFFERENT BOT_TOKEN (separate Telegram bot via @BotFather)
+  #   - A DIFFERENT CMD_SUFFIX (e.g., "1" for /mirror1, "2" for /mirror2)
+  #   - A DIFFERENT port (8081 here, mapped to 8080 inside the container)
+  #   - Its own config.py OR distinct env vars (BOT_TOKEN2, OWNER_ID2, etc.)
+  # ────────────────────────────────────────────────────────────────────
+  # amaterasu2:
+  #   build: .
+  #   container_name: amaterasu-bot2
+  #   restart: always
+  #   environment:
+  #     - TZ=Asia/Dhaka
+  #     - BIND_TO_LOOPBACK=${BIND_TO_LOOPBACK:-true}
+  #     - CMD_SUFFIX=2
+  #   ports:
+  #     - "${BIND_ADDRESS:-127.0.0.1}:8081:8080"
+  #   volumes:
+  #     - ./instance2:/usr/src/app:z
+  #     - tunnel_data2:/data
+  #   cap_add:
+  #     - SYS_ADMIN
+  #     - SYS_PTRACE
+  #     - SYS_NICE
+  #     - DAC_READ_SEARCH
+  #   healthcheck:
+  #     test: ["CMD", "curl", "-fsS", "http://localhost:8080/healthz"]
+  #     interval: 30s
+  #     timeout: 5s
+  #     retries: 3
+  #     start_period: 60s
+  #
+  # tunnel2:
+  #   build:
+  #     context: .
+  #     dockerfile: tunnel.Dockerfile
+  #   container_name: amaterasu-tunnel2
+  #   restart: always
+  #   network_mode: "service:amaterasu2"
+  #   volumes:
+  #     - tunnel_data2:/data
+  #   depends_on:
+  #     - amaterasu2
+
+volumes:
+  tunnel_data:
+  # tunnel_data2:   # uncomment when enabling the second instance

@@ -1005,6 +1005,10 @@ class FFMpeg:
         self._total_time = (await get_media_info(video_file))[0]
         base_name = ospath.splitext(video_file)[0]
         output = f"{base_name}.{ext}"
+        # Phase 3.1 — use hardware-accelerated encoder when available.
+        # Falls back to libx264 (software) if no hardware encoder detected.
+        from ..ext_utils.hwaccel import get_best_hw_encoder
+        hw_encoder = await get_best_hw_encoder()
         if retry:
             cmd = [
                 "taskset",
@@ -1021,7 +1025,7 @@ class FFMpeg:
                 "-map",
                 "0",
                 "-c:v",
-                "libx264",
+                hw_encoder,
                 "-c:a",
                 "aac",
             ]
@@ -1135,6 +1139,9 @@ class FFMpeg:
         self._total_time = sample_duration
         dir, name = video_file.rsplit("/", 1)
         output_file = f"{dir}/SAMPLE.{name}"
+        # Phase 3.1 — use hardware-accelerated encoder for sample video too.
+        from ..ext_utils.hwaccel import get_best_hw_encoder
+        hw_encoder = await get_best_hw_encoder()
         segments = [(0, part_duration)]
         duration = (await get_media_info(video_file))[0]
         remaining_duration = duration - (part_duration * 2)
@@ -1179,7 +1186,7 @@ class FFMpeg:
             "-map",
             "[aout]",
             "-c:v",
-            "libx264",
+            hw_encoder,
             "-c:a",
             "aac",
             "-threads",

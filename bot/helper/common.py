@@ -77,6 +77,12 @@ class TaskConfig:
         self.user = self.message.from_user or self.message.sender_chat
         self.user_id = self.user.id
         self.user_dict = user_data.get(self.user_id, {})
+        # Phase 3.4 — task priority. Higher value = higher priority.
+        # Owner/sudo can set priority via /setpriority inline button on
+        # the task status message. Default 0. The queue dispatcher in
+        # task_manager.py sorts pending tasks by priority DESC, then
+        # added_at ASC. Normal users cannot change priority.
+        self.priority = 0
         self.metadata_processor = MetadataProcessor()
         for k in ("METADATA", "AUDIO_METADATA", "VIDEO_METADATA", "SUBTITLE_METADATA"):
             v = self.user_dict.get(k, {})

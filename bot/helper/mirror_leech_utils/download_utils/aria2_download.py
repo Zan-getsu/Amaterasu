@@ -37,6 +37,16 @@ async def add_aria2_download(
         a2c_opt["seed-time"] = seed_time
     if TORRENT_TIMEOUT := Config.TORRENT_TIMEOUT:
         a2c_opt["bt-stop-timeout"] = f"{TORRENT_TIMEOUT}"
+    # Phase 4.1 — sequential torrent streaming. When --stream flag is
+    # set, prioritize first and last pieces so the file can be streamed
+    # while still downloading. aria2's bt-prioritize-piece=head,tail
+    # downloads the first and last pieces first (for fast seek/preview).
+    if getattr(listener, "is_stream", False) and (
+        listener.link.startswith("magnet:") or listener.link.endswith(".torrent")
+    ):
+        a2c_opt["bt-prioritize-piece"] = "head,tail"
+        a2c_opt["bt-request-peer-speed-limit"] = "0"
+        LOGGER.info(f"Sequential streaming enabled for aria2 torrent: {listener.link[:80]}")
 
     add_to_queue, event = await check_running_tasks(listener)
     if add_to_queue:
@@ -54,8 +64,19 @@ async def add_aria2_download(
             gid = await TorrentManager.aria2.jsonrpc("addTorrent", params)
             """gid = await TorrentManager.aria2.add_torrent(path=listener.link, options=a2c_opt)"""
         else:
+            # Phase 3.2 — parallel multi-source download. If the listener
+            # has a --multi flag with multiple URLs, pass them all to
+            # aria2's addUri. aria2 downloads from all sources in parallel
+            # and picks the fastest mirror for each byte range.
+            uris = [listener.link]
+            multi_urls = getattr(listener, "multi_urls", None)
+            if multi_urls:
+                # multi_urls is a list of additional URLs (already split
+                # from the --multi flag value in the mirror handler)
+                uris = [listener.link] + [u for u in multi_urls if u and u != listener.link]
+                LOGGER.info(f"Aria2 multi-source download: {len(uris)} URLs")
             gid = await TorrentManager.aria2.addUri(
-                uris=[listener.link], options=a2c_opt
+                uris=uris, options=a2c_opt
             )
     except (TimeoutError, ClientError, Exception) as e:
         LOGGER.info(f"Aria2c Download Error: {e}")

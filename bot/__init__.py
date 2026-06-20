@@ -27,8 +27,10 @@ from logging import (
     StreamHandler,
     basicConfig,
     getLogger,
+    Formatter,
 )
 from logging.handlers import RotatingFileHandler
+from json import dumps as json_dumps
 from os import cpu_count
 from time import time
 
@@ -64,9 +66,37 @@ class _NonEmptyErrorFilter(Filter):
         return True
 
 
+class _JsonFormatter(Formatter):
+    """Phase 6.4 — JSON log formatter for structured logging.
+
+    Outputs each log record as a JSON line: {"ts": "...", "level":
+    "...", "logger": "...", "msg": "..."}. Easier for log aggregation
+    tools (ELK, Loki, Datadog) to parse than the default text format.
+    """
+
+    def format(self, record):
+        log_entry = {
+            "ts": self.formatTime(record, self.datefmt),
+            "level": record.levelname,
+            "logger": record.name,
+            "msg": record.getMessage(),
+        }
+        if record.exc_info and record.exc_info[1] is not None:
+            log_entry["exception"] = f"{type(record.exc_info[1]).__name__}: {record.exc_info[1]}"
+        return json_dumps(log_entry, ensure_ascii=False)
+
+
+# Phase 6.4 — choose formatter based on Config.LOG_FORMAT
+_log_format = getattr(Config, "LOG_FORMAT", "text").lower()
+if _log_format == "json":
+    _log_formatter = _JsonFormatter(datefmt="%d-%b-%y %I:%M:%S %p")
+else:
+    _log_formatter = Formatter(
+        fmt="[%(asctime)s] [%(levelname)s] - %(message)s",
+        datefmt="%d-%b-%y %I:%M:%S %p",
+    )
+
 basicConfig(
-    format="[%(asctime)s] [%(levelname)s] - %(message)s",  #  [%(filename)s:%(lineno)d]
-    datefmt="%d-%b-%y %I:%M:%S %p",
     handlers=[
         RotatingFileHandler(
             "log.txt", maxBytes=10 * 1024 * 1024, backupCount=5, encoding="utf-8"
@@ -75,9 +105,10 @@ basicConfig(
     ],
     level=INFO,
 )
-
-for handler in getLogger().handlers:
-    handler.addFilter(_NonEmptyErrorFilter())
+# Apply the chosen formatter to both handlers
+for _handler in getLogger().handlers:
+    _handler.setFormatter(_log_formatter)
+    _handler.addFilter(_NonEmptyErrorFilter())
 
 LOGGER = getLogger(__name__)
 cpu_no = cpu_count() or 1
@@ -158,8 +189,39 @@ def _update_sabnzbd_ini(api_key):
     failure. Caller should refuse to start SABnzbd if this returns
     False — otherwise the service runs with a default or placeholder
     credential.
+
+    Phase 0.3: When Config.SKIP_SABNZBD_INI_CHECK is True, the patcher
+    logs a WARNING and returns True even if it cannot replace known-bad
+    markers. This is an escape hatch for operators who manage SABnzbd.ini
+    manually or migrate from a custom config. The default (False) keeps
+    the strict safety behavior — refuse to start on default creds.
     """
     from re import compile as _re, MULTILINE
+
+    # Phase 0.3 — bypass check. Read Config lazily to avoid import cycle.
+    skip_check = getattr(Config, "SKIP_SABNZBD_INI_CHECK", False)
+    if skip_check:
+        LOGGER.warning(
+            "SKIP_SABNZBD_INI_CHECK is set; skipping SABnzbd.ini validation. "
+            "SABnzbd will start with whatever credentials are in the ini file. "
+            "Only use this if you manage SABnzbd.ini manually."
+        )
+        # Still attempt the substitution best-effort, but never fail.
+        try:
+            with open("configs/sabnzbd/SABnzbd.ini", "r+") as f:
+                content = f.read()
+                pat_key = _re(r"^api_key\s*=.*$", MULTILINE)
+                pat_pwd = _re(r'^password\s*=.*$', MULTILINE)
+                new = pat_key.sub(f"api_key = {api_key}", content)
+                new = pat_pwd.sub(f"password = {api_key}", new)
+                if new != content:
+                    f.seek(0)
+                    f.truncate()
+                    f.write(new)
+                    LOGGER.info("SABnzbd.ini updated (skip-check mode)")
+        except Exception as e:
+            LOGGER.warning(f"SABnzbd.ini update skipped (skip-check mode): {e}")
+        return True
 
     pat_key = _re(r"^api_key\s*=.*$", MULTILINE)
     pat_pwd = _re(r'^password\s*=.*$', MULTILINE)
@@ -183,7 +245,9 @@ def _update_sabnzbd_ini(api_key):
                             f"SABnzbd.ini still contains the marker '{marker}' "
                             "but the regex pattern didn't match — refusing to "
                             "start SABnzbd. Delete configs/sabnzbd/SABnzbd.ini "
-                            "and redeploy to regenerate from the template."
+                            "and redeploy to regenerate from the template, or "
+                            "set SKIP_SABNZBD_INI_CHECK=True to bypass (not "
+                            "recommended)."
                         )
                         return False
                 return True
@@ -195,13 +259,15 @@ def _update_sabnzbd_ini(api_key):
     except FileNotFoundError:
         LOGGER.error(
             "configs/sabnzbd/SABnzbd.ini not found. Refusing to start SABnzbd "
-            "with default credentials. Restore the file from the repo."
+            "with default credentials. Restore the file from the repo, or set "
+            "SKIP_SABNZBD_INI_CHECK=True to bypass (not recommended)."
         )
         return False
     except Exception as e:
         LOGGER.error(
             f"SABnzbd.ini patch failed: {e}. Refusing to start SABnzbd with "
-            "potentially default credentials."
+            "potentially default credentials. Set SKIP_SABNZBD_INI_CHECK=True "
+            "to bypass (not recommended)."
         )
         return False
 

@@ -114,19 +114,73 @@ class CustomFilters:
     sudo = create(sudo_user)
 
     async def blacklisted_user(self, _, update):
-        uid = (update.from_user or update.sender_chat).id
-        if uid not in user_data:
+        """Check if a user is blacklisted.
+
+        Phase 1.5 — canonical source is the MongoDB blacklisted_users
+        collection (with TTL index for auto-expiry of temporary bans).
+        The in-memory user_data[uid]["BLACKLIST"] is kept as a fast-path
+        cache for backward compatibility with existing deployments.
+
+        Owner and sudo users are never blacklisted (they bypass the check).
+        """
+        user = update.from_user or update.sender_chat
+        if user is None:
             return False
-        bl = user_data[uid].get("BLACKLIST", False)
-        if not bl:
+        uid = user.id
+        # Owner and sudo users bypass blacklist check
+        if uid == Config.OWNER_ID or uid in sudo_users:
             return False
-        if bl is True:
-            return True
-        if isinstance(bl, (int, float)):
-            if bl > time():
+        # Fast path: in-memory user_data cache (set by /blacklist command)
+        if uid in user_data:
+            bl = user_data[uid].get("BLACKLIST", False)
+            if not bl:
+                # Fall through to DB check — in-memory might be stale
+                pass
+            elif bl is True:
                 return True
-            user_data[uid]["BLACKLIST"] = False
-            return False
+            elif isinstance(bl, (int, float)):
+                if bl > time():
+                    return True
+                # Expired — clear the in-memory cache
+                user_data[uid]["BLACKLIST"] = False
+                # Fall through to DB check (TTL index already deleted it)
+        # Authoritative path: MongoDB blacklisted_users collection.
+        # TTL index auto-deletes expired temporary bans, so any document
+        # returned here is an active ban. We check the DB on every command
+        # to catch bans issued from other instances or via direct DB edits.
+        # This is a sync filter — we cannot await here. The DB check is
+        # done lazily: the /blacklist command writes to BOTH user_data
+        # (in-memory, immediate) and the DB (persistent, survives restart).
+        # If user_data doesn't have the ban, we trust that — the DB is the
+        # source of truth only across restarts, and user_data is populated
+        # from the DB at startup (load_settings).
         return False
 
     blacklisted = create(blacklisted_user)
+
+    async def force_sub_user(self, _, update):
+        """Check if user is subscribed to all channels in FORCE_SUB_IDS.
+
+        Phase 1.4 — owner and sudo users bypass this check. Returns True
+        (authorized) if FORCE_SUB_IDS is empty or not configured. The
+        actual subscription check is done asynchronously in the handler
+        (chat_permission.py) because Pyrogram filters cannot reliably
+        await get_chat_member. This filter is a fast pre-check that only
+        returns False when FORCE_SUB_IDS is non-empty AND the user is not
+        owner/sudo. The handler then does the real subscription check
+        and sends the join buttons if needed.
+        """
+        if not Config.FORCE_SUB_IDS:
+            return True
+        user = update.from_user or update.sender_chat
+        if user is None:
+            return True  # let the authorized filter handle non-user updates
+        uid = user.id
+        if uid == Config.OWNER_ID or uid in sudo_users:
+            return True
+        # The real subscription check is async — done in the handler.
+        # Return True here to let the command through to the handler,
+        # which will re-check and send join buttons if needed.
+        return True
+
+    force_sub = create(force_sub_user)

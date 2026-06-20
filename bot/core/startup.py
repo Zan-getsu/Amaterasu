@@ -1,6 +1,7 @@
 from asyncio import create_subprocess_exec, create_subprocess_shell, gather, sleep
 from importlib import import_module
 from os import environ, path as ospath, getenv
+from time import time
 
 from aiofiles import open as aiopen
 from aiofiles.os import makedirs, remove, path as aiopath
@@ -235,6 +236,43 @@ async def load_settings():
                 user_data[uid] = row
             LOGGER.info("Users Data has been imported from MongoDB")
 
+        # Phase 1.5 — sync MongoDB blacklisted_users into in-memory
+        # user_data[uid]["BLACKLIST"] for the fast-path filter check.
+        # The TTL index has already auto-deleted expired temporary bans,
+        # so every document here is an active ban. Permanent bans have
+        # expires_at=None; temporary bans have expires_at as a datetime.
+        try:
+            bl_count = 0
+            async for bl_doc in database.db.blacklisted_users.find({}):
+                uid = bl_doc.get("user_id")
+                if uid is None:
+                    continue
+                expires_at = bl_doc.get("expires_at")
+                if expires_at is None:
+                    # Permanent ban
+                    if uid not in user_data:
+                        user_data[uid] = {}
+                    user_data[uid]["BLACKLIST"] = True
+                    bl_count += 1
+                else:
+                    # Temporary ban — convert datetime to epoch timestamp
+                    # for the in-memory format expected by _get_blacklist_info
+                    from datetime import timezone as _tz
+                    if expires_at.tzinfo is None:
+                        expires_at = expires_at.replace(tzinfo=_tz.utc)
+                    bl_value = expires_at.timestamp()
+                    if bl_value > time():
+                        if uid not in user_data:
+                            user_data[uid] = {}
+                        user_data[uid]["BLACKLIST"] = bl_value
+                        bl_count += 1
+            if bl_count > 0:
+                LOGGER.info(
+                    f"Blacklist: synced {bl_count} active bans from MongoDB"
+                )
+        except Exception as e:
+            LOGGER.warning(f"Blacklist sync from MongoDB: {e}")
+
         if rss_exists:
             rows = database.db.rss[PART].find({})
             async for row in rows:
@@ -383,7 +421,22 @@ async def start_web_server():
         Config.WEB_ACCESS_PASSWORD = access_pwd
     proc_env = environ.copy()
     proc_env["WEB_ACCESS_PASSWORD"] = access_pwd
-    bind_address = Config.BIND_ADDRESS or "0.0.0.0"
+    # Resolve bind address from BIND_TO_LOOPBACK (Phase 0.1).
+    # Config.BIND_ADDRESS is still respected as an explicit override for
+    # advanced operators. Priority: explicit BIND_ADDRESS > BIND_TO_LOOPBACK
+    # flag > default 0.0.0.0 (inside-container; the docker-compose ports
+    # block controls host-level binding).
+    if Config.BIND_ADDRESS:
+        bind_address = Config.BIND_ADDRESS
+    elif Config.BIND_TO_LOOPBACK:
+        # Loopback inside the container. The docker-compose ports block
+        # controls the host-level binding (127.0.0.1:8080:8080 by default).
+        bind_address = "127.0.0.1"
+    else:
+        # BIND_TO_LOOPBACK=False — bind all interfaces inside the container.
+        # Pair with `ports: ["0.0.0.0:8080:8080"]` in docker-compose for
+        # direct LAN access without a reverse proxy.
+        bind_address = "0.0.0.0"
     await create_subprocess_exec(
         "gunicorn",
         "-k",

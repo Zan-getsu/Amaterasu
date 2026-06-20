@@ -207,6 +207,11 @@ MAX_QUEUE_SIZE = 0
 # 15. DYNAMIC STREAMING WEB SERVER
 # ==========================================
 PORT = 8080
+# When True (default), the web UI binds to 127.0.0.1 only — operators
+# must put a reverse proxy (nginx, Caddy, Cloudflare Tunnel) in front.
+# When False, binds 0.0.0.0 for direct LAN access. Trade-off: False is
+# more convenient but exposes the web UI to anyone on the host LAN.
+BIND_TO_LOOPBACK = True
 CLOUDFLARE_TUNNEL_ENABLED = False
 CLOUDFLARE_TUNNEL_TOKEN = ""
 CLOUDFLARE_TUNNEL_TARGET = ""
@@ -237,6 +242,17 @@ THROTTLE_SERVICES = "auto"
 UPSTREAM_REPO = ""
 UPSTREAM_BRANCH = "main"
 UPDATE_PKGS = False
+# Comma-separated regex patterns for allowed UPSTREAM_REPO URLs.
+# Default (empty) uses the built-in 3-pattern allowlist:
+#   github.com, raw.githubusercontent.com, git.nbmirror.qzz.io
+# Add your own fork URL here to enable auto-update from a custom fork.
+# Example: "^https://github\\.com/yourname/Amaterasu/?$"
+UPSTREAM_ALLOWLIST = ""
+# When True, the SABnzbd.ini patcher skips validation and starts SABnzbd
+# even if known-bad credential markers cannot be replaced. Use only if
+# you manage SABnzbd.ini manually. Default False refuses to start on
+# default credentials — a safety net.
+SKIP_SABNZBD_INI_CHECK = False
 
 # RSS
 RSS_DELAY = 600
@@ -304,3 +320,40 @@ ENABLE_EXEC_COMMAND = False
 # with self-signed certs). Empty by default — all outbound HTTPS
 # requests verify the server certificate.
 INSECURE_HOSTS = []
+
+# ==========================================
+# 19. v1.6.1 NEW FEATURES
+# ==========================================
+
+# Phase 3.1 — FFmpeg hardware acceleration. 'auto' detects NVENC/QSV/
+# VAAPI/VideoToolbox at startup. Options: auto, nvenc, qsv, vaapi, none.
+FFMPEG_HW_ACCEL = "auto"
+
+# Phase 3.5 — upload queue parallelism. Number of concurrent uploads.
+UPLOAD_PARALLELISM = 3
+
+# Phase 3.7 — yt-dlp playlist parallelism (max 6).
+PLAYLIST_PARALLELISM = 3
+
+# Phase 4.4 — automatic subtitle download. Requires OPENSUBTITLES_API.
+AUTO_SUBTITLES = False
+SUBTITLE_LANGS = "en"
+OPENSUBTITLES_API = ""
+
+# Phase 4.5-4.7 — additional rclone upload remotes. Set to the rclone
+# remote name configured via `rclone config`.
+RCLONE_SFTP_REMOTE = ""
+RCLONE_WEBDAV_REMOTE = ""
+RCLONE_B2_REMOTE = ""
+RCLONE_ONEDRIVE_REMOTE = ""
+RCLONE_DROPBOX_REMOTE = ""
+
+# Phase 4.8 — auto-detected at startup. Do NOT set manually.
+IS_PREMIUM_BOT = False
+
+# Phase 5.5 — per-user quota (0 = unlimited).
+USER_DAILY_QUOTA_GB = 0
+USER_MONTHLY_QUOTA_GB = 0
+
+# Phase 6.4 — structured logging format: 'text' or 'json'.
+LOG_FORMAT = "text"

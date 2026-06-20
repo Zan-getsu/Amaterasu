@@ -201,6 +201,68 @@ class Config:
     DEFAULT_ENCODE_PRESET = {}
     DISABLE_ENCODE = False
 
+    # Phase 3.1 — FFmpeg hardware acceleration.
+    # 'auto' (default): probe for NVENC → QSV → VAAPI → VideoToolbox at
+    #   startup, use the first available, fall back to libx264 (software).
+    # 'nvenc': force NVIDIA NVENC (fail back to libx264 if unavailable).
+    # 'qsv': force Intel Quick Sync Video.
+    # 'vaapi': force VAAPI (AMD/Intel Linux).
+    # 'none': always use libx264 software encoding (slowest but most
+    #   compatible — use if hardware drivers are flaky).
+    FFMPEG_HW_ACCEL = "auto"
+
+    # Phase 3.5 — upload queue parallelism. Number of parallel uploads
+    # per bot. Default 3 — balances throughput with Telegram rate limits.
+    # Increase to 5-8 for premium bots with high FloodWait tolerance.
+    UPLOAD_PARALLELISM = 3
+
+    # Phase 3.7 — yt-dlp playlist parallelism. Number of playlist items
+    # to download concurrently. Default 3, max 6 (higher risks source
+    # site rate limits). Each item's progress shows as "Item N/Total".
+    PLAYLIST_PARALLELISM = 3
+
+    # Phase 4.4 — automatic subtitle download. When True, after a video
+    # file is downloaded, search OpenSubtitles for subtitles in
+    # SUBTITLE_LANGS and download the top match per language. Saved as
+    # filename.lang.srt alongside the video. Requires OPENSUBTITLES_API
+    # to be set. If API is unreachable or no results, the task continues
+    # without subtitles (never fails the task).
+    AUTO_SUBTITLES = False
+    SUBTITLE_LANGS = "en"
+    OPENSUBTITLES_API = ""
+
+    # Phase 4.5/4.6/4.7 — additional rclone upload remotes. When set,
+    # these appear as upload destination options in the existing rclone
+    # upload flow. No new code — just config registration + README docs.
+    # Each value is the rclone remote name (e.g., 'myb2' for a B2 remote
+    # configured via `rclone config`).
+    RCLONE_SFTP_REMOTE = ""
+    RCLONE_WEBDAV_REMOTE = ""
+    RCLONE_B2_REMOTE = ""
+    RCLONE_ONEDRIVE_REMOTE = ""
+    RCLONE_DROPBOX_REMOTE = ""
+
+    # Phase 4.8 — Telegram Premium bot detection. Set automatically at
+    # startup by TgClient.start_bot() via client.get_me().is_premium.
+    # When True, telegram_uploader uses 4 GB split size (vs 2 GB standard).
+    # Operators should NOT set this manually — it's auto-detected.
+    IS_PREMIUM_BOT = False
+
+    # Phase 5.5 — per-user quota system. 0 = unlimited (default).
+    # Owner can set global defaults here, and override per-user via
+    # the /userlist owner panel. Quota is checked in pre_task_check
+    # before starting a download. Resets lazily (daily = 24h, monthly
+    # = 30 days) — no cron needed.
+    USER_DAILY_QUOTA_GB = 0
+    USER_MONTHLY_QUOTA_GB = 0
+
+    # Phase 6.4 — structured logging format. 'text' (default) uses the
+    # human-readable format "[timestamp] [LEVEL] - message". 'json'
+    # outputs each log line as JSON: {"ts": "...", "level": "...",
+    # "logger": "...", "msg": "...", "extra": {...}}. JSON format is
+    # easier for log aggregation (ELK, Loki, Datadog).
+    LOG_FORMAT = "text"
+
     # Security: dangerous commands (RCE) — disabled by default.
     # Set ENABLE_SHELL_COMMAND=1 to re-enable /shell (owner-only).
     # Set ENABLE_EXEC_COMMAND=1 to re-enable /exec and /aexec (owner-only).
@@ -231,6 +293,37 @@ class Config:
     MAX_FILES_PER_PERIOD = 2
     RATE_LIMIT_PERIOD_MINUTES = 1
     MAX_QUEUE_SIZE = 100
+
+    # When True (default), docker-compose binds the web UI to 127.0.0.1 only —
+    # operators must put a reverse proxy (nginx, Caddy, Cloudflare Tunnel) in
+    # front. When False, the web UI binds 0.0.0.0 and is reachable on the
+    # host LAN directly. Useful for quick deployments without a reverse proxy
+    # or for operators who want direct access via an SSH tunnel.
+    # Trade-off: False is more convenient but exposes the web UI to anyone
+    # who can reach the host on port 8080.
+    BIND_TO_LOOPBACK = True
+
+    # Comma-separated regex patterns for allowed UPSTREAM_REPO URLs in
+    # update.py. Default allows github.com, raw.githubusercontent.com, and
+    # the Amaterasu Forgejo mirror. Add your own fork URL here to enable
+    # auto-update from a custom fork. Example:
+    #   UPSTREAM_ALLOWLIST="^https://github\.com/yourname/Amaterasu/?$"
+    # Multiple patterns are comma-separated.
+    UPSTREAM_ALLOWLIST = (
+        r"^https://("
+        r"github\.com/[\w.-]+/[\w.-]+/?|"
+        r"raw\.githubusercontent\.com/[\w.-]+/[\w.-]+/?|"
+        r"git\.nbmirror\.qzz\.io/[\w.-]+/[\w.-]+/?"
+        r")$"
+    )
+
+    # When True, the SABnzbd.ini patcher refuses to start SABnzbd if it
+    # cannot replace known-bad credential markers (sabpassword, CHANGEME,
+    # REPLACED_AT_BOOT_BY_AMATERASU). This is a safety net against shipping
+    # default credentials. When False (skip the check), SABnzbd starts even
+    # if the ini file has unknown content — useful for operators who manage
+    # SABnzbd.ini manually or migrate from a custom config.
+    SKIP_SABNZBD_INI_CHECK = False
 
     # Advanced / Web Server Settings
     FQDN = ""

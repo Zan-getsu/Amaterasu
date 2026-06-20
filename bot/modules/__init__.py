@@ -16,6 +16,7 @@ from .clone import clone_node
 from .exec import aioexecute, clear, execute
 from .file_selector import confirm_selection, select
 from .file_sorter import sort_command, sort_media_handler
+from .setup import setup_wizard, setup_callback  # Phase 5.8
 from .filetolink import channel_media_handler, link_command_handler, private_media_handler
 from .force_start import remove_from_queue
 from .gd_count import count_node
@@ -142,6 +143,8 @@ __all__ = [
     "single_resume_task",
     "sort_command",
     "sort_media_handler",
+    "setup_wizard",
+    "setup_callback",
     "speedtest",
     "start",
     "start_cb",

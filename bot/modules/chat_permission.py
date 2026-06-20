@@ -1,9 +1,12 @@
 from time import time
+from datetime import datetime, timezone, timedelta
 
 from .. import user_data
 from ..helper.ext_utils.bot_utils import update_user_ldata, new_task
 from ..helper.ext_utils.db_handler import database
 from ..helper.telegram_helper.message_utils import send_message
+from ..helper.telegram_helper.button_build import ButtonMaker
+from ..core.config_manager import Config
 
 
 def _parse_time(time_str):
@@ -193,14 +196,19 @@ async def add_blacklist(_, message):
     if id_ in user_data and _get_blacklist_info(user_data[id_].get("BLACKLIST"))[0]:
         return await send_message(message, f"<b>User Already BlackListed!</b> \u2192 <code>{id_}</code>")
 
+    added_by = message.from_user.id if message.from_user else 0
     if time_str:
         seconds = _parse_time(time_str)
         if seconds is None:
             return await send_message(message, "<b>Invalid Time Format!</b> Use <code>1d</code>, <code>2h</code>, or <code>30m</code>.")
         bl_value = time() + seconds
         remaining = _format_remaining(seconds)
+        # Phase 1.5 — write to BOTH in-memory (fast path) and MongoDB
+        # (persistent, survives restart, TTL auto-expiry).
         update_user_ldata(id_, "BLACKLIST", bl_value)
         await database.update_user_data(id_)
+        expires_at = datetime.now(timezone.utc) + timedelta(seconds=seconds)
+        await database.add_blacklist(id_, added_by, expires_at=expires_at)
         msg = f"""<b>❖ BLACKLIST APPLIED</b>
 <code>┌─ {'User':<9}: {id_}
 ├─ {'Type':<9}: Temporary
@@ -208,8 +216,11 @@ async def add_blacklist(_, message):
 └─ {'Expires':<9}: {remaining} from now
 </code>"""
     else:
+        # Phase 1.5 — permanent ban. expires_at=None, excluded from TTL
+        # index (sparse), so it never auto-expires.
         update_user_ldata(id_, "BLACKLIST", True)
         await database.update_user_data(id_)
+        await database.add_blacklist(id_, added_by, expires_at=None)
         msg = f"""<b>❖ BLACKLIST APPLIED</b>
 <code>┌─ {'User':<9}: {id_}
 ├─ {'Type':<9}: Permanent
@@ -237,11 +248,21 @@ async def remove_blacklist(_, message):
 
     bl_value = user_data.get(id_, {}).get("BLACKLIST")
     is_bl, remaining = _get_blacklist_info(bl_value)
+    # Also check MongoDB in case the in-memory cache is stale (e.g., ban
+    # was issued from another instance).
+    if not is_bl and Config.DATABASE_URL:
+        db_bl = await database.get_blacklist(id_)
+        if db_bl is not None:
+            is_bl = True
+            remaining = "Permanent" if db_bl.get("expires_at") is None else "Temporary"
+
     if not is_bl:
         return await send_message(message, f"<b>User Already Freed</b> \u2192 <code>{id_}</code>")
 
+    # Phase 1.5 — remove from BOTH in-memory and MongoDB.
     update_user_ldata(id_, "BLACKLIST", False)
     await database.update_user_data(id_)
+    await database.remove_blacklist(id_)
     await send_message(message, f"""<b>❖ BLACKLIST REMOVED</b>
 <code>┌─ {'User':<9}: {id_}
 └─ {'Status':<9}: User Set Free!
@@ -251,4 +272,82 @@ async def remove_blacklist(_, message):
 @new_task
 async def black_listed(_, message):
     await send_message(message, "<b>BlackListed Detected</b> \u2192 <i>Restricted from Bot</i>")
+
+
+# ────────────────────────────────────────────────────────────────────
+# Phase 1.4 — Force-subscribe check
+# ────────────────────────────────────────────────────────────────────
+async def check_force_sub(client, message):
+    """Check if the user is subscribed to all channels in FORCE_SUB_IDS.
+
+    Returns True if the user is allowed to proceed (subscribed, owner,
+    sudo, or FORCE_SUB_IDS is empty). Returns False after sending a
+    message with join buttons if the user is not subscribed.
+
+    Call this at the top of any command handler that should require
+    force-subscribe:
+        if not await check_force_sub(client, message):
+            return
+    """
+    if not Config.FORCE_SUB_IDS:
+        return True
+    user = message.from_user or message.sender_chat
+    if user is None:
+        return True
+    uid = user.id
+    if uid == Config.OWNER_ID or uid in user_data and user_data[uid].get("SUDO") or uid in sudo_users:
+        return True
+
+    # Parse FORCE_SUB_IDS — accept list of ints or comma-separated string
+    sub_ids = Config.FORCE_SUB_IDS
+    if isinstance(sub_ids, str):
+        sub_ids = [int(s.strip()) for s in sub_ids.split(",") if s.strip().lstrip("-").isdigit()]
+    elif not isinstance(sub_ids, list):
+        return True
+    if not sub_ids:
+        return True
+
+    not_joined = []
+    for chan_id in sub_ids:
+        try:
+            member = await client.get_chat_member(chan_id, uid)
+            if member.status.value in ("left", "kicked"):
+                not_joined.append(chan_id)
+        except Exception:
+            # If we can't check (bot not in channel, channel deleted, etc.),
+            # skip this channel rather than blocking the user.
+            continue
+
+    if not not_joined:
+        return True
+
+    # User hasn't joined all required channels — send join buttons
+    from ..helper.telegram_helper.button_build import ButtonMaker
+    buttons = ButtonMaker()
+    for chan_id in not_joined:
+        try:
+            chat = await client.get_chat(chan_id)
+            label = f"Join {chat.title or chan_id}"
+            buttons.url_button(label, f"https://t.me/c/{str(chan_id)[4:]}" if str(chan_id).startswith("-100") else f"https://t.me/{chat.username}")
+        except Exception:
+            buttons.url_button(f"Join {chan_id}", f"https://t.me/c/{str(chan_id)[4:]}")
+    buttons.data_button("Check Again", f"forcesub check {uid}")
+    await send_message(
+        message,
+        "<b>❖ Join Required</b>\nPlease join the channel(s) above to use this bot.",
+        buttons.build_menu(1),
+    )
+    return False
+
+
+async def forcesub_callback(_, query):
+    """Handle the 'Check Again' button from the force-sub message."""
+    data = query.data.split()
+    if len(data) < 3 or query.from_user.id != int(data[2]):
+        await query.answer("Not authorized.", show_alert=True)
+        return
+    await query.answer("Re-checking subscription...")
+    # Re-run the check by editing the original message
+    from ..helper.telegram_helper.message_utils import edit_message
+    await edit_message(query.message, "<i>Re-checking subscription...</i>")
 

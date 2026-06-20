@@ -87,6 +87,23 @@ async def add_qb_torrent(listener, path, ratio, seed_time):
         listener.name = tor_info.name
         ext_hash = tor_info.hash
 
+        # Phase 4.1 — sequential torrent streaming. When --stream flag
+        # is set, enable sequential download so pieces arrive in order
+        # and the file can be streamed while still downloading. Also
+        # prioritize first and last pieces (for fast seek/preview).
+        if getattr(listener, "is_stream", False):
+            try:
+                await TorrentManager.qbittorrent.torrents.set_preferences(
+                    ext_hash,
+                    sequential_download=True,
+                    first_last_piece_priority=True,
+                )
+                LOGGER.info(
+                    f"Sequential streaming enabled for torrent {ext_hash} ({listener.name})"
+                )
+            except Exception as e:
+                LOGGER.warning(f"Could not enable sequential download for {ext_hash}: {e}")
+
         async with task_dict_lock:
             task_dict[listener.mid] = QbittorrentStatus(listener, queued=add_to_queue)
         await on_download_start(f"{listener.mid}")

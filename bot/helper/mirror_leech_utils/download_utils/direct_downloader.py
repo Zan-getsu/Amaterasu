@@ -29,6 +29,20 @@ async def add_direct_download(listener, path):
         return
     listener.size = details["total_size"]
 
+    # Phase 2.3 — disk space pre-check. Fail fast with a clear message
+    # instead of failing mid-download with a confusing OSError.
+    from ...ext_utils.disk_utils import check_disk_space, format_bytes
+    from .... import DOWNLOAD_DIR
+    if listener.size and not check_disk_space(listener.size, DOWNLOAD_DIR):
+        from ...ext_utils.disk_utils import get_free_space_gb
+        free_gb = get_free_space_gb(DOWNLOAD_DIR)
+        required_gb = listener.size / (1024 ** 3)
+        from ...ext_utils.error_messages import disk_full
+        await listener.on_download_error(
+            disk_full(required_gb, free_gb, DOWNLOAD_DIR).to_user_message()
+        )
+        return
+
     if not listener.name:
         listener.name = details["title"]
     path = f"{path}/{listener.name}"
@@ -55,6 +69,10 @@ async def add_direct_download(listener, path):
         if listener.is_cancelled:
             return
 
+    # Phase 2.2 — HTTP Range resume is handled natively by aria2 via
+    # `continue=true` in configs/aria2/aria2.conf. When aria2 detects a
+    # partial .aria2 control file at the target path, it resumes from
+    # the last completed byte. No custom resume logic needed here.
     a2c_opt = {"follow-torrent": "false", "follow-metalink": "false"}
     if header := details.get("header"):
         a2c_opt["header"] = header

@@ -289,6 +289,11 @@ async def healthz():
 
     Returns 200 if the FastAPI app is up and the DB is reachable (if
     configured). Returns 503 if the DB is configured but unreachable.
+
+    Phase 2.9 — includes engine health states in the response body.
+    The response code is still 200/503 based on DB connectivity (so
+    k8s probes don't flap on engine restarts), but the body includes
+    `engines` with per-engine state and `unavailable_engines` count.
     """
     try:
         from bot.helper.ext_utils.db_handler import database
@@ -303,7 +308,19 @@ async def healthz():
         # web server is up — return 200 with a warning so the probe
         # doesn't kill the pod before the bot can recover.
         return JSONResponse({"status": "degraded", "reason": str(e)[:200]})
-    return JSONResponse({"status": "ok"})
+    # Phase 2.9 — include engine health in the response body
+    try:
+        from bot.helper.ext_utils.engine_health import get_health_states, get_unavailable_count
+        engines = get_health_states()
+        unavailable = get_unavailable_count()
+    except Exception:
+        engines = {}
+        unavailable = 0
+    return JSONResponse({
+        "status": "ok",
+        "engines": engines,
+        "unavailable_engines": unavailable,
+    })
 
 
 @app.get("/metrics")
@@ -707,6 +724,153 @@ async def homepage(request: Request):
     return response
 
 
+# ────────────────────────────────────────────────────────────────────
+# Phase 1.3 — Web UI login password (LOGIN_PASS)
+# ────────────────────────────────────────────────────────────────────
+# When Config.LOGIN_PASS is set, all admin routes require a session_token
+# cookie obtained via /login. Public routes (/, /healthz, /metrics,
+# /stream/*, /dl/*, /watch/*, /login) are exempt. The session token is
+# an HMAC signature of "amaterasu_session" with the web secret — stateless,
+# no server-side session storage needed. Cookie expires in 7 days.
+
+_LOGIN_PAGE_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Amaterasu — Login</title>
+<style>
+body { font-family: -apple-system, system-ui, sans-serif; background: #f5f6f7;
+       display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; }
+.card { background: #fff; padding: 2rem; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        width: 100%; max-width: 360px; }
+h1 { font-size: 1.5rem; margin: 0 0 1.5rem; color: #1d1f20; }
+label { display: block; margin-bottom: 0.5rem; font-size: 0.9rem; color: #476675; }
+input[type="password"] { width: 100%; padding: 0.6rem; border: 1px solid #c1cbd1;
+                         border-radius: 4px; font-size: 1rem; box-sizing: border-box; }
+button { width: 100%; padding: 0.7rem; background: #1c6d96; color: #fff; border: none;
+         border-radius: 4px; font-size: 1rem; cursor: pointer; margin-top: 1rem; }
+button:hover { background: #155a7e; }
+.error { color: #a0524a; font-size: 0.85rem; margin-top: 0.5rem; }
+</style>
+</head>
+<body>
+<div class="card">
+<h1>Amaterasu Login</h1>
+<form method="POST" action="/login">
+<label for="password">Password</label>
+<input type="password" id="password" name="password" autofocus required>
+{error_html}
+<button type="submit">Login</button>
+</form>
+</div>
+</body>
+</html>"""
+
+# Admin routes that require login when LOGIN_PASS is set
+_ADMIN_PATH_PREFIXES = ("/app/", "/api/profiles", "/api/status", "/qbit/", "/nzb/")
+# Public routes that never require login
+_PUBLIC_PATHS = frozenset({"/", "/healthz", "/metrics", "/login"})
+
+
+def _make_session_cookie() -> str:
+    """Create a signed session token. HMAC of 'amaterasu_session' with
+    the web secret. Stateless — no server-side storage."""
+    from hmac import new as hmac_new
+    from hashlib import sha256
+    from base64 import urlsafe_b64encode
+    secret = _web_secret().encode("utf-8")
+    mac = hmac_new(secret, b"amaterasu_session", sha256).digest()
+    return urlsafe_b64encode(mac).decode("ascii").rstrip("=")
+
+
+def _verify_session_cookie(token: str | None) -> bool:
+    """Verify the session cookie against the expected HMAC."""
+    if not token:
+        return False
+    from hmac import new as hmac_new, compare_digest
+    from hashlib import sha256
+    from base64 import urlsafe_b64encode
+    expected = _make_session_cookie()
+    return compare_digest(token, expected)
+
+
+def _login_pass_configured() -> bool:
+    """Check if LOGIN_PASS is set (non-empty). When not set, login is
+    skipped entirely — all routes are public (v1.5.0 behavior)."""
+    config = _get_config()
+    return bool(getattr(config, "LOGIN_PASS", "") or "")
+
+
+@app.get("/login", response_class=HTMLResponse)
+async def login_page(request: Request, error: str | None = None):
+    """Render the login form. Only meaningful when LOGIN_PASS is set."""
+    if not _login_pass_configured():
+        # If LOGIN_PASS is not set, redirect to home — no login needed
+        from fastapi.responses import RedirectResponse
+        return RedirectResponse(url="/", status_code=302)
+    error_html = f'<p class="error">{error}</p>' if error else ""
+    return HTMLResponse(_LOGIN_PAGE_HTML.replace("{error_html}", error_html))
+
+
+@app.post("/login")
+async def login_submit(request: Request):
+    """Validate the password and set the session cookie."""
+    if not _login_pass_configured():
+        from fastapi.responses import RedirectResponse
+        return RedirectResponse(url="/", status_code=302)
+    form = await request.form()
+    password = form.get("password", "")
+    config = _get_config()
+    from hmac import compare_digest
+    if compare_digest(str(password), str(config.LOGIN_PASS)):
+        response = JSONResponse({"status": "ok"})
+        response.set_cookie(
+            key="amaterasu_session",
+            value=_make_session_cookie(),
+            httponly=True,
+            samesite="strict",
+            secure=request.url.scheme == "https",
+            max_age=7 * 24 * 3600,  # 7 days
+            path="/",
+        )
+        from fastapi.responses import RedirectResponse
+        return RedirectResponse(url="/", status_code=302, headers={
+            "set-cookie": response.headers.get("set-cookie", "")
+        })
+    return HTMLResponse(
+        _LOGIN_PAGE_HTML.replace(
+            "{error_html}", '<p class="error">Incorrect password.</p>'
+        ),
+        status_code=401,
+    )
+
+
+@app.middleware("http")
+async def login_gate(request: Request, call_next):
+    """Middleware that enforces LOGIN_PASS on admin routes.
+
+    Public routes (/, /healthz, /metrics, /stream/*, /dl/*, /watch/*,
+    /login) are always allowed. Admin routes (/app/*, /api/profiles*,
+    /qbit/*, /nzb/*) require a valid session cookie when LOGIN_PASS is
+    set. When LOGIN_PASS is not set, all routes are public (v1.5.0).
+    """
+    path = request.url.path
+    # Always allow public paths
+    if path in _PUBLIC_PATHS or path.startswith(("/stream/", "/dl/", "/watch/")):
+        return await call_next(request)
+    # If LOGIN_PASS is not set, allow everything (v1.5.0 behavior)
+    if not _login_pass_configured():
+        return await call_next(request)
+    # Check session cookie for admin routes
+    if path.startswith(_ADMIN_PATH_PREFIXES):
+        cookie = request.cookies.get("amaterasu_session")
+        if not _verify_session_cookie(cookie):
+            from fastapi.responses import RedirectResponse
+            return RedirectResponse(url="/login", status_code=302)
+    return await call_next(request)
+
+
 def rewrite_location(location: str, proxy_prefix: str) -> str:
     parsed = urlparse(location)
     if not parsed.netloc:
@@ -831,21 +995,15 @@ def select_optimal_client() -> tuple[int, any]:
     return client_id, TgClient.stream_clients[client_id]
 
 def get_media(message):
-    if not message:
-        return None
-    for media_type in ["audio", "document", "photo", "sticker", "animation", "video", "voice", "video_note"]:
-        if media := getattr(message, media_type, None):
-            return media
-    return None
+    # Phase 2.12 — delegate to canonical implementation in tg_utils.py
+    from bot.helper.telegram_helper.tg_utils import get_media as _get_media
+    return _get_media(message)
 
 
 def get_media_type(message):
-    if not message:
-        return "file"
-    for media_type in ["audio", "document", "photo", "sticker", "animation", "video", "voice", "video_note"]:
-        if getattr(message, media_type, None):
-            return media_type
-    return "file"
+    # Phase 2.12 — delegate to canonical implementation in tg_utils.py
+    from bot.helper.telegram_helper.tg_utils import get_media_type as _get_media_type
+    return _get_media_type(message)
 
 async def get_message(client, chat_id: int, message_id: int) -> any:
     import asyncio

@@ -225,6 +225,18 @@ class Mirror(TaskListener):
             "-en": False,
             "-enmeta": "",
             "-ff": set(),
+            # Phase 3.2 — parallel multi-source download. Pass multiple
+            # space-separated URLs after --multi and aria2 will download
+            # the same file from all sources in parallel (mirror mode).
+            # Example: /mirror --multi url1 url2 url3
+            "--multi": "",
+            # Phase 4.1 — sequential torrent streaming flag. When set,
+            # torrent pieces are downloaded in order so the file can be
+            # streamed while still downloading.
+            "--stream": False,
+            # Phase 4.3 — cloud-to-cloud transfer flag. When set, both
+            # source and destination must be rclone remotes.
+            "--c2c": False,
         }
 
         arg_parser(input_list[1:], args)
@@ -291,6 +303,17 @@ class Mirror(TaskListener):
         self.is_yt = args["-yt"]
         self.is_encode = args["-en"]
         self.encode_metadata = args["-enmeta"]
+        # Phase 3.2 — parallel multi-source download. Parse the --multi
+        # flag value (space-separated URLs) into a list. The first URL
+        # is the primary (listener.link); the rest are additional mirrors
+        # that aria2 downloads in parallel.
+        self.multi_urls = []
+        if args.get("--multi"):
+            self.multi_urls = [u.strip() for u in args["--multi"].split() if u.strip()]
+        # Phase 4.1 — sequential torrent streaming flag
+        self.is_stream = args.get("--stream", False)
+        # Phase 4.3 — cloud-to-cloud transfer flag
+        self.is_c2c = args.get("--c2c", False)
         self.metadata_dict = self.default_metadata_dict.copy()
         self.audio_metadata_dict = self.audio_metadata_dict.copy()
         self.video_metadata_dict = self.video_metadata_dict.copy()
@@ -487,6 +510,13 @@ class Mirror(TaskListener):
 
         self._set_mode_engine()
 
+        # Phase 3.3 — Smart engine selection is already handled by the
+        # existing URL pattern checks below (is_magnet, is_rclone_path,
+        # is_gdrive_link, is_mega_link, etc.). The engine_selector.py
+        # module (Phase 2.7) provides a cleaner abstraction for fallback
+        # chains and is used by the engine_health integration. No new
+        # commands — /mirror and /leech auto-detect the engine when no
+        # explicit flag (/qbmirror, /jdmirror, etc.) is given.
         if (
             not self.is_jd
             and not self.is_nzb
@@ -556,6 +586,28 @@ class Mirror(TaskListener):
             await add_gd_download(self, path)
         elif is_mega_link(self.link):
             await add_mega_download(self, f"{path}/")
+        elif getattr(self, "is_c2c", False):
+            # Phase 4.3 — cloud-to-cloud transfer. Both source and dest
+            # are rclone remotes — no local download. The link is the
+            # source; the upload destination (self.up_dest) is the dest.
+            from ..helper.mirror_leech_utils.rclone_utils.transfer import (
+                RcloneTransferHelper,
+            )
+            dest = self.up_dest or self.link  # fallback to same remote if no dest
+            # If up_dest is not set, we need a destination. For c2c, the
+            # command format is: /mirror --c2c source_remote:path dest_remote:path
+            # The link is the source; the second arg is in -up.
+            if not self.up_dest:
+                await send_message(
+                    self.message,
+                    "Cloud-to-cloud transfer requires a destination. "
+                    "Use: /mirror --c2c source_remote:path -up dest_remote:path",
+                )
+                await self.remove_from_same_dir()
+                await delete_links(self.message)
+                return
+            rc_helper = RcloneTransferHelper(self)
+            await rc_helper.c2c_transfer(self.link, self.up_dest)
         else:
             ussr = args["-au"]
             pssw = args["-ap"]

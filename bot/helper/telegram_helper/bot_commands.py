@@ -64,6 +64,7 @@ class BotCommands:
         "FileToLink": ["link", "stream", "f2l"],
         "AutoRename": ["autorename", "ar"],
         "Sort": "sort",
+        "Setup": ["setup", "init"],  # Phase 5.8 — interactive setup wizard
     }
 
     @classmethod

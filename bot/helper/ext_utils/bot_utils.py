@@ -290,6 +290,9 @@ def arg_parser(items, arg_base):
         "-bt",
         "-yt",
         "-en",
+        # Phase 4.1/4.3 — boolean flags using --word syntax
+        "--stream",
+        "--c2c",
     }
     if Config.DISABLE_BULK and "-b" in items:
         arg_base["-b"] = False

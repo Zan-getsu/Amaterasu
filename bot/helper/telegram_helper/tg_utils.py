@@ -120,3 +120,48 @@ async def verify_token(user_id, button=None):
         )
     return None, button
 
+
+
+# ────────────────────────────────────────────────────────────────────
+# Phase 2.12 — Canonical media helpers (deduplicated from
+# bot/modules/filetolink.py and web/wserver.py)
+# ────────────────────────────────────────────────────────────────────
+
+MEDIA_TYPES = (
+    "audio",
+    "document",
+    "photo",
+    "sticker",
+    "animation",
+    "video",
+    "voice",
+    "video_note",
+)
+
+
+def get_media(message):
+    """Return the first media attribute on a Pyrogram message, or None.
+
+    Checks audio, document, photo, sticker, animation, video, voice,
+    video_note in that order. Consolidated from duplicate definitions
+    in bot/modules/filetolink.py and web/wserver.py.
+    """
+    if not message:
+        return None
+    for media_type in MEDIA_TYPES:
+        if media := getattr(message, media_type, None):
+            return media
+    return None
+
+
+def get_media_type(message):
+    """Return the attribute name of the first media on the message.
+
+    Returns 'file' as a fallback if no recognized media attribute is set.
+    """
+    if not message:
+        return "file"
+    for media_type in MEDIA_TYPES:
+        if getattr(message, media_type, None):
+            return media_type
+    return "file"

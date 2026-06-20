@@ -44,11 +44,58 @@ class DbManager:
         try:
             if self._conn is not None:
                 self._conn.close()
+            # Phase 1.10 — MongoDB connection pooling. maxPoolSize=50
+            # handles 50 concurrent operations (plenty for a single-bot
+            # deployment with 10 concurrent tasks). minPoolSize=5 keeps
+            # warm connections ready. serverSelectionTimeoutMS=5000 fails
+            # fast if MongoDB is unreachable (default 30s is too long for
+            # a bot that should degrade gracefully).
             self._conn = AsyncIOMotorClient(
-                Config.DATABASE_URL, server_api=ServerApi("1")
+                Config.DATABASE_URL,
+                server_api=ServerApi("1"),
+                maxPoolSize=50,
+                minPoolSize=5,
+                serverSelectionTimeoutMS=5000,
             )
             self.db = self._conn.amaterasu
             self._return = False
+            # Phase 1.5 — create TTL index on blacklisted_users.expires_at.
+            # MongoDB automatically deletes documents when expires_at < now.
+            # Sparse index so permanent bans (expires_at=None) are excluded
+            # from the TTL and never auto-expire.
+            try:
+                await self.db.blacklisted_users.create_index(
+                    "expires_at",
+                    expireAfterSeconds=0,
+                    sparse=True,
+                    name="ttl_expires_at",
+                )
+                # Also index user_id for fast lookup
+                await self.db.blacklisted_users.create_index(
+                    "user_id",
+                    unique=True,
+                    name="uniq_user_id",
+                )
+            except PyMongoError as e:
+                LOGGER.warning(f"blacklisted_users index creation: {e}")
+            # Phase 3.10 — create indexes for common query patterns.
+            # background=True so index creation doesn't block startup.
+            try:
+                # user_stats: index on user_id for fast per-user lookups
+                await self.db.user_stats.create_index(
+                    "user_id", unique=True, background=True, name="uniq_user_id"
+                )
+                # tasks: index on the partition key (_id already indexed
+                # by MongoDB). Add user_id index for per-user task queries.
+                # The tasks collection is sharded by _bot_id(), so we
+                # index within each shard.
+                # Note: tasks[_bot_id()] is a per-bot collection; we
+                # create indexes on it after TgClient.ID is set (in
+                # load_settings). Here we just create indexes on the
+                # global collections.
+                LOGGER.info("DB indexes created (blacklisted_users, user_stats)")
+            except PyMongoError as e:
+                LOGGER.warning(f"Phase 3.10 index creation: {e}")
         except PyMongoError as e:
             LOGGER.error(f"Error in DB connection: {e}")
             self.db = None
@@ -476,6 +523,209 @@ class DbManager:
             {"$set": {f"{profile_id}.is_default": True}},
             upsert=True
         )
+
+    # ────────────────────────────────────────────────────────────────────
+    # Phase 1.5 — Blacklist system with MongoDB TTL index
+    # ────────────────────────────────────────────────────────────────────
+    # The blacklisted_users collection uses a TTL index on expires_at
+    # (sparse, expireAfterSeconds=0). MongoDB automatically deletes
+    # documents when expires_at < now. Permanent bans set expires_at=None
+    # and are excluded from the TTL (sparse index skips null values).
+    #
+    # Schema: {
+    #   _id: ObjectId,
+    #   user_id: int (unique indexed),
+    #   added_by: int (owner/sudo user_id who issued the ban),
+    #   added_at: datetime (UTC),
+    #   expires_at: datetime | None (None = permanent),
+    #   reason: str
+    # }
+    async def add_blacklist(self, user_id, added_by, expires_at=None, reason=""):
+        """Add a user to the blacklist. If user_id already exists, update
+        the existing record (upsert). expires_at is a datetime in UTC, or
+        None for a permanent ban. Returns True on success."""
+        if self._return:
+            return False
+        from datetime import datetime, timezone
+        doc = {
+            "user_id": user_id,
+            "added_by": added_by,
+            "added_at": datetime.now(timezone.utc),
+            "expires_at": expires_at,
+            "reason": reason,
+        }
+        try:
+            await self.db.blacklisted_users.update_one(
+                {"user_id": user_id},
+                {"$set": doc},
+                upsert=True,
+            )
+            return True
+        except PyMongoError as e:
+            LOGGER.error(f"add_blacklist error: {e}")
+            return False
+
+    async def remove_blacklist(self, user_id):
+        """Remove a user from the blacklist. Returns True if a document
+        was deleted, False if the user wasn't blacklisted or on error."""
+        if self._return:
+            return False
+        try:
+            result = await self.db.blacklisted_users.delete_one(
+                {"user_id": user_id}
+            )
+            return result.deleted_count > 0
+        except PyMongoError as e:
+            LOGGER.error(f"remove_blacklist error: {e}")
+            return False
+
+    async def get_blacklist(self, user_id):
+        """Return the blacklist document for user_id, or None if not
+        blacklisted. Expired temporary bans are auto-deleted by the TTL
+        index, so any document returned is an active ban."""
+        if self._return:
+            return None
+        try:
+            return await self.db.blacklisted_users.find_one(
+                {"user_id": user_id}, {"_id": 0}
+            )
+        except PyMongoError as e:
+            LOGGER.error(f"get_blacklist error: {e}")
+            return None
+
+    async def get_all_blacklisted(self):
+        """Return a list of all active blacklist documents. Used by owner
+        to list current bans."""
+        if self._return:
+            return []
+        try:
+            cursor = self.db.blacklisted_users.find({}, {"_id": 0})
+            return await cursor.to_list(length=None)
+        except PyMongoError as e:
+            LOGGER.error(f"get_all_blacklisted error: {e}")
+            return []
+
+    # ────────────────────────────────────────────────────────────────────
+    # Phase 5.4 — Per-user usage statistics
+    # ────────────────────────────────────────────────────────────────────
+    async def increment_user_stats(self, user_id, downloads=0, uploads=0,
+                                    bytes_downloaded=0, bytes_uploaded=0,
+                                    engine=None):
+        """Increment per-user usage stats. Called after each completed
+        task. Creates the user_stats document on first call (upsert).
+        engine is the engine name (e.g., 'aria2', 'qbit') — increments
+        the engines_used.<engine> counter."""
+        if self._return:
+            return
+        from datetime import datetime, timezone
+        update = {
+            "$inc": {
+                "total_downloads": downloads,
+                "total_uploads": uploads,
+                "bytes_downloaded": bytes_downloaded,
+                "bytes_uploaded": bytes_uploaded,
+            },
+            "$set": {"last_active": datetime.now(timezone.utc)},
+        }
+        if engine:
+            update["$inc"][f"engines_used.{engine}"] = 1
+        try:
+            await self.db.user_stats.update_one(
+                {"user_id": user_id}, update, upsert=True
+            )
+        except PyMongoError as e:
+            LOGGER.error(f"increment_user_stats error: {e}")
+
+    async def get_user_stats(self, user_id):
+        """Return the stats document for user_id, or None."""
+        if self._return:
+            return None
+        try:
+            return await self.db.user_stats.find_one(
+                {"user_id": user_id}, {"_id": 0}
+            )
+        except PyMongoError as e:
+            LOGGER.error(f"get_user_stats error: {e}")
+            return None
+
+    async def add_user_daily_usage(self, user_id, bytes_):
+        """Add bytes to the user's daily usage counter. Resets lazily
+        (check on next request, not via cron)."""
+        if self._return:
+            return
+        from datetime import datetime, timezone, timedelta
+        now = datetime.now(timezone.utc)
+        try:
+            doc = await self.db.user_stats.find_one({"user_id": user_id})
+            if doc is None:
+                await self.db.user_stats.update_one(
+                    {"user_id": user_id},
+                    {"$inc": {"daily_bytes": bytes_},
+                     "$set": {"daily_reset_at": now, "monthly_reset_at": now,
+                              "monthly_bytes": bytes_}},
+                    upsert=True,
+                )
+                return
+            # Reset daily if >24h since last reset
+            daily_reset = doc.get("daily_reset_at", now)
+            if (now - daily_reset).total_seconds() > 86400:
+                await self.db.user_stats.update_one(
+                    {"user_id": user_id},
+                    {"$set": {"daily_bytes": bytes_, "daily_reset_at": now}},
+                )
+            else:
+                await self.db.user_stats.update_one(
+                    {"user_id": user_id},
+                    {"$inc": {"daily_bytes": bytes_}},
+                )
+            # Reset monthly if >30 days since last reset
+            monthly_reset = doc.get("monthly_reset_at", now)
+            if (now - monthly_reset).total_seconds() > 30 * 86400:
+                await self.db.user_stats.update_one(
+                    {"user_id": user_id},
+                    {"$set": {"monthly_bytes": bytes_, "monthly_reset_at": now}},
+                )
+            else:
+                await self.db.user_stats.update_one(
+                    {"user_id": user_id},
+                    {"$inc": {"monthly_bytes": bytes_}},
+                )
+        except PyMongoError as e:
+            LOGGER.error(f"add_user_daily_usage error: {e}")
+
+    async def get_user_quota_usage(self, user_id):
+        """Return (daily_bytes, monthly_bytes, daily_reset_at, monthly_reset_at).
+        Lazily resets counters that have expired."""
+        if self._return:
+            return 0, 0, None, None
+        from datetime import datetime, timezone
+        try:
+            doc = await self.db.user_stats.find_one({"user_id": user_id})
+            if doc is None:
+                return 0, 0, None, None
+            now = datetime.now(timezone.utc)
+            daily_bytes = doc.get("daily_bytes", 0)
+            monthly_bytes = doc.get("monthly_bytes", 0)
+            daily_reset = doc.get("daily_reset_at")
+            monthly_reset = doc.get("monthly_reset_at")
+            # Lazy daily reset
+            if daily_reset and (now - daily_reset).total_seconds() > 86400:
+                daily_bytes = 0
+                await self.db.user_stats.update_one(
+                    {"user_id": user_id},
+                    {"$set": {"daily_bytes": 0, "daily_reset_at": now}},
+                )
+            # Lazy monthly reset
+            if monthly_reset and (now - monthly_reset).total_seconds() > 30 * 86400:
+                monthly_bytes = 0
+                await self.db.user_stats.update_one(
+                    {"user_id": user_id},
+                    {"$set": {"monthly_bytes": 0, "monthly_reset_at": now}},
+                )
+            return daily_bytes, monthly_bytes, daily_reset, monthly_reset
+        except PyMongoError as e:
+            LOGGER.error(f"get_user_quota_usage error: {e}")
+            return 0, 0, None, None
 
 
 database = DbManager()

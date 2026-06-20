@@ -1,4 +1,4 @@
-from asyncio import Event
+from asyncio import Event, Semaphore
 from time import time
 
 from ... import (
@@ -19,6 +19,23 @@ from .bot_utils import get_telegraph_list, sync_to_async, safe_int
 from .files_utils import get_base_name, check_storage_threshold
 from .links_utils import is_gdrive_id
 from .status_utils import get_readable_time, get_readable_file_size, get_specific_tasks
+
+# Phase 3.5 — upload parallelism semaphore. Limits concurrent uploads
+# to Config.UPLOAD_PARALLELISM (default 3). Downloads proceed at their
+# own pace; the download→upload handoff acquires this semaphore.
+_upload_semaphore = None
+
+
+def get_upload_semaphore():
+    """Return the upload semaphore, creating it lazily on first use.
+    Reads Config.UPLOAD_PARALLELISM at creation time — operators who
+    change this config must restart the bot for it to take effect."""
+    global _upload_semaphore
+    if _upload_semaphore is None:
+        limit = max(1, int(getattr(Config, "UPLOAD_PARALLELISM", 3) or 3))
+        _upload_semaphore = Semaphore(limit)
+        LOGGER.info(f"Upload parallelism: {limit} concurrent uploads")
+    return _upload_semaphore
 
 
 async def stop_duplicate_check(listener):
@@ -129,7 +146,12 @@ async def start_from_queued():
                         if f_tasks == 0 or (up_limit and index >= up_limit - up):
                             break
                 if queued_dl and (not dl_limit or dl < dl_limit) and f_tasks != 0:
-                    for index, mid in enumerate(list(queued_dl.keys()), start=1):
+                    # Phase 3.4 — sort queued downloads by priority (DESC)
+                    # then by insertion order (ASC = FIFO for same priority).
+                    # task_dict[mid] holds the status object; .listener holds
+                    # the TaskConfig with .priority attribute.
+                    sorted_mids = _sort_queue_by_priority(queued_dl)
+                    for index, mid in enumerate(sorted_mids, start=1):
                         await start_dl_from_queued(mid)
                         if (dl_limit and index >= dl_limit - dl) or index == f_tasks:
                             break
@@ -140,14 +162,18 @@ async def start_from_queued():
             up = len(non_queued_up)
             if queued_up and up < up_limit:
                 f_tasks = up_limit - up
-                for index, mid in enumerate(list(queued_up.keys()), start=1):
+                # Phase 3.4 — sort upload queue by priority too
+                sorted_mids = _sort_queue_by_priority(queued_up)
+                for index, mid in enumerate(sorted_mids, start=1):
                     await start_up_from_queued(mid)
                     if index == f_tasks:
                         break
     else:
         async with queue_dict_lock:
             if queued_up:
-                for mid in list(queued_up.keys()):
+                # Phase 3.4 — sort by priority even when unlimited
+                sorted_mids = _sort_queue_by_priority(queued_up)
+                for mid in sorted_mids:
                     await start_up_from_queued(mid)
 
     if dl_limit := safe_int(Config.QUEUE_DOWNLOAD):
@@ -155,15 +181,44 @@ async def start_from_queued():
             dl = len(non_queued_dl)
             if queued_dl and dl < dl_limit:
                 f_tasks = dl_limit - dl
-                for index, mid in enumerate(list(queued_dl.keys()), start=1):
+                # Phase 3.4 — sort by priority
+                sorted_mids = _sort_queue_by_priority(queued_dl)
+                for index, mid in enumerate(sorted_mids, start=1):
                     await start_dl_from_queued(mid)
                     if index == f_tasks:
                         break
     else:
         async with queue_dict_lock:
             if queued_dl:
-                for mid in list(queued_dl.keys()):
+                # Phase 3.4 — sort by priority even when unlimited
+                sorted_mids = _sort_queue_by_priority(queued_dl)
+                for mid in sorted_mids:
                     await start_dl_from_queued(mid)
+
+
+def _sort_queue_by_priority(queue_dict):
+    """Phase 3.4 — Sort a queue dict's keys by priority (DESC) then
+    insertion order (ASC = FIFO for same priority).
+
+    queue_dict is {mid: event} — insertion-ordered in Python 3.7+.
+    We look up each mid in task_dict to get the listener.priority.
+    Mids not in task_dict get priority 0 (default).
+    """
+    try:
+        def priority_of(mid):
+            status = task_dict.get(mid)
+            if status is None:
+                return 0
+            listener = getattr(status, "listener", None)
+            if listener is None:
+                return 0
+            return getattr(listener, "priority", 0) or 0
+        # Sort by (-priority, insertion_order) — Python's sort is stable,
+        # so same-priority items keep insertion order.
+        return sorted(list(queue_dict.keys()), key=lambda m: -priority_of(m))
+    except Exception:
+        # Fallback to insertion order on any error
+        return list(queue_dict.keys())
 
 
 async def limit_checker(listener, yt_playlist=0):
@@ -283,6 +338,13 @@ async def pre_task_check(message):
     if token_msg is not None:
         msg.append(token_msg)
 
+    # Phase 5.5 — per-user quota check. Sudo users bypass. If the user
+    # has exceeded their daily or monthly quota, block the task with a
+    # clear message including when the quota resets.
+    quota_msg = await _check_user_quota(user_id)
+    if quota_msg:
+        msg.append(quota_msg)
+
     if msg:
         _user = message.from_user or message.sender_chat
         username = _user.mention if hasattr(_user, 'mention') else _user.title
@@ -294,3 +356,62 @@ async def pre_task_check(message):
         return final_msg, button
 
     return None, None
+
+
+async def _check_user_quota(user_id):
+    """Phase 5.5 — Check if user has exceeded their daily/monthly quota.
+
+    Returns a message string if quota exceeded, or None if OK.
+    Sudo users bypass — checked by caller (pre_task_check returns early
+    for sudo). Reads Config.USER_DAILY_QUOTA_GB and USER_MONTHLY_QUOTA_GB.
+    Uses database.get_user_quota_usage() which lazily resets expired
+    counters.
+    """
+    try:
+        from .db_handler import database
+        daily_limit_gb = safe_int(Config.USER_DAILY_QUOTA_GB)
+        monthly_limit_gb = safe_int(Config.USER_MONTHLY_QUOTA_GB)
+        if daily_limit_gb <= 0 and monthly_limit_gb <= 0:
+            return None  # no quota configured
+        if database.db is None:
+            return None  # DB not connected — can't check quota
+        daily_bytes, monthly_bytes, daily_reset, monthly_reset = (
+            await database.get_user_quota_usage(user_id)
+        )
+        from .status_utils import get_readable_file_size
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc)
+        msgs = []
+        if daily_limit_gb > 0:
+            daily_limit_bytes = daily_limit_gb * 1024 ** 3
+            if daily_bytes >= daily_limit_bytes:
+                # Calculate reset time
+                if daily_reset:
+                    reset_in = 86400 - (now - daily_reset).total_seconds()
+                    reset_str = get_readable_time(max(0, int(reset_in)))
+                else:
+                    reset_str = "24h"
+                msgs.append(
+                    f"┠ <b>Daily quota exceeded</b> → "
+                    f"{get_readable_file_size(daily_bytes)} / "
+                    f"{daily_limit_gb} GB\n"
+                    f"┠ <i>Resets in</i> → {reset_str}"
+                )
+        if monthly_limit_gb > 0:
+            monthly_limit_bytes = monthly_limit_gb * 1024 ** 3
+            if monthly_bytes >= monthly_limit_bytes:
+                if monthly_reset:
+                    reset_in = 30 * 86400 - (now - monthly_reset).total_seconds()
+                    reset_str = get_readable_time(max(0, int(reset_in)))
+                else:
+                    reset_str = "30d"
+                msgs.append(
+                    f"┠ <b>Monthly quota exceeded</b> → "
+                    f"{get_readable_file_size(monthly_bytes)} / "
+                    f"{monthly_limit_gb} GB\n"
+                    f"┠ <i>Resets in</i> → {reset_str}"
+                )
+        return "\n".join(msgs) if msgs else None
+    except Exception as e:
+        LOGGER.warning(f"Quota check error for user {user_id}: {e}")
+        return None  # don't block on quota check errors

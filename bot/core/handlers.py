@@ -8,6 +8,14 @@ from ..core.config_manager import Config
 from ..helper.ext_utils.help_messages import BOT_COMMANDS  # noqa: F401
 from ..helper.telegram_helper.bot_commands import BotCommands
 from ..helper.telegram_helper.filters import CustomFilters
+# Phase 3.9 — Lazy module loading deferred. The eager `from ..modules
+# import *` imports all 36 command modules at startup (~30-50% of boot
+# time). Converting to lazy loading (importlib.import_module on first
+# handler call) would require restructuring all 50+ add_handler()
+# references to use string names + a lazy resolver, and verifying no
+# circular imports across 36 modules. The regression risk is too high
+# for this phase — deferred to a future minor release. Startup time
+# is already acceptable (30-60s including engine daemons).
 from ..modules import *
 from .tg_client import TgClient
 
@@ -388,6 +396,18 @@ def add_handlers():
         CallbackQueryHandler(pics_callback, filters=regex("^images"))
     )
 
+    # Phase 1.6 — image search callback handler (imgsearch prefix)
+    from ..modules.images import image_search_callback
+    TgClient.bot.add_handler(
+        CallbackQueryHandler(image_search_callback, filters=regex("^imgsearch"))
+    )
+
+    # Phase 1.4 — force-subscribe callback handler (forcesub prefix)
+    from ..modules.chat_permission import forcesub_callback
+    TgClient.bot.add_handler(
+        CallbackQueryHandler(forcesub_callback, filters=regex("^forcesub"))
+    )
+
     TgClient.bot.add_handler(
         MessageHandler(
             bot_stats,
@@ -519,6 +539,18 @@ def add_handlers():
             filters=channel,
         ),
         group=1,
+    )
+    # Phase 5.8 — /setup interactive wizard (owner only)
+    TgClient.bot.add_handler(
+        MessageHandler(
+            setup_wizard,
+            filters=command(BotCommands.SetupCommand, case_sensitive=True)
+            & CustomFilters.owner,
+        )
+    )
+    # Phase 5.8 — setup wizard callback handler
+    TgClient.bot.add_handler(
+        CallbackQueryHandler(setup_callback, filters=regex("^setup"))
     )
     if Config.SET_COMMANDS:
         global BOT_COMMANDS

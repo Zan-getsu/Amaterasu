@@ -69,13 +69,64 @@ def _load_db_partition_salt():
 
 _DB_PARTITION_SALT = _load_db_partition_salt()
 
-_ALLOWED_UPSTREAM = re_compile(
-    r"^https://("
-    r"github\.com/[\w.-]+/[\w.-]+/?|"
-    r"raw\.githubusercontent\.com/[\w.-]+/[\w.-]+/?|"
-    r"git\.nbmirror\.qzz\.io/[\w.-]+/[\w.-]+/?"
-    r")$"
+# Default allowlist — operators can override via UPSTREAM_ALLOWLIST env var
+# or config.py to add their own fork URL. Comma-separated regex patterns.
+_DEFAULT_UPSTREAM_PATTERNS = (
+    r"^https://github\.com/[\w.-]+/[\w.-]+/?$",
+    r"^https://raw\.githubusercontent\.com/[\w.-]+/[\w.-]+/?$",
+    r"^https://git\.nbmirror\.qzz\.io/[\w.-]+/[\w.-]+/?$",
 )
+
+
+def _load_upstream_allowlist():
+    """Load the UPSTREAM_ALLOWLIST from env or config.py.
+
+    Returns a list of compiled regex patterns. Priority:
+      1. UPSTREAM_ALLOWLIST env var (comma-separated regex patterns)
+      2. config.py UPSTREAM_ALLOWLIST (comma-separated regex patterns)
+      3. Default 3 patterns (github.com, raw.githubusercontent.com, git.nbmirror.qzz.io)
+
+    This allows operators to add their own fork URL for auto-update
+    without modifying the source code.
+    """
+    from re import compile as _re_compile
+
+    # Try env var first
+    raw = environ.get("UPSTREAM_ALLOWLIST", "").strip()
+    if not raw:
+        # Try config.py
+        try:
+            settings = import_module("config")
+            raw = getattr(settings, "UPSTREAM_ALLOWLIST", "").strip()
+        except (ModuleNotFoundError, AttributeError):
+            raw = ""
+
+    if raw:
+        # Operator provided custom allowlist. Split on comma, strip each
+        # pattern, compile each as a regex. Skip empty patterns.
+        patterns = [p.strip() for p in raw.split(",") if p.strip()]
+        if patterns:
+            compiled = []
+            for p in patterns:
+                try:
+                    compiled.append(_re_compile(p))
+                except Exception as e:
+                    _LOGGER.warning(
+                        f"UPSTREAM_ALLOWLIST pattern '{p}' is invalid regex "
+                        f"and will be skipped: {e}"
+                    )
+            if compiled:
+                return compiled
+            _LOGGER.warning(
+                "UPSTREAM_ALLOWLIST set but no valid patterns parsed; "
+                "falling back to default allowlist."
+            )
+
+    # Default — compile the 3 standard patterns
+    return [_re_compile(p) for p in _DEFAULT_UPSTREAM_PATTERNS]
+
+
+_ALLOWLIST_PATTERNS = _load_upstream_allowlist()
 _BRANCH_RE = re_compile(r"^[\w./-]+$")
 
 _VAR_LIST = [
@@ -170,11 +221,16 @@ def _run_update(upstream_repo, upstream_branch, version):
         _LOGGER.info("No UPSTREAM_REPO set, skipping git update")
         return
 
-    if not _ALLOWED_UPSTREAM.match(upstream_repo):
+    # Check against the configurable allowlist (Phase 0.2). Operators can
+    # add their own fork URL via UPSTREAM_ALLOWLIST env var or config.py.
+    allowed = any(p.match(upstream_repo) for p in _ALLOWLIST_PATTERNS)
+    if not allowed:
         _LOGGER.error(
-            "UPSTREAM_REPO rejected (must be github.com, "
-            "raw.githubusercontent.com, or git.nbmirror.qzz.io): "
-            f"{upstream_repo}"
+            "UPSTREAM_REPO rejected (not in UPSTREAM_ALLOWLIST): "
+            f"{upstream_repo}\n"
+            "To allow this URL, set UPSTREAM_ALLOWLIST in your env or "
+            "config.py as a comma-separated list of regex patterns. "
+            "Example: UPSTREAM_ALLOWLIST=\"^https://github\\.com/yourname/Amaterasu/?$\""
         )
         exit(1)
 

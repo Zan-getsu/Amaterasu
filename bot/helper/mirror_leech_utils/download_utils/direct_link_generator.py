@@ -158,7 +158,14 @@ def direct_link_generator(link):
     elif Config.DEBRID_LINK_API and any(
         x in domain for x in debrid_link_supported_sites
     ):
-        return debrid_link(link)
+        # Phase 1.1 — use the new multi-provider debrid_utils dispatcher.
+        # Supports Real-Debrid (rd:), AllDebrid (ad:), Premiumize (pm:),
+        # and Debrid-Link (dl:) via DEBRID_LINK_API prefix. Falls back to
+        # the legacy debrid_link() function for backward compat.
+        from bot.helper.mirror_leech_utils.download_utils.debrid_utils import (
+            debrid_unrestrict,
+        )
+        return debrid_unrestrict(link)
     elif "yadi.sk" in link or "disk.yandex." in link:
         return yandex_disk(link)
     elif "buzzheavier.com" in domain:

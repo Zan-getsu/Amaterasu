@@ -14,36 +14,12 @@ from bot.helper.ext_utils.shortener_utils import short_url
 from bot.helper.telegram_helper.button_build import ButtonMaker
 from bot.helper.telegram_helper.message_utils import edit_message, send_message
 from web.security import make_route_token
-
-
-MEDIA_TYPES = (
-    "audio",
-    "document",
-    "photo",
-    "sticker",
-    "animation",
-    "video",
-    "voice",
-    "video_note",
+# Phase 2.12 — import canonical media helpers from tg_utils (deduplication)
+from bot.helper.telegram_helper.tg_utils import (
+    MEDIA_TYPES,
+    get_media,
+    get_media_type,
 )
-
-
-def get_media(message):
-    if not message:
-        return None
-    for media_type in MEDIA_TYPES:
-        if media := getattr(message, media_type, None):
-            return media
-    return None
-
-
-def get_media_type(message):
-    if not message:
-        return "file"
-    for media_type in MEDIA_TYPES:
-        if getattr(message, media_type, None):
-            return media_type
-    return "file"
 
 
 def get_filename(message, media=None):

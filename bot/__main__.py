@@ -130,6 +130,20 @@ async def main():
     create_tracked_task(telegraph.create_account())
     create_tracked_task(rclone_serve_booter())
     create_tracked_task(search_images())
+    # Phase 1.7 — start tunnel monitor for Cloudflare quick tunnel URL
+    # persistence. Watches /data/tunnel_url.txt and propagates new URLs
+    # to Config.BASE_URL, MongoDB, and owner DM.
+    from .helper.ext_utils.tunnel_monitor import start_tunnel_monitor
+    create_tracked_task(start_tunnel_monitor())
+    # Phase 2.9 — start engine health checker. Checks aria2, qbit,
+    # SABnzbd, JDownloader every 5 minutes. Notifies owner on
+    # HEALTHY → UNAVAILABLE and UNAVAILABLE → HEALTHY transitions.
+    from .helper.ext_utils.engine_health import start_engine_health_checker
+    create_tracked_task(start_engine_health_checker())
+    # Phase 3.1 — detect FFmpeg hardware acceleration at startup so the
+    # first encode doesn't pay the probe cost. Logs the detected encoder.
+    from .helper.ext_utils.hwaccel import init_hwaccel_detection
+    create_tracked_task(init_hwaccel_detection())
 
 
 try:

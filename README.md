@@ -14,7 +14,7 @@
 **The Absolute Pinnacle of Telegram Mirroring and Leeching**
 
 <p align="center">
-  <a href="#"><img src="https://img.shields.io/badge/Version-1.5.0-orange?style=for-the-badge&logo=rocket"></a>
+  <a href="#"><img src="https://img.shields.io/badge/Version-1.6.1-orange?style=for-the-badge&logo=rocket"></a>
   <a href="#"><img src="https://img.shields.io/github/repo-size/its-niloy/Amaterasu?color=FF4500&label=Size&style=for-the-badge"></a>
   <a href="#"><img src="https://img.shields.io/github/license/its-niloy/Amaterasu?style=for-the-badge&color=FF8C00"></a>
   <br>
@@ -98,6 +98,65 @@ It converges five industrial download engines (Aria2c, qBittorrent, JDownloader,
 
 > [!IMPORTANT]
 > Amaterasu also ships with a built-in **FileToLink** streaming web server. Any file uploaded to a designated Telegram channel can be instantly converted into a direct HTTP stream link — seekable, resumable, and playable in VLC, MX Player, or any browser.
+
+---
+
+## 🆕 What's New in v1.6.1
+
+A major upgrade focused on **features, robustness, and speed**. Security hardening from v1.5.0 is preserved but now every measure is configurable so it never blocks functionality.
+
+### New Features
+
+- **Debrid multi-provider**: Real-Debrid, AllDebrid, Premiumize, Debrid-Link via `DEBRID_LINK_API` prefix
+- **4 new DDL hosters**: StreamWish, FileLion, InstaDL, Protected.link
+- **Sequential torrent streaming**: `--stream` flag — stream while still downloading
+- **Cloud-to-cloud transfer**: `--c2c` flag — rclone copy between remotes, no local download
+- **Parallel multi-source download**: `--multi url1 url2 url3` — aria2 downloads from all sources
+- **Automatic subtitles**: `AUTO_SUBTITLES` — OpenSubtitles search by file hash
+- **Telegram Premium auto-detect**: 4 GB upload limit when bot is premium
+- **Interactive setup wizard**: `/setup` — 5-step owner-only guided setup
+- **Image search**: `/images <query>` — wallpaperflare/peapix/wallhaven with Mirror buttons
+- **Force-subscribe**: `FORCE_SUB_IDS` — require channel join before bot use
+- **Web UI login**: `LOGIN_PASS` — HMAC session cookie for admin routes
+- **Blacklist with TTL**: auto-expiring temporary bans via MongoDB TTL index
+
+### Performance
+
+- **FFmpeg hardware acceleration**: auto-detect NVENC/QSV/VAAPI/VideoToolbox (5-20× faster encoding)
+- **Upload queue parallelism**: `UPLOAD_PARALLELISM` (default 3 concurrent uploads)
+- **Adaptive status updates**: 5s for active tasks, 60s for idle
+- **Queue prioritization**: `priority` field — high-priority tasks jump the queue
+- **yt-dlp playlist parallelism**: `PLAYLIST_PARALLELISM`
+
+### Robustness
+
+- **Retry with exponential backoff**: 1→2→4→8→16s for transient failures
+- **Disk space pre-check**: fail fast with actionable error before download
+- **FloodWait manager**: per-chat state tracking + preemptive delay
+- **Engine health checks**: 5-min interval, owner DM on state transitions
+- **Actionable error messages**: every error says what went wrong AND what to do
+- **Shared HTTP client**: httpx.AsyncClient with HTTP/2 + connection pooling
+
+### Quality
+
+- **29 smoke tests** (HMAC tokens, path traversal, rate limiting, retry, etc.)
+- **CI workflow**: ruff + pytest + pip-audit on every PR
+- **11 critical dependencies pinned** for reproducible builds
+- **Dependabot** for automated dependency updates
+- **Structured logging**: `LOG_FORMAT=json` for log aggregation
+
+### Config Relaxations (security no longer blocks functionality)
+
+- `BIND_TO_LOOPBACK=False` — direct LAN access without reverse proxy
+- `UPSTREAM_ALLOWLIST` — add your own fork URL for auto-update
+- `SKIP_SABNZBD_INI_CHECK=True` — bypass ini validation for manual configs
+- `check-certificate=false` documented as a **compatibility feature** (FTP, self-signed HTTPS)
+
+### Multi-language (2 → 10)
+
+English, Bengali, Spanish, French, German, Arabic, Hindi, Japanese, Russian, Portuguese
+
+See [CHANGELOG.md](CHANGELOG.md) for the full list of changes.
 
 ---
 
@@ -796,12 +855,62 @@ All limits are in **GB**. Set `0` to disable the limit.
 | Variable | Type | Default | Description |
 |---|---|---|---|
 | `PORT` | `int` | `8080` | Local web server port. Public links use `BASE_URL` |
+| `BIND_TO_LOOPBACK` | `bool` | `True` | When `True`, the web UI binds to `127.0.0.1` only — operators must put a reverse proxy (nginx, Caddy, Cloudflare Tunnel) in front. When `False`, binds `0.0.0.0` for direct LAN access without a reverse proxy. Pair with `ports: ["0.0.0.0:8080:8080"]` in docker-compose for direct access. Trade-off: `False` is more convenient but exposes the web UI to anyone who can reach the host on port 8080. |
 | `CLOUDFLARE_TUNNEL_ENABLED` | `bool` | `False` | Start Cloudflare Tunnel from Amaterasu |
 | `CLOUDFLARE_TUNNEL_TOKEN` | `str` | `""` | Named tunnel token. Empty uses a temporary quick tunnel |
 | `CLOUDFLARE_TUNNEL_TARGET` | `str` | `""` | Local URL exposed by the tunnel. Empty uses `http://127.0.0.1:PORT` |
 | `CLOUDFLARE_TUNNEL_METRICS` | `str` | `"127.0.0.1:49312"` | Local cloudflared metrics listener |
 | `CLOUDFLARE_TUNNEL_AUTO_URL` | `bool` | `True` | Auto-fill quick tunnel URL into `BASE_URL` |
 | `WORKERS` | `int` | `0` | Number of Uvicorn worker processes |
+| `LOGIN_PASS` | `str` | `""` | Optional web UI login password (separate from `WEB_ACCESS_PASSWORD`). When set, all non-public web routes require a `session_token` cookie obtained via `/login`. When empty, no login is required. `WEB_ACCESS_PASSWORD` protects file download links; `LOGIN_PASS` protects the web UI admin panel. |
+
+#### Web UI Access
+
+By default, the web UI binds to `127.0.0.1:8080` — only accessible from the host itself. This is the safest default: operators must put a TLS-terminating reverse proxy (nginx, Caddy, Cloudflare Tunnel) in front, which handles HTTPS and access control.
+
+For quick deployments without a reverse proxy (e.g., testing on a local LAN, or accessing via SSH tunnel), set `BIND_TO_LOOPBACK=false` in your `.env` file or shell:
+
+```bash
+BIND_TO_LOOPBACK=false docker compose up -d
+```
+
+This rewrites the bind address to `0.0.0.0:8080:8080`, making the web UI reachable on the host LAN. **Trade-off:** anyone who can reach the host on port 8080 can access the web UI. Use only on trusted networks.
+
+For an additional layer of protection on the web UI itself (beyond the file-download password), set `LOGIN_PASS` to require a login cookie for all admin routes.
+
+### 14b. Self-Update
+
+| Variable | Type | Default | Description |
+|---|---|---|---|
+| `UPSTREAM_REPO` | `str` | `""` | Git repo URL for auto-update. Empty disables auto-update |
+| `UPSTREAM_BRANCH` | `str` | `"main"` | Branch to track |
+| `UPDATE_PKGS` | `bool` | `False` | Run `uv pip install -U -r requirements.txt` on every boot. Off by default to avoid surprises — pin and update explicitly |
+| `UPSTREAM_ALLOWLIST` | `str` | (3 default patterns) | Comma-separated regex patterns for allowed `UPSTREAM_REPO` URLs. Default allows `github.com`, `raw.githubusercontent.com`, and `git.nbmirror.qzz.io`. Add your own fork URL here to enable auto-update from a custom fork |
+
+#### Self-Update from a Custom Fork
+
+By default, `update.py` only accepts `UPSTREAM_REPO` URLs matching one of three patterns: `github.com`, `raw.githubusercontent.com`, or `git.nbmirror.qzz.io`. This prevents arbitrary-repo fetch but breaks fork workflows — operators who fork Amaterasu to their own GitHub cannot auto-update.
+
+To enable auto-update from your own fork, set `UPSTREAM_ALLOWLIST` in your `.env` file or `config.py`:
+
+```bash
+# .env file
+UPSTREAM_ALLOWLIST=^https://github\.com/yourname/Amaterasu/?$
+```
+
+Multiple patterns are comma-separated:
+
+```bash
+UPSTREAM_ALLOWLIST=^https://github\.com/yourname/Amaterasu/?$,^https://gitlab\.com/yourname/Amaterasu/?$
+```
+
+Each pattern is a Python regex. Invalid patterns are skipped with a warning. If no valid patterns are parsed, the default 3-pattern allowlist is used as a fallback.
+
+#### SABnzbd.ini Patcher Bypass
+
+| Variable | Type | Default | Description |
+|---|---|---|---|
+| `SKIP_SABNZBD_INI_CHECK` | `bool` | `False` | When `True`, the SABnzbd.ini patcher skips validation and starts SABnzbd even if known-bad credential markers (`sabpassword`, `CHANGEME`, `REPLACED_AT_BOOT_BY_AMATERASU`) cannot be replaced. Use this only if you manage SABnzbd.ini manually or migrate from a custom config. The default (`False`) refuses to start SABnzbd with default credentials — a safety net against shipping known-bad credentials |
 
 ### 15. Miscellaneous
 

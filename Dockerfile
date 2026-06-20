@@ -42,6 +42,7 @@ RUN apt-get update && apt-get upgrade -y && \
         mediainfo \
         nodejs \
         default-jre-headless \
+        openssh-client \
     # Install MEGAcmd
     && mkdir -p /etc/apt/keyrings \
     && curl -fsSL https://mega.nz/linux/repo/Debian_12/Release.key | gpg --dearmor -o /etc/apt/keyrings/mega.nz.gpg \

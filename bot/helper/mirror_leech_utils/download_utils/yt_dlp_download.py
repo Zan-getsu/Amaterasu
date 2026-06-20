@@ -366,6 +366,21 @@ class YoutubeDLHelper:
         await self._on_download_start()
 
         self.opts["postprocessors"] = []
+        # Phase 3.7 — playlist parallelism. yt-dlp downloads playlist
+        # items sequentially, but we can parallelize fragment downloads
+        # within each item by increasing concurrent_fragments. For true
+        # per-item parallelism (downloading N videos at once), we'd need
+        # to extract entries and download each via a separate aria2 task
+        # — that's a larger refactor deferred to a future version.
+        # For now, bump concurrent_fragments for playlists to improve
+        # throughput on multi-fragment videos.
+        if playlist:
+            parallelism = min(6, max(1, int(getattr(Config, "PLAYLIST_PARALLELISM", 3) or 3)))
+            self.opts["concurrent_fragments"] = max(8, parallelism * 4)
+            LOGGER.info(
+                f"yt-dlp playlist: concurrent_fragments={self.opts['concurrent_fragments']} "
+                f"(PLAYLIST_PARALLELISM={parallelism})"
+            )
         if extra_postprocess:
             self.opts["postprocessors"].append(
                 {

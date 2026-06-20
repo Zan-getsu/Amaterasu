@@ -16,6 +16,19 @@ from bot.helper.mirror_leech_utils.uphoster_utils.devuploads_utils.upload import
 from bot.helper.mirror_leech_utils.uphoster_utils.vikingfile_utils.upload import (
     VikingFileUpload,
 )
+# Phase 1.2 — additional DDL hosters
+from bot.helper.mirror_leech_utils.uphoster_utils.streamwish_utils.upload import (
+    StreamWishUpload,
+)
+from bot.helper.mirror_leech_utils.uphoster_utils.filelion_utils.upload import (
+    FileLionUpload,
+)
+from bot.helper.mirror_leech_utils.uphoster_utils.instadl_utils.upload import (
+    InstaDLUpload,
+)
+from bot.helper.mirror_leech_utils.uphoster_utils.protected_utils.upload import (
+    ProtectedUpload,
+)
 
 LOGGER = getLogger(__name__)
 
@@ -25,6 +38,13 @@ SERVICE_MAP = {
     "pixeldrain": PixelDrainUpload,
     "devuploads": DevUploadsUpload,
     "vikingfile": VikingFileUpload,
+    # Phase 1.2 — additional DDL hosters. Only appear in UI when the
+    # corresponding API key is set (Rule 2 — no UI noise for unconfigured
+    # features).
+    "streamwish": StreamWishUpload,
+    "filelion": FileLionUpload,
+    "instadl": InstaDLUpload,
+    "protected": ProtectedUpload,
 }
 
 

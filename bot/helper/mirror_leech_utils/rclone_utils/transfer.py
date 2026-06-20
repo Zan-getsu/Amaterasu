@@ -528,3 +528,107 @@ class RcloneTransferHelper:
         else:
             LOGGER.info(f"Cancelling Clone: {self._listener.name}")
             await self._listener.on_upload_error("your clone has been stopped!")
+
+    # ────────────────────────────────────────────────────────────────────
+    # Phase 4.3 — Cloud-to-cloud transfer
+    # ────────────────────────────────────────────────────────────────────
+    async def c2c_transfer(self, source, destination, config_path="rclone.conf"):
+        """Transfer files directly between two rclone remotes without
+        local download. Uses `rclone copy` with source and destination
+        both as rclone remote paths.
+
+        Args:
+            source: rclone remote path (e.g., 'remote1:path/to/source')
+            destination: rclone remote path (e.g., 'remote2:path/to/dest')
+            config_path: rclone config file path (default 'rclone.conf')
+
+        Both source and destination must be configured rclone remotes.
+        rclone handles server-side copy where supported (e.g., GDrive
+        to GDrive uses Google's server-side copy — no bandwidth used).
+        """
+        from ... import LOGGER
+        from aiofiles.os import path as aiopath
+
+        # Validate both are rclone paths (contain ':')
+        if ":" not in source or ":" not in destination:
+            await self._listener.on_download_error(
+                "Cloud-to-cloud transfer requires both source and destination "
+                "to be rclone remotes (format: 'remote:path'). "
+                "Check your rclone config with `rclone listremotes`."
+            )
+            return
+
+        self._is_download = True  # reuse download status tracking
+        self._is_upload = False
+        self._listener.name = source.split(":")[-1].rstrip("/").split("/")[-1] or "c2c_transfer"
+        LOGGER.info(f"C2C transfer: {source} → {destination}")
+
+        # Build rclone copy command with progress
+        cmd = [
+            BinConfig.RCLONE_NAME,
+            "copy",
+            source,
+            destination,
+            f"--config={config_path}",
+            "--progress",
+            "--stats=1s",
+            "--verbose",
+            "--transfers=4",
+            "--checkers=8",
+            "--contimeout=60s",
+            "--timeout=300s",
+            "--retries=3",
+            "--low-level-retries=10",
+        ]
+
+        # Add rc_flags if set
+        if rcflags := self._listener.rc_flags:
+            cmd.extend(rcflags.split())
+
+        try:
+            self._proc = await create_subprocess_exec(
+                *cmd,
+                stdout=PIPE,
+                stderr=PIPE,
+            )
+            # Track progress via rclone's --progress output
+            self._updater = SetInterval(2, self._progress)
+            await self._proc.communicate()
+            self._updater.cancel()
+
+            if self._proc.returncode == 0:
+                LOGGER.info(f"C2C transfer complete: {source} → {destination}")
+                # Get the destination link if possible
+                link = await self._get_c2c_link(destination, config_path)
+                await self._listener.on_download_complete(link or destination)
+            else:
+                stderr_data = await self._proc.stderr.read()
+                error = stderr_data.decode("utf-8", "ignore") if stderr_data else "unknown error"
+                LOGGER.error(f"C2C transfer failed: {error}")
+                await self._listener.on_download_error(
+                    f"Cloud-to-cloud transfer failed: {error[:500]}"
+                )
+        except Exception as e:
+            LOGGER.error(f"C2C transfer error: {e}")
+            await self._listener.on_download_error(f"Cloud-to-cloud transfer error: {e}")
+        finally:
+            if self._updater:
+                self._updater.cancel()
+
+    async def _get_c2c_link(self, destination, config_path):
+        """Try to get a shareable link for the destination. Returns None
+        if the remote type doesn't support links."""
+        try:
+            from asyncio import create_subprocess_exec
+            from asyncio.subprocess import PIPE
+            proc = await create_subprocess_exec(
+                BinConfig.RCLONE_NAME, "link", destination,
+                f"--config={config_path}",
+                stdout=PIPE, stderr=PIPE,
+            )
+            stdout, _ = await proc.communicate()
+            if proc.returncode == 0:
+                return stdout.decode("utf-8", "ignore").strip()
+        except Exception:
+            pass
+        return None
