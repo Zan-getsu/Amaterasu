@@ -22,7 +22,7 @@ from os import environ
 from pathlib import Path
 
 from ... import LOGGER
-from .config_manager import Config
+from ...core.config_manager import Config
 
 _TUNNEL_URL_FILE = Path(environ.get("TUNNEL_URL_FILE", "/data/tunnel_url.txt"))
 _POLL_INTERVAL = 10  # seconds
@@ -71,8 +71,7 @@ async def _propagate_url(url):
         LOGGER.warning(f"Tunnel URL persist to MongoDB: {e}")
     # DM the owner with the new URL
     try:
-        from .tg_client import TgClient
-        from .telegram_helper.message_utils import send_message
+        from ...core.tg_client import TgClient
         if TgClient.bot and Config.OWNER_ID:
             await TgClient.bot.send_message(
                 Config.OWNER_ID,
