@@ -60,8 +60,11 @@ RUN apt-get update && apt-get upgrade -y && \
 # by this project.  Build the pinned FFmpeg 8.1.2 release instead of silently
 # falling back to the distro package.  Keep libsvtav1 and libaom enabled for
 # modern AV1 encode paths, alongside the existing H.264/H.265/Opus support.
+# MEGAcmd adds a duplicate source with a different keyring.  Remove it before
+# this next apt-get update without invalidating the completed package layer.
 ARG FFMPEG_VERSION=8.1.2
 RUN set -eux; \
+    rm -f /etc/apt/sources.list.d/meganz.list; \
     apt-get update; \
     apt-get install -y --no-install-recommends \
         nasm \
