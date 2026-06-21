@@ -70,7 +70,15 @@ class TelegramUploader:
         self._client = None
         self._start_time = time()
         self._total_files = 0
-        self._thumb = self._listener.thumb or f"thumbnails/{listener.user_id}.jpg"
+        # An encoding profile cover is downloaded before encoding and used as an
+        # embedded cover. Keep that path explicitly for the subsequent Telegram
+        # upload too; ``listener.thumb`` may be reset by another task stage.
+        self._encode_profile_thumb = getattr(listener, "_encode_cover_thumb", None)
+        self._thumb = (
+            self._encode_profile_thumb
+            or self._listener.thumb
+            or f"thumbnails/{listener.user_id}.jpg"
+        )
         self._msgs_dict = {}
         self._corrupted = 0
         self._is_corrupted = False
@@ -648,13 +656,24 @@ class TelegramUploader:
             )
             return
 
+        profile_thumb = self._encode_profile_thumb
         if (
-            self._thumb is not None
-            and not await aiopath.exists(self._thumb)
-            and self._thumb != "none"
+            profile_thumb
+            and profile_thumb != "none"
+            and await aiopath.exists(profile_thumb)
         ):
-            self._thumb = None
-        thumb = self._thumb
+            # The profile image must be the Telegram thumbnail as well as the
+            # embedded cover. It was only implicitly inherited before, which
+            # allowed a later task stage to replace it with an extracted frame.
+            thumb = profile_thumb
+        else:
+            if (
+                self._thumb is not None
+                and not await aiopath.exists(self._thumb)
+                and self._thumb != "none"
+            ):
+                self._thumb = None
+            thumb = self._thumb
         self._is_corrupted = False
         key = None
         try:
