@@ -365,7 +365,7 @@ async def metrics():
         "",
     ]
     return Response(
-        text="\n".join(lines),
+        content="\n".join(lines),
         media_type="text/plain; version=0.0.4; charset=utf-8",
     )
 

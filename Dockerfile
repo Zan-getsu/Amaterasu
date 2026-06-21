@@ -28,7 +28,6 @@ RUN apt-get update && apt-get upgrade -y && \
         libmagic1 \
         locales \
         tzdata \
-        ffmpeg \
         aria2 \
         qbittorrent-nox \
         p7zip-full \
@@ -56,6 +55,45 @@ RUN apt-get update && apt-get upgrade -y && \
     && curl -fsSL "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-${cf_arch}" -o /usr/local/bin/cloudflared \
     && chmod +x /usr/local/bin/cloudflared \
     && curl -fsSL https://deno.land/install.sh | DENO_INSTALL=/usr/local sh
+
+# Debian Bookworm ships FFmpeg 5.1, which lacks the AV1 workflow support used
+# by this project.  Build the pinned FFmpeg 8.1.2 release instead of silently
+# falling back to the distro package.  Keep libsvtav1 and libaom enabled for
+# modern AV1 encode paths, alongside the existing H.264/H.265/Opus support.
+ARG FFMPEG_VERSION=8.1.2
+RUN set -eux; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends \
+        nasm \
+        yasm \
+        pkg-config \
+        libaom-dev \
+        libopus-dev \
+        libsvtav1-dev \
+        libx264-dev \
+        libx265-dev; \
+    curl -fsSLO "https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VERSION}.tar.xz"; \
+    tar -xJf "ffmpeg-${FFMPEG_VERSION}.tar.xz"; \
+    cd "ffmpeg-${FFMPEG_VERSION}"; \
+    ./configure \
+        --prefix=/usr/local \
+        --enable-gpl \
+        --enable-version3 \
+        --enable-libaom \
+        --enable-libopus \
+        --enable-libsvtav1 \
+        --enable-libx264 \
+        --enable-libx265 \
+        --disable-debug \
+        --disable-doc; \
+    make -j"$(nproc)"; \
+    make install; \
+    ldconfig; \
+    cd /; \
+    rm -rf "/usr/src/app/ffmpeg-${FFMPEG_VERSION}" \
+           "/usr/src/app/ffmpeg-${FFMPEG_VERSION}.tar.xz"; \
+    apt-get clean; \
+    rm -rf /var/lib/apt/lists/*
 
 # Copy and install python requirements
 COPY requirements.txt .

@@ -440,7 +440,10 @@ async def update_status_message(sid, force=False):
             return
         if time() < status_dict[sid].get("flood_until", 0):
             return
-        if not force and time() - status_dict[sid]["time"] < 3:
+        # Keep a small per-message guard for Telegram, but do not silently
+        # override a configured interval below three seconds.
+        min_interval = max(1, min(int(Config.STATUS_UPDATE_INTERVAL), 3))
+        if not force and time() - status_dict[sid]["time"] < min_interval:
             return
         status_dict[sid]["time"] = time()
         page_no = status_dict[sid]["page_no"]
@@ -538,46 +541,11 @@ async def send_status_message(msg, user_id=0):
                 "is_user": is_user,
             }
         if not intervals["status"].get(sid) and not is_user:
-            # Phase 3.8 — adaptive status update interval. Active tasks
-            # (download speed > 0) update every 5s for responsive UX.
-            # Idle/queued tasks update every 60s to reduce Telegram API
-            # calls and DB writes.
-            interval = _adaptive_status_interval()
             intervals["status"][sid] = SetInterval(
-                interval, update_status_message, sid
+                max(1, int(Config.STATUS_UPDATE_INTERVAL)),
+                update_status_message,
+                sid,
             )
-
-
-def _adaptive_status_interval():
-    """Phase 3.8 — Return the status update interval based on task activity.
-
-    - Active task (download speed > 0): 5 seconds (responsive UX)
-    - Idle/queued task (no active download): 60 seconds (reduce API calls)
-    - Fallback: Config.STATUS_UPDATE_INTERVAL (default 15s)
-
-    Reads the current task_dict to determine if any task has speed > 0.
-    """
-    try:
-        from ... import task_dict
-        base = Config.STATUS_UPDATE_INTERVAL
-        has_active = False
-        for status_obj in task_dict.values():
-            speed = getattr(status_obj, "speed_raw", lambda: 0)
-            try:
-                if callable(speed):
-                    s = speed()
-                else:
-                    s = speed
-                if s and s > 0:
-                    has_active = True
-                    break
-            except Exception:
-                continue
-        if has_active:
-            return min(base, 5)  # Active: 5s (or less if base < 5)
-        return max(base, 60)  # Idle: 60s (or more if base > 60)
-    except Exception:
-        return Config.STATUS_UPDATE_INTERVAL
 
 
 async def open_category_btns(message):
@@ -675,4 +643,3 @@ async def open_drive_clean(message):
         await edit_message(prompt, "<b>Task Cancelled</b>")
     del bot_cache[msg_id]
     return drive_id, is_cancelled
-
