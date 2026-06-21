@@ -71,12 +71,19 @@ RUN set -eux; \
     apt-get install -y --no-install-recommends \
         nasm \
         yasm \
+        cmake \
         pkg-config \
         libaom-dev \
         libopus-dev \
-        libsvtav1-dev \
         libx264-dev \
         libx265-dev; \
+    git clone --depth 1 https://github.com/nekotrix/SVT-AV1-Essential.git /tmp/svt-av1; \
+    cd /tmp/svt-av1/Build; \
+    cmake .. -G"Unix Makefiles" -DCMAKE_BUILD_TYPE=Release; \
+    make -j"$(nproc)"; \
+    make install; \
+    ldconfig; \
+    cd /usr/src/app; \
     curl -fsSLO "https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VERSION}.tar.xz"; \
     tar -xJf "ffmpeg-${FFMPEG_VERSION}.tar.xz"; \
     cd "ffmpeg-${FFMPEG_VERSION}"; \
@@ -95,7 +102,8 @@ RUN set -eux; \
     make install; \
     ldconfig; \
     cd /; \
-    rm -rf "/usr/src/app/ffmpeg-${FFMPEG_VERSION}" \
+    rm -rf /tmp/svt-av1 \
+           "/usr/src/app/ffmpeg-${FFMPEG_VERSION}" \
            "/usr/src/app/ffmpeg-${FFMPEG_VERSION}.tar.xz"; \
     apt-get clean; \
     rm -rf /var/lib/apt/lists/*
