@@ -3,6 +3,7 @@ from importlib import import_module
 from json import loads as json_loads
 from json import JSONDecodeError
 from os import getenv
+from shutil import which
 from typing import Optional, Type
 
 
@@ -562,6 +563,9 @@ class Config:
 class BinConfig:
     ARIA2_NAME = "aria2c"
     QBIT_NAME = "qbittorrent-nox"
-    FFMPEG_NAME = "/usr/bin/ffmpeg"
+    # Source-built FFmpeg is installed in /usr/local/bin; distro packages
+    # use /usr/bin. Resolve it at startup so every encode/thumbnail command
+    # uses the binary that is actually present in the image.
+    FFMPEG_NAME = which("ffmpeg") or "/usr/bin/ffmpeg"
     RCLONE_NAME = "rclone"
     SABNZBD_NAME = "sabnzbdplus"
