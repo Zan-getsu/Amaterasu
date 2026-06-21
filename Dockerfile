@@ -64,7 +64,9 @@ RUN apt-get update && apt-get upgrade -y && \
 # this next apt-get update without invalidating the completed package layer.
 ARG FFMPEG_VERSION=8.1.2
 RUN set -eux; \
-    rm -f /etc/apt/sources.list.d/meganz.list; \
+    find /etc/apt/sources.list.d -maxdepth 1 -type f \
+        -exec grep -l 'meganz-archive-keyring.gpg' {} + \
+        | xargs -r rm -f; \
     apt-get update; \
     apt-get install -y --no-install-recommends \
         nasm \
