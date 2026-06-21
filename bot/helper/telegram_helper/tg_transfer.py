@@ -39,13 +39,9 @@ async def _tcp_tuned_connect(self, address):
             sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPINTVL, 10)
             sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPCNT, 3)
             sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_QUICKACK, 1)
-            sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 8 * 1024 * 1024)
-            sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 256 * 1024)
         except OSError as e:
             LOGGER.info(f"HypertgTCP socket tune failed: {e}")
 
-
-TCP.connect = _tcp_tuned_connect
 
 _orig_dc_new = DataCenter.__new__
 
@@ -57,13 +53,33 @@ def _dc_alt_port(cls, dc_id, test_mode, ipv6, media):
     return ip, port
 
 
-DataCenter.__new__ = staticmethod(_dc_alt_port)
+TCP.connect = _tcp_tuned_connect
+_hyper_patches_applied = False
+
+
+def _apply_hyper_patches():
+    """Enable the alternate Telegram media port only for Hyper transfers.
+
+    This module is imported by the ordinary uploader too.  Applying the
+    DataCenter override at import time therefore routed normal Pyrogram
+    uploads through the Hyper port even when USE_HYPER=False.
+    """
+    global _hyper_patches_applied
+    if _hyper_patches_applied:
+        return
+    try:
+        DataCenter.__new__ = staticmethod(_dc_alt_port)
+        _hyper_patches_applied = True
+        LOGGER.info("Applied Hyper DC media port 5222")
+    except Exception as e:
+        LOGGER.warning(f"Failed to apply Hyper DC port patch: {e}")
 
 MB = 1024 * 1024
 
 
 class HypertgTransfer:
     def __init__(self, obj):
+        _apply_hyper_patches()
         self._obj = obj
         self._listener = obj._listener
         self.clients = TgClient.helper_bots

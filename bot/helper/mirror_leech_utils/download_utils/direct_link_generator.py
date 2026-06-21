@@ -1577,7 +1577,10 @@ def gofile(url):
     def __fetch_links(session, _id, folderPath=""):
         _url = f"https://api.gofile.io/contents/{_id}?cache=true"
         time_slot = int(time()) // 14400
-        raw = f"{user_agent}::en-US::{token}::{time_slot}::gf2026x"
+        # GoFile validates this hash as the website client token.  Keep it
+        # aligned with WZML-X; the old gf2026x value is rejected by the
+        # contents API and prevents links from being resolved.
+        raw = f"{user_agent}::en-US::{token}::{time_slot}::9844d94d963d30"
         wt = sha256(raw.encode()).hexdigest()
         headers = {
             "User-Agent": user_agent,
@@ -2429,4 +2432,3 @@ def instagram(link: str) -> str:
 
     except Exception as e:
         raise DirectDownloadLinkException(f"ERROR: {e}")
-

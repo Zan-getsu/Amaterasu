@@ -119,11 +119,41 @@ class HypertgUpload(HypertgTransfer):
                         for attempt in range(5):
                             try:
                                 await s.invoke(data)
+                                # Progress means Telegram has acknowledged the
+                                # part, not merely that it has been queued in
+                                # memory.  The old accounting ran in the
+                                # producer below, so the status reached 100%
+                                # while workers were still sending parts.
+                                self._obj._processed_bytes += len(data.bytes)
                                 break
                             except StopTransmission:
                                 raise
                             except CancelledError:
                                 return
+                            except (OSError, TimeoutError, ConnectionError):
+                                # A dead media connection used to fall through
+                                # to the generic exponential backoff. That left
+                                # the same broken session in place for up to 15
+                                # seconds and then silently skipped its part.
+                                # Recreate it, as current WZML-X does, so the
+                                # upload can resume on the next attempt.
+                                LOGGER.warning(
+                                    f"HypertgUL worker {wid} transport error "
+                                    f"attempt {attempt + 1}/5 — reconnecting"
+                                )
+                                try:
+                                    await s.stop()
+                                except Exception:
+                                    pass
+                                s = Session(up_client, dc_id, ak, tm, is_media=True)
+                                await self.start_session(s, mode=1)
+                                if ea is not None:
+                                    await s.invoke(
+                                        raw.functions.auth.ImportAuthorization(
+                                            id=ea.id, bytes=ea.bytes
+                                        )
+                                    )
+                                await sleep(1)
                             except Exception:
                                 if attempt == 4:
                                     break
@@ -138,7 +168,6 @@ class HypertgUpload(HypertgTransfer):
 
             rpc_fn = raw.functions.upload.SaveBigFilePart if is_big else raw.functions.upload.SaveFilePart
             POOL = 4 * 1024 * 1024
-            acc = 0
             part = 0
 
             buf_fut = await sync_to_async(fp.read, POOL, wait=False)
@@ -166,15 +195,8 @@ class HypertgUpload(HypertgTransfer):
                             break
                         except QueueFull:
                             await sleep(0)
-                    acc += len(chunk)
-                    if part & 7 == 7:
-                        self._obj._processed_bytes += acc
-                        acc = 0
                     part += 1
                     off = end
-
-            if acc:
-                self._obj._processed_bytes += acc
 
             for _ in workers:
                 await q.put(_UL_STOP)
@@ -311,7 +333,6 @@ class HypertgUpload(HypertgTransfer):
         self._cancel.clear()
         if self._listener.is_cancelled:
             raise StopTransmission()
-        self._obj._processed_bytes = 0
         self._up_file = ospath.basename(file_path)
         self._up_size = ospath.getsize(file_path)
 
@@ -326,6 +347,7 @@ class HypertgUpload(HypertgTransfer):
 
         mime_type = self._mime(file_path)
         input_media = self._build_media(input_file, mime_type, media_type, attributes, thumb_file)
+        self._obj._is_finalizing_upload = True
 
         # Parse HTML entities from the caption. The raw SendMedia RPC
         # treats `message` as plain text — without explicit `entities`,
