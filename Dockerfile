@@ -74,9 +74,18 @@ RUN set -eux; \
         cmake \
         pkg-config \
         libaom-dev \
+        libass-dev \
+        libdav1d-dev \
+        libfontconfig1-dev \
+        libfreetype6-dev \
+        libmp3lame-dev \
         libopus-dev \
         libx264-dev \
-        libx265-dev; \
+        libx265-dev \
+        libvorbis-dev \
+        libvpx-dev \
+        libwebp-dev \
+        libzimg-dev; \
     git clone --depth 1 https://github.com/nekotrix/SVT-AV1-Essential.git /tmp/svt-av1; \
     cd /tmp/svt-av1/Build; \
     cmake .. -G"Unix Makefiles" -DCMAKE_BUILD_TYPE=Release; \
@@ -92,10 +101,19 @@ RUN set -eux; \
         --enable-gpl \
         --enable-version3 \
         --enable-libaom \
+        --enable-libass \
+        --enable-libdav1d \
+        --enable-libfontconfig \
+        --enable-libfreetype \
+        --enable-libmp3lame \
         --enable-libopus \
         --enable-libsvtav1 \
+        --enable-libvorbis \
+        --enable-libvpx \
+        --enable-libwebp \
         --enable-libx264 \
         --enable-libx265 \
+        --enable-libzimg \
         --disable-debug \
         --disable-doc; \
     make -j"$(nproc)"; \
