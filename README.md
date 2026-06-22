@@ -11,6 +11,8 @@
      ╚═╝  ╚═╝╚═╝     ╚═╝╚══════╝   ╚═╝   ╚══════╝╚═╝  ╚═╝╚═╝  ╚═╝╚══════╝ ╚═════╝ 
 ```
 
+<img src="banner.png" alt="Amaterasu Banner" width="100%">
+
 **The Absolute Pinnacle of Telegram Mirroring and Leeching**
 
 <p align="center">
