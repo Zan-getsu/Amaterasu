@@ -102,7 +102,7 @@ def _setup_message(step, state):
             f"├─ Google Drive  : {gdrive_status}\n"
             f"├─ Rclone        : {rclone_status}\n"
             f"├─ Owner ID      : {getattr(Config, 'OWNER_ID', 0)}\n"
-            f"└─ Version       : v1.6.2</code>\n\n"
+            f"└─ Version       : v1.6.3</code>\n\n"
             "<i>Setup is complete! The bot is ready to use.\n"
             "Use /help to see all commands.\n"
             "Use /usetting to configure per-user settings.</i>"

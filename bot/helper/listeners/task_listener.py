@@ -622,13 +622,9 @@ class TaskListener(TaskConfig):
                                 f"reference: {c_id}/{msg_id}"
                             )
                         else:
-                            from urllib.parse import quote
-                            safe_name = quote(name.replace("/", "_"), safe="")
                             base_url = Config.BASE_URL.rstrip("/")
-                            token_path = f"/{c_id}/{msg_id}/{safe_name}?hash={stream_token}"
-                            
-                            stream_link = f"{base_url}/watch{token_path}"
-                            download_link = f"{base_url}/dl{token_path}"
+                            stream_link = f"{base_url}/watch/{stream_token}"
+                            download_link = f"{base_url}/dl/{stream_token}"
                             fmsg += (
                                 f"\n┠ <b>Stream</b> → <a href='{stream_link}'>Online</a>"
                                 f" | <a href='{download_link}'>Download</a>"

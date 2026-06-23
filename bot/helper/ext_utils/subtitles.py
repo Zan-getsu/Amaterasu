@@ -74,7 +74,7 @@ async def _search_opensubtitles(file_hash, size, filename, language, api_key):
         from bot.helper.ext_utils.http_client import http_client
         headers = {
             "Api-Key": api_key,
-            "User-Agent": "Amaterasu v1.6.2",
+            "User-Agent": "Amaterasu v1.6.3",
             "Content-Type": "application/json",
         }
         params = {
@@ -121,7 +121,7 @@ async def _download_subtitle(file_id, api_key, output_path):
         from aiofiles import open as aiopen
         headers = {
             "Api-Key": api_key,
-            "User-Agent": "Amaterasu v1.6.2",
+            "User-Agent": "Amaterasu v1.6.3",
             "Content-Type": "application/json",
         }
         # Step 1: request download link

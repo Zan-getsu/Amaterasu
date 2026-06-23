@@ -325,7 +325,7 @@ ENABLE_EXEC_COMMAND = False
 INSECURE_HOSTS = []
 
 # ==========================================
-# 19. v1.6.2 NEW FEATURES
+# 19. v1.6.3 NEW FEATURES
 # ==========================================
 
 # FFmpeg hardware acceleration. 'auto' detects NVENC/QSV/
