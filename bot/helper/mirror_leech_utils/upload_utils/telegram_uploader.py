@@ -494,10 +494,9 @@ class TelegramUploader:
                         # files up to 4 GB can be sent without the user
                         # session. Otherwise, fall back to user session for
                         # files > 2 GB (the standard bot limit).
-                        from ... import Config as _Config
                         premium_limit = 4 * 1024 * 1024 * 1024  # 4 GB
                         standard_limit = 2097152000  # 2 GB
-                        if getattr(_Config, "IS_PREMIUM_BOT", False):
+                        if getattr(Config, "IS_PREMIUM_BOT", False):
                             self._user_session = f_size > premium_limit
                         else:
                             self._user_session = f_size > standard_limit

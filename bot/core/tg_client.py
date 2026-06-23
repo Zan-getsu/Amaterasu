@@ -394,6 +394,13 @@ class TgClient:
             )
 
         for chat_id in chat_ids:
+            try:
+                chat = await cls.user.get_chat(chat_id)
+            except Exception as e:
+                raise RuntimeError(
+                    f"Cannot inspect provisioning chat {chat_id}: {e}"
+                ) from e
+            is_channel = chat.type == enums.ChatType.CHANNEL
             for bot_id, bot_name in stream_bots.items():
                 # The stream client knows its own numeric ID, but that ID is
                 # not necessarily in the user session's peer cache. Resolve
@@ -413,19 +420,27 @@ class TgClient:
                         raise RuntimeError(
                             f"Cannot check @{bot_name} in {chat_id}: {e}"
                         ) from e
-                    try:
-                        await cls.user.add_chat_members(chat_id, bot_id)
-                        member = await cls.user.get_chat_member(chat_id, bot_id)
-                        LOGGER.info(
-                            f"Added FileToLink stream bot [@{bot_name}] to {chat_id}"
-                        )
-                    except Exception as add_error:
-                        raise RuntimeError(
-                            f"Cannot add [@{bot_name}] to {chat_id}: {add_error}"
-                        ) from add_error
+                    if is_channel:
+                        # Telegram channels do not allow bots to be ordinary
+                        # members (USER_BOT). promote_chat_member below adds
+                        # the bot directly as an administrator.
+                        member = None
+                    else:
+                        try:
+                            await cls.user.add_chat_members(chat_id, bot_id)
+                            member = await cls.user.get_chat_member(chat_id, bot_id)
+                            LOGGER.info(
+                                f"Added FileToLink stream bot [@{bot_name}] to {chat_id}"
+                            )
+                        except Exception as add_error:
+                            raise RuntimeError(
+                                f"Cannot add [@{bot_name}] to {chat_id}: {add_error}"
+                            ) from add_error
 
                 status = str(getattr(member, "status", "")).lower()
-                if any(role in status for role in ("administrator", "owner", "creator")):
+                if member and any(
+                    role in status for role in ("administrator", "owner", "creator")
+                ):
                     continue
                 try:
                     await cls.user.promote_chat_member(
