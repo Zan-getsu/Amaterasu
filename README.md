@@ -844,7 +844,7 @@ All limits are in **GB**. Set `0` to disable the limit.
 | `MAX_BATCH_FILES` | `int` | `0` | Max files per batch operation |
 | `CHANNEL` | `bool` | `False` | Enable channel mode |
 | `MULTI_TOKEN1..3` | `str` | `""` | Additional bot tokens for load balancing |
-| `AUTO_PROVISION_STREAM_BOTS` | `bool` | `False` | Use `USER_SESSION_STRING` at startup to add and promote configured `MULTI_TOKEN` bots in `BIN_CHANNEL` and `LEECH_DUMP_CHAT`; startup fails if this cannot be completed. |
+| `AUTO_PROVISION_STREAM_BOTS` | `bool` | `False` | Use `USER_SESSION_STRING` at startup to add and promote configured `MULTI_TOKEN` bots in `BIN_CHANNEL` and `LEECH_DUMP_CHAT`; provisioning is skipped if unavailable. |
 | `TOKEN_ENABLED` | `bool` | `False` | Reserved legacy setting; FileToLink URLs are always signed |
 | `TOKEN_TTL_HOURS` | `int` | `0` | Reserved legacy setting; route tokens currently do not expire |
 | `SHORTEN_ENABLED` | `bool` | `False` | Enable URL shortening for stream links |

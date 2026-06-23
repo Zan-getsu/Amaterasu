@@ -350,9 +350,8 @@ class TgClient:
         """Add configured FileToLink stream bots to storage chats on startup.
 
         Telegram bot accounts cannot invite other bots, so this opt-in flow
-        runs through the configured user session. It deliberately fails fast:
-        an operator who enabled provisioning should not get a partially
-        configured FileToLink pool without noticing.
+        runs through the configured user session. The caller logs any
+        provisioning error and continues normal bot startup.
         """
         if not Config.AUTO_PROVISION_STREAM_BOTS:
             return

@@ -160,7 +160,7 @@ BOOL_VARS = [
 ]
 
 DEFAULT_DESP = {
-    "AUTO_PROVISION_STREAM_BOTS": "At startup, use USER_SESSION_STRING to add and promote FileToLink MULTI_TOKEN bots in BIN_CHANNEL and LEECH_DUMP_CHAT. Requires user-admin invite/promote rights; startup fails if unavailable.",
+    "AUTO_PROVISION_STREAM_BOTS": "At startup, use USER_SESSION_STRING to add and promote FileToLink MULTI_TOKEN bots in BIN_CHANNEL and LEECH_DUMP_CHAT. Requires user-admin invite/promote rights; skips provisioning if unavailable.",
     "AS_DOCUMENT": "Send files as document instead of media. Default: False.",
     "AUTHORIZED_CHATS": "User/Chat IDs authorized to use the bot. Space-separated. Supports thread IDs with | separator.",
     "BASE_URL": "Public URL for FileToLink and web UI links. Example: https://stream.example.com.",
