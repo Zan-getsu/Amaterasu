@@ -136,8 +136,12 @@ async def main():
     _ctt(TgClient.start_helper_bots())
     _ctt(TgClient.start_helper_users())
 
-    await TgClient.start_stream_clients()
+    # Stream clients (MULTI_TOKEN bots) are used for load-balanced file
+    # streaming and are managed by the web server (gunicorn) subprocess.
+    # The main bot process only needs them temporarily if
+    # AUTO_PROVISION_STREAM_BOTS is enabled (to add bots to storage chats).
     if provision_stream_bots:
+        await TgClient.start_stream_clients()
         try:
             await TgClient.provision_stream_bots()
         except Exception as e:
@@ -145,6 +149,16 @@ async def main():
                 "AUTO_PROVISION_STREAM_BOTS failed; continuing normal startup: %s",
                 e,
             )
+        # Provisioning done — stop the stream clients in this process.
+        # The web server subprocess starts its own set for actual streaming.
+        for cid, client in list(TgClient.stream_clients.items()):
+            if cid != 0:
+                try:
+                    await client.stop()
+                except Exception:
+                    pass
+        TgClient.stream_clients = {}
+        TgClient.stream_loads = {}
     await gather(load_configurations(), update_variables())
 
     await gather(

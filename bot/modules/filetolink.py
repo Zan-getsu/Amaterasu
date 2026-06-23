@@ -69,7 +69,11 @@ async def maybe_shorten(link: str) -> str:
 
 
 async def generate_link_markup(chat_id, message_id, filename, secure_hash=""):
-    token_path = f"/{secure_hash}" if secure_hash else f"/{chat_id}/{message_id}/{quote_media_name(filename)}"
+    safe_name = quote_media_name(filename)
+    if secure_hash:
+        token_path = f"/{chat_id}/{message_id}/{safe_name}?hash={secure_hash}"
+    else:
+        token_path = f"/{chat_id}/{message_id}/{safe_name}"
     base_url = Config.BASE_URL.rstrip("/")
     
     stream_link = await maybe_shorten(f"{base_url}/watch{token_path}")

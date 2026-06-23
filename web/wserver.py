@@ -173,12 +173,7 @@ async def lifespan(app: FastAPI):
             no_updates=True,
         )
         await TgClient.bot.start()
-        # Register the web bot as the sole stream client for this process.
-        # The main bot process already starts all MULTI_TOKEN stream bots;
-        # starting them here too would create duplicate Telegram connections.
-        # select_optimal_client() uses stream_clients[0] as the fallback.
-        TgClient.stream_clients[0] = TgClient.bot
-        TgClient.stream_loads[0] = 0
+        await TgClient.start_stream_clients()
             
     aria2 = Aria2HttpClient("http://localhost:6800/jsonrpc")
     qbittorrent = await create_client("http://localhost:8090/api/v2/")
