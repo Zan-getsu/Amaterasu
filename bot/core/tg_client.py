@@ -395,6 +395,17 @@ class TgClient:
 
         for chat_id in chat_ids:
             for bot_id, bot_name in stream_bots.items():
+                # The stream client knows its own numeric ID, but that ID is
+                # not necessarily in the user session's peer cache. Resolve
+                # the public bot username first so subsequent member/invite
+                # operations have a valid InputUser peer.
+                try:
+                    peer = await cls.user.get_users(bot_name)
+                    bot_id = peer.id
+                except Exception as e:
+                    raise RuntimeError(
+                        f"Cannot resolve FileToLink stream bot [@{bot_name}]: {e}"
+                    ) from e
                 try:
                     member = await cls.user.get_chat_member(chat_id, bot_id)
                 except Exception as e:
