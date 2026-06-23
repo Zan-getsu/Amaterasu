@@ -5,7 +5,18 @@ All notable changes to Amaterasu are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.6.3] — 2026-06-21
+## [1.6.3] — 2026-06-23
+
+### Fixed
+- **Stream Clients Initialization**: Fixed an issue where stream bots (MULTI_TOKENs) were being started twice (in both the main bot process and the web server subprocess), causing duplicate Telegram connections. The main process now properly hands off stream client management to the web server for load balancing.
+- **Import Error**: Fixed a relative import error (`cannot import name 'Config'`) in `telegram_uploader.py` during Leech uploads.
+- **Link Generation**: Reverted and unified the FileToLink and Leech task link generation to consistently use the cleaner, compact URL structure (`/watch/{token}` and `/dl/{token}`) instead of the legacy disposition query parameters.
+
+### Changed
+- **Config Template**: Renamed section 19 in `config_sample.py` to `ADDITIONAL CONFIGURATIONS` to make it version-agnostic.
+- **Version Bump**: Bumped project version to `v1.6.3` across the codebase.
+
+## [1.6.2] — 2026-06-21
 
 - Maintenance release.
 
