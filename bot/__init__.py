@@ -111,15 +111,23 @@ for _handler in getLogger().handlers:
     _handler.addFilter(_NonEmptyErrorFilter())
 
 LOGGER = getLogger(__name__)
-cpu_no = cpu_count() or 1
+try:
+    # Docker may expose a CPU count that includes CPUs outside this
+    # container's affinity mask. taskset must only receive allowed CPU IDs.
+    from os import sched_getaffinity
+
+    cpu_ids = sorted(sched_getaffinity(0))
+except (ImportError, AttributeError, OSError):
+    cpu_ids = list(range(cpu_count() or 1))
+
+cpu_no = len(cpu_ids) or 1
 threads = max(1, cpu_no // 2)
-cores = ",".join(str(i) for i in range(1, threads + 1))
+cores = ",".join(str(cpu) for cpu in cpu_ids[:threads])
 
 if cpu_no <= 1 or cpu_no == 2:
     service_cores = ""
 else:
-    service_start = threads + 1
-    service_cores = ",".join(str(i) for i in range(service_start, cpu_no + 1))
+    service_cores = ",".join(str(cpu) for cpu in cpu_ids[threads:])
 
 bot_cache = {}
 DOWNLOAD_DIR = "/usr/src/app/downloads/"

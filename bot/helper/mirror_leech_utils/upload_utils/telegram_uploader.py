@@ -1,8 +1,8 @@
-from asyncio import CancelledError, ensure_future, gather, sleep
+from asyncio import CancelledError, Lock, ensure_future, gather, sleep
 from logging import getLogger
 from os import path as ospath, walk
 from re import match as re_match, sub as re_sub
-from time import time
+from time import monotonic, time
 
 from aioshutil import rmtree
 from natsort import natsorted
@@ -57,6 +57,15 @@ from ...telegram_helper.button_build import ButtonMaker
 from ...telegram_helper.message_utils import delete_message
 
 LOGGER = getLogger(__name__)
+
+
+# Standard Pyrogram uploads end with a SendMedia RPC. Telegram rate-limits
+# that RPC per account, so overlapping normal uploads can all finish their
+# bytes and then repeatedly FloodWait at finalization. Keep each account's
+# normal transfer serial and share the cooldown with queued uploads. HyperTG
+# uses its own worker pool and is intentionally not gated here.
+_NORMAL_PYROGRAM_UPLOAD_LOCKS = {"bot": Lock(), "user": Lock()}
+_NORMAL_PYROGRAM_FLOOD_UNTIL = {"bot": 0.0, "user": 0.0}
 
 
 class TelegramUploader:
@@ -114,6 +123,30 @@ class TelegramUploader:
         self._last_uploaded = 0
         self._processed_bytes = self._completed_bytes
         self._is_finalizing_upload = False
+
+    async def _run_normal_pyrogram_upload(self, upload_factory):
+        client_name = "user" if self._user_session else "bot"
+        async with _NORMAL_PYROGRAM_UPLOAD_LOCKS[client_name]:
+            wait_time = max(
+                0.0, _NORMAL_PYROGRAM_FLOOD_UNTIL[client_name] - monotonic()
+            )
+            if wait_time:
+                LOGGER.info(
+                    "Telegram %s upload gate cooling down for %.0fs before "
+                    "starting the next upload",
+                    client_name,
+                    wait_time,
+                )
+                await sleep(wait_time)
+            try:
+                return await upload_factory()
+            except (FloodWait, FloodPremiumWait) as flood:
+                flood_wait = max(1, getattr(flood, "value", 5)) * 1.3
+                _NORMAL_PYROGRAM_FLOOD_UNTIL[client_name] = max(
+                    _NORMAL_PYROGRAM_FLOOD_UNTIL[client_name],
+                    monotonic() + flood_wait,
+                )
+                raise
 
     async def _user_settings(self):
         settings_map = {
@@ -559,7 +592,7 @@ class TelegramUploader:
         try:
             if self._hu is None:
                 if key == "videos":
-                    upload_coro = target_client.send_video(
+                    upload_factory = lambda: target_client.send_video(
                         chat_id=self._sent_msg.chat.id,
                         video=upload_path,
                         caption=cap_mono,
@@ -573,7 +606,7 @@ class TelegramUploader:
                         progress=self._upload_progress,
                     )
                 elif key == "audios":
-                    upload_coro = target_client.send_audio(
+                    upload_factory = lambda: target_client.send_audio(
                         chat_id=self._sent_msg.chat.id,
                         audio=upload_path,
                         caption=cap_mono,
@@ -586,7 +619,7 @@ class TelegramUploader:
                         progress=self._upload_progress,
                     )
                 elif key == "documents":
-                    upload_coro = target_client.send_document(
+                    upload_factory = lambda: target_client.send_document(
                         chat_id=self._sent_msg.chat.id,
                         document=upload_path,
                         caption=cap_mono,
@@ -597,7 +630,7 @@ class TelegramUploader:
                         progress=self._upload_progress,
                     )
                 else:
-                    upload_coro = target_client.send_photo(
+                    upload_factory = lambda: target_client.send_photo(
                         chat_id=self._sent_msg.chat.id,
                         photo=upload_path,
                         caption=cap_mono,
@@ -605,7 +638,7 @@ class TelegramUploader:
                         reply_to_message_id=self._sent_msg.id,
                         progress=self._upload_progress,
                     )
-                sent_msg = await upload_coro
+                sent_msg = await self._run_normal_pyrogram_upload(upload_factory)
             else:
                 sent_msg = await self._hu.upload(
                     target_client=target_client,
