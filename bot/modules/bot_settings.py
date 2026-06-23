@@ -90,6 +90,7 @@ def _config_update_payload(key, value):
 
 
 DEFAULT_VALUES = {
+    "AUTO_PROVISION_STREAM_BOTS": False,
     "LEECH_SPLIT_SIZE": TgClient.MAX_SPLIT_SIZE,
     "RSS_DELAY": 600,
     "STATUS_UPDATE_INTERVAL": 15,
@@ -122,6 +123,7 @@ DEFAULT_VALUES = {
 }
 
 BOOL_VARS = [
+    "AUTO_PROVISION_STREAM_BOTS",
     "AS_DOCUMENT",
     "BOT_PM",
     "CLEAN_LOG_MSG",
@@ -158,6 +160,7 @@ BOOL_VARS = [
 ]
 
 DEFAULT_DESP = {
+    "AUTO_PROVISION_STREAM_BOTS": "At startup, use USER_SESSION_STRING to add and promote FileToLink MULTI_TOKEN bots in BIN_CHANNEL and LEECH_DUMP_CHAT. Requires user-admin invite/promote rights; startup fails if unavailable.",
     "AS_DOCUMENT": "Send files as document instead of media. Default: False.",
     "AUTHORIZED_CHATS": "User/Chat IDs authorized to use the bot. Space-separated. Supports thread IDs with | separator.",
     "BASE_URL": "Public URL for FileToLink and web UI links. Example: https://stream.example.com.",
@@ -314,7 +317,7 @@ PROTECTED_VARS = {
 }
 RESTART_VARS = {
     "CMD_SUFFIX", "OWNER_ID", "USER_SESSION_STRING", "TELEGRAM_HASH", "TELEGRAM_API", "BOT_TOKEN",
-    "TG_PROXY", "AUTHORIZED_CHATS", "DATABASE_URL"
+    "TG_PROXY", "AUTHORIZED_CHATS", "DATABASE_URL", "AUTO_PROVISION_STREAM_BOTS"
 }
 
 ONOFF_VARS = [
@@ -1507,4 +1510,3 @@ async def load_config():
         await database.disconnect()
     await gather(initiate_search_tools(), start_from_queued(), rclone_serve_booter())
     add_job()
-

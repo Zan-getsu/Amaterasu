@@ -182,6 +182,9 @@ CHANNEL = False
 MULTI_TOKEN1 = ""
 MULTI_TOKEN2 = ""
 MULTI_TOKEN3 = ""
+# When True, a configured USER_SESSION_STRING adds MULTI_TOKEN bots to
+# BIN_CHANNEL and LEECH_DUMP_CHAT, then promotes them at startup.
+AUTO_PROVISION_STREAM_BOTS = False
 
 # Token System (FileToLink)
 TOKEN_ENABLED = False

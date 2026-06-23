@@ -108,19 +108,32 @@ async def main():
     await TgClient.start_bot()
 
     # Start the user session, helper bots, and helper users in the
-    # BACKGROUND (non-blocking). Each of these already has its own
-    # FloodWait retry logic that schedules a background task via
-    # bot_loop.create_task(), so they won't block main() even if
-    # Telegram rate-limits them. The bot works fine without them —
-    # they just add capacity (more upload slots, premium-tier splits).
+    # BACKGROUND (non-blocking) by default. Provisioning stream bots is the
+    # exception: it must establish the user session first and fail closed if
+    # it cannot complete the requested membership/admin setup.
     # We use create_tracked_task (which wraps bot_loop.create_task)
     # so failures are logged instead of silently dropped.
     from .helper.ext_utils.bot_utils import create_tracked_task as _ctt
-    _ctt(TgClient.start_user())
+    if Config.AUTO_PROVISION_STREAM_BOTS:
+        if not Config.USER_SESSION_STRING:
+            raise RuntimeError(
+                "AUTO_PROVISION_STREAM_BOTS requires USER_SESSION_STRING. "
+                "Refusing to start because the requested provisioning cannot run."
+            )
+        await TgClient.start_user()
+        if TgClient.user is None:
+            raise RuntimeError(
+                "AUTO_PROVISION_STREAM_BOTS could not start USER_SESSION_STRING. "
+                "Refusing to start because the requested provisioning cannot run."
+            )
+    else:
+        _ctt(TgClient.start_user())
     _ctt(TgClient.start_helper_bots())
     _ctt(TgClient.start_helper_users())
 
     await TgClient.start_stream_clients()
+    if Config.AUTO_PROVISION_STREAM_BOTS:
+        await TgClient.provision_stream_bots()
     await gather(load_configurations(), update_variables())
 
     await gather(

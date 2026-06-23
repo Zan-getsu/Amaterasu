@@ -466,7 +466,16 @@ class HypertgDownload(HypertgTransfer):
         min_part = 1 * MB
         n_parts = min(n_use, max(1, self.file_size // min_part)) if self.file_size >= min_part else 1
         psz = self.file_size // n_parts if n_parts > 0 else self.file_size
-        ranges = [(i * psz, min((i + 1) * psz, self.file_size)) for i in range(n_parts)]
+        # Integer division can leave a remainder. Give it to the final
+        # worker; otherwise every multi-part download is truncated by
+        # ``file_size % n_parts`` bytes.
+        ranges = [
+            (
+                i * psz,
+                self.file_size if i == n_parts - 1 else (i + 1) * psz,
+            )
+            for i in range(n_parts)
+        ]
         assigns = [cidx[i % n_use] for i in range(n_parts)]
 
         unique_clients = set(assigns)

@@ -48,6 +48,7 @@ class Config:
 
     AS_DOCUMENT = False
     AUTHORIZED_CHATS = ""
+    AUTO_PROVISION_STREAM_BOTS = False
     BASE_URL = ""
     BOT_TOKEN = ""
     HELPER_TOKENS = ""

@@ -1,6 +1,7 @@
 from ast import literal_eval
 from pyrogram import Client, enums
 from pyrogram.errors import FloodWait
+from pyrogram.types import ChatPrivileges
 from asyncio import Lock, gather, sleep
 from hashlib import sha256
 from inspect import signature
@@ -343,6 +344,95 @@ class TgClient:
                 LOGGER.info(f"Stream Bot [{key}] [@{client.me.username}] Started!")
             except Exception as e:
                 LOGGER.error(f"Failed to start stream bot from {key}. {e}")
+
+    @classmethod
+    async def provision_stream_bots(cls):
+        """Add configured FileToLink stream bots to storage chats on startup.
+
+        Telegram bot accounts cannot invite other bots, so this opt-in flow
+        runs through the configured user session. It deliberately fails fast:
+        an operator who enabled provisioning should not get a partially
+        configured FileToLink pool without noticing.
+        """
+        if not Config.AUTO_PROVISION_STREAM_BOTS:
+            return
+        if cls.user is None:
+            raise RuntimeError(
+                "AUTO_PROVISION_STREAM_BOTS requires a running USER_SESSION_STRING"
+            )
+
+        chat_ids = []
+        for raw_chat_id in (Config.BIN_CHANNEL, Config.LEECH_DUMP_CHAT):
+            if raw_chat_id in (None, "", 0, "0"):
+                continue
+            try:
+                chat_id = int(raw_chat_id)
+            except (TypeError, ValueError) as e:
+                raise RuntimeError(
+                    f"Invalid provisioning chat ID: {raw_chat_id!r}"
+                ) from e
+            if chat_id not in chat_ids:
+                chat_ids.append(chat_id)
+        if not chat_ids:
+            raise RuntimeError(
+                "AUTO_PROVISION_STREAM_BOTS requires BIN_CHANNEL or LEECH_DUMP_CHAT"
+            )
+
+        expected_tokens = {
+            token
+            for token in Config.MULTI_TOKENS.values()
+            if token and token != Config.BOT_TOKEN
+        }
+        stream_bots = {}
+        for client_id, client in cls.stream_clients.items():
+            if client_id == 0 or not getattr(client, "me", None):
+                continue
+            stream_bots[client.me.id] = client.me.username or str(client.me.id)
+        if not stream_bots or len(stream_bots) != len(expected_tokens):
+            raise RuntimeError(
+                "Not all configured MULTI_TOKEN stream bots started; "
+                "cannot provision an incomplete FileToLink pool"
+            )
+
+        for chat_id in chat_ids:
+            for bot_id, bot_name in stream_bots.items():
+                try:
+                    member = await cls.user.get_chat_member(chat_id, bot_id)
+                except Exception as e:
+                    if type(e).__name__ != "UserNotParticipant":
+                        raise RuntimeError(
+                            f"Cannot check @{bot_name} in {chat_id}: {e}"
+                        ) from e
+                    try:
+                        await cls.user.add_chat_members(chat_id, bot_id)
+                        member = await cls.user.get_chat_member(chat_id, bot_id)
+                        LOGGER.info(
+                            f"Added FileToLink stream bot [@{bot_name}] to {chat_id}"
+                        )
+                    except Exception as add_error:
+                        raise RuntimeError(
+                            f"Cannot add [@{bot_name}] to {chat_id}: {add_error}"
+                        ) from add_error
+
+                status = str(getattr(member, "status", "")).lower()
+                if any(role in status for role in ("administrator", "owner", "creator")):
+                    continue
+                try:
+                    await cls.user.promote_chat_member(
+                        chat_id,
+                        bot_id,
+                        privileges=ChatPrivileges(
+                            can_manage_chat=True,
+                            can_post_messages=True,
+                        ),
+                    )
+                    LOGGER.info(
+                        f"Promoted FileToLink stream bot [@{bot_name}] in {chat_id}"
+                    )
+                except Exception as e:
+                    raise RuntimeError(
+                        f"Cannot promote [@{bot_name}] in {chat_id}: {e}"
+                    ) from e
 
     @classmethod
     async def stop(cls):
