@@ -1263,6 +1263,7 @@ async def watch_media(chat_id: str, message_id: int, request: Request, filename:
             download_url = f"/dl/{chat_id}/{message_id}/{quote(filename, safe='')}?hash={secure_hash}"
         
         file_type = _classify_file_type(filename, mime_type)
+        LOGGER.info(f"Watch page: {filename} | client={client_id} | type={file_type} | size={readable_size}")
         subtitles = await _find_companion_subtitles(client, chat_id, message_id) if file_type == "video" else []
 
         return templates.TemplateResponse(request, "player.html", {
@@ -1345,6 +1346,11 @@ async def stream_media(chat_id: str, message_id: int, request: Request, filename
             disposition = request.query_params.get("disposition", "attachment").strip().lower()
         if disposition not in VALID_DISPOSITIONS:
             disposition = "attachment"
+
+        from bot.helper.ext_utils.status_utils import get_readable_file_size
+        readable_size = get_readable_file_size(file_size)
+        mode = "Download" if disposition == "attachment" else "Stream"
+        LOGGER.info(f"{mode}: {filename} | client={client_id} | size={readable_size} | range={'bytes ' + str(start) + '-' + str(end) if ranged_response else 'full'}")
 
         from urllib.parse import quote
         encoded_filename = quote(filename, safe="")
