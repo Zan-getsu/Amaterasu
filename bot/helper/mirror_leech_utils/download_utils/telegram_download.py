@@ -155,7 +155,11 @@ class TelegramDownloadHelper:
         if not self.session:
             if self._hyper_dl:
                 self.session = "hbots"
-            elif self._listener.transmission_mode in ("user", "both") and self._listener.is_super_chat:
+            elif (
+                TgClient.user
+                and self._listener.transmission_mode in ("user", "both")
+                and self._listener.is_super_chat
+            ):
                 self.session = "user"
                 try:
                     message = await TgClient.user.get_messages(
