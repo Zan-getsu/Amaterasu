@@ -1,6 +1,8 @@
 #!/bin/bash
 
-if [ -d ".venv" ]; then
+if [ -d "/wzvenv" ]; then
+    source /wzvenv/bin/activate
+elif [ -d ".venv" ]; then
     source .venv/bin/activate
 fi
 
