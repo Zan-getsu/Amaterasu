@@ -2,7 +2,8 @@ version: '3.8'
 
 services:
   amaterasu:
-    build: .
+    image: nbots/amaterasu:latest
+    pull_policy: always
     container_name: amaterasu-bot
     restart: always
     # ────────────────────────────────────────────────────────────────────

@@ -1,4 +1,4 @@
-ARG BASE_IMAGE=amaterasu:v1
+ARG BASE_IMAGE=nbots/amaterasu:v1
 FROM ${BASE_IMAGE}
 
 ENV LANG=C.UTF-8 \
