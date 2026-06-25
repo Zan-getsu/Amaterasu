@@ -24,7 +24,7 @@ services:
       - TZ=Asia/Dhaka
       - BIND_TO_LOOPBACK=${BIND_TO_LOOPBACK:-true}
     ports:
-      - "${BIND_ADDRESS:-127.0.0.1}:8080:8080"
+      - "8080:8080"
     volumes:
       # Mount the entire repo so config.py, accounts/, rclone/, tokens/,
       # cookies/, thumbnails/, downloads/, log.txt, .amaterasu_secrets
