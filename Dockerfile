@@ -10,7 +10,25 @@ ENV LANG=C.UTF-8 \
     PATH="/amaterasuvenv/bin:${PATH}"
 
 WORKDIR /usr/src/app
-
+# Install all required native tools. The base image may already have some;
+# apt will skip packages that are already present.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        aria2 \
+        curl \
+        cpulimit \
+        default-jre-headless \
+        git \
+        mediainfo \
+        p7zip-full \
+        procps \
+        qbittorrent-nox \
+        rclone \
+        sabnzbdplus \
+        unzip \
+        util-linux \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
 
 
 RUN set -eux; \
