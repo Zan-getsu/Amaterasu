@@ -152,7 +152,12 @@ RUN set -eux; \
     apt-get clean; \
     rm -rf /var/lib/apt/lists/*
 
-# 5. Compile MEGA SDK Python bindings
+# 5. Create the virtual environment (Must be done before MEGA SDK to provide 'wheel')
+RUN set -eux; \
+    python3 -m venv /amaterasuvenv; \
+    /amaterasuvenv/bin/python -m pip install --no-cache-dir --upgrade pip uv wheel setuptools
+
+# 6. Compile MEGA SDK Python bindings
 RUN apt-get update \
     && apt-get install -y --no-install-recommends libsodium-dev \
     && apt-get clean \
@@ -171,16 +176,11 @@ RUN set -eux; \
         --without-freeimage \
         --without-libraw \
         --without-readline; \
-    make -j"$(nproc)"; \
+    make -j2; \
     cd /tmp/mega-sdk/bindings/python; \
-    python3 setup.py bdist_wheel; \
-    python3 -m pip install --break-system-packages --no-cache-dir dist/*.whl; \
-    python3 -c "from mega import MegaApi, MegaListener, MegaRequest, MegaTransfer; print('Mega SDK Python bindings OK')"; \
+    /amaterasuvenv/bin/python setup.py bdist_wheel; \
+    /amaterasuvenv/bin/python -m pip install --no-cache-dir dist/*.whl; \
+    /amaterasuvenv/bin/python -c "from mega import MegaApi, MegaListener, MegaRequest, MegaTransfer; print('Mega SDK Python bindings OK')"; \
     rm -rf /tmp/mega-sdk
-
-# 6. Create the virtual environment base (to be used by the app image)
-RUN set -eux; \
-    python3 -m venv /amaterasuvenv; \
-    /amaterasuvenv/bin/python -m pip install --no-cache-dir --upgrade pip uv wheel
 
 # This marks the end of the base image.
