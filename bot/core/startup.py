@@ -484,9 +484,9 @@ async def load_configurations():
     )
     if not Config.DISABLE_NZB:
         cmd += f" {BinConfig.SABNZBD_NAME}"
-    await (
-        await create_subprocess_shell(cmd)
-    ).wait()
+    proc = await create_subprocess_shell(cmd)
+    if await proc.wait() != 0:
+        raise RuntimeError("setpkgs.sh failed to start required download services")
 
     if await aiopath.exists("cfg.zip"):
         if await aiopath.exists("/JDownloader/cfg"):
