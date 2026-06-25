@@ -1,65 +1,186 @@
-FROM mysterysd/wzmlx:v3
+FROM python:3.11-slim-bookworm
 
 ENV LANG=C.UTF-8 \
     DEBIAN_FRONTEND=noninteractive \
     TZ=Asia/Dhaka \
     PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1 \
-    VIRTUAL_ENV=/amaterasuvenv \
-    PATH="/amaterasuvenv/bin:/wzvenv/bin:${PATH}"
+    PYTHONDONTWRITEBYTECODE=1
 
-WORKDIR /usr/src/app
-
-# Restore the symlinks for the obfuscated binaries in wzmlx:v3.
-# The base image provides these under custom names; we must link them back
-# to the standard names before apt tries to install anything.
-RUN set -eux; \
-    link_cmd() { \
-        if command -v "$2" >/dev/null 2>&1; then return 0; fi; \
-        if command -v "$1" >/dev/null 2>&1; then \
-            ln -sf "$(command -v "$1")" "/usr/local/bin/$2"; \
-        fi; \
-    }; \
-    link_cmd blitzfetcher aria2c; \
-    link_cmd stormtorrent qbittorrent-nox; \
-    link_cmd mediaforge ffmpeg; \
-    link_cmd ghostdrive rclone; \
-    link_cmd newsripper sabnzbdplus
-
-# Install all required native tools. The base image may already have some;
-# apt will skip packages that are already present.
-
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends \
-        aria2 \
-        curl \
-        cpulimit \
-        default-jre-headless \
+# 1. Update and install system dependencies
+RUN apt-get update && apt-get upgrade -y && \
+    # Add non-free repo for unrar (debian bullseye/bookworm)
+    sed -i 's/main$/main contrib non-free/g' /etc/apt/sources.list.d/debian.sources 2>/dev/null || true && \
+    sed -i 's/main$/main contrib non-free/g' /etc/apt/sources.list 2>/dev/null || true && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends \
+        bash \
+        ca-certificates \
         git \
-        mediainfo \
-        p7zip-full \
-        procps \
+        curl \
+        wget \
+        gnupg \
+        build-essential \
+        autoconf \
+        autoconf-archive \
+        automake \
+        libtool-bin \
+        swig \
+        python3-dev \
+        pkg-config \
+        libcurl4-openssl-dev \
+        libc-ares-dev \
+        libcrypto++-dev \
+        libssl-dev \
+        libffi-dev \
+        libxml2-dev \
+        libxslt-dev \
+        libmagic1 \
+        zlib1g-dev \
+        libsqlite3-dev \
+        locales \
+        tzdata \
+        aria2 \
         qbittorrent-nox \
+        p7zip-full \
+        p7zip-rar \
+        unrar \
+        unzip \
+        cpulimit \
         rclone \
         sabnzbdplus \
-        unzip \
-        util-linux \
+        procps \
+        mediainfo \
+        nodejs \
+        default-jre-headless \
+        openssh-client \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-
-# WZML-X already ships the slow native stack, including MEGA SDK bindings.
-# Publish this as our own stable Amaterasu base and expose a consistent
-# /amaterasuvenv path for the app image.
+# 2. Install MEGAcmd
 RUN set -eux; \
-    if [ -d /wzvenv ] && [ ! -e /amaterasuvenv ]; then \
-        ln -s /wzvenv /amaterasuvenv; \
-    fi; \
-    if [ ! -x /amaterasuvenv/bin/python ]; then \
-        python3 -m venv /amaterasuvenv; \
-    fi; \
-    /amaterasuvenv/bin/python -m pip install --no-cache-dir --upgrade pip uv wheel; \
-    /amaterasuvenv/bin/python -c "from mega import MegaApi, MegaListener, MegaRequest, MegaTransfer; print('Mega SDK Python bindings OK')"; \
-    mkdir -p /usr/src/app/downloads /JDownloader /data
+    mkdir -p /etc/apt/keyrings; \
+    for attempt in 1 2 3 4 5; do \
+        curl -fsSL --retry 5 --retry-delay 5 --retry-all-errors \
+            https://mega.nz/linux/repo/Debian_12/Release.key \
+            -o /tmp/mega-release.key && test -s /tmp/mega-release.key && break; \
+        if [ "$attempt" = "5" ]; then exit 1; fi; \
+        sleep 5; \
+    done; \
+    gpg --dearmor -o /etc/apt/keyrings/mega.nz.gpg /tmp/mega-release.key; \
+    rm -f /tmp/mega-release.key; \
+    echo "deb [arch=amd64,arm64 signed-by=/etc/apt/keyrings/mega.nz.gpg] https://mega.nz/linux/repo/Debian_12/ ./" > /etc/apt/sources.list.d/mega.nz.list; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends megacmd; \
+    apt-get clean; \
+    rm -rf /var/lib/apt/lists/*
 
-CMD ["bash"]
+# 3. Install Cloudflared & Deno
+RUN set -eux; \
+    arch="$(dpkg --print-architecture)"; \
+    case "$arch" in amd64|arm64) cf_arch="$arch" ;; *) echo "Unsupported cloudflared arch: $arch" && exit 1 ;; esac; \
+    curl -fsSL --retry 5 --retry-delay 5 --retry-all-errors \
+        "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-${cf_arch}" \
+        -o /usr/local/bin/cloudflared; \
+    chmod +x /usr/local/bin/cloudflared; \
+    curl -fsSL --retry 5 --retry-delay 5 --retry-all-errors \
+        https://deno.land/install.sh \
+        -o /tmp/deno-install.sh; \
+    DENO_INSTALL=/usr/local sh /tmp/deno-install.sh; \
+    rm -f /tmp/deno-install.sh
+
+# 4. Compile FFmpeg (with SVT-AV1 support)
+ARG FFMPEG_VERSION=8.1.2
+RUN set -eux; \
+    find /etc/apt/sources.list.d -maxdepth 1 -type f \
+        -exec grep -l 'meganz-archive-keyring.gpg' {} + \
+        | xargs -r rm -f; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends \
+        nasm \
+        yasm \
+        cmake \
+        libaom-dev \
+        libass-dev \
+        libdav1d-dev \
+        libfontconfig1-dev \
+        libfreetype6-dev \
+        libmp3lame-dev \
+        libopus-dev \
+        libx264-dev \
+        libx265-dev \
+        libvorbis-dev \
+        libvpx-dev \
+        libwebp-dev \
+        libzimg-dev; \
+    git clone --depth 1 https://github.com/nekotrix/SVT-AV1-Essential.git /tmp/svt-av1; \
+    cd /tmp/svt-av1/Build; \
+    cmake .. -G"Unix Makefiles" -DCMAKE_BUILD_TYPE=Release; \
+    make -j"$(nproc)"; \
+    make install; \
+    ldconfig; \
+    cd /; \
+    curl -fsSLO "https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VERSION}.tar.xz"; \
+    tar -xJf "ffmpeg-${FFMPEG_VERSION}.tar.xz"; \
+    cd "ffmpeg-${FFMPEG_VERSION}"; \
+    ./configure \
+        --prefix=/usr/local \
+        --enable-gpl \
+        --enable-version3 \
+        --enable-libaom \
+        --enable-libass \
+        --enable-libdav1d \
+        --enable-libfontconfig \
+        --enable-libfreetype \
+        --enable-libmp3lame \
+        --enable-libopus \
+        --enable-libsvtav1 \
+        --enable-libvorbis \
+        --enable-libvpx \
+        --enable-libwebp \
+        --enable-libx264 \
+        --enable-libx265 \
+        --enable-libzimg \
+        --disable-debug \
+        --disable-doc; \
+    make -j"$(nproc)"; \
+    make install; \
+    ldconfig; \
+    cd /; \
+    rm -rf /tmp/svt-av1 \
+           "ffmpeg-${FFMPEG_VERSION}" \
+           "ffmpeg-${FFMPEG_VERSION}.tar.xz"; \
+    apt-get clean; \
+    rm -rf /var/lib/apt/lists/*
+
+# 5. Compile MEGA SDK Python bindings
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libsodium-dev \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+ARG MEGA_SDK_VERSION=v7.0.0
+RUN set -eux; \
+    git clone --depth 1 --branch "$MEGA_SDK_VERSION" https://github.com/meganz/sdk.git /tmp/mega-sdk; \
+    cd /tmp/mega-sdk; \
+    ./autogen.sh; \
+    sed -i 's/-std=c++11/-std=c++17/g' configure; \
+    CXXFLAGS="-g -O2 -std=c++17" ./configure \
+        --disable-silent-rules \
+        --enable-python \
+        --disable-examples \
+        --without-freeimage \
+        --without-libraw \
+        --without-readline; \
+    make -j"$(nproc)"; \
+    cd /tmp/mega-sdk/bindings/python; \
+    python3 setup.py bdist_wheel; \
+    python3 -m pip install --break-system-packages --no-cache-dir dist/*.whl; \
+    python3 -c "from mega import MegaApi, MegaListener, MegaRequest, MegaTransfer; print('Mega SDK Python bindings OK')"; \
+    rm -rf /tmp/mega-sdk
+
+# 6. Create the virtual environment base (to be used by the app image)
+RUN set -eux; \
+    python3 -m venv /amaterasuvenv; \
+    /amaterasuvenv/bin/python -m pip install --no-cache-dir --upgrade pip uv wheel
+
+# This marks the end of the base image.

@@ -1,7 +1,8 @@
 services:
   amaterasu:
-    image: nbots/amaterasu:latest
-    pull_policy: always
+    build: .
+    image: amaterasu:latest
+    pull_policy: build
     container_name: amaterasu-bot
     restart: always
     # ────────────────────────────────────────────────────────────────────
