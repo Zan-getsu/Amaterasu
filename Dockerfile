@@ -166,6 +166,11 @@ RUN pip3 install --no-cache-dir --upgrade pip uv wheel
 # The bot's Mega implementation uses the official MEGA SDK Python bindings
 # (`from mega import MegaApi`), which are not provided by MEGAcmd or PyPI.
 # v7.x is the latest upstream SDK line that still includes bindings/python.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libsodium-dev \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
 ARG MEGA_SDK_VERSION=v7.0.0
 RUN set -eux; \
     git clone --depth 1 --branch "$MEGA_SDK_VERSION" https://github.com/meganz/sdk.git /tmp/mega-sdk; \
