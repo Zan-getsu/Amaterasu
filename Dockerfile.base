@@ -10,6 +10,22 @@ ENV LANG=C.UTF-8 \
 
 WORKDIR /usr/src/app
 
+RUN set -eux; \
+    if ! command -v aria2c >/dev/null 2>&1; then \
+        if command -v apt-get >/dev/null 2>&1; then \
+            apt-get update; \
+            apt-get install -y --no-install-recommends aria2; \
+            apt-get clean; \
+            rm -rf /var/lib/apt/lists/*; \
+        elif command -v apk >/dev/null 2>&1; then \
+            apk add --no-cache aria2; \
+        else \
+            echo "No supported package manager found to install aria2" >&2; \
+            exit 1; \
+        fi; \
+    fi; \
+    command -v aria2c
+
 # WZML-X already ships the slow native stack, including MEGA SDK bindings.
 # Publish this as our own stable Amaterasu base and expose a consistent
 # /amaterasuvenv path for the app image.

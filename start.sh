@@ -8,6 +8,8 @@ elif [ -d ".venv" ]; then
     source .venv/bin/activate
 fi
 
+git config --global --add safe.directory /usr/src/app 2>/dev/null || true
+
 # ── Sanitise config.py encoding (permanent fix for non-UTF-8 files) ──
 # If the user saved config.py with a Windows editor (CP1252/Latin-1),
 # Python 3 will refuse to parse it.  Detect and auto-convert to UTF-8
