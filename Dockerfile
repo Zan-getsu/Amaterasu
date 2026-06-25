@@ -176,8 +176,8 @@ RUN set -eux; \
     git clone --depth 1 --branch "$MEGA_SDK_VERSION" https://github.com/meganz/sdk.git /tmp/mega-sdk; \
     cd /tmp/mega-sdk; \
     ./autogen.sh; \
-    sed -i 's/-std=c++11/-std=c++14/g' configure; \
-    CXXFLAGS="-g -O2 -std=c++14" ./configure \
+    sed -i 's/-std=c++11/-std=c++17/g' configure; \
+    CXXFLAGS="-g -O2 -std=c++17" ./configure \
         --disable-silent-rules \
         --enable-python \
         --disable-examples \
