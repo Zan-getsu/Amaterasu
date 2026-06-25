@@ -5,22 +5,15 @@ services:
     container_name: amaterasu-bot
     restart: always
     # ────────────────────────────────────────────────────────────────────
-    # Web UI port binding (Phase 0.1 — configurable via BIND_TO_LOOPBACK)
+    # Web UI port binding
     # ────────────────────────────────────────────────────────────────────
-    # Default: 127.0.0.1 only (loopback). Operators should put a
-    # TLS-terminating reverse proxy (nginx, Caddy, Cloudflare Tunnel) in
-    # front. The other engine daemons (qBittorrent 8090, SABnzbd 8070,
-    # aria2 RPC 6800, rclone serve 8081) remain container-internal.
-    #
-    # To expose the web UI directly on the host LAN (no reverse proxy),
-    # set in your .env file or shell before `docker compose up`:
-    #   BIND_TO_LOOPBACK=false
-    # This rewrites the bind address to 0.0.0.0:8080:8080. Trade-off: the
-    # web UI is reachable by anyone who can reach the host on port 8080.
-    # Recommended only for trusted LANs or SSH-tunnel workflows.
+    # Default: host port 8080 maps to the bot's internal port 8080.
+    # Change the left side manually on your VPS if you want another
+    # public port, for example "83:8080".
     environment:
       - TZ=Asia/Dhaka
       - BIND_TO_LOOPBACK=${BIND_TO_LOOPBACK:-true}
+      - ARIA2_RPC_URL=http://aria2:6800/jsonrpc
     ports:
       - "8080:8080"
     volumes:
@@ -46,12 +39,24 @@ services:
       - SYS_PTRACE
       - SYS_NICE
       - DAC_READ_SEARCH
+    depends_on:
+      - aria2
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8080/healthz"]
       interval: 30s
       timeout: 5s
       retries: 3
       start_period: 60s
+
+  aria2:
+    build:
+      context: .
+      dockerfile: aria2.Dockerfile
+    container_name: amaterasu-aria2
+    restart: always
+    volumes:
+      - .:/usr/src/app:z
+      - ./configs/aria2:/config:ro
 
   # ────────────────────────────────────────────────────────────────────
   # Cloudflare Quick Tunnel (Phase 1.7)

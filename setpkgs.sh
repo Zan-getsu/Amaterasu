@@ -25,7 +25,7 @@ if command -v cpulimit >/dev/null 2>&1 && cpulimit -l 100 -z -- true 2>/dev/null
     _have_cpulimit=1
 fi
 
-if [ -n "$SERVICE_CORES" ] && [ "$_have_taskset" = "1" ]; then
+if [ "$ARIA2C" != "EXTERNAL_ARIA2" ] && [ -n "$SERVICE_CORES" ] && [ "$_have_taskset" = "1" ]; then
     ARIA2_CMD="taskset -c $SERVICE_CORES $ARIA2C"
 else
     ARIA2_CMD="$ARIA2C"
@@ -45,16 +45,20 @@ fi
 
 # Fetch tracker list for aria2 (best-effort; fall back to empty list
 # if the network is down).
-tracker_list=""
-if tracker_list=$(curl -Ns --max-time 10 https://cdn.jsdelivr.net/gh/ngosang/trackerslist@master/trackers_all.txt 2>/dev/null | awk '$0' | tr '\n\n' ','); then
-    :
-fi
+if [ "$ARIA2C" != "EXTERNAL_ARIA2" ]; then
+    # Fetch tracker list for aria2 (best-effort; fall back to empty list
+    # if the network is down).
+    tracker_list=""
+    if tracker_list=$(curl -Ns --max-time 10 https://cdn.jsdelivr.net/gh/ngosang/trackerslist@master/trackers_all.txt 2>/dev/null | awk '$0' | tr '\n\n' ','); then
+        :
+    fi
 
-if [ -n "$tracker_list" ]; then
-    $ARIA2_CMD --conf-path=configs/aria2/aria2.conf --daemon=true --rpc-listen-all=true --bt-tracker="[$tracker_list]"
-else
-    echo "[setpkgs.sh] Warning: could not fetch tracker list; starting aria2 without extra trackers"
-    $ARIA2_CMD --conf-path=configs/aria2/aria2.conf --daemon=true --rpc-listen-all=true
+    if [ -n "$tracker_list" ]; then
+        $ARIA2_CMD --conf-path=configs/aria2/aria2.conf --daemon=true --rpc-listen-all=true --bt-tracker="[$tracker_list]"
+    else
+        echo "[setpkgs.sh] Warning: could not fetch tracker list; starting aria2 without extra trackers"
+        $ARIA2_CMD --conf-path=configs/aria2/aria2.conf --daemon=true --rpc-listen-all=true
+    fi
 fi
 
 if [ -n "$SABNZBDPLUS" ]; then

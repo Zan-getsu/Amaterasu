@@ -475,10 +475,11 @@ async def load_configurations():
     # already has a .netrc) doesn't prevent setpkgs.sh from running.
     # The aria2/sabnzbd daemons are the critical part; .netrc is only
     # used by rclone for some auth flows.
+    aria2_bin = "EXTERNAL_ARIA2" if _environ.get("ARIA2_RPC_URL") else BinConfig.ARIA2_NAME
     cmd = (
         f"chmod 600 .netrc; "
         f"cp .netrc '{_home}/.netrc' 2>/dev/null || true; "
-        f"chmod +x setpkgs.sh && ./setpkgs.sh {BinConfig.ARIA2_NAME} "
+        f"chmod +x setpkgs.sh && ./setpkgs.sh {aria2_bin} "
         f"\"{service_cores}\" {Config.CPU_LIMIT}"
     )
     if not Config.DISABLE_NZB:

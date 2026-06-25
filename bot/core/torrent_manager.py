@@ -2,7 +2,7 @@ from asyncio import TimeoutError, create_subprocess_exec, gather, sleep
 from contextlib import suppress
 from inspect import iscoroutinefunction
 from pathlib import Path
-from os import getcwd
+from os import environ, getcwd
 
 from aioaria2 import Aria2WebsocketClient
 from aiohttp import ClientError, ClientSession, ClientTimeout
@@ -37,11 +37,12 @@ def wrap_with_retry(obj, max_retries=3):
     return obj
 
 
-async def _connect_aria2(retries=5, delay=2):
+async def _connect_aria2(retries=30, delay=2):
     from aioaria2.exceptions import Aria2rpcException
+    aria2_rpc_url = environ.get("ARIA2_RPC_URL", "http://localhost:6800/jsonrpc")
     for i in range(retries):
         try:
-            return await Aria2WebsocketClient.new("http://localhost:6800/jsonrpc")
+            return await Aria2WebsocketClient.new(aria2_rpc_url)
         except Aria2rpcException:
             if i == retries - 1:
                 raise
