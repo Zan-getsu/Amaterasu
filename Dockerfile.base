@@ -15,7 +15,6 @@ RUN set -eux; \
         --set-interpreter "/opt/aria2/lib/$(basename "$loader")" \
         --set-rpath /opt/aria2/lib \
         /aria2-out/usr/bin/aria2c; \
-    /aria2-out/usr/bin/aria2c --version; \
     apt-get clean; \
     rm -rf /var/lib/apt/lists/*
 
