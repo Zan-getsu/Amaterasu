@@ -1,4 +1,4 @@
-ARG BASE_IMAGE=mysterysd/wzmlx:v3
+ARG BASE_IMAGE=nbots/amaterasu:v1
 FROM ${BASE_IMAGE}
 
 ENV LANG=C.UTF-8 \
