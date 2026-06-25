@@ -10,7 +10,20 @@
 # built-in cloudflare_tunnel.py will handle it directly — no separate
 # tunnel container needed.
 
-FROM cloudflare/cloudflared:latest
+FROM alpine:3.20
+
+RUN set -eux; \
+    apk add --no-cache bash ca-certificates curl grep; \
+    arch="$(apk --print-arch)"; \
+    case "$arch" in \
+        x86_64) cf_arch="amd64" ;; \
+        aarch64) cf_arch="arm64" ;; \
+        *) echo "Unsupported cloudflared arch: $arch" && exit 1 ;; \
+    esac; \
+    curl -fsSL --retry 5 --retry-delay 5 --retry-all-errors \
+        "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-${cf_arch}" \
+        -o /usr/local/bin/cloudflared; \
+    chmod +x /usr/local/bin/cloudflared
 
 WORKDIR /app
 
