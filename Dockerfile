@@ -11,22 +11,44 @@ ENV LANG=C.UTF-8 \
 
 WORKDIR /usr/src/app
 
-# Verify all required native tools are present in the base image.
+# Ensure all required native tools are present.
+# The base image ships most of them, but install anything missing.
 RUN set -eux; \
+    missing=""; \
+    for pkg_check in \
+        "aria2c:aria2" \
+        "qbittorrent-nox:qbittorrent-nox" \
+        "ffmpeg:ffmpeg" \
+        "ffprobe:ffmpeg" \
+        "rclone:rclone" \
+        "sabnzbdplus:sabnzbdplus" \
+        "7z:p7zip-full" \
+        "mediainfo:mediainfo" \
+        "java:default-jre-headless" \
+        "curl:curl" \
+        "git:git" \
+        "pkill:procps" \
+        "taskset:util-linux" \
+        "cpulimit:cpulimit" \
+        "unzip:unzip"; do \
+        cmd="${pkg_check%%:*}"; \
+        pkg="${pkg_check##*:}"; \
+        if ! command -v "$cmd" >/dev/null 2>&1; then \
+            missing="$missing $pkg"; \
+        fi; \
+    done; \
+    if [ -n "$missing" ]; then \
+        apt-get update; \
+        apt-get install -y --no-install-recommends $missing; \
+        apt-get clean; \
+        rm -rf /var/lib/apt/lists/*; \
+    fi; \
+    echo "=== Tool verification ==="; \
     for cmd in \
         aria2c qbittorrent-nox ffmpeg ffprobe rclone sabnzbdplus 7z \
         mediainfo java split curl git pkill taskset cpulimit unzip; do \
         command -v "$cmd"; \
-    done; \
-    aria2c --version; \
-    qbittorrent-nox --version; \
-    ffmpeg -version; \
-    ffprobe -version; \
-    rclone --version; \
-    sabnzbdplus --version; \
-    7z i; \
-    mediainfo --Version; \
-    java -version
+    done
 
 RUN set -eux; \
     if [ -d /wzvenv ] && [ ! -e /amaterasuvenv ]; then \
