@@ -9,8 +9,26 @@ ENV LANG=C.UTF-8 \
     PATH="/amaterasuvenv/bin:/wzvenv/bin:${PATH}"
 
 WORKDIR /usr/src/app
+
+# Restore the symlinks for the obfuscated binaries in wzmlx:v3.
+# The base image provides these under custom names; we must link them back
+# to the standard names before apt tries to install anything.
+RUN set -eux; \
+    link_cmd() { \
+        if command -v "$2" >/dev/null 2>&1; then return 0; fi; \
+        if command -v "$1" >/dev/null 2>&1; then \
+            ln -sf "$(command -v "$1")" "/usr/local/bin/$2"; \
+        fi; \
+    }; \
+    link_cmd blitzfetcher aria2c; \
+    link_cmd stormtorrent qbittorrent-nox; \
+    link_cmd mediaforge ffmpeg; \
+    link_cmd ghostdrive rclone; \
+    link_cmd newsripper sabnzbdplus
+
 # Install all required native tools. The base image may already have some;
 # apt will skip packages that are already present.
+
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         aria2 \
