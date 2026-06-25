@@ -2,6 +2,11 @@ name: Publish Amaterasu App Image
 
 on:
   workflow_dispatch:
+  workflow_run:
+    workflows:
+      - Publish Amaterasu Docker Image
+    types:
+      - completed
   push:
     branches:
       - main
@@ -29,6 +34,7 @@ jobs:
     name: Build and push app image
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
 
     steps:
       - name: Checkout repository
@@ -55,6 +61,21 @@ jobs:
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Wait for base image
+        env:
+          BASE_IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:${{ env.BASE_TAG }}
+        run: |
+          for attempt in $(seq 1 30); do
+            if docker buildx imagetools inspect "$BASE_IMAGE" >/dev/null 2>&1; then
+              echo "Base image is available: $BASE_IMAGE"
+              exit 0
+            fi
+            echo "Base image not available yet ($attempt/30): $BASE_IMAGE"
+            sleep 60
+          done
+          echo "::error::Base image was not available after 30 minutes: $BASE_IMAGE"
+          exit 1
 
       - name: Build and push app image
         uses: docker/build-push-action@v6
