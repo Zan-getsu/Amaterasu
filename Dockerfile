@@ -11,21 +11,8 @@ ENV LANG=C.UTF-8 \
 
 WORKDIR /usr/src/app
 
+# Verify all required native tools are present in the base image.
 RUN set -eux; \
-    link_cmd() { \
-        source_name="$1"; \
-        target_name="$2"; \
-        if command -v "$target_name" >/dev/null 2>&1; then \
-            return 0; \
-        fi; \
-        source_path="$(command -v "$source_name")"; \
-        ln -sf "$source_path" "/usr/local/bin/$target_name"; \
-    }; \
-    link_cmd blitzfetcher aria2c; \
-    link_cmd stormtorrent qbittorrent-nox; \
-    link_cmd mediaforge ffmpeg; \
-    link_cmd ghostdrive rclone; \
-    link_cmd newsripper sabnzbdplus; \
     for cmd in \
         aria2c qbittorrent-nox ffmpeg ffprobe rclone sabnzbdplus 7z \
         mediainfo java split curl git pkill taskset cpulimit unzip; do \
