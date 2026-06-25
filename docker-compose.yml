@@ -13,7 +13,6 @@ services:
     environment:
       - TZ=Asia/Dhaka
       - BIND_TO_LOOPBACK=${BIND_TO_LOOPBACK:-true}
-      - ARIA2_RPC_URL=http://aria2:6800/jsonrpc
     ports:
       - "8080:8080"
     volumes:
@@ -39,24 +38,12 @@ services:
       - SYS_PTRACE
       - SYS_NICE
       - DAC_READ_SEARCH
-    depends_on:
-      - aria2
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8080/healthz"]
       interval: 30s
       timeout: 5s
       retries: 3
       start_period: 60s
-
-  aria2:
-    build:
-      context: .
-      dockerfile: aria2.Dockerfile
-    container_name: amaterasu-aria2
-    restart: always
-    volumes:
-      - .:/usr/src/app:z
-      - ./configs/aria2:/config:ro
 
   # ────────────────────────────────────────────────────────────────────
   # Cloudflare Quick Tunnel (Phase 1.7)
