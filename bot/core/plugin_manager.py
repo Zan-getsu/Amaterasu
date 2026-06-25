@@ -75,18 +75,20 @@ class PluginManager:
     def _refresh_commands(self):
         try:
             from ..helper.telegram_helper.bot_commands import BotCommands
-            from ..helper.ext_utils.help_messages import (
-                get_bot_commands,
-                get_help_string,
-            )
-            import importlib
 
             BotCommands.refresh_commands()
 
-            importlib.reload(sys.modules["bot.helper.ext_utils.help_messages"])
+            help_mod = sys.modules.get("bot.helper.ext_utils.help_messages")
+            if help_mod is not None:
+                importlib.reload(help_mod)
 
-            globals()["BOT_COMMANDS"] = get_bot_commands()
-            globals()["help_string"] = get_help_string()
+                handlers_mod = sys.modules.get("bot.core.handlers")
+                if handlers_mod is not None and hasattr(handlers_mod, "BOT_COMMANDS"):
+                    handlers_mod.BOT_COMMANDS = help_mod.BOT_COMMANDS
+
+                help_page_mod = sys.modules.get("bot.modules.help")
+                if help_page_mod is not None and hasattr(help_page_mod, "help_string"):
+                    help_page_mod.help_string = help_mod.help_string
 
             LOGGER.info("Bot commands and help refreshed")
         except Exception as e:
@@ -106,7 +108,11 @@ class PluginManager:
             spec = importlib.util.spec_from_file_location(plugin_name, plugin_path)
             module = importlib.util.module_from_spec(spec)
             sys.modules[plugin_name] = module
-            spec.loader.exec_module(module)
+            try:
+                spec.loader.exec_module(module)
+            except Exception:
+                sys.modules.pop(plugin_name, None)
+                raise
 
             plugin_class = None
             for attr_name in dir(module):
@@ -173,7 +179,8 @@ class PluginManager:
 
     async def reload_plugin(self, plugin_name: str) -> bool:
         try:
-            await self.unload_plugin(plugin_name)
+            if plugin_name in self.loaded_modules:
+                await self.unload_plugin(plugin_name)
             return await self.load_plugin(plugin_name)
         except Exception as e:
             LOGGER.error(f"Error reloading plugin {plugin_name}: {e}", exc_info=True)
@@ -186,9 +193,10 @@ class PluginManager:
                 return False
 
             plugin_instance = self.loaded_modules[plugin_name]
+            plugin_info = self.plugins[plugin_name]
             if await plugin_instance.on_enable():
-                self._enable_handlers(self.plugins[plugin_name])
-                self.plugins[plugin_name].enabled = True
+                plugin_info.enabled = True
+                self._register_handlers(plugin_instance, plugin_info)
                 self._refresh_commands()
                 LOGGER.info(f"Plugin {plugin_name} enabled")
                 return True
@@ -207,9 +215,10 @@ class PluginManager:
                 return False
 
             plugin_instance = self.loaded_modules[plugin_name]
+            plugin_info = self.plugins[plugin_name]
             if await plugin_instance.on_disable():
-                self._unregister_handlers(self.plugins[plugin_name])
-                self.plugins[plugin_name].enabled = False
+                plugin_info.enabled = False
+                self._unregister_handlers(plugin_info)
                 self._refresh_commands()
                 LOGGER.info(f"Plugin {plugin_name} disabled")
                 return True
@@ -263,6 +272,7 @@ class PluginManager:
                 self.bot.remove_handler(handler)
             except Exception as e:
                 LOGGER.warning(f"Error removing handler: {e}")
+        plugin_info.handlers.clear()
 
 
 plugin_manager = PluginManager(None)

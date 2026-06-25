@@ -18,6 +18,8 @@ from pyrogram.filters import regex
 
 async def gen_mediainfo(message, link=None, media=None, mmsg=None):
     temp_send = await send_message(message, "<i>Generating MediaInfo...</i>")
+    des_path = None
+    tc = ""
     try:
         path = "mediainfo/"
         if not await aiopath.isdir(path):
@@ -54,8 +56,7 @@ async def gen_mediainfo(message, link=None, media=None, mmsg=None):
         await edit_message(temp_send, f"MediaInfo Stopped due to {str(e)}")
         return
     finally:
-        from contextlib import suppress
-        with suppress(Exception):
+        if des_path and await aiopath.exists(des_path):
             await aioremove(des_path)
     link_id = (await telegraph.create_page(title="MediaInfo X", content=tc))["path"]
     await temp_send.edit(
@@ -150,4 +151,3 @@ async def minfo_callback(_, query):
 TgClient.bot.add_handler(
     CallbackQueryHandler(minfo_callback, filters=regex("^minfo$"))
 )
-

@@ -21,11 +21,23 @@ RUN apt-get update && apt-get upgrade -y && \
         wget \
         gnupg \
         build-essential \
+        autoconf \
+        autoconf-archive \
+        automake \
+        libtool-bin \
+        swig \
+        python3-dev \
+        pkg-config \
+        libcurl4-openssl-dev \
+        libc-ares-dev \
+        libcrypto++-dev \
         libssl-dev \
         libffi-dev \
         libxml2-dev \
         libxslt-dev \
         libmagic1 \
+        zlib1g-dev \
+        libsqlite3-dev \
         locales \
         tzdata \
         aria2 \
@@ -72,7 +84,6 @@ RUN set -eux; \
         nasm \
         yasm \
         cmake \
-        pkg-config \
         libaom-dev \
         libass-dev \
         libdav1d-dev \
@@ -128,8 +139,31 @@ RUN set -eux; \
 
 # Copy and install python requirements
 COPY requirements.txt .
-RUN pip3 install --no-cache-dir --upgrade pip uv && \
-    uv pip install --system --no-cache -r requirements.txt
+RUN pip3 install --no-cache-dir --upgrade pip uv wheel
+
+# The bot's Mega implementation uses the official MEGA SDK Python bindings
+# (`from mega import MegaApi`), which are not provided by MEGAcmd or PyPI.
+# v7.x is the latest upstream SDK line that still includes bindings/python.
+ARG MEGA_SDK_VERSION=v7.0.0
+RUN set -eux; \
+    git clone --depth 1 --branch "$MEGA_SDK_VERSION" https://github.com/meganz/sdk.git /tmp/mega-sdk; \
+    cd /tmp/mega-sdk; \
+    ./autogen.sh; \
+    ./configure \
+        --disable-silent-rules \
+        --enable-python \
+        --disable-examples \
+        --without-freeimage \
+        --without-libraw \
+        --without-readline; \
+    make -j"$(nproc)"; \
+    cd /tmp/mega-sdk/bindings/python; \
+    python setup.py bdist_wheel; \
+    python -m pip install --no-cache-dir dist/*.whl; \
+    python -c "from mega import MegaApi, MegaListener, MegaRequest, MegaTransfer; print('Mega SDK Python bindings OK')"; \
+    rm -rf /tmp/mega-sdk
+
+RUN uv pip install --system --no-cache -r requirements.txt
 
 # Copy all the project files
 COPY . .

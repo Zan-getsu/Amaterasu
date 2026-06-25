@@ -3,9 +3,7 @@ from os import path as ospath
 from pickle import load as pload
 from urllib.parse import parse_qs, urlparse
 
-from google_auth_httplib2 import AuthorizedHttp
 from googleapiclient.discovery import build
-from googleapiclient.http import build_http
 from tenacity import (
     retry,
     retry_if_exception_type,
@@ -76,9 +74,9 @@ class YouTubeHelper:
             LOGGER.error(f"YouTube token file {token_path} not found!")
             raise FileNotFoundError(f"YouTube token file {token_path} not found!")
 
-        authorized_http = AuthorizedHttp(credentials, http=build_http())
-        authorized_http.http.disable_ssl_certificate_validation = True
-        return build("youtube", "v3", http=authorized_http, cache_discovery=False)
+        if credentials is None:
+            raise ValueError(f"YouTube token file {token_path} is empty or invalid.")
+        return build("youtube", "v3", credentials=credentials, cache_discovery=False)
 
     def get_video_id_from_url(self, url):
         """Extract video ID from YouTube URL"""

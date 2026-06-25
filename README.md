@@ -247,7 +247,7 @@ graph TD
 | Component | Technology |
 |---|---|
 | Language | Python 3.11 |
-| Telegram Framework | Pyrogram (pyrotgfork 2.2.19) |
+| Telegram Framework | Pyrogram (pyrotgfork 2.2.24) |
 | Web Server | FastAPI + Uvicorn |
 | Database | MongoDB (Motor async driver) |
 | Containerization | Docker / Podman |

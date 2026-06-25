@@ -44,5 +44,6 @@ except (ImportError, ModuleNotFoundError) as e:
 def mega_sdk_missing_message():
     return (
         "Mega SDK Python bindings are not installed in this image. "
-        "The bot can run, but Mega download/upload/account tools are unavailable."
+        "Rebuild the Docker image from the current Dockerfile to enable Mega "
+        "download/upload/account tools."
     )

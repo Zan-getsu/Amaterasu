@@ -496,7 +496,7 @@ async def load_configurations():
 
     if await aiopath.exists("accounts.zip"):
         if await aiopath.exists("accounts"):
-            await rmtree("accounts")
+            await rmtree("accounts", ignore_errors=True)
         await (
             await create_subprocess_exec(
                 "7z", "x", "-o.", "-aoa", "accounts.zip", "accounts/*.json"

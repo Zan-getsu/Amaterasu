@@ -444,7 +444,17 @@ def get_bot_commands():
         for plugin_info in plugin_manager.list_plugins():
             if plugin_info.enabled and plugin_info.commands:
                 for cmd in plugin_info.commands:
-                    pass
+                    if any(
+                        cmd == existing
+                        or (isinstance(existing, list) and cmd in existing)
+                        for existing in commands.values()
+                    ):
+                        continue
+                    key = cmd.capitalize()
+                    if key not in commands:
+                        commands[key] = (
+                            plugin_info.description or f"Plugin command: {cmd}"
+                        )
 
     return commands
 
@@ -595,9 +605,10 @@ def get_help_string():
             help_lines.append(f"{cmd_str}: Auto-Rename a file based on your template, or set a new template.")
         elif key == "Sort":
             help_lines.append(f"{cmd_str}: Toggle sort mode. Send files, then run it again to resend them alphabetically by file name.")
+        elif key in BOT_COMMANDS:
+            help_lines.append(f"{cmd_str}: {BOT_COMMANDS[key]}")
 
     return "\n".join(help_lines)
 
 
 help_string = get_help_string()
-

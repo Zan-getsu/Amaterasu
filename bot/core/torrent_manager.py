@@ -51,6 +51,7 @@ async def _connect_aria2(retries=5, delay=2):
 async def _connect_qbittorrent(retries=30, delay=2):
     base_url = "http://localhost:8090/api/v2/"
     last_error = None
+    warn_after = min(10, retries - 1)
     for i in range(retries):
         try:
             timeout = ClientTimeout(total=5)
@@ -63,9 +64,14 @@ async def _connect_qbittorrent(retries=30, delay=2):
                     )
         except (ClientError, OSError, TimeoutError) as e:
             last_error = e
-        LOGGER.warning(
-            f"qBittorrent WebUI not ready, retrying ({i + 1}/{retries}): {last_error}"
+        message = (
+            f"qBittorrent WebUI not ready, retrying ({i + 1}/{retries}): "
+            f"{last_error}"
         )
+        if i >= warn_after:
+            LOGGER.warning(message)
+        else:
+            LOGGER.debug(message)
         if i == retries - 1:
             raise last_error
         await sleep(delay)

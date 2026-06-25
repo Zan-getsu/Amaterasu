@@ -76,7 +76,20 @@ class BotCommands:
             for plugin_info in plugin_manager.list_plugins():
                 if plugin_info.enabled and plugin_info.commands:
                     for cmd in plugin_info.commands:
-                        pass
+                        if any(
+                            cmd == existing
+                            or (isinstance(existing, list) and cmd in existing)
+                            for existing in commands.values()
+                        ):
+                            continue
+                        key = cmd.capitalize()
+                        if key not in commands:
+                            commands[key] = [cmd]
+                        elif isinstance(commands[key], list):
+                            if cmd not in commands[key]:
+                                commands[key].append(cmd)
+                        else:
+                            commands[key] = [commands[key], cmd]
         return commands
 
     @classmethod

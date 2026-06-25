@@ -64,7 +64,10 @@ async def speedtest_command(client: Client, message: Message):
             "<b>⚑ ERROR:</b> <i>Can't connect to Server at the Moment, Try Again Later!</i>",
         )
         return
-    speed_results.results.share()
+    try:
+        speed_results.results.share()
+    except Exception:
+        pass
     result = speed_results.results.dict()
     string_speed = f"""<b>❖ SPEEDTEST INFO</b>
 ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄

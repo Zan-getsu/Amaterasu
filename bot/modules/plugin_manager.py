@@ -23,6 +23,8 @@ async def get_plugins_menu(user_id: int, stype: str = "main"):
     if stype == "main":
         loaded_plugins = plugin_manager.list_plugins()
         available_plugins = plugin_manager.discover_plugins()
+        loaded_names = {p.name for p in loaded_plugins}
+        total_plugins = len(set(available_plugins) | loaded_names)
 
         buttons.data_button(
             "Loaded Plugins", f"plugins {user_id} loaded", position="header"
@@ -34,7 +36,7 @@ async def get_plugins_menu(user_id: int, stype: str = "main"):
         text = f"""<b>❖ PLUGIN MANAGEMENT</b>
 <code>┌─ {'Loaded Plugins':<17}: {len(loaded_plugins)}
 ├─ {'Available Plugins':<17}: {len(available_plugins)}
-└─ {'Total Plugins':<17}: {len(loaded_plugins) + len(available_plugins)}
+└─ {'Total Plugins':<17}: {total_plugins}
 </code>"""
 
         btns = buttons.build_menu(2)
@@ -125,6 +127,11 @@ async def get_plugins_menu(user_id: int, stype: str = "main"):
             buttons.data_button("↩ BACK", f"plugins {user_id} loaded", position="footer")
             btns = buttons.build_menu(1)
 
+    else:
+        text = f"❌ Unknown menu type: {stype}"
+        buttons.data_button("↩ BACK", f"plugins {user_id} main", position="footer")
+        btns = buttons.build_menu(1)
+
     return text, btns
 
 
@@ -147,6 +154,15 @@ async def edit_plugins_menu(client: Client, query):
     try:
         user_id = query.from_user.id
         data = query.data.split()
+
+        if len(data) < 3:
+            return await query.answer("Invalid data!", show_alert=True)
+
+        if (
+            data[2] in {"plugin", "load", "unload", "reload", "toggle"}
+            and len(data) < 4
+        ):
+            return await query.answer("Invalid data!", show_alert=True)
 
         if user_id != int(data[1]):
             return await query.answer("Not yours!", show_alert=True)
@@ -283,4 +299,3 @@ def register_plugin_commands():
     TgClient.bot.add_handler(
         CallbackQueryHandler(edit_plugins_menu, filters=regex("^plugins"))
     )
-
