@@ -16,6 +16,7 @@ RUN apt-get update && apt-get upgrade -y && \
     apt-get update && \
     apt-get install -y --no-install-recommends \
         bash \
+        ca-certificates \
         git \
         curl \
         wget \
@@ -54,19 +55,40 @@ RUN apt-get update && apt-get upgrade -y && \
         nodejs \
         default-jre-headless \
         openssh-client \
-    # Install MEGAcmd
-    && mkdir -p /etc/apt/keyrings \
-    && curl -fsSL https://mega.nz/linux/repo/Debian_12/Release.key | gpg --dearmor -o /etc/apt/keyrings/mega.nz.gpg \
-    && echo "deb [arch=amd64,arm64 signed-by=/etc/apt/keyrings/mega.nz.gpg] https://mega.nz/linux/repo/Debian_12/ ./" > /etc/apt/sources.list.d/mega.nz.list \
-    && apt-get update \
-    && apt-get install -y --no-install-recommends megacmd \
     && apt-get clean \
-    && rm -rf /var/lib/apt/lists/* \
-    && arch="$(dpkg --print-architecture)" \
-    && case "$arch" in amd64|arm64) cf_arch="$arch" ;; *) echo "Unsupported cloudflared arch: $arch" && exit 1 ;; esac \
-    && curl -fsSL "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-${cf_arch}" -o /usr/local/bin/cloudflared \
-    && chmod +x /usr/local/bin/cloudflared \
-    && curl -fsSL https://deno.land/install.sh | DENO_INSTALL=/usr/local sh
+    && rm -rf /var/lib/apt/lists/*
+
+# Install MEGAcmd. Keep this separate from the large base package layer because
+# mega.nz occasionally resets the key download connection during Docker builds.
+RUN set -eux; \
+    mkdir -p /etc/apt/keyrings; \
+    for attempt in 1 2 3 4 5; do \
+        curl -fsSL --retry 5 --retry-delay 5 --retry-all-errors \
+            https://mega.nz/linux/repo/Debian_12/Release.key \
+            -o /tmp/mega-release.key && test -s /tmp/mega-release.key && break; \
+        if [ "$attempt" = "5" ]; then exit 1; fi; \
+        sleep 5; \
+    done; \
+    gpg --dearmor -o /etc/apt/keyrings/mega.nz.gpg /tmp/mega-release.key; \
+    rm -f /tmp/mega-release.key; \
+    echo "deb [arch=amd64,arm64 signed-by=/etc/apt/keyrings/mega.nz.gpg] https://mega.nz/linux/repo/Debian_12/ ./" > /etc/apt/sources.list.d/mega.nz.list; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends megacmd; \
+    apt-get clean; \
+    rm -rf /var/lib/apt/lists/*
+
+RUN set -eux; \
+    arch="$(dpkg --print-architecture)"; \
+    case "$arch" in amd64|arm64) cf_arch="$arch" ;; *) echo "Unsupported cloudflared arch: $arch" && exit 1 ;; esac; \
+    curl -fsSL --retry 5 --retry-delay 5 --retry-all-errors \
+        "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-${cf_arch}" \
+        -o /usr/local/bin/cloudflared; \
+    chmod +x /usr/local/bin/cloudflared; \
+    curl -fsSL --retry 5 --retry-delay 5 --retry-all-errors \
+        https://deno.land/install.sh \
+        -o /tmp/deno-install.sh; \
+    DENO_INSTALL=/usr/local sh /tmp/deno-install.sh; \
+    rm -f /tmp/deno-install.sh
 
 # Debian Bookworm ships FFmpeg 5.1, which lacks the AV1 workflow support used
 # by this project.  Build the pinned FFmpeg 8.1.2 release instead of silently
