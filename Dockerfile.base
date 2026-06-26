@@ -224,6 +224,15 @@ RUN set -eux; \
 # -----------------------------------------------------------------------------
 # Pin the version here. If n8.0 does not exist on your build date, browse
 # https://github.com/FFmpeg/FFmpeg/tags and pick the latest n8.x tag.
+#
+# IMPORTANT — flags removed in FFmpeg 8.x:
+#   The following flags were valid in FFmpeg 6.x/7.x but are now INVALID:
+#     --enable-avcodec --enable-avformat --enable-avutil
+#     --enable-swresample --enable-swscale --enable-avfilter
+#     --enable-avdevice --enable-postproc --enable-network
+#   These libraries/features are now ALWAYS built (or auto-enabled); the
+#   --enable-* flags were removed and will cause configure to fail with
+#   "Unknown option". Only --disable-* variants remain valid.
 ARG FFMPEG_VERSION=n8.0
 RUN set -eux; \
     git clone --depth 1 --branch "${FFMPEG_VERSION}" \
@@ -239,15 +248,6 @@ RUN set -eux; \
         --enable-version3 \
         --enable-shared \
         --enable-pic \
-        --enable-avcodec \
-        --enable-avformat \
-        --enable-avutil \
-        --enable-swresample \
-        --enable-swscale \
-        --enable-avfilter \
-        --enable-avdevice \
-        --enable-postproc \
-        --enable-network \
         --enable-libaom \
         --enable-libdav1d \
         --enable-libsvtav1 \
