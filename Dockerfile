@@ -14,13 +14,9 @@ WORKDIR /usr/src/app
 # Create the virtual environment (was missing — uv can't install into a non-existent venv)
 RUN python3 -m venv /amaterasuvenv
 
-# Install uv + sabnzbd into the venv
-# sabnzbd is a Python package; the bot expects the binary name 'sabnzbdplus'
-# so we create a symlink after install.
-RUN /amaterasuvenv/bin/pip install --no-cache-dir uv sabnzbd
-
-# Create sabnzbdplus symlink (bot expects this binary name)
-RUN ln -sf /amaterasuvenv/bin/sabnzbd /usr/local/bin/sabnzbdplus
+# Install uv into the venv for fast package installation
+# (sabnzbdplus is installed via apt in the base image, not pip — it's not on PyPI)
+RUN /amaterasuvenv/bin/pip install --no-cache-dir uv
 
 # Install python dependencies using uv
 COPY requirements.txt .

@@ -9,7 +9,8 @@
 #  - AV1 stack:   SVT-AV1 + libaom + dav1d (all built from source)
 #  - Mega SDK:    official C++ SDK Python bindings compiled from source
 #  - megacmd:     installed from Mega's official Debian 12 apt repo
-#  - Download:    aria2, qbittorrent-nox, p7zip, rclone, cloudflared, java
+#  - Download:    aria2, qbittorrent-nox, sabnzbdplus, p7zip, rclone,
+#                 cloudflared, java, gunicorn
 #
 #  Why Debian 12 (Bookworm)?
 #    * Provides native arm64 megacmd package (Debian 11 does not).
@@ -66,14 +67,14 @@ RUN echo '/usr/local/lib' > /etc/ld.so.conf.d/local.conf && ldconfig
 #      is auto-disabled and libmega.so.70000 ends up with an undefined symbol
 #      that crashes _mega.so at runtime. See Block 7 comments for details.
 #
-#      NOTE: Download tools (aria2, qbittorrent-nox, p7zip-full, rclone,
-#      default-jre-headless, gunicorn) are installed here so the bot's
-#      setpkgs.sh startup script can find aria2c, qbittorrent-nox, 7z,
-#      rclone, java, and gunicorn at runtime. cloudflared is installed
+#      NOTE: Download tools (aria2, qbittorrent-nox, sabnzbdplus, p7zip-full,
+#      rclone, default-jre-headless, gunicorn) are installed here so the bot's
+#      setpkgs.sh startup script can find aria2c, qbittorrent-nox, sabnzbdplus,
+#      7z, rclone, java, and gunicorn at runtime. cloudflared is installed
 #      separately in Block 1b (it's not in Debian repos).
 # -----------------------------------------------------------------------------
 RUN set -eux; \
-    # --- 0. Enable contrib / non-free repos (for libfdk-aac-dev, libx265) ---
+    # --- 0. Enable contrib / non-free repos (for libfdk-aac-dev, libx265, sabnzbdplus) ---
     sed -i -E 's/^Components: main(\s|$)/Components: main contrib non-free non-free-firmware\1/' \
         /etc/apt/sources.list.d/debian.sources; \
     if [ -f /etc/apt/sources.list ]; then \
@@ -159,6 +160,7 @@ RUN set -eux; \
         rclone \
         default-jre-headless \
         gunicorn \
+        sabnzbdplus \
         bash \
         coreutils \
         findutils \
@@ -493,6 +495,7 @@ RUN set -eux; \
     echo "=== Download tools ==="; \
     which aria2c || echo "WARNING: aria2c not found"; \
     which qbittorrent-nox || echo "WARNING: qbittorrent-nox not found"; \
+    which sabnzbdplus || echo "WARNING: sabnzbdplus not found"; \
     which 7z || echo "WARNING: 7z not found"; \
     which rclone || echo "WARNING: rclone not found"; \
     which cloudflared || echo "WARNING: cloudflared not found"; \
