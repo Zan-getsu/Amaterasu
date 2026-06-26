@@ -10,13 +10,19 @@ name: Publish Amaterasu App Image
 #    * Final merge job stitches both into a single multi-arch manifest
 #      tagged :latest (plus :latest-sha-<short> for traceability).
 #
-#  Triggers (unchanged from original):
+#  Triggers:
 #    * workflow_run after "Publish Amaterasu Docker Image" completes successfully
-#    * Push to main/master that doesn't touch Dockerfile.base or this workflow
+#    * Push to main/master touching only app files (Dockerfile, requirements.txt,
+#      start.sh, bot/, config/) — NOT Dockerfile.base (that triggers base workflow)
 #    * Manual dispatch
 #
 #  Cache: cache-from only (no cache-to).
-#    See dockerhub-amaterasu.yml header for rationale.
+#    Both Docker Hub blob storage and GitHub Actions Cache (Azure-backed) have
+#    intermittent outages that cause cache EXPORT to fail, marking the build
+#    job as failed even though the image was already pushed. This blocks the
+#    merge job from running.
+#    Fix: keep cache-from (read-only, never fails — just skips if cache is
+#    empty), drop cache-to entirely.
 # =============================================================================
 
 on:
@@ -30,12 +36,15 @@ on:
     branches:
       - main
       - master
-    paths-ignore:
-      - Dockerfile.base
-      - Dockerfile.source-build
-      - .github/workflows/dockerhub-amaterasu.yml
-      - "*.md"
-      - LICENSE
+    paths:
+      - 'Dockerfile'
+      - 'requirements.txt'
+      - 'start.sh'
+      - 'qBittorrent.sh'
+      - 'aria.sh'
+      - '.github/workflows/dockerhub-app.yml'
+      - 'bot/**'
+      - 'config/**'
 
 permissions:
   contents: read
@@ -64,7 +73,13 @@ jobs:
             runner: ubuntu-24.04-arm
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
-    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    # Strict guard: skip app build if base workflow didn't succeed.
+    # workflow_run fires on ANY completion (success OR failure), so we must
+    # explicitly check the conclusion. For other triggers (push, dispatch),
+    # we assume the user knows the base is ready.
+    if: >-
+      github.event_name != 'workflow_run' ||
+      github.event.workflow_run.conclusion == 'success'
 
     steps:
       - name: Checkout repository
@@ -92,16 +107,20 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Wait for base image
+      - name: Wait for base image (with freshness check)
         env:
           BASE_IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:${{ env.BASE_TAG }}
         run: |
+          set -euo pipefail
           for attempt in $(seq 1 30); do
             if docker buildx imagetools inspect "$BASE_IMAGE" >/dev/null 2>&1; then
-              echo "Base image is available: $BASE_IMAGE"
+              echo "Base image tag exists: $BASE_IMAGE"
               # Verify this arch is present in the manifest
               if docker buildx imagetools inspect "$BASE_IMAGE" | grep -q "linux/${{ matrix.platform }}"; then
                 echo "linux/${{ matrix.platform }} entry found in base manifest"
+                # Print the manifest for the build log (helps diagnose stale tags)
+                echo "=== Base manifest contents ==="
+                docker buildx imagetools inspect "$BASE_IMAGE"
                 exit 0
               fi
               echo "Waiting for linux/${{ matrix.platform }} in base manifest ($attempt/30)..."
@@ -111,6 +130,8 @@ jobs:
             sleep 60
           done
           echo "::error::Base image or linux/${{ matrix.platform }} was not available after 30 minutes: $BASE_IMAGE"
+          echo "This usually means the base workflow's merge job failed."
+          echo "Check: https://github.com/${{ github.repository }}/actions/workflows/dockerhub-amaterasu.yml"
           exit 1
 
       - name: Build and push (by digest, no tag yet)
