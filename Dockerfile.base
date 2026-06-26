@@ -9,6 +9,7 @@
 #  - AV1 stack:   SVT-AV1 + libaom + dav1d (all built from source)
 #  - Mega SDK:    official C++ SDK Python bindings compiled from source
 #  - megacmd:     installed from Mega's official Debian 12 apt repo
+#  - Download:    aria2, qbittorrent-nox, p7zip, rclone, cloudflared, java
 #
 #  Why Debian 12 (Bookworm)?
 #    * Provides native arm64 megacmd package (Debian 11 does not).
@@ -64,8 +65,14 @@ RUN echo '/usr/local/lib' > /etc/ld.so.conf.d/local.conf && ldconfig
 #      it) is only compiled when FUSE is enabled. Without libfuse-dev, FUSE
 #      is auto-disabled and libmega.so.70000 ends up with an undefined symbol
 #      that crashes _mega.so at runtime. See Block 7 comments for details.
+#
+#      NOTE: Download tools (aria2, qbittorrent-nox, p7zip-full, rclone,
+#      cloudflared, default-jre-headless, gunicorn) are installed here so the
+#      bot's setpkgs.sh startup script can find aria2c, qbittorrent-nox, 7z,
+#      rclone, cloudflared, java, and gunicorn at runtime.
 # -----------------------------------------------------------------------------
 RUN set -eux; \
+    # --- 0. Enable contrib / non-free repos (for libfdk-aac-dev, libx265) ---
     sed -i -E 's/^Components: main(\s|$)/Components: main contrib non-free non-free-firmware\1/' \
         /etc/apt/sources.list.d/debian.sources; \
     if [ -f /etc/apt/sources.list ]; then \
@@ -74,6 +81,7 @@ RUN set -eux; \
     fi; \
     grep -E '^Components:.*non-free' /etc/apt/sources.list.d/debian.sources \
         || { echo "::error::Failed to enable non-free component"; exit 1; }; \
+    # --- 1. apt-get update with retry (max 3 attempts) ---
     apt_retry() { \
         for i in 1 2 3; do \
             if apt-get update; then return 0; fi; \
@@ -83,6 +91,7 @@ RUN set -eux; \
         return 1; \
     }; \
     apt_retry; \
+    # --- 2. Install all build deps + download tools ---
     apt-get install -y --no-install-recommends \
         build-essential \
         pkg-config \
@@ -143,6 +152,13 @@ RUN set -eux; \
         libvidstab-dev \
         libxvidcore-dev \
         libfuse-dev \
+        aria2 \
+        qbittorrent-nox \
+        p7zip-full \
+        rclone \
+        cloudflared \
+        default-jre-headless \
+        gunicorn \
         bash \
         coreutils \
         findutils \
@@ -391,6 +407,9 @@ RUN set -eux; \
             -e 's/--std=c++03/--std=c++17/g' \
             -e 's/--std=c++11/--std=c++17/g' \
             {} +; \
+    # Export compiler flags favouring C++17 + permissive warnings.
+    # (No longer need -Wno-register or auto_ptr workarounds — v7.0.0
+    # doesn't use either. Keep -fpermissive as belt-and-suspenders.)
     export CXXFLAGS="-std=c++17 -O2 -fPIC \
         -Wno-error=deprecated-declarations \
         -Wno-deprecated-declarations \
@@ -400,6 +419,10 @@ RUN set -eux; \
         -Wno-deprecated-declarations"; \
     export LDFLAGS="-L/usr/local/lib"; \
     export PKG_CONFIG_PATH="/usr/local/lib/pkgconfig:/usr/lib/pkgconfig"; \
+    #
+    # CRITICAL: build the core C++ library (libmega.so) BEFORE the Python
+    # bindings. setup.py only links against it; it does not compile it.
+    #
     ./autogen.sh; \
     ./configure \
         --prefix=/usr/local \
@@ -412,12 +435,19 @@ RUN set -eux; \
     make -j"$(nproc)"; \
     make install; \
     ldconfig; \
+    #
+    # Verify the versioned SONAME was installed correctly.
+    # (ld.so.conf.d was already set up in Block 0 — just refresh the cache.)
+    #
     ls -la /usr/local/lib/libmega.so* || { \
         echo "::error::libmega.so not found in /usr/local/lib after make install"; \
         echo "Searching system for libmega.so* to diagnose:"; \
         find / -name 'libmega.so*' 2>/dev/null | head -10; \
         exit 1; \
     }; \
+    #
+    # Now the Python wrapper can find ../../src/.libs/libmega.so.
+    #
     cd bindings/python; \
     pip install . ; \
     cd /; \
@@ -442,8 +472,17 @@ RUN set -eux; \
     python3 -c "from mega import MegaApi; print('Mega SDK Python: OK')"; \
     echo "=== megacmd CLI ==="; \
     (mega-version || mega-cmd-version || true); \
+    echo "=== Download tools ==="; \
+    which aria2c || echo "WARNING: aria2c not found"; \
+    which qbittorrent-nox || echo "WARNING: qbittorrent-nox not found"; \
+    which 7z || echo "WARNING: 7z not found"; \
+    which rclone || echo "WARNING: rclone not found"; \
+    which cloudflared || echo "WARNING: cloudflared not found"; \
+    which java || echo "WARNING: java not found"; \
+    which gunicorn || echo "WARNING: gunicorn not found"; \
     echo "=== ALL COMPONENTS VERIFIED ==="
 
 WORKDIR /app
 
+# Default shell — base image is meant to be inherited, not run directly.
 CMD ["bash"]
