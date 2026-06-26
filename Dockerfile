@@ -11,7 +11,7 @@ ENV LANG=C.UTF-8 \
 
 WORKDIR /usr/src/app
 
-# Create the virtual environment (was missing — uv can't install into a non-existent venv)
+# Create the virtual environment (was missing)
 RUN python3 -m venv /amaterasuvenv
 
 # Install uv into the venv for fast package installation
