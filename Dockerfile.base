@@ -98,9 +98,6 @@ RUN set -eux; \
     apt-get install -y --no-install-recommends \
         nasm \
         yasm \
-        cmake \
-        meson \
-        ninja-build \
         libass-dev \
         libfontconfig1-dev \
         libfreetype6-dev \
@@ -111,6 +108,7 @@ RUN set -eux; \
         libvorbis-dev \
         libvpx-dev \
         libwebp-dev; \
+    pip install --no-cache-dir meson ninja cmake; \
     git clone --depth 1 https://aomedia.googlesource.com/aom /tmp/aom; \
     mkdir -p /tmp/aom/aom_build && cd /tmp/aom/aom_build; \
     cmake -G "Unix Makefiles" -DCMAKE_INSTALL_PREFIX="/usr/local" -DENABLE_SHARED=off -DENABLE_NASM=on ..; \
