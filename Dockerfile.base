@@ -7,8 +7,10 @@ ENV LANG=en_US.UTF-8 \
     PYTHONDONTWRITEBYTECODE=1
 
 # 1. Update and install system dependencies
-RUN apt-get update && apt-get upgrade -y && \
+RUN sed -i 's/Components: main$/Components: main contrib non-free/g' /etc/apt/sources.list.d/debian.sources 2>/dev/null || true && \
+    sed -i 's/main$/main contrib non-free/g' /etc/apt/sources.list.d/debian.sources 2>/dev/null || true && \
     sed -i 's/main$/main contrib non-free/g' /etc/apt/sources.list 2>/dev/null || true && \
+    apt-get update && apt-get upgrade -y && \
     apt-get update && \
     apt-get install -y --no-install-recommends \
         bash \
