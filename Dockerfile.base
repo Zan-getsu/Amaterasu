@@ -1,6 +1,6 @@
-FROM python:3.11-slim-bookworm
+FROM python:3.11-slim-bullseye
 
-ENV LANG=C.UTF-8 \
+ENV LANG=en_US.UTF-8 \
     DEBIAN_FRONTEND=noninteractive \
     TZ=Asia/Dhaka \
     PYTHONUNBUFFERED=1 \
@@ -8,8 +8,6 @@ ENV LANG=C.UTF-8 \
 
 # 1. Update and install system dependencies
 RUN apt-get update && apt-get upgrade -y && \
-    # Add non-free repo for unrar (debian bullseye/bookworm)
-    sed -i 's/main$/main contrib non-free/g' /etc/apt/sources.list.d/debian.sources 2>/dev/null || true && \
     sed -i 's/main$/main contrib non-free/g' /etc/apt/sources.list 2>/dev/null || true && \
     apt-get update && \
     apt-get install -y --no-install-recommends \
@@ -68,7 +66,7 @@ RUN set -eux; \
     done; \
     gpg --dearmor -o /etc/apt/keyrings/mega.nz.gpg /tmp/mega-release.key; \
     rm -f /tmp/mega-release.key; \
-    echo "deb [arch=amd64,arm64 signed-by=/etc/apt/keyrings/mega.nz.gpg] https://mega.nz/linux/repo/Debian_12/ ./" > /etc/apt/sources.list.d/mega.nz.list; \
+    echo "deb [arch=amd64,arm64 signed-by=/etc/apt/keyrings/mega.nz.gpg] https://mega.nz/linux/repo/Debian_11/ ./" > /etc/apt/sources.list.d/mega.nz.list; \
     apt-get update; \
     apt-get install -y --no-install-recommends megacmd; \
     apt-get clean; \
@@ -99,9 +97,9 @@ RUN set -eux; \
         nasm \
         yasm \
         cmake \
-        libaom-dev \
+        meson \
+        ninja-build \
         libass-dev \
-        libdav1d-dev \
         libfontconfig1-dev \
         libfreetype6-dev \
         libmp3lame-dev \
@@ -110,8 +108,17 @@ RUN set -eux; \
         libx265-dev \
         libvorbis-dev \
         libvpx-dev \
-        libwebp-dev \
-        libzimg-dev; \
+        libwebp-dev; \
+    git clone --depth 1 https://aomedia.googlesource.com/aom /tmp/aom; \
+    mkdir -p /tmp/aom/aom_build && cd /tmp/aom/aom_build; \
+    cmake -G "Unix Makefiles" -DCMAKE_INSTALL_PREFIX="/usr/local" -DENABLE_SHARED=off -DENABLE_NASM=on ..; \
+    make -j4; \
+    make install; \
+    git clone --depth 1 https://code.videolan.org/videolan/dav1d.git /tmp/dav1d; \
+    mkdir -p /tmp/dav1d/build && cd /tmp/dav1d/build; \
+    meson setup --buildtype release --default-library static --prefix "/usr/local" ..; \
+    ninja; \
+    ninja install; \
     git clone --depth 1 https://github.com/nekotrix/SVT-AV1-Essential.git /tmp/svt-av1; \
     cd /tmp/svt-av1/Build; \
     cmake .. -G"Unix Makefiles" -DCMAKE_BUILD_TYPE=Release; \
@@ -122,7 +129,7 @@ RUN set -eux; \
     curl -fsSLO "https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VERSION}.tar.xz"; \
     tar -xJf "ffmpeg-${FFMPEG_VERSION}.tar.xz"; \
     cd "ffmpeg-${FFMPEG_VERSION}"; \
-    PKG_CONFIG_PATH="/usr/local/lib/pkgconfig:/usr/local/lib64/pkgconfig" ./configure \
+    PKG_CONFIG_PATH="/usr/local/lib/pkgconfig:/usr/local/lib/x86_64-linux-gnu/pkgconfig:/usr/local/lib64/pkgconfig" ./configure \
         --prefix=/usr/local \
         --enable-gpl \
         --enable-version3 \
@@ -139,7 +146,6 @@ RUN set -eux; \
         --enable-libwebp \
         --enable-libx264 \
         --enable-libx265 \
-        --enable-libzimg \
         --disable-debug \
         --disable-doc; \
     make -j4; \
@@ -147,6 +153,8 @@ RUN set -eux; \
     ldconfig; \
     cd /; \
     rm -rf /tmp/svt-av1 \
+           /tmp/aom \
+           /tmp/dav1d \
            "ffmpeg-${FFMPEG_VERSION}" \
            "ffmpeg-${FFMPEG_VERSION}.tar.xz"; \
     apt-get clean; \
@@ -161,8 +169,6 @@ RUN set -eux; \
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         libsodium-dev \
-        gcc-11 \
-        g++-11 \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
@@ -172,7 +178,6 @@ RUN set -eux; \
     cd /tmp/mega-sdk; \
     ./autogen.sh; \
     sed -i 's/-std=c++11/-std=c++14/g' configure; \
-    export CC=gcc-11 CXX=g++-11 CXXFLAGS="-g -O2 -std=c++14"; \
     ./configure \
         --disable-silent-rules \
         --enable-python \
