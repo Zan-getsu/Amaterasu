@@ -383,6 +383,8 @@ RUN set -eux; \
         --without-libraw \
         --without-readline; \
     make -j"$(nproc)"; \
+    make install; \
+    ldconfig; \
     #
     # Now the Python wrapper can find ../../src/.libs/libmega.so.
     #
