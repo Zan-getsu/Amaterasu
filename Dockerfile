@@ -11,9 +11,15 @@ ENV LANG=C.UTF-8 \
 
 WORKDIR /usr/src/app
 
-# Install python dependencies using uv for speed
+# Create the virtual environment (was missing — uv can't install into a non-existent venv)
+RUN python3 -m venv /amaterasuvenv
+
+# Install uv into the venv for fast package installation
+RUN /amaterasuvenv/bin/pip install --no-cache-dir uv
+
+# Install python dependencies using uv
 COPY requirements.txt .
-RUN uv pip install --python /amaterasuvenv/bin/python --no-cache-dir -r requirements.txt
+RUN /amaterasuvenv/bin/uv pip install --python /amaterasuvenv/bin/python --no-cache-dir -r requirements.txt
 
 # Copy all the project files
 COPY . .

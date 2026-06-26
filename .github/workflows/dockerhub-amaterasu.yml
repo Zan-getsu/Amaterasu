@@ -15,22 +15,28 @@ name: Publish Amaterasu Docker Image
 #    * ARM runners are GA and free for PUBLIC repositories.
 #      For PRIVATE repos they bill at standard Linux runner rates.
 #
-#  Triggers (unchanged from original):
+#  Triggers:
 #    * Push to main/master touching Dockerfile.base or this workflow
-#    * Manual dispatch via Actions tab
+#    * Manual dispatch (with optional "Bust cache" checkbox for clean rebuild)
 #
 #  Cache: cache-from only (no cache-to).
-#    Both Docker Hub's blob storage API and GitHub Actions Cache (Azure-backed)
-#    have intermittent outages that cause cache EXPORT to fail, marking the
-#    build job as failed even though the image was already pushed. This blocks
-#    the merge job from running.
+#    Both Docker Hub blob storage and GitHub Actions Cache (Azure-backed) have
+#    intermittent outages that cause cache EXPORT to fail, marking the build
+#    job as failed even though the image was already pushed. This blocks the
+#    merge job from running.
 #    Fix: keep cache-from (read-only, never fails — just skips if cache is
-#    empty), drop cache-to entirely. Rebuilds are slower (~20 min vs ~5-10 min
-#    with warm cache) but the build NEVER fails on cache operations.
+#    empty), drop cache-to entirely.
+#    Use the "Bust cache" checkbox on manual dispatch to force a full
+#    rebuild when stale cache layers produce a broken image.
 # =============================================================================
 
 on:
   workflow_dispatch:
+    inputs:
+      no_cache:
+        description: 'Bust cache (rebuild everything from scratch, ignoring GHA cache)'
+        type: boolean
+        default: false
   push:
     branches:
       - main
@@ -108,6 +114,11 @@ jobs:
           cache-from: |
             type=gha,scope=base-${{ matrix.platform }}
           provenance: false
+          # no-cache: when true (manual dispatch with "Bust cache" checkbox),
+          # forces a complete rebuild from scratch. Use this when you suspect
+          # stale cache layers are producing a broken image (e.g. size is
+          # much smaller than expected).
+          no-cache: ${{ inputs.no_cache || false }}
 
       - name: Export digest to file
         run: |
@@ -133,6 +144,7 @@ jobs:
             echo "- Digest: \`${{ steps.build.outputs.digest }}\`"
             echo "- Runner: \`${{ matrix.runner }}\` (native — no QEMU)"
             echo "- Cache scope: \`base-${{ matrix.platform }}\`"
+            echo "- No-cache: \`${{ inputs.no_cache || false }}\`"
           } >> "$GITHUB_STEP_SUMMARY"
 
   # ---------------------------------------------------------------------------
