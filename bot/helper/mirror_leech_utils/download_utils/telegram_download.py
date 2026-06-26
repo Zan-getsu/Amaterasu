@@ -105,6 +105,7 @@ class TelegramDownloadHelper:
                 # (failed offsets or size mismatch). Fall back to standard
                 # Pyrogram download instead of uploading a corrupt file.
                 if download is None and not self._listener.is_cancelled:
+                    self._hyper_dl = False
                     LOGGER.info(
                         "HypertgDL returned incomplete download; falling back "
                         "to standard Pyrogram download (slower but reliable)"

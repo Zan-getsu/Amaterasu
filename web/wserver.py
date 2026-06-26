@@ -1,17 +1,19 @@
-from asyncio import sleep
 import re
+from asyncio import sleep
+from contextlib import asynccontextmanager, suppress
+from hashlib import sha256
 from importlib import import_module
+from logging import FileHandler, StreamHandler, basicConfig, getLogger, INFO, WARNING
 from os import environ
+from pathlib import Path
 from re import compile as re_compile
 from urllib.parse import quote, urlparse
-from contextlib import asynccontextmanager, suppress
-from logging import INFO, WARNING, FileHandler, StreamHandler, basicConfig, getLogger
 
 from aioaria2 import Aria2HttpClient
 from aiohttp.client_exceptions import ClientError
 from aioqbt.client import create_client
 from fastapi import FastAPI, Request, HTTPException
-from fastapi.responses import HTMLResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 from sabnzbdapi import SabnzbdClient
@@ -974,6 +976,7 @@ async def qbittorrent_proxy(path: str = "", request: Request = None):
 # FileToLink dynamic load-balanced streaming endpoints
 CHUNK_SIZE = 1024 * 1024
 MAX_CONCURRENT_PER_CLIENT = 8
+FILETOLINK_CACHE_DIR = environ.get("FILETOLINK_CACHE_DIR", "/tmp/amaterasu-filetolink")
 VALID_DISPOSITIONS = {"inline", "attachment"}
 RANGE_REGEX = re.compile(r"^bytes=(?P<start>\d*)-(?P<end>\d*)$")
 CORS_HEADERS = {
@@ -982,6 +985,28 @@ CORS_HEADERS = {
     "Access-Control-Allow-Headers": "Range, Content-Type, *",
     "Access-Control-Expose-Headers": "Content-Length, Content-Range, Content-Disposition",
 }
+_filetolink_cache_locks = {}
+
+
+def _resolve_cache_max_bytes() -> int:
+    try:
+        cache_max_mb = int(environ.get("FILETOLINK_CACHE_MAX_MB", "256"))
+    except (TypeError, ValueError):
+        cache_max_mb = 256
+    return max(cache_max_mb, 0) * 1024 * 1024
+
+
+FILETOLINK_CACHE_MAX_BYTES = _resolve_cache_max_bytes()
+
+
+def _release_stream_load(client_id: int) -> None:
+    from bot.core.tg_client import TgClient
+
+    TgClient.stream_loads[client_id] = max(
+        TgClient.stream_loads.get(client_id, 1) - 1,
+        0,
+    )
+
 
 def select_optimal_client() -> tuple[int, any]:
     from bot.core.tg_client import TgClient
@@ -1203,6 +1228,124 @@ def _parse_range_header(range_header: str | None, file_size: int) -> tuple[int, 
     return start, end, not (start == 0 and end == file_size - 1)
 
 
+def _cache_path_for_media(chat_id, message_id: int, unique_id: str, filename: str) -> Path:
+    cache_key = sha256(
+        f"{chat_id}:{message_id}:{unique_id}:{filename}".encode(
+            "utf-8",
+            errors="replace",
+        )
+    ).hexdigest()
+    ext = ""
+    if "." in filename:
+        suffix = filename.rsplit(".", 1)[-1].lower()
+        if re.fullmatch(r"[a-z0-9]{1,12}", suffix):
+            ext = f".{suffix}"
+    return Path(FILETOLINK_CACHE_DIR) / f"{cache_key}{ext}"
+
+
+async def _get_cached_media(
+    preferred_client_id: int,
+    preferred_client,
+    message,
+    chat_id,
+    message_id: int,
+    unique_id: str,
+    filename: str,
+    file_size: int,
+) -> Path | None:
+    if file_size <= 0 or file_size > FILETOLINK_CACHE_MAX_BYTES:
+        return None
+
+    import asyncio
+    from pyrogram.errors import FloodWait
+    from bot.core.tg_client import TgClient
+
+    cache_path = _cache_path_for_media(chat_id, message_id, unique_id, filename)
+    if cache_path.exists() and cache_path.stat().st_size == file_size:
+        return cache_path
+    if cache_path.exists():
+        with suppress(FileNotFoundError):
+            cache_path.unlink()
+
+    try:
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+    except Exception as e:
+        LOGGER.warning(f"FileToLink cache disabled; cannot create cache dir: {e}")
+        return None
+    lock_key = cache_path.stem
+    lock = _filetolink_cache_locks.setdefault(lock_key, asyncio.Lock())
+
+    async with lock:
+        if cache_path.exists() and cache_path.stat().st_size == file_size:
+            return cache_path
+        if cache_path.exists():
+            with suppress(FileNotFoundError):
+                cache_path.unlink()
+
+        temp_path = cache_path.with_suffix(f"{cache_path.suffix}.part")
+        with suppress(FileNotFoundError):
+            temp_path.unlink()
+
+        client_choices = [(preferred_client_id, preferred_client)]
+        client_choices.extend(
+            (cid, client)
+            for cid, client in TgClient.stream_clients.items()
+            if cid != preferred_client_id
+        )
+
+        for cache_client_id, cache_client in client_choices:
+            extra_load = cache_client_id != preferred_client_id
+            downloaded_path = temp_path
+            if extra_load:
+                TgClient.stream_loads[cache_client_id] = (
+                    TgClient.stream_loads.get(cache_client_id, 0) + 1
+                )
+            try:
+                cache_message = message
+                if cache_client_id != preferred_client_id:
+                    cache_message = await get_message(cache_client, chat_id, message_id)
+                downloaded = await cache_client.download_media(
+                    cache_message,
+                    file_name=str(temp_path),
+                )
+                downloaded_path = Path(downloaded) if downloaded else temp_path
+                if not downloaded_path.exists():
+                    raise RuntimeError("download_media returned no file")
+                downloaded_size = downloaded_path.stat().st_size
+                if downloaded_size <= 0:
+                    raise RuntimeError("downloaded file is empty")
+                if downloaded_size != file_size:
+                    raise RuntimeError(
+                        f"downloaded file is incomplete ({downloaded_size}/{file_size})"
+                    )
+                downloaded_path.replace(cache_path)
+                LOGGER.info(
+                    f"FileToLink cache ready: {filename} | client={cache_client_id} "
+                    f"| size={cache_path.stat().st_size}"
+                )
+                return cache_path
+            except FloodWait as e:
+                await asyncio.sleep(e.value)
+            except Exception as e:
+                LOGGER.warning(
+                    f"FileToLink cache failed for {filename} with client="
+                    f"{cache_client_id}: {e}"
+                )
+                with suppress(FileNotFoundError):
+                    temp_path.unlink()
+                if downloaded_path != temp_path:
+                    with suppress(FileNotFoundError):
+                        downloaded_path.unlink()
+            finally:
+                if extra_load:
+                    TgClient.stream_loads[cache_client_id] = max(
+                        TgClient.stream_loads.get(cache_client_id, 1) - 1,
+                        0,
+                    )
+
+    return None
+
+
 @app.options("/watch/{path:path}")
 @app.options("/stream/{path:path}")
 @app.options("/dl/{path:path}")
@@ -1271,7 +1414,7 @@ async def watch_media(chat_id: str, message_id: int, request: Request, filename:
             "subtitles": subtitles,
         })
     finally:
-        TgClient.stream_loads[client_id] -= 1
+        _release_stream_load(client_id)
 
 
 @app.api_route("/stream/{token}", methods=["GET", "HEAD"])
@@ -1364,8 +1507,45 @@ async def stream_media(chat_id: str, message_id: int, request: Request, filename
             
         if request.method == "HEAD":
             headers["Content-Length"] = str(content_length)
-            TgClient.stream_loads[client_id] -= 1
-            return Response(status_code=206 if ranged_response else 200, headers=headers)
+            response = Response(
+                status_code=206 if ranged_response else 200,
+                headers=headers,
+            )
+            _release_stream_load(client_id)
+            return response
+
+        cached_path = await _get_cached_media(
+            client_id,
+            client,
+            message,
+            chat_id,
+            message_id,
+            unique_id,
+            filename,
+            file_size,
+        )
+        if cached_path:
+            file_headers = {
+                key: value
+                for key, value in headers.items()
+                if key.lower()
+                not in {
+                    "accept-ranges",
+                    "content-disposition",
+                    "content-length",
+                    "content-range",
+                    "content-type",
+                }
+            }
+            response = FileResponse(
+                cached_path,
+                media_type=mime_type,
+                filename=filename,
+                content_disposition_type=disposition,
+                headers=file_headers,
+            )
+            _release_stream_load(client_id)
+            return response
             
         async def stream_generator():
             try:
@@ -1442,7 +1622,7 @@ async def stream_media(chat_id: str, message_id: int, request: Request, filename
                             return
                         raise HTTPException(status_code=404, detail="Failed to stream media") from e
             finally:
-                TgClient.stream_loads[client_id] -= 1
+                _release_stream_load(client_id)
                 
         # Do not send Content-Length for live Telegram streams. If Telegram
         # times out mid-transfer, chunked streaming can end cleanly instead
@@ -1454,7 +1634,7 @@ async def stream_media(chat_id: str, message_id: int, request: Request, filename
         )
         
     except Exception as e:
-        TgClient.stream_loads[client_id] -= 1
+        _release_stream_load(client_id)
         raise e
 
 
