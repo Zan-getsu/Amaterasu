@@ -233,6 +233,18 @@ RUN set -eux; \
 #   These libraries/features are now ALWAYS built (or auto-enabled); the
 #   --enable-* flags were removed and will cause configure to fail with
 #   "Unknown option". Only --disable-* variants remain valid.
+#
+# IMPORTANT — also removed (caused configure failures):
+#   * --pkg-config-flags="--static"
+#       This is a static-build flag that tells pkg-config to require all
+#       transitive static deps. Wrong for shared builds (we use
+#       --enable-shared); caused spurious "libX not found" errors.
+#   * --enable-librist
+#       RIST (Reliable Internet Stream Transport) is a niche UDP streaming
+#       protocol. The bot doesn't use it (zero references in codebase).
+#       Debian 12 ships librist 0.2.7+dfsg-1, but the "+dfsg" suffix
+#       confuses pkg-config's version comparison, causing FFmpeg's
+#       "librist >= 0.2.7 not found" check to fail. Easiest fix: drop it.
 ARG FFMPEG_VERSION=n8.0
 RUN set -eux; \
     git clone --depth 1 --branch "${FFMPEG_VERSION}" \
@@ -240,7 +252,6 @@ RUN set -eux; \
     cd /tmp/ffmpeg; \
     ./configure \
         --prefix=/usr/local \
-        --pkg-config-flags="--static" \
         --extra-cflags="-I/usr/local/include" \
         --extra-ldflags="-L/usr/local/lib" \
         --enable-gpl \
@@ -264,7 +275,6 @@ RUN set -eux; \
         --enable-libfreetype \
         --enable-libfontconfig \
         --enable-libopenmpt \
-        --enable-librist \
         --enable-librsvg \
         --enable-libsoxr \
         --enable-libvidstab \
