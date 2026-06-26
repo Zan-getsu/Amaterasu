@@ -36,6 +36,13 @@ ENV PIP_DISABLE_PIP_VERSION_CHECK=1
 ENV PIP_NO_CACHE_DIR=1
 
 # -----------------------------------------------------------------------------
+# 0. Fix dynamic linker path for slim images
+#    slim images strip /usr/local/lib from ld.so.conf.d/. We must restore it
+#    so that SVT-AV1, libaom, dav1d, FFmpeg, and Mega SDK can be found at runtime.
+# -----------------------------------------------------------------------------
+RUN echo '/usr/local/lib' > /etc/ld.so.conf.d/local.conf && ldconfig
+
+# -----------------------------------------------------------------------------
 # 0+1. Enable contrib/non-free repos AND install all build deps in ONE atomic
 #      RUN block. Combining these prevents a class of bugs where:
 #        * BuildKit caches the pre-sed debian.sources, then runs apt-get update
@@ -316,6 +323,14 @@ RUN set -eux; \
 #    autotools build (./autogen.sh && ./configure && make) has been run in
 #    the SDK root. Skipping the autotools steps causes pip install to fail
 #    at the SWIG link step with `cannot find -lmega`.
+#
+#    SONAME / RUNTIME LINKING:
+#    libtool embeds the versioned SONAME 'libmega.so.70000' into _mega.so's
+#    DT_NEEDED entry (where 70000 = 7*10000+0*100+0 from version.h).
+#    python:3.11-slim-bookworm does NOT include /usr/local/lib in its
+#    default ld.so search path, so we must add it via /etc/ld.so.conf.d/
+#    before ldconfig — otherwise the runtime ImportError:
+#        libmega.so.70000: cannot open shared object file
 # -----------------------------------------------------------------------------
 ARG MEGA_SDK_VERSION=v7.0.0
 
@@ -386,6 +401,14 @@ RUN set -eux; \
     make install; \
     ldconfig; \
     #
+    # Verify the versioned SONAME was installed correctly.
+    # (ld.so.conf.d was already set up in Block 0 — just refresh the cache.)
+    #
+    ls -la /usr/local/lib/libmega.so* || { \
+        echo "::error::libmega.so not found in /usr/local/lib after make install"; \
+        exit 1; \
+    }; \
+    #
     # Now the Python wrapper can find ../../src/.libs/libmega.so.
     #
     cd bindings/python; \
@@ -404,6 +427,10 @@ RUN set -eux; \
     ffmpeg -hide_banner -encoders | grep -E 'av1|libaom|libsvtav1' || true; \
     echo "=== FFmpeg AV1 decoders ==="; \
     ffmpeg -hide_banner -decoders | grep -E 'av1|dav1d' || true; \
+    echo "=== libmega.so files in /usr/local/lib ==="; \
+    ls -la /usr/local/lib/libmega.so* 2>/dev/null || echo "WARNING: no libmega.so in /usr/local/lib"; \
+    echo "=== ldconfig cache (libmega entries) ==="; \
+    ldconfig -p | grep libmega || echo "WARNING: libmega not in ldconfig cache"; \
     echo "=== Mega SDK Python binding ==="; \
     python3 -c "from mega import MegaApi; print('Mega SDK Python: OK')"; \
     echo "=== megacmd CLI ==="; \
