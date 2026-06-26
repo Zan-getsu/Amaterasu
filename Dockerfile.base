@@ -159,7 +159,10 @@ RUN set -eux; \
 
 # 6. Compile MEGA SDK Python bindings
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends libsodium-dev \
+    && apt-get install -y --no-install-recommends \
+        libsodium-dev \
+        gcc-11 \
+        g++-11 \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
@@ -169,7 +172,7 @@ RUN set -eux; \
     cd /tmp/mega-sdk; \
     ./autogen.sh; \
     sed -i 's/-std=c++11/-std=c++14/g' configure; \
-    CXXFLAGS="-g -O2 -std=c++14 -fpermissive" ./configure \
+    CC=gcc-11 CXX=g++-11 CXXFLAGS="-g -O2 -std=c++14" ./configure \
         --disable-silent-rules \
         --enable-python \
         --disable-examples \
