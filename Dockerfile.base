@@ -67,9 +67,10 @@ RUN echo '/usr/local/lib' > /etc/ld.so.conf.d/local.conf && ldconfig
 #      that crashes _mega.so at runtime. See Block 7 comments for details.
 #
 #      NOTE: Download tools (aria2, qbittorrent-nox, p7zip-full, rclone,
-#      cloudflared, default-jre-headless, gunicorn) are installed here so the
-#      bot's setpkgs.sh startup script can find aria2c, qbittorrent-nox, 7z,
-#      rclone, cloudflared, java, and gunicorn at runtime.
+#      default-jre-headless, gunicorn) are installed here so the bot's
+#      setpkgs.sh startup script can find aria2c, qbittorrent-nox, 7z,
+#      rclone, java, and gunicorn at runtime. cloudflared is installed
+#      separately in Block 1b (it's not in Debian repos).
 # -----------------------------------------------------------------------------
 RUN set -eux; \
     # --- 0. Enable contrib / non-free repos (for libfdk-aac-dev, libx265) ---
@@ -156,7 +157,6 @@ RUN set -eux; \
         qbittorrent-nox \
         p7zip-full \
         rclone \
-        cloudflared \
         default-jre-headless \
         gunicorn \
         bash \
@@ -167,6 +167,24 @@ RUN set -eux; \
         gawk \
     ; \
     rm -rf /var/lib/apt/lists/*
+
+# -----------------------------------------------------------------------------
+# 1b. cloudflared — installed via direct binary download (NOT in Debian repos)
+#     Cloudflare distributes cloudflared via GitHub releases, not apt.
+#     We download the static binary for the correct architecture.
+#     Releases: https://github.com/cloudflare/cloudflared/releases
+# -----------------------------------------------------------------------------
+RUN set -eux; \
+    arch="$(dpkg --print-architecture)"; \
+    case "$arch" in \
+        amd64)  cf_arch="amd64"  ;; \
+        arm64)  cf_arch="arm64"  ;; \
+        *) echo "::error::Unsupported arch for cloudflared: $arch"; exit 1 ;; \
+    esac; \
+    curl -fsSL "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-${cf_arch}" \
+        -o /usr/local/bin/cloudflared; \
+    chmod +x /usr/local/bin/cloudflared; \
+    cloudflared --version
 
 # -----------------------------------------------------------------------------
 # 2. megacmd CLI from Mega's official Debian 12 repo
