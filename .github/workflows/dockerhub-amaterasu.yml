@@ -18,6 +18,12 @@ name: Publish Amaterasu Docker Image
 #  Triggers (unchanged from original):
 #    * Push to main/master touching Dockerfile.base or this workflow
 #    * Manual dispatch via Actions tab
+#
+#  Cache: GHA-only (no registry cache).
+#    Docker Hub's blob storage API has intermittent 400 outages that cause
+#    registry cache export to fail, marking the build job as failed even
+#    though the image was already pushed. GHA cache is reliable, free,
+#    and 10GB is sufficient for this build.
 # =============================================================================
 
 on:
@@ -98,10 +104,8 @@ jobs:
             type=image,name=docker.io/${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=true
           cache-from: |
             type=gha,scope=base-${{ matrix.platform }}
-            type=registry,ref=docker.io/${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:cache-${{ matrix.platform }}
           cache-to: |
             type=gha,mode=max,scope=base-${{ matrix.platform }}
-            type=registry,ref=docker.io/${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:cache-${{ matrix.platform }},mode=max
           provenance: false
 
       - name: Export digest to file

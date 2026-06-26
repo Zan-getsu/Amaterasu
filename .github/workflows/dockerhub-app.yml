@@ -14,6 +14,9 @@ name: Publish Amaterasu App Image
 #    * workflow_run after "Publish Amaterasu Docker Image" completes successfully
 #    * Push to main/master that doesn't touch Dockerfile.base or this workflow
 #    * Manual dispatch
+#
+#  Cache: GHA-only (no registry cache).
+#    See dockerhub-amaterasu.yml header for rationale.
 # =============================================================================
 
 on:
@@ -123,10 +126,8 @@ jobs:
             type=image,name=docker.io/${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=true
           cache-from: |
             type=gha,scope=app-${{ matrix.platform }}
-            type=registry,ref=docker.io/${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:app-cache-${{ matrix.platform }}
           cache-to: |
             type=gha,mode=max,scope=app-${{ matrix.platform }}
-            type=registry,ref=docker.io/${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:app-cache-${{ matrix.platform }},mode=max
           provenance: false
 
       - name: Export digest to file
