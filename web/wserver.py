@@ -1370,51 +1370,83 @@ async def stream_media(chat_id: str, message_id: int, request: Request, filename
         async def stream_generator():
             try:
                 bytes_sent = 0
-                bytes_to_skip = start % CHUNK_SIZE
-                chunk_offset = start // CHUNK_SIZE
-                chunk_limit = ((content_length + CHUNK_SIZE - 1) // CHUNK_SIZE) + 1
                 
                 import asyncio
                 from pyrogram.errors import FloodWait
                 
                 started_stream = False
-                media_generator = None
-                while True:
+                retries_left = 3
+
+                while bytes_sent < content_length:
+                    absolute_pos = start + bytes_sent
+                    bytes_to_skip = absolute_pos % CHUNK_SIZE
+                    chunk_offset = absolute_pos // CHUNK_SIZE
+                    remaining_total = content_length - bytes_sent
+                    chunk_limit = (
+                        (remaining_total + bytes_to_skip + CHUNK_SIZE - 1)
+                        // CHUNK_SIZE
+                    ) + 1
+
                     try:
                         media_generator = client.stream_media(
                             message, offset=chunk_offset, limit=chunk_limit
                         )
-                        break
+
+                        async for chunk in media_generator:
+                            started_stream = True
+                            retries_left = 3
+                            if bytes_to_skip > 0:
+                                if len(chunk) <= bytes_to_skip:
+                                    bytes_to_skip -= len(chunk)
+                                    continue
+                                chunk = chunk[bytes_to_skip:]
+                                bytes_to_skip = 0
+                                
+                            remaining = content_length - bytes_sent
+                            if len(chunk) > remaining:
+                                chunk = chunk[:remaining]
+                                
+                            if chunk:
+                                yield chunk
+                                bytes_sent += len(chunk)
+                                
+                            if bytes_sent >= content_length:
+                                break
                     except FloodWait as e:
                         await asyncio.sleep(e.value)
+                    except TimeoutError as e:
+                        if retries_left <= 0:
+                            LOGGER.warning(
+                                f"Telegram stream timed out for {filename} after "
+                                f"{bytes_sent}/{content_length} bytes: {e}"
+                            )
+                            return
+                        retries_left -= 1
+                        await asyncio.sleep(2)
                     except Exception as e:
-                        if started_stream:
-                            raise
-                        raise HTTPException(status_code=404, detail="Failed to stream media") from e
-                
-                async for chunk in media_generator:
-                    started_stream = True
-                    if bytes_to_skip > 0:
-                        if len(chunk) <= bytes_to_skip:
-                            bytes_to_skip -= len(chunk)
+                        if e.__class__.__name__ == "TimeoutError":
+                            if retries_left <= 0:
+                                LOGGER.warning(
+                                    f"Telegram stream timed out for {filename} after "
+                                    f"{bytes_sent}/{content_length} bytes: {e}"
+                                )
+                                return
+                            retries_left -= 1
+                            await asyncio.sleep(2)
                             continue
-                        chunk = chunk[bytes_to_skip:]
-                        bytes_to_skip = 0
-                        
-                    remaining = content_length - bytes_sent
-                    if len(chunk) > remaining:
-                        chunk = chunk[:remaining]
-                        
-                    if chunk:
-                        yield chunk
-                        bytes_sent += len(chunk)
-                        
-                    if bytes_sent >= content_length:
-                        break
+                        if started_stream:
+                            LOGGER.warning(
+                                f"Telegram stream interrupted for {filename} after "
+                                f"{bytes_sent}/{content_length} bytes: {e}"
+                            )
+                            return
+                        raise HTTPException(status_code=404, detail="Failed to stream media") from e
             finally:
                 TgClient.stream_loads[client_id] -= 1
                 
-        headers["Content-Length"] = str(content_length)
+        # Do not send Content-Length for live Telegram streams. If Telegram
+        # times out mid-transfer, chunked streaming can end cleanly instead
+        # of tripping h11's "Too little data for declared Content-Length".
         return StreamingResponse(
             stream_generator(),
             status_code=206 if ranged_response else 200,
