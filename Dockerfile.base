@@ -45,21 +45,20 @@ ENV PIP_NO_CACHE_DIR=1
 #
 #      The retry loop on apt-get update handles transient mirror failures
 #      (Debian mirrors occasionally return 503 or stale hashes during sync).
+#
+#      NOTE: libcurl4-gnutls-dev is used (NOT libcurl4-openssl-dev) because
+#      libmediainfo-dev has a hard dependency on the GnuTLS variant. The two
+#      -dev packages conflict (both ship /usr/include/curl/curl.h). GnuTLS is
+#      fully functional for both FFmpeg and Mega SDK HTTP layers.
 # -----------------------------------------------------------------------------
 RUN set -eux; \
     # --- 0. Enable contrib / non-free repos (for libfdk-aac-dev, libx265) ---
-    # Use a permissive sed: match "Components: main" possibly followed by
-    # space/EOL, and replace with the full component list. Idempotent —
-    # running it twice produces the same result.
     sed -i -E 's/^Components: main(\s|$)/Components: main contrib non-free non-free-firmware\1/' \
         /etc/apt/sources.list.d/debian.sources; \
-    # Fallback: also handle classic sources.list format (just in case the
-    # base image ever switches back to it).
     if [ -f /etc/apt/sources.list ]; then \
         sed -i -E 's/^(deb.*\/debian.*)main(\s|$)/\1main contrib non-free non-free-firmware\2/' \
             /etc/apt/sources.list; \
     fi; \
-    # --- Verify the sed actually took effect (fail fast if not) ---
     grep -E '^Components:.*non-free' /etc/apt/sources.list.d/debian.sources \
         || { echo "::error::Failed to enable non-free component"; exit 1; }; \
     # --- 1. apt-get update with retry (max 3 attempts) ---
@@ -100,7 +99,7 @@ RUN set -eux; \
         libssl-dev \
         libcrypto++-dev \
         libgpgme-dev \
-        libcurl4-openssl-dev \
+        libcurl4-gnutls-dev \
         libsqlite3-dev \
         libfreeimage-dev \
         libmediainfo-dev \
@@ -361,7 +360,7 @@ RUN set -eux; \
     echo "=== FFmpeg AV1 decoders ==="; \
     ffmpeg -hide_banner -decoders | grep -E 'av1|dav1d' || true; \
     echo "=== Mega SDK Python binding ==="; \
-    python3 -c "from mega import Mega; print('Mega SDK Python: OK')"; \
+    python3 -c "from mega import MegaApi; print('Mega SDK Python: OK')"; \
     echo "=== megacmd CLI ==="; \
     (mega-version || mega-cmd-version || true); \
     echo "=== ALL COMPONENTS VERIFIED ==="
