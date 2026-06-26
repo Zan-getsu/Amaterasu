@@ -143,12 +143,17 @@ RUN set -eux; \
 # -----------------------------------------------------------------------------
 # 2. megacmd CLI from Mega's official Debian 12 repo
 #    (Debian 12 repo has BOTH amd64 and arm64 — solves the original blocker)
+#
+#    URL NOTE: Mega renamed the repo path from "Debian_12.0" to "Debian_12"
+#    (no minor-version suffix). The old URL returns 404. If you ever upgrade
+#    to Debian 13, the path will likely be "Debian_13" — verify at
+#    https://mega.nz/linux/repo/ before changing.
 # -----------------------------------------------------------------------------
 RUN set -eux; \
     arch="$(dpkg --print-architecture)"; \
-    curl -fsSL "https://mega.nz/linux/repo/Debian_12.0/Release.key" \
+    curl -fsSL "https://mega.nz/linux/repo/Debian_12/Release.key" \
         | gpg --dearmor -o /usr/share/keyrings/mega-archive-keyring.gpg; \
-    echo "deb [arch=${arch} signed-by=/usr/share/keyrings/mega-archive-keyring.gpg] https://mega.nz/linux/repo/Debian_12.0/ ./" \
+    echo "deb [arch=${arch} signed-by=/usr/share/keyrings/mega-archive-keyring.gpg] https://mega.nz/linux/repo/Debian_12/ ./" \
         > /etc/apt/sources.list.d/mega.nz.list; \
     # Retry apt-get update (Mega's CDN occasionally 503s)
     for i in 1 2 3; do \
