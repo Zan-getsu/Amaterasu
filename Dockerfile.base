@@ -172,7 +172,8 @@ RUN set -eux; \
     cd /tmp/mega-sdk; \
     ./autogen.sh; \
     sed -i 's/-std=c++11/-std=c++14/g' configure; \
-    CC=gcc-11 CXX=g++-11 CXXFLAGS="-g -O2 -std=c++14" ./configure \
+    export CC=gcc-11 CXX=g++-11 CXXFLAGS="-g -O2 -std=c++14"; \
+    ./configure \
         --disable-silent-rules \
         --enable-python \
         --disable-examples \
