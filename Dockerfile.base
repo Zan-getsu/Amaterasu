@@ -61,7 +61,7 @@ RUN set -eux; \
     mkdir -p /etc/apt/keyrings; \
     for attempt in 1 2 3 4 5; do \
         curl -fsSL --retry 5 --retry-delay 5 --retry-all-errors \
-            https://mega.nz/linux/repo/Debian_12/Release.key \
+            https://mega.nz/linux/repo/Debian_11/Release.key \
             -o /tmp/mega-release.key && test -s /tmp/mega-release.key && break; \
         if [ "$attempt" = "5" ]; then exit 1; fi; \
         sleep 5; \
