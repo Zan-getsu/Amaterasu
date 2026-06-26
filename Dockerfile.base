@@ -288,17 +288,32 @@ RUN set -eux; \
 # -----------------------------------------------------------------------------
 # 7. Mega SDK Python bindings (compiled from source)
 #
-#    THE CRITICAL FIX:
-#    Mega SDK's C++ codebase predates C++17 and uses constructs REMOVED in
-#    C++17 (std::auto_ptr, register keyword, dynamic exception specs).
-#    Naive `sed s/std::auto_ptr/std::unique_ptr/` is DANGEROUS because
-#    auto_ptr has silent ownership-transfer copy semantics that unique_ptr
-#    lacks — replacing them breaks runtime behaviour.
+#    THE C++ STANDARD PARADOX (and how we resolve it):
+#    The Mega SDK v7.0.0 source is schizophrenic about C++ standards:
+#      * configure.ac line 148: forces -std=c++11 (last -std= wins in GCC)
+#      * configure.ac line 104: AX_CXX_COMPILE_STDCXX([11], ...) targets C++11
+#      * BUT the actual source code uses std::make_unique (a C++14 feature!)
+#        e.g. megaapi_impl.cpp:38830 — auto mount = std::make_unique<...>
 #
-#    SAFER APPROACH: force -std=c++14, which still permits these constructs
-#    (with deprecation warnings, NOT errors). We also strip any explicit
-#    -std=c++17/-std=c++2a from build scripts, and add -fpermissive +
-#    -Wno-error=deprecated-declarations as belt-and-suspenders.
+#    This means the SDK's own build config is internally inconsistent: the
+#    build flags say "C++11" but the source code requires "C++14". On GCC 12
+#    (Debian 12), this fails with:
+#        error: 'std::make_unique' is only available from C++14 onwards
+#
+#    THE FIX: We sed-replace EVERY -std=c++NN and -std=gnu++NN in build
+#    scripts (configure.ac, Makefile.am, CMakeLists.txt, setup.py, *.in)
+#    with -std=c++14 / -std=gnu++14. This catches the c++11 in configure.ac
+#    AND any c++17+ leftovers, normalizing everything to c++14.
+#
+#    WHY NOT C++17 OR HIGHER?
+#    The SDK source also uses constructs REMOVED in C++17 (std::auto_ptr,
+#    register keyword, dynamic exception specs). Naive replacement of
+#    std::auto_ptr with std::unique_ptr is DANGEROUS — auto_ptr's copy
+#    constructor silently transfers ownership, unique_ptr's is deleted.
+#    Forcing C++14 keeps both old AND new code paths compilable:
+#      * std::make_unique works (C++14 feature) ✓
+#      * std::auto_ptr works (deprecated but legal in C++14) ✓
+#      * register keyword works (deprecated but legal in C++14) ✓
 #
 #    BUILD ORDER MATTERS:
 #    The Python `setup.py` in bindings/python/ only builds the SWIG C++
@@ -314,19 +329,43 @@ RUN set -eux; \
     git clone --depth 1 --branch "${MEGA_SDK_VERSION}" \
         https://github.com/meganz/sdk.git /tmp/mega-sdk; \
     cd /tmp/mega-sdk; \
-    # Patch 1: strip explicit modern -std flags from build scripts so our
-    # env-level -std=c++14 actually takes effect.
+    # -------------------------------------------------------------------------
+    # Patch 1: Normalize ALL hardcoded -std= flags to -std=c++14.
+    #
+    # WHY THIS IS NEEDED:
+    # The Mega SDK's configure.ac (line 148) explicitly appends:
+    #     CXXFLAGS="$CXXFLAGS -std=c++11 -Wall ..."
+    # This OVERRIDES our env-level -std=c++14 because the LAST -std= flag
+    # wins in GCC. But the SDK source code (e.g. megaapi_impl.cpp:38830)
+    # uses std::make_unique — a C++14 feature. With -std=c++11, that fails
+    # to compile.
+    #
+    # The fix: sed-replace EVERY -std=c++NN and -std=gnu++NN in build
+    # scripts with -std=c++14 / -std=gnu++14. This catches the c++11 in
+    # configure.ac AND the c++03 in Makefile.am (cppcheck) AND any c++17+
+    # leftovers — all normalized to c++14.
+    # -------------------------------------------------------------------------
     find . -type f \( \
             -name 'Makefile*' -o -name '*.am' -o -name '*.cmake' \
             -o -name 'CMakeLists.txt' -o -name 'setup.py' -o -name '*.py' \
             -o -name 'configure*' -o -name '*.ac' -o -name '*.in' \
         \) -exec sed -i \
+            -e 's/-std=c++03/-std=c++14/g' \
+            -e 's/-std=c++11/-std=c++14/g' \
+            -e 's/-std=c++14/-std=c++14/g' \
             -e 's/-std=c++17/-std=c++14/g' \
+            -e 's/-std=c++1z/-std=c++14/g' \
             -e 's/-std=c++2a/-std=c++14/g' \
             -e 's/-std=c++20/-std=c++14/g' \
+            -e 's/-std=gnu++03/-std=gnu++14/g' \
+            -e 's/-std=gnu++11/-std=gnu++14/g' \
+            -e 's/-std=gnu++14/-std=gnu++14/g' \
             -e 's/-std=gnu++17/-std=gnu++14/g' \
+            -e 's/-std=gnu++1z/-std=gnu++14/g' \
             -e 's/-std=gnu++2a/-std=gnu++14/g' \
             -e 's/-std=gnu++20/-std=gnu++14/g' \
+            -e 's/--std=c++03/--std=c++14/g' \
+            -e 's/--std=c++11/--std=c++14/g' \
             {} +; \
     # Patch 2: SWIG-generated wrappers may have 'register' keyword; remove.
     find . -type f \( -name '*.cpp' -o -name '*.cxx' -o -name '*.h' \) \
