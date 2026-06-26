@@ -57,9 +57,15 @@ RUN echo '/usr/local/lib' > /etc/ld.so.conf.d/local.conf && ldconfig
 #      libmediainfo-dev has a hard dependency on the GnuTLS variant. The two
 #      -dev packages conflict (both ship /usr/include/curl/curl.h). GnuTLS is
 #      fully functional for both FFmpeg and Mega SDK HTTP layers.
+#
+#      NOTE: libfuse-dev is required because the Mega SDK v7.0.0 has an
+#      upstream build-system bug — src/fuse/common/query.cpp (always compiled)
+#      calls InodeID::get(), but src/fuse/common/inode_id.cpp (which defines
+#      it) is only compiled when FUSE is enabled. Without libfuse-dev, FUSE
+#      is auto-disabled and libmega.so.70000 ends up with an undefined symbol
+#      that crashes _mega.so at runtime. See Block 7 comments for details.
 # -----------------------------------------------------------------------------
 RUN set -eux; \
-    # --- 0. Enable contrib / non-free repos (for libfdk-aac-dev, libx265) ---
     sed -i -E 's/^Components: main(\s|$)/Components: main contrib non-free non-free-firmware\1/' \
         /etc/apt/sources.list.d/debian.sources; \
     if [ -f /etc/apt/sources.list ]; then \
@@ -68,7 +74,6 @@ RUN set -eux; \
     fi; \
     grep -E '^Components:.*non-free' /etc/apt/sources.list.d/debian.sources \
         || { echo "::error::Failed to enable non-free component"; exit 1; }; \
-    # --- 1. apt-get update with retry (max 3 attempts) ---
     apt_retry() { \
         for i in 1 2 3; do \
             if apt-get update; then return 0; fi; \
@@ -78,7 +83,6 @@ RUN set -eux; \
         return 1; \
     }; \
     apt_retry; \
-    # --- 2. Install all build deps ---
     apt-get install -y --no-install-recommends \
         build-essential \
         pkg-config \
@@ -138,6 +142,7 @@ RUN set -eux; \
         libsoxr-dev \
         libvidstab-dev \
         libxvidcore-dev \
+        libfuse-dev \
         bash \
         coreutils \
         findutils \
@@ -162,7 +167,6 @@ RUN set -eux; \
         | gpg --dearmor -o /usr/share/keyrings/mega-archive-keyring.gpg; \
     echo "deb [arch=${arch} signed-by=/usr/share/keyrings/mega-archive-keyring.gpg] https://mega.nz/linux/repo/Debian_12/ ./" \
         > /etc/apt/sources.list.d/mega.nz.list; \
-    # Retry apt-get update (Mega's CDN occasionally 503s)
     for i in 1 2 3; do \
         if apt-get update; then break; fi; \
         echo "apt-get update failed (attempt $i/3), retrying in 5s..."; \
@@ -331,6 +335,20 @@ RUN set -eux; \
 #    /usr/local/lib/. This breaks the ld.so.conf.d setup from Block 0
 #    (which only adds /usr/local/lib). Always pass --prefix=/usr/local
 #    to keep Mega SDK installs consistent with SVT-AV1/libaom/dav1d/FFmpeg.
+#
+#    FUSE WARNING (upstream SDK build-system bug):
+#    The SDK's src/fuse/common/query.cpp is ALWAYS compiled and it calls
+#    InodeID::get(). But src/fuse/common/inode_id.cpp (which DEFINES
+#    InodeID::get()) is only compiled when --enable-fuse is active (which
+#    auto-triggers when libfuse-dev is present). Without libfuse-dev, FUSE
+#    is disabled, inode_id.cpp is skipped, and libmega.so.70000 ends up
+#    with an undefined symbol — causing ImportError at runtime:
+#        undefined symbol: _ZNK4mega4fuse7InodeID3getEv
+#    libtool permits undefined symbols at link time, so 'make' succeeds,
+#    but the dynamic linker catches it when _mega.so loads libmega.so.
+#    Fix: install libfuse-dev (in Block 1) so FUSE is auto-enabled and
+#    inode_id.cpp gets compiled. The bot doesn't USE FUSE mounting, but
+#    the library must be complete for the SWIG wrapper to load.
 # -----------------------------------------------------------------------------
 ARG MEGA_SDK_VERSION=v7.0.0
 
@@ -373,9 +391,6 @@ RUN set -eux; \
             -e 's/--std=c++03/--std=c++17/g' \
             -e 's/--std=c++11/--std=c++17/g' \
             {} +; \
-    # Export compiler flags favouring C++17 + permissive warnings.
-    # (No longer need -Wno-register or auto_ptr workarounds — v7.0.0
-    # doesn't use either. Keep -fpermissive as belt-and-suspenders.)
     export CXXFLAGS="-std=c++17 -O2 -fPIC \
         -Wno-error=deprecated-declarations \
         -Wno-deprecated-declarations \
@@ -385,10 +400,6 @@ RUN set -eux; \
         -Wno-deprecated-declarations"; \
     export LDFLAGS="-L/usr/local/lib"; \
     export PKG_CONFIG_PATH="/usr/local/lib/pkgconfig:/usr/lib/pkgconfig"; \
-    #
-    # CRITICAL: build the core C++ library (libmega.so) BEFORE the Python
-    # bindings. setup.py only links against it; it does not compile it.
-    #
     ./autogen.sh; \
     ./configure \
         --prefix=/usr/local \
@@ -401,19 +412,12 @@ RUN set -eux; \
     make -j"$(nproc)"; \
     make install; \
     ldconfig; \
-    #
-    # Verify the versioned SONAME was installed correctly.
-    # (ld.so.conf.d was already set up in Block 0 — just refresh the cache.)
-    #
     ls -la /usr/local/lib/libmega.so* || { \
         echo "::error::libmega.so not found in /usr/local/lib after make install"; \
         echo "Searching system for libmega.so* to diagnose:"; \
         find / -name 'libmega.so*' 2>/dev/null | head -10; \
         exit 1; \
     }; \
-    #
-    # Now the Python wrapper can find ../../src/.libs/libmega.so.
-    #
     cd bindings/python; \
     pip install . ; \
     cd /; \
@@ -442,5 +446,4 @@ RUN set -eux; \
 
 WORKDIR /app
 
-# Default shell — base image is meant to be inherited, not run directly.
 CMD ["bash"]
