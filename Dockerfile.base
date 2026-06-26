@@ -114,14 +114,14 @@ RUN set -eux; \
     git clone --depth 1 https://github.com/nekotrix/SVT-AV1-Essential.git /tmp/svt-av1; \
     cd /tmp/svt-av1/Build; \
     cmake .. -G"Unix Makefiles" -DCMAKE_BUILD_TYPE=Release; \
-    make -j"$(nproc)"; \
+    make -j4; \
     make install; \
     ldconfig; \
     cd /; \
     curl -fsSLO "https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VERSION}.tar.xz"; \
     tar -xJf "ffmpeg-${FFMPEG_VERSION}.tar.xz"; \
     cd "ffmpeg-${FFMPEG_VERSION}"; \
-    ./configure \
+    PKG_CONFIG_PATH="/usr/local/lib/pkgconfig:/usr/local/lib64/pkgconfig" ./configure \
         --prefix=/usr/local \
         --enable-gpl \
         --enable-version3 \
@@ -140,7 +140,7 @@ RUN set -eux; \
         --enable-libx265 \
         --disable-debug \
         --disable-doc; \
-    make -j"$(nproc)"; \
+    make -j4; \
     make install; \
     ldconfig; \
     cd /; \
