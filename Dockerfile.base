@@ -324,13 +324,13 @@ RUN set -eux; \
 #    the SDK root. Skipping the autotools steps causes pip install to fail
 #    at the SWIG link step with `cannot find -lmega`.
 #
-#    SONAME / RUNTIME LINKING:
-#    libtool embeds the versioned SONAME 'libmega.so.70000' into _mega.so's
-#    DT_NEEDED entry (where 70000 = 7*10000+0*100+0 from version.h).
-#    python:3.11-slim-bookworm does NOT include /usr/local/lib in its
-#    default ld.so search path, so we must add it via /etc/ld.so.conf.d/
-#    before ldconfig — otherwise the runtime ImportError:
-#        libmega.so.70000: cannot open shared object file
+#    PREFIX WARNING:
+#    The SDK's configure.ac line 50 sets AC_PREFIX_DEFAULT([/]) — meaning
+#    if you don't explicitly pass --prefix to ./configure, make install
+#    dumps libmega.so into /lib/ (or /lib/x86_64-linux-gnu/), NOT
+#    /usr/local/lib/. This breaks the ld.so.conf.d setup from Block 0
+#    (which only adds /usr/local/lib). Always pass --prefix=/usr/local
+#    to keep Mega SDK installs consistent with SVT-AV1/libaom/dav1d/FFmpeg.
 # -----------------------------------------------------------------------------
 ARG MEGA_SDK_VERSION=v7.0.0
 
@@ -391,6 +391,7 @@ RUN set -eux; \
     #
     ./autogen.sh; \
     ./configure \
+        --prefix=/usr/local \
         --disable-silent-rules \
         --enable-python \
         --disable-examples \
@@ -406,6 +407,8 @@ RUN set -eux; \
     #
     ls -la /usr/local/lib/libmega.so* || { \
         echo "::error::libmega.so not found in /usr/local/lib after make install"; \
+        echo "Searching system for libmega.so* to diagnose:"; \
+        find / -name 'libmega.so*' 2>/dev/null | head -10; \
         exit 1; \
     }; \
     #
