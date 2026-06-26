@@ -36,16 +36,44 @@ ENV PIP_DISABLE_PIP_VERSION_CHECK=1
 ENV PIP_NO_CACHE_DIR=1
 
 # -----------------------------------------------------------------------------
-# 0. Enable contrib / non-free repos (needed for libfdk-aac-dev)
+# 0+1. Enable contrib/non-free repos AND install all build deps in ONE atomic
+#      RUN block. Combining these prevents a class of bugs where:
+#        * BuildKit caches the pre-sed debian.sources, then runs apt-get update
+#          against the post-sed version → exit 100 from missing packages.
+#        * apt-get update succeeds once but a transient mirror issue later
+#          causes install to fail with hash sum mismatch.
+#
+#      The retry loop on apt-get update handles transient mirror failures
+#      (Debian mirrors occasionally return 503 or stale hashes during sync).
 # -----------------------------------------------------------------------------
-RUN sed -i 's/Components: main/Components: main contrib non-free non-free-firmware/' \
-        /etc/apt/sources.list.d/debian.sources
-
-# -----------------------------------------------------------------------------
-# 1. System build dependencies + modern toolchain
-#    (Debian 12 ships cmake 3.25, meson 1.0, ninja 1.11 — sufficient for AV1)
-# -----------------------------------------------------------------------------
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN set -eux; \
+    # --- 0. Enable contrib / non-free repos (for libfdk-aac-dev, libx265) ---
+    # Use a permissive sed: match "Components: main" possibly followed by
+    # space/EOL, and replace with the full component list. Idempotent —
+    # running it twice produces the same result.
+    sed -i -E 's/^Components: main(\s|$)/Components: main contrib non-free non-free-firmware\1/' \
+        /etc/apt/sources.list.d/debian.sources; \
+    # Fallback: also handle classic sources.list format (just in case the
+    # base image ever switches back to it).
+    if [ -f /etc/apt/sources.list ]; then \
+        sed -i -E 's/^(deb.*\/debian.*)main(\s|$)/\1main contrib non-free non-free-firmware\2/' \
+            /etc/apt/sources.list; \
+    fi; \
+    # --- Verify the sed actually took effect (fail fast if not) ---
+    grep -E '^Components:.*non-free' /etc/apt/sources.list.d/debian.sources \
+        || { echo "::error::Failed to enable non-free component"; exit 1; }; \
+    # --- 1. apt-get update with retry (max 3 attempts) ---
+    apt_retry() { \
+        for i in 1 2 3; do \
+            if apt-get update; then return 0; fi; \
+            echo "apt-get update failed (attempt $i/3), retrying in 5s..."; \
+            sleep 5; \
+        done; \
+        return 1; \
+    }; \
+    apt_retry; \
+    # --- 2. Install all build deps ---
+    apt-get install -y --no-install-recommends \
         build-essential \
         pkg-config \
         git \
@@ -71,7 +99,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         swig \
         libssl-dev \
         libcrypto++-dev \
-        libgpgme11-dev \
+        libgpgme-dev \
         libcurl4-openssl-dev \
         libsqlite3-dev \
         libfreeimage-dev \
@@ -110,7 +138,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         grep \
         sed \
         gawk \
-    && rm -rf /var/lib/apt/lists/*
+    ; \
+    rm -rf /var/lib/apt/lists/*
 
 # -----------------------------------------------------------------------------
 # 2. megacmd CLI from Mega's official Debian 12 repo
@@ -122,7 +151,12 @@ RUN set -eux; \
         | gpg --dearmor -o /usr/share/keyrings/mega-archive-keyring.gpg; \
     echo "deb [arch=${arch} signed-by=/usr/share/keyrings/mega-archive-keyring.gpg] https://mega.nz/linux/repo/Debian_12.0/ ./" \
         > /etc/apt/sources.list.d/mega.nz.list; \
-    apt-get update; \
+    # Retry apt-get update (Mega's CDN occasionally 503s)
+    for i in 1 2 3; do \
+        if apt-get update; then break; fi; \
+        echo "apt-get update failed (attempt $i/3), retrying in 5s..."; \
+        sleep 5; \
+    done; \
     apt-get install -y --no-install-recommends megacmd; \
     rm -rf /var/lib/apt/lists/*
 
@@ -327,7 +361,7 @@ RUN set -eux; \
     echo "=== FFmpeg AV1 decoders ==="; \
     ffmpeg -hide_banner -decoders | grep -E 'av1|dav1d' || true; \
     echo "=== Mega SDK Python binding ==="; \
-    python3 -c "from mega import MegaApi; print('Mega SDK Python: OK')"; \
+    python3 -c "from mega import Mega; print('Mega SDK Python: OK')"; \
     echo "=== megacmd CLI ==="; \
     (mega-version || mega-cmd-version || true); \
     echo "=== ALL COMPONENTS VERIFIED ==="
