@@ -110,8 +110,7 @@ RUN set -eux; \
         libx265-dev \
         libvorbis-dev \
         libvpx-dev \
-        libwebp-dev \
-        libzimg-dev; \
+        libwebp-dev; \
     git clone --depth 1 https://github.com/nekotrix/SVT-AV1-Essential.git /tmp/svt-av1; \
     cd /tmp/svt-av1/Build; \
     cmake .. -G"Unix Makefiles" -DCMAKE_BUILD_TYPE=Release; \
@@ -139,7 +138,6 @@ RUN set -eux; \
         --enable-libwebp \
         --enable-libx264 \
         --enable-libx265 \
-        --enable-libzimg \
         --disable-debug \
         --disable-doc; \
     make -j"$(nproc)"; \
