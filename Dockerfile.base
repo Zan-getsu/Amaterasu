@@ -1,4 +1,4 @@
-FROM python:3.11-slim-bullseye
+FROM python:3.11-slim-bookworm
 
 ENV LANG=C.UTF-8 \
     DEBIAN_FRONTEND=noninteractive \
@@ -61,14 +61,14 @@ RUN set -eux; \
     mkdir -p /etc/apt/keyrings; \
     for attempt in 1 2 3 4 5; do \
         curl -fsSL --retry 5 --retry-delay 5 --retry-all-errors \
-            https://mega.nz/linux/repo/Debian_11/Release.key \
+            https://mega.nz/linux/repo/Debian_12/Release.key \
             -o /tmp/mega-release.key && test -s /tmp/mega-release.key && break; \
         if [ "$attempt" = "5" ]; then exit 1; fi; \
         sleep 5; \
     done; \
     gpg --dearmor -o /etc/apt/keyrings/mega.nz.gpg /tmp/mega-release.key; \
     rm -f /tmp/mega-release.key; \
-    echo "deb [arch=amd64,arm64 signed-by=/etc/apt/keyrings/mega.nz.gpg] https://mega.nz/linux/repo/Debian_11/ ./" > /etc/apt/sources.list.d/mega.nz.list; \
+    echo "deb [arch=amd64,arm64 signed-by=/etc/apt/keyrings/mega.nz.gpg] https://mega.nz/linux/repo/Debian_12/ ./" > /etc/apt/sources.list.d/mega.nz.list; \
     apt-get update; \
     apt-get install -y --no-install-recommends megacmd; \
     apt-get clean; \
@@ -110,7 +110,8 @@ RUN set -eux; \
         libx265-dev \
         libvorbis-dev \
         libvpx-dev \
-        libwebp-dev; \
+        libwebp-dev \
+        libzimg-dev; \
     git clone --depth 1 https://github.com/nekotrix/SVT-AV1-Essential.git /tmp/svt-av1; \
     cd /tmp/svt-av1/Build; \
     cmake .. -G"Unix Makefiles" -DCMAKE_BUILD_TYPE=Release; \
@@ -138,6 +139,7 @@ RUN set -eux; \
         --enable-libwebp \
         --enable-libx264 \
         --enable-libx265 \
+        --enable-libzimg \
         --disable-debug \
         --disable-doc; \
     make -j4; \
@@ -167,7 +169,7 @@ RUN set -eux; \
     cd /tmp/mega-sdk; \
     ./autogen.sh; \
     sed -i 's/-std=c++11/-std=c++14/g' configure; \
-    CXXFLAGS="-g -O2 -std=c++14" ./configure \
+    CXXFLAGS="-g -O2 -std=c++14 -fpermissive" ./configure \
         --disable-silent-rules \
         --enable-python \
         --disable-examples \
