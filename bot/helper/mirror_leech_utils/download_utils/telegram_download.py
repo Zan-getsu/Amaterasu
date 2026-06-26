@@ -1,6 +1,8 @@
 from asyncio import Lock, sleep
+from contextlib import suppress
 from time import time
 from secrets import token_hex
+from aiofiles.os import path as aiopath, remove as aioremove
 from pyrogram.errors import FloodWait, PeerIdInvalid, ChannelInvalid
 
 from bot.helper.ext_utils.hyperdl_utils import HypertgDownload
@@ -83,6 +85,99 @@ class TelegramDownloadHelper:
             GLOBAL_GID.pop(self._id)
         return
 
+    async def _remove_bad_download(self, download):
+        if download and await aiopath.exists(download):
+            with suppress(Exception):
+                await aioremove(download)
+
+    async def _validate_download(self, download, label):
+        if not download:
+            return None
+        try:
+            size = await aiopath.getsize(download)
+        except Exception as e:
+            LOGGER.warning(f"Telegram download validation failed ({label}): {e}")
+            return None
+
+        expected = self._listener.size or 0
+        if size <= 0:
+            LOGGER.warning(
+                f"Telegram download produced zero-byte file via {label}; retrying"
+            )
+            await self._remove_bad_download(download)
+            return None
+        if expected and size != expected:
+            LOGGER.warning(
+                f"Telegram download size mismatch via {label}: "
+                f"{size}/{expected} bytes; retrying"
+            )
+            await self._remove_bad_download(download)
+            return None
+        return download
+
+    async def _standard_download_once(self, message, path, label):
+        download = await message.download(
+            file_name=path,
+            progress=self._on_download_progress,
+        )
+        return await self._validate_download(download, label)
+
+    async def _standard_download(self, message, path):
+        candidates = [("current", message)]
+
+        if Config.TRANSMISSION_MODE in ("user", "both") and TgClient.user:
+            try:
+                user_message = await TgClient.user.get_messages(
+                    chat_id=message.chat.id,
+                    message_ids=message.id,
+                )
+                candidates.insert(0, ("user", user_message))
+            except Exception as e:
+                LOGGER.warning(f"Telegram user fallback message refresh failed: {e}")
+
+        try:
+            fresh_message = await self._listener.client.get_messages(
+                chat_id=message.chat.id,
+                message_ids=message.id,
+            )
+            candidates.append(("listener", fresh_message))
+        except Exception as e:
+            LOGGER.warning(f"Telegram listener fallback message refresh failed: {e}")
+
+        if TgClient.bot:
+            try:
+                bot_message = await TgClient.bot.get_messages(
+                    chat_id=message.chat.id,
+                    message_ids=message.id,
+                )
+                candidates.append(("bot", bot_message))
+            except Exception as e:
+                LOGGER.warning(f"Telegram bot fallback message refresh failed: {e}")
+
+        tried = set()
+        for label, candidate in candidates:
+            if candidate is None:
+                continue
+            key = (label, id(candidate))
+            if key in tried:
+                continue
+            tried.add(key)
+            if self._listener.is_cancelled:
+                return None
+            self._processed_bytes = 0
+            try:
+                download = await self._standard_download_once(candidate, path, label)
+            except (FloodWait, FloodPremiumWait):
+                raise
+            except Exception as e:
+                LOGGER.warning(
+                    f"Telegram standard download failed via {label}: {e}"
+                )
+                download = None
+            if download:
+                return download
+        return None
+
     async def _download(self, message, path):
         try:
             # TODO : Add support for user session ( Huh ??)
@@ -110,26 +205,9 @@ class TelegramDownloadHelper:
                         "HypertgDL returned incomplete download; falling back "
                         "to standard Pyrogram download (slower but reliable)"
                     )
-                    if Config.TRANSMISSION_MODE in ("user", "both"):
-                        try:
-                            user_message = await TgClient.user.get_messages(
-                                chat_id=message.chat.id, message_ids=message.id
-                            )
-                            download = await user_message.download(
-                                file_name=path, progress=self._on_download_progress
-                            )
-                        except Exception:
-                            download = await message.download(
-                                file_name=path, progress=self._on_download_progress
-                            )
-                    else:
-                        download = await message.download(
-                            file_name=path, progress=self._on_download_progress
-                        )
+                    download = await self._standard_download(message, path)
             else:
-                download = await message.download(
-                    file_name=path, progress=self._on_download_progress
-                )
+                download = await self._standard_download(message, path)
             if self._listener.is_cancelled:
                 return
         except (FloodWait, FloodPremiumWait) as f:
