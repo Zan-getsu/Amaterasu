@@ -37,7 +37,7 @@ xattr
 yt-dlp-ejs
 pyrotgfork==2.2.24
 yt-dlp[default,curl-cffi]==2026.6.9
-fastapi==0.138.0
+fastapi==0.138.1
 uvicorn==0.49.0
 motor==3.7.1
 pymongo==4.17.0
