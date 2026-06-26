@@ -13,7 +13,7 @@
 #  Why Debian 12 (Bookworm)?
 #    * Provides native arm64 megacmd package (Debian 11 does not).
 #    * Ships modern cmake 3.25 / meson 1.0 / ninja 1.11 (no pip fallback needed).
-#    * GCC 12 default; we tame it for the legacy Mega C++ code via -std=c++14.
+#    * GCC 12 default; Mega SDK v7.0.0 requires C++17 (for std::filesystem).
 #
 #  Build:
 #    docker buildx build --platform linux/amd64,linux/arm64 \
@@ -288,32 +288,26 @@ RUN set -eux; \
 # -----------------------------------------------------------------------------
 # 7. Mega SDK Python bindings (compiled from source)
 #
-#    THE C++ STANDARD PARADOX (and how we resolve it):
-#    The Mega SDK v7.0.0 source is schizophrenic about C++ standards:
-#      * configure.ac line 148: forces -std=c++11 (last -std= wins in GCC)
-#      * configure.ac line 104: AX_CXX_COMPILE_STDCXX([11], ...) targets C++11
-#      * BUT the actual source code uses std::make_unique (a C++14 feature!)
-#        e.g. megaapi_impl.cpp:38830 — auto mount = std::make_unique<...>
-#
-#    This means the SDK's own build config is internally inconsistent: the
-#    build flags say "C++11" but the source code requires "C++14". On GCC 12
-#    (Debian 12), this fails with:
+#    THE C++ STANDARD REQUIREMENT:
+#    Mega SDK v7.0.0 source code requires C++17 (uses std::filesystem in
+#    autocomplete.cpp, sync.cpp, gfx/worker/*.cpp). However, the SDK's own
+#    configure.ac (line 148) hardcodes:
+#        CXXFLAGS="$CXXFLAGS -std=c++11 -Wall ..."
+#    This -std=c++11 OVERRIDES any env-level -std= flag (last -std= wins
+#    in GCC), causing the build to fail with:
+#        error: 'std::filesystem' has not been declared
 #        error: 'std::make_unique' is only available from C++14 onwards
 #
-#    THE FIX: We sed-replace EVERY -std=c++NN and -std=gnu++NN in build
+#    THE FIX: sed-replace EVERY -std=c++NN and -std=gnu++NN in build
 #    scripts (configure.ac, Makefile.am, CMakeLists.txt, setup.py, *.in)
-#    with -std=c++14 / -std=gnu++14. This catches the c++11 in configure.ac
-#    AND any c++17+ leftovers, normalizing everything to c++14.
+#    with -std=c++17 / -std=gnu++17. This catches the c++11 in configure.ac
+#    AND the c++03 in Makefile.am (cppcheck) AND any other variants —
+#    all normalized to c++17.
 #
-#    WHY NOT C++17 OR HIGHER?
-#    The SDK source also uses constructs REMOVED in C++17 (std::auto_ptr,
-#    register keyword, dynamic exception specs). Naive replacement of
-#    std::auto_ptr with std::unique_ptr is DANGEROUS — auto_ptr's copy
-#    constructor silently transfers ownership, unique_ptr's is deleted.
-#    Forcing C++14 keeps both old AND new code paths compilable:
-#      * std::make_unique works (C++14 feature) ✓
-#      * std::auto_ptr works (deprecated but legal in C++14) ✓
-#      * register keyword works (deprecated but legal in C++14) ✓
+#    WHY C++17 IS SAFE HERE:
+#    v7.0.0 has been modernized — zero usages of std::auto_ptr, zero usages
+#    of the register keyword, zero dynamic exception specs (all of which
+#    were REMOVED in C++17). So nothing in the source code blocks C++17.
 #
 #    BUILD ORDER MATTERS:
 #    The Python `setup.py` in bindings/python/ only builds the SWIG C++
@@ -330,51 +324,46 @@ RUN set -eux; \
         https://github.com/meganz/sdk.git /tmp/mega-sdk; \
     cd /tmp/mega-sdk; \
     # -------------------------------------------------------------------------
-    # Patch 1: Normalize ALL hardcoded -std= flags to -std=c++14.
+    # Patch 1: Normalize ALL hardcoded -std= flags to -std=c++17.
     #
-    # WHY THIS IS NEEDED:
-    # The Mega SDK's configure.ac (line 148) explicitly appends:
-    #     CXXFLAGS="$CXXFLAGS -std=c++11 -Wall ..."
-    # This OVERRIDES our env-level -std=c++14 because the LAST -std= flag
-    # wins in GCC. But the SDK source code (e.g. megaapi_impl.cpp:38830)
-    # uses std::make_unique — a C++14 feature. With -std=c++11, that fails
-    # to compile.
+    # The Mega SDK v7.0.0 source uses std::filesystem (C++17 feature) in:
+    #   - src/autocomplete.cpp (line 32: namespace fs = std::filesystem)
+    #   - src/posix/gfx/worker/socket_utils.cpp
+    #   - include/mega/posix/gfx/worker/socket_utils.h
+    # It also uses std::make_unique (C++14, works in C++17).
     #
-    # The fix: sed-replace EVERY -std=c++NN and -std=gnu++NN in build
-    # scripts with -std=c++14 / -std=gnu++14. This catches the c++11 in
-    # configure.ac AND the c++03 in Makefile.am (cppcheck) AND any c++17+
-    # leftovers — all normalized to c++14.
+    # But configure.ac line 148 hardcodes -std=c++11 which overrides our
+    # env-level -std= flag (last -std= wins in GCC). The fix: sed-replace
+    # EVERY -std=c++NN / -std=gnu++NN variant to -std=c++17 / -std=gnu++17.
     # -------------------------------------------------------------------------
     find . -type f \( \
             -name 'Makefile*' -o -name '*.am' -o -name '*.cmake' \
             -o -name 'CMakeLists.txt' -o -name 'setup.py' -o -name '*.py' \
             -o -name 'configure*' -o -name '*.ac' -o -name '*.in' \
         \) -exec sed -i \
-            -e 's/-std=c++03/-std=c++14/g' \
-            -e 's/-std=c++11/-std=c++14/g' \
-            -e 's/-std=c++14/-std=c++14/g' \
-            -e 's/-std=c++17/-std=c++14/g' \
-            -e 's/-std=c++1z/-std=c++14/g' \
-            -e 's/-std=c++2a/-std=c++14/g' \
-            -e 's/-std=c++20/-std=c++14/g' \
-            -e 's/-std=gnu++03/-std=gnu++14/g' \
-            -e 's/-std=gnu++11/-std=gnu++14/g' \
-            -e 's/-std=gnu++14/-std=gnu++14/g' \
-            -e 's/-std=gnu++17/-std=gnu++14/g' \
-            -e 's/-std=gnu++1z/-std=gnu++14/g' \
-            -e 's/-std=gnu++2a/-std=gnu++14/g' \
-            -e 's/-std=gnu++20/-std=gnu++14/g' \
-            -e 's/--std=c++03/--std=c++14/g' \
-            -e 's/--std=c++11/--std=c++14/g' \
+            -e 's/-std=c++03/-std=c++17/g' \
+            -e 's/-std=c++11/-std=c++17/g' \
+            -e 's/-std=c++14/-std=c++17/g' \
+            -e 's/-std=c++17/-std=c++17/g' \
+            -e 's/-std=c++1z/-std=c++17/g' \
+            -e 's/-std=c++2a/-std=c++17/g' \
+            -e 's/-std=c++20/-std=c++17/g' \
+            -e 's/-std=gnu++03/-std=gnu++17/g' \
+            -e 's/-std=gnu++11/-std=gnu++17/g' \
+            -e 's/-std=gnu++14/-std=gnu++17/g' \
+            -e 's/-std=gnu++17/-std=gnu++17/g' \
+            -e 's/-std=gnu++1z/-std=gnu++17/g' \
+            -e 's/-std=gnu++2a/-std=gnu++17/g' \
+            -e 's/-std=gnu++20/-std=gnu++17/g' \
+            -e 's/--std=c++03/--std=c++17/g' \
+            -e 's/--std=c++11/--std=c++17/g' \
             {} +; \
-    # Patch 2: SWIG-generated wrappers may have 'register' keyword; remove.
-    find . -type f \( -name '*.cpp' -o -name '*.cxx' -o -name '*.h' \) \
-        -exec sed -i -E 's/\bregister\s+//g' {} +; \
-    # Export compiler flags favouring C++14 + permissive warnings.
-    export CXXFLAGS="-std=c++14 -O2 -fPIC \
+    # Export compiler flags favouring C++17 + permissive warnings.
+    # (No longer need -Wno-register or auto_ptr workarounds — v7.0.0
+    # doesn't use either. Keep -fpermissive as belt-and-suspenders.)
+    export CXXFLAGS="-std=c++17 -O2 -fPIC \
         -Wno-error=deprecated-declarations \
         -Wno-deprecated-declarations \
-        -Wno-register \
         -fpermissive"; \
     export CFLAGS="-O2 -fPIC \
         -Wno-error=deprecated-declarations \
