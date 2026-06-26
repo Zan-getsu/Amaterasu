@@ -17,24 +17,22 @@ name: Publish Amaterasu Docker Image
 #
 #  Triggers:
 #    * Push to main/master touching Dockerfile.base or this workflow
-#    * Manual dispatch (with optional "Bust cache" checkbox for clean rebuild)
+#    * Manual dispatch (with optional "Bust cache" checkbox — kept for
+#      backward compat but no longer needed since no-cache is forced true)
 #
-#  Cache: cache-from only (no cache-to).
-#    Both Docker Hub blob storage and GitHub Actions Cache (Azure-backed) have
-#    intermittent outages that cause cache EXPORT to fail, marking the build
-#    job as failed even though the image was already pushed. This blocks the
-#    merge job from running.
-#    Fix: keep cache-from (read-only, never fails — just skips if cache is
-#    empty), drop cache-to entirely.
-#    Use the "Bust cache" checkbox on manual dispatch to force a full
-#    rebuild when stale cache layers produce a broken image.
+#  Cache: DISABLED ENTIRELY (no-cache: true forced).
+#    Stale GHA cache layers from broken earlier builds were being reused
+#    even when the Dockerfile changed, producing a 439 MB image instead
+#    of the expected ~2 GB. The "Bust cache" checkbox approach didn't
+#    reliably work, so we force no-cache:true on EVERY build.
+#    Slower (~25 min per arch) but correct.
 # =============================================================================
 
 on:
   workflow_dispatch:
     inputs:
       no_cache:
-        description: 'Bust cache (rebuild everything from scratch, ignoring GHA cache)'
+        description: 'Bust cache (kept for backward compat — no-cache is now forced true always)'
         type: boolean
         default: false
   push:
@@ -111,14 +109,15 @@ jobs:
           # with all arches + apply tags in one atomic operation.
           outputs: |
             type=image,name=docker.io/${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=true
-          cache-from: |
-            type=gha,scope=base-${{ matrix.platform }}
           provenance: false
-          # no-cache: when true (manual dispatch with "Bust cache" checkbox),
-          # forces a complete rebuild from scratch. Use this when you suspect
-          # stale cache layers are producing a broken image (e.g. size is
-          # much smaller than expected).
-          no-cache: ${{ inputs.no_cache || false }}
+          # no-cache: FORCED TRUE permanently.
+          # Stale GHA cache layers from broken earlier builds were being
+          # reused even when the Dockerfile changed, producing a 439 MB
+          # image instead of the expected ~2 GB. The "Bust cache" checkbox
+          # approach didn't reliably work, so we force no-cache:true on
+          # EVERY build. Slower (~25 min per arch) but correct.
+          # cache-from/cache-to removed entirely — no-cache makes them useless.
+          no-cache: true
 
       - name: Export digest to file
         run: |
@@ -143,8 +142,7 @@ jobs:
             echo "- Image: \`docker.io/${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}\`"
             echo "- Digest: \`${{ steps.build.outputs.digest }}\`"
             echo "- Runner: \`${{ matrix.runner }}\` (native — no QEMU)"
-            echo "- Cache scope: \`base-${{ matrix.platform }}\`"
-            echo "- No-cache: \`${{ inputs.no_cache || false }}\`"
+            echo "- no-cache: forced true (clean rebuild)"
           } >> "$GITHUB_STEP_SUMMARY"
 
   # ---------------------------------------------------------------------------
