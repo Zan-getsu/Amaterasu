@@ -121,6 +121,7 @@ RUN set -eux; \
         libsqlite3-dev \
         libfreeimage-dev \
         libmediainfo-dev \
+        mediainfo \
         libzen-dev \
         libsodium-dev \
         libc-ares-dev \

@@ -1,6 +1,5 @@
 from os import getcwd, path as ospath
-from re import search
-from shlex import split
+from urllib.parse import unquote, urlparse
 
 from aiofiles import open as aiopen
 from aiofiles.os import mkdir, path as aiopath, remove as aioremove
@@ -8,12 +7,26 @@ from aiohttp import ClientSession
 
 from .. import LOGGER
 from ..core.tg_client import TgClient
-from ..helper.ext_utils.bot_utils import cmd_exec
+from ..helper.ext_utils.media_utils import generate_mediainfo_content
 from ..helper.ext_utils.telegraph_helper import telegraph
 from ..helper.telegram_helper.bot_commands import BotCommands
 from ..helper.telegram_helper.message_utils import send_message, edit_message
 from pyrogram.handlers import CallbackQueryHandler
 from pyrogram.filters import regex
+
+
+def _link_filename(link):
+    parsed_name = unquote(urlparse(link).path.rsplit("/", 1)[-1]).strip()
+    return parsed_name or "mediainfo-sample.bin"
+
+
+def _media_filename(media, message):
+    name = getattr(media, "file_name", None)
+    if name:
+        return name
+    unique_id = getattr(media, "file_unique_id", None) or getattr(media, "file_id", None)
+    message_id = getattr(message, "id", "media")
+    return f"{unique_id or message_id}.media"
 
 
 async def gen_mediainfo(message, link=None, media=None, mmsg=None):
@@ -26,7 +39,7 @@ async def gen_mediainfo(message, link=None, media=None, mmsg=None):
             await mkdir(path)
         file_size = 0
         if link:
-            filename = search(".+/(.+)", link).group(1)
+            filename = _link_filename(link)
             des_path = ospath.join(path, filename)
             headers = {
                 "user-agent": "Mozilla/5.0 (Linux; Android 12; 2201116PI) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/107.0.0.0 Mobile Safari/537.36"
@@ -39,18 +52,15 @@ async def gen_mediainfo(message, link=None, media=None, mmsg=None):
                             await f.write(chunk)
                             break
         elif media:
-            des_path = ospath.join(path, media.file_name)
-            file_size = media.file_size
+            des_path = ospath.join(path, _media_filename(media, mmsg or message))
+            file_size = media.file_size or 0
             if file_size <= 50000000:
                 await mmsg.download(ospath.join(getcwd(), des_path))
             else:
-                async for chunk in TgClient.bot.stream_media(media, limit=5):
+                async for chunk in TgClient.bot.stream_media(mmsg, limit=5):
                     async with aiopen(des_path, "ab") as f:
                         await f.write(chunk)
-        stdout, _, _ = await cmd_exec(split(f'mediainfo "{des_path}"'))
-        tc = f"<h4>📌 {ospath.basename(des_path)}</h4><br><br>"
-        if len(stdout) != 0:
-            tc += parseinfo(stdout, file_size)
+        tc = await generate_mediainfo_content(des_path, file_size)
     except Exception as e:
         LOGGER.error(e)
         await edit_message(temp_send, f"MediaInfo Stopped due to {str(e)}")
@@ -63,33 +73,6 @@ async def gen_mediainfo(message, link=None, media=None, mmsg=None):
         f"<b>MediaInfo:</b>\n\n➲ <b>Link :</b> https://graph.org/{link_id}",
         disable_web_page_preview=False,
     )
-
-
-section_dict = {"General": "🗒", "Video": "🎞", "Audio": "🔊", "Text": "🔠", "Menu": "🗃"}
-
-
-def parseinfo(out, size):
-    tc, trigger = "", False
-    size_line = (
-        f"File size                                 : {size / (1024 * 1024):.2f} MiB"
-    )
-    for line in out.split("\n"):
-        for section, emoji in section_dict.items():
-            if line.startswith(section):
-                trigger = True
-                if not line.startswith("General"):
-                    tc += "</pre><br>"
-                tc += f"<h4>{emoji} {line.replace('Text', 'Subtitle')}</h4>"
-                break
-        if line.startswith("File size"):
-            line = size_line
-        if trigger:
-            tc += "<br><pre>"
-            trigger = False
-        else:
-            tc += line + "\n"
-    tc += "</pre><br>"
-    return tc
 
 
 async def mediainfo(_, message):

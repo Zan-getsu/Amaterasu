@@ -164,9 +164,12 @@ async def lifespan(app: FastAPI):
     if database.db is not None:
         bot_id = Config.BOT_TOKEN.split(":", 1)[0] if Config.BOT_TOKEN else "0"
         PART = db_partition_id(bot_id)
-        db_config = await database.db.settings.deployConfig.find_one({"_id": PART}, {"_id": 0})
+        db_config = await database.db.settings.config.find_one({"_id": PART}, {"_id": 0})
+        if not db_config:
+            db_config = await database.db.settings.deployConfig.find_one({"_id": PART}, {"_id": 0})
         if db_config:
             Config.load_dict(db_config)
+            Config.load_env()
             
     if Config.BOT_TOKEN:
         TgClient.bot = TgClient.tgClient(

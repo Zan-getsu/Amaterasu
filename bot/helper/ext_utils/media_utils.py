@@ -15,6 +15,7 @@ from asyncio import (
 from asyncio.subprocess import PIPE
 from os import path as ospath
 from re import search as re_search, escape
+from shutil import which
 from time import time
 from aioshutil import rmtree
 from langcodes import Language
@@ -1329,11 +1330,118 @@ class FFMpeg:
 
 section_dict = {"General": "🗒", "Video": "🎞", "Audio": "🔊", "Text": "🔠", "Menu": "🗃"}
 
+def _format_duration(seconds):
+    with suppress(Exception):
+        seconds = int(float(seconds))
+        hours, rem = divmod(seconds, 3600)
+        minutes, seconds = divmod(rem, 60)
+        if hours:
+            return f"{hours} h {minutes} min {seconds} s"
+        if minutes:
+            return f"{minutes} min {seconds} s"
+        return f"{seconds} s"
+    return ""
+
+
+def _format_file_size(size):
+    with suppress(Exception):
+        size = int(float(size))
+        units = ("B", "KiB", "MiB", "GiB", "TiB")
+        value = float(size)
+        for unit in units:
+            if value < 1024 or unit == units[-1]:
+                return f"{value:.2f} {unit}" if unit != "B" else f"{size} B"
+            value /= 1024
+    return ""
+
+
+def _add_mediainfo_field(lines, label, value, suffix=""):
+    if value is not None and value != "":
+        lines.append(f"{label:<42}: {value}{suffix}")
+
+
+async def _ffprobe_mediainfo_output(des_path, file_size):
+    stdout, stderr, code = await cmd_exec(
+        [
+            "ffprobe",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-print_format",
+            "json",
+            "-show_format",
+            "-show_streams",
+            des_path,
+        ]
+    )
+    if code != 0 or not stdout:
+        raise RuntimeError(stderr or "ffprobe could not read media info")
+    try:
+        data = json.loads(stdout)
+    except json.JSONDecodeError as e:
+        raise RuntimeError(f"ffprobe returned invalid media info: {e}") from e
+
+    fmt = data.get("format") or {}
+    streams = data.get("streams") or []
+    lines = ["General"]
+    _add_mediainfo_field(lines, "Complete name", ospath.basename(des_path))
+    _add_mediainfo_field(lines, "Format", fmt.get("format_long_name") or fmt.get("format_name"))
+    _add_mediainfo_field(lines, "File size", _format_file_size(file_size or fmt.get("size")))
+    _add_mediainfo_field(lines, "Duration", _format_duration(fmt.get("duration")))
+    _add_mediainfo_field(lines, "Overall bit rate", fmt.get("bit_rate"), " b/s")
+
+    counts = {"video": 0, "audio": 0, "subtitle": 0}
+    for stream in streams:
+        codec_type = stream.get("codec_type")
+        if codec_type not in counts:
+            continue
+        counts[codec_type] += 1
+        section = {
+            "video": "Video",
+            "audio": "Audio",
+            "subtitle": "Text",
+        }[codec_type]
+        lines.extend(["", section if counts[codec_type] == 1 else f"{section} #{counts[codec_type]}"])
+        _add_mediainfo_field(lines, "ID", stream.get("index"))
+        _add_mediainfo_field(lines, "Format", stream.get("codec_long_name") or stream.get("codec_name"))
+        _add_mediainfo_field(lines, "Codec ID", stream.get("codec_tag_string"))
+        _add_mediainfo_field(lines, "Duration", _format_duration(stream.get("duration")))
+        _add_mediainfo_field(lines, "Bit rate", stream.get("bit_rate"), " b/s")
+        if codec_type == "video":
+            _add_mediainfo_field(lines, "Width", stream.get("width"), " pixels")
+            _add_mediainfo_field(lines, "Height", stream.get("height"), " pixels")
+            _add_mediainfo_field(lines, "Frame rate", stream.get("avg_frame_rate"))
+            _add_mediainfo_field(lines, "Color space", stream.get("color_space"))
+            _add_mediainfo_field(lines, "Chroma subsampling", stream.get("chroma_location"))
+        elif codec_type == "audio":
+            _add_mediainfo_field(lines, "Channel(s)", stream.get("channels"))
+            _add_mediainfo_field(lines, "Channel layout", stream.get("channel_layout"))
+            _add_mediainfo_field(lines, "Sampling rate", stream.get("sample_rate"), " Hz")
+        tags = stream.get("tags") or {}
+        _add_mediainfo_field(lines, "Language", tags.get("language"))
+        _add_mediainfo_field(lines, "Title", tags.get("title") or tags.get("handler_name"))
+    return "\n".join(lines)
+
+
+async def get_mediainfo_text(des_path, file_size=0):
+    if not des_path or not await aiopath.exists(des_path):
+        raise FileNotFoundError(des_path or "media file")
+    if which("mediainfo"):
+        try:
+            stdout, stderr, code = await cmd_exec(["mediainfo", des_path])
+            if code == 0 and stdout:
+                return stdout
+            LOGGER.warning(
+                f"mediainfo failed for {des_path}; falling back to ffprobe: {stderr}"
+            )
+        except FileNotFoundError:
+            LOGGER.warning("mediainfo binary not found; falling back to ffprobe")
+    return await _ffprobe_mediainfo_output(des_path, file_size)
+
+
 def parseinfo(out, size):
     tc, trigger = "", False
-    size_line = (
-        f"File size                                 : {size / (1024 * 1024):.2f} MiB"
-    )
+    size_line = f"File size                                 : {size / (1024 * 1024):.2f} MiB" if size else None
     for line in out.split("\n"):
         for section, emoji in section_dict.items():
             if line.startswith(section):
@@ -1342,7 +1450,7 @@ def parseinfo(out, size):
                     tc += "</pre><br>"
                 tc += f"<h4>{emoji} {line.replace('Text', 'Subtitle')}</h4>"
                 break
-        if line.startswith("File size"):
+        if size_line and line.startswith("File size"):
             line = size_line
         if trigger:
             tc += "<br><pre>"
@@ -1353,17 +1461,21 @@ def parseinfo(out, size):
     return tc
 
 async def generate_telegraph_mediainfo(des_path, file_size):
-    from shlex import split
     from .telegraph_helper import telegraph
     if not des_path or not await aiopath.exists(des_path):
         return None
     try:
-        stdout, _, _ = await cmd_exec(split(f'mediainfo "{des_path}"'))
-        tc = f"<h4>📌 {ospath.basename(des_path)}</h4><br><br>"
-        if len(stdout) != 0:
-            tc += parseinfo(stdout, file_size)
-            link_id = (await telegraph.create_page(title="MediaInfo X", content=tc))["path"]
-            return f"https://graph.org/{link_id}"
+        tc = await generate_mediainfo_content(des_path, file_size)
+        link_id = (await telegraph.create_page(title="MediaInfo X", content=tc))["path"]
+        return f"https://graph.org/{link_id}"
     except Exception as e:
         LOGGER.error(f"Failed to generate telegraph mediainfo: {e}")
     return None
+
+
+async def generate_mediainfo_content(des_path, file_size=0):
+    stdout = await get_mediainfo_text(des_path, file_size)
+    tc = f"<h4>📌 {ospath.basename(des_path)}</h4><br><br>"
+    if stdout:
+        tc += parseinfo(stdout, file_size)
+    return tc

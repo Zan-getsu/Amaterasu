@@ -531,6 +531,12 @@ CLOUDFLARE_TUNNEL_AUTO_URL = True
 
 With `CLOUDFLARE_TUNNEL_AUTO_URL = True`, Amaterasu watches the `cloudflared` logs, captures the generated `trycloudflare.com` URL, and updates `BASE_URL` in memory. If MongoDB is configured, it also saves the new `BASE_URL`.
 
+The legacy Compose sidecar tunnel is opt-in. Start it only when you explicitly want the separate sidecar flow:
+
+```bash
+docker compose --profile tunnel up -d
+```
+
 For production, use a **named tunnel** with your own domain:
 
 1. Open the Cloudflare dashboard.

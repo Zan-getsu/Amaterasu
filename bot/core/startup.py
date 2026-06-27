@@ -178,6 +178,7 @@ async def load_settings():
 
         if config_dict:
             Config.load_dict(config_dict)
+            Config.load_env()
 
         if pf_dict:
             for key, value in pf_dict.items():

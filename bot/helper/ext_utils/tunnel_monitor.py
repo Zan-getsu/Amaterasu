@@ -29,6 +29,10 @@ _POLL_INTERVAL = 10  # seconds
 _last_url = None
 
 
+def _monitor_enabled():
+    return bool(Config.CLOUDFLARE_TUNNEL_ENABLED and Config.CLOUDFLARE_TUNNEL_AUTO_URL)
+
+
 async def _read_tunnel_url():
     """Read the tunnel URL from the shared volume file. Returns None if
     the file doesn't exist or is empty."""
@@ -47,14 +51,16 @@ async def _read_tunnel_url():
 async def _propagate_url(url):
     """Propagate the new tunnel URL to Config, MongoDB, and owner DM."""
     global _last_url
+    if not _monitor_enabled():
+        return
     if url == _last_url:
         return  # no change
     _last_url = url
     LOGGER.info(f"Tunnel URL detected: {url}")
     # Update Config.BASE_URL so FileToLink and other routes use the tunnel
     Config.BASE_URL = url
-    Config.FQDN = url.split("://", 1)[-1].split(":")[0] if "://" in url else ""
-    Config.HAS_SSL = url.startswith("https://")
+    Config.FQDN = ""
+    Config.HAS_SSL = True
     Config.NO_PORT = True
     # Persist to MongoDB so it survives restart
     try:
@@ -62,9 +68,11 @@ async def _propagate_url(url):
         if database.db is not None:
             await database.update_config({
                 "BASE_URL": url,
-                "FQDN": Config.FQDN,
-                "HAS_SSL": Config.HAS_SSL,
-                "NO_PORT": Config.NO_PORT,
+                "FQDN": "",
+                "HAS_SSL": True,
+                "NO_PORT": True,
+                "BASE_URL_PORT": Config.PORT,
+                "CLOUDFLARE_TUNNEL_AUTO_FQDN": None,
             })
             LOGGER.info(f"Tunnel URL persisted to MongoDB: {url}")
     except Exception as e:
@@ -96,9 +104,10 @@ async def tunnel_monitor_loop():
     await sleep(15)
     while True:
         try:
-            url = await _read_tunnel_url()
-            if url and url != _last_url:
-                await _propagate_url(url)
+            if _monitor_enabled():
+                url = await _read_tunnel_url()
+                if url and url != _last_url:
+                    await _propagate_url(url)
         except Exception as e:
             LOGGER.warning(f"tunnel_monitor loop error: {e}")
         await sleep(_POLL_INTERVAL)

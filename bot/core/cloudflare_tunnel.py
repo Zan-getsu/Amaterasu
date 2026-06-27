@@ -12,17 +12,8 @@ _proc = None
 _log_task = None
 
 
-def _as_bool(value):
-    if isinstance(value, bool):
-        return value
-    if value is None:
-        return None
-    return str(value).lower() in ("true", "1", "t", "y", "yes")
-
-
 def _auto_url_enabled():
-    legacy = _as_bool(Config.CLOUDFLARE_TUNNEL_AUTO_FQDN)
-    return Config.CLOUDFLARE_TUNNEL_AUTO_URL if legacy is None else legacy
+    return bool(Config.CLOUDFLARE_TUNNEL_AUTO_URL)
 
 
 def _target_url():

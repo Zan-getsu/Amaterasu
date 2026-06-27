@@ -349,16 +349,32 @@ class Config:
     def get(cls, key):
         return getattr(cls, key) if hasattr(cls, key) else None
 
+    @staticmethod
+    def _coerce_optional_bool(value):
+        if value is None or isinstance(value, bool):
+            return value
+        text = str(value).strip().lower()
+        if text in ("", "none", "null"):
+            return None
+        return text in ("true", "1", "t", "y", "yes", "on")
+
     @classmethod
     def set(cls, key, value):
         if hasattr(cls, key):
-            value = cls._convert_env_type(key, value)
+            if key == "CLOUDFLARE_TUNNEL_AUTO_FQDN":
+                value = cls._coerce_optional_bool(value)
+            else:
+                value = cls._convert_env_type(key, value)
             setattr(cls, key, value)
             if key == "BASE_URL":
                 cls.FQDN = ""
                 cls.HAS_SSL = True
                 cls.NO_PORT = True
             elif key == "CLOUDFLARE_TUNNEL_AUTO_URL":
+                cls.CLOUDFLARE_TUNNEL_AUTO_FQDN = None
+            elif key == "CLOUDFLARE_TUNNEL_AUTO_FQDN":
+                if value is not None:
+                    cls.CLOUDFLARE_TUNNEL_AUTO_URL = value
                 cls.CLOUDFLARE_TUNNEL_AUTO_FQDN = None
             if key in [
                 "PORT",
@@ -420,7 +436,11 @@ class Config:
 
         if cls.BASE_URL:
             cls.BASE_URL = str(cls.BASE_URL).strip().rstrip("/")
-        elif cls.FQDN:
+            return
+
+        cls.BASE_URL = ""
+        if cls.FQDN:
+            cls.FQDN = str(cls.FQDN).strip().strip("/")
             protocol = "https" if cls.HAS_SSL else "http"
             if cls.NO_PORT or cls.PORT in [80, 443]:
                 cls.BASE_URL = f"{protocol}://{cls.FQDN}"
@@ -466,6 +486,7 @@ class Config:
     @classmethod
     def load_env(cls):
         config_vars = cls.get_all()
+        has_modern_auto_url = getenv("CLOUDFLARE_TUNNEL_AUTO_URL") is not None
         for key in config_vars:
             env_value = getenv(key)
             if env_value is not None:
@@ -475,6 +496,8 @@ class Config:
                     converted_value = cls._convert_env_type(key, env_value)
                     cls.set(key, converted_value)
         for key in cls._LEGACY_URL_VARS:
+            if key == "CLOUDFLARE_TUNNEL_AUTO_FQDN" and has_modern_auto_url:
+                continue
             env_value = getenv(key)
             if env_value is not None:
                 cls.set(key, env_value)
@@ -494,7 +517,7 @@ class Config:
         if isinstance(original_value, bool):
             if isinstance(value, bool):
                 return value
-            return str(value).lower() in ["true", "1", "t", "y", "yes"]
+            return str(value).lower() in ["true", "1", "t", "y", "yes", "on"]
         elif isinstance(original_value, int):
             if isinstance(value, int):
                 return value
@@ -535,7 +558,17 @@ class Config:
 
     @classmethod
     def load_dict(cls, config_dict):
+        has_base_url = "BASE_URL" in config_dict
+        has_auto_url = "CLOUDFLARE_TUNNEL_AUTO_URL" in config_dict
         for key, value in config_dict.items():
+            if (
+                key in cls._LEGACY_URL_VARS
+                and key != "CLOUDFLARE_TUNNEL_AUTO_FQDN"
+                and has_base_url
+            ):
+                continue
+            if key == "CLOUDFLARE_TUNNEL_AUTO_FQDN" and has_auto_url:
+                continue
             if hasattr(cls, key):
                 if key == "DEFAULT_UPLOAD" and value != "gd":
                     value = "rc"
@@ -553,10 +586,11 @@ class Config:
                             value = []
                     except Exception:
                         value = []
-                value = cls._convert_env_type(key, value)
-                setattr(cls, key, value)
+                cls.set(key, value)
             elif key.startswith("MULTI_TOKEN") and value:
                 cls.MULTI_TOKENS[key] = value.strip() if isinstance(value, str) else str(value)
+        if has_auto_url:
+            cls.CLOUDFLARE_TUNNEL_AUTO_FQDN = None
         cls._validate_required()
         cls.construct_base_url()
 
