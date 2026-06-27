@@ -329,11 +329,6 @@ class AsyncMega:
         self._transfer_future = Future()
         LOGGER.info("Mega: startUpload for %s", customName)
 
-        options = MegaUploadOptions.createInstance()
-        options.fileName = customName
-        options.mtime = mtime
-        options.isSourceTemporary = False
-
         ml = getattr(self, "_mega_listener", None)
         if ml:
             ml._bytes_transferred = 0
@@ -345,13 +340,33 @@ class AsyncMega:
             ml._uploaded_node_handle = None
             ml._export_link = None
 
-        await sync_to_async(
-            self.api.startUpload,
-            localPath,
-            parentNode,
-            cancelToken,
-            options,
-        )
+        if MegaUploadOptions is not None:
+            # New API (master branch): use MegaUploadOptions
+            options = MegaUploadOptions.createInstance()
+            options.fileName = customName
+            options.mtime = mtime
+            options.isSourceTemporary = False
+            await sync_to_async(
+                self.api.startUpload,
+                localPath,
+                parentNode,
+                cancelToken,
+                options,
+            )
+        else:
+            # Old API (v7.0.0 release): pass fileName, mtime, etc. directly
+            # startUpload(localPath, parent, fileName, mtime, appData, isSourceTemporary, startFirst, cancelToken)
+            await sync_to_async(
+                self.api.startUpload,
+                localPath,
+                parentNode,
+                customName,
+                mtime,
+                None,       # appData
+                False,      # isSourceTemporary
+                False,      # startFirst
+                cancelToken,
+            )
 
     def __getattr__(self, name):
         attr = getattr(self.api, name)

@@ -7,14 +7,14 @@
 #  - Base:        python:3.11-slim-bookworm (Debian 12)
 #  - FFmpeg:      8.x compiled from source with full AV1 stack
 #  - AV1 stack:   SVT-AV1 + libaom + dav1d (all built from source)
-#  - Mega SDK:    official C++ SDK Python bindings compiled from source (master branch)
+#  - Mega SDK:    v7.0.0 official C++ SDK Python bindings (autotools build)
 #  - megacmd:     installed from Mega's official Debian 12 apt repo
 #  - Download:    aria2, qbittorrent-nox, sabnzbdplus, p7zip, rclone, cloudflared, java
 #
 #  Why Debian 12 (Bookworm)?
 #    * Provides native arm64 megacmd package (Debian 11 does not).
 #    * Ships modern cmake 3.25 / meson 1.0 / ninja 1.11 (no pip fallback needed).
-#    * GCC 12 default; Mega SDK master branch requires C++17 (for std::filesystem).
+#    * GCC 12 default; Mega SDK v7.0.0 requires C++17 (for std::filesystem).
 #
 #  Build:
 #    docker buildx build --platform linux/amd64,linux/arm64 \
@@ -332,7 +332,7 @@ RUN set -eux; \
 # 7. Mega SDK Python bindings (compiled from source)
 #
 #    THE C++ STANDARD REQUIREMENT:
-#    Mega SDK master branch source code requires C++17 (uses std::filesystem in
+#    Mega SDK v7.0.0 source code requires C++17 (uses std::filesystem in
 #    autocomplete.cpp, sync.cpp, gfx/worker/*.cpp). However, the SDK's own
 #    configure.ac (line 148) hardcodes:
 #        CXXFLAGS="$CXXFLAGS -std=c++11 -Wall ..."
@@ -348,7 +348,7 @@ RUN set -eux; \
 #    all normalized to c++17.
 #
 #    WHY C++17 IS SAFE HERE:
-#    The master branch has been modernized — zero usages of std::auto_ptr, zero usages
+#    v7.0.0 has been modernized — zero usages of std::auto_ptr, zero usages
 #    of the register keyword, zero dynamic exception specs (all of which
 #    were REMOVED in C++17). So nothing in the source code blocks C++17.
 #
@@ -381,23 +381,23 @@ RUN set -eux; \
 #    Fix: install libfuse-dev (in Block 1) so FUSE is auto-enabled and
 #    inode_id.cpp gets compiled. The bot doesn't USE FUSE mounting, but
 #    the library must be complete for the SWIG wrapper to load.
-#
-#    BRANCH WARNING:
-#    Use 'master' branch (not a release tag) — MegaUploadOptions is only
-#    available in the unreleased master branch, and the bot's mega_sdk.py
-#    imports it. WZML-X's mysterysd/wzmlx base image also uses master.
-#    Release tags (v7.0.0, v7.1.2, v9.15.1) do NOT have MegaUploadOptions.
 # -----------------------------------------------------------------------------
-ARG MEGA_SDK_BRANCH=master
+# Mega SDK v7.0.0 — has autogen.sh + bindings/python/setup.py (autotools build).
+# NOTE: MegaUploadOptions is NOT available in v7.0.0 (it was added to the
+# unreleased master branch on 2026-06-04, but master removed autogen.sh AND
+# bindings/python/ entirely). The bot's mega_sdk.py and mega_listener.py are
+# patched to make MegaUploadOptions optional and fall back to the old
+# startUpload(localPath, parent, fileName, mtime, ...) API when it's missing.
+ARG MEGA_SDK_VERSION=v7.0.0
 
 RUN set -eux; \
-    git clone --depth 1 --branch "${MEGA_SDK_BRANCH}" \
+    git clone --depth 1 --branch "${MEGA_SDK_VERSION}" \
         https://github.com/meganz/sdk.git /tmp/mega-sdk; \
     cd /tmp/mega-sdk; \
     # -------------------------------------------------------------------------
     # Patch 1: Normalize ALL hardcoded -std= flags to -std=c++17.
     #
-    # The Mega SDK master branch source uses std::filesystem (C++17 feature) in:
+    # The Mega SDK v7.0.0 source uses std::filesystem (C++17 feature) in:
     #   - src/autocomplete.cpp (line 32: namespace fs = std::filesystem)
     #   - src/posix/gfx/worker/socket_utils.cpp
     #   - include/mega/posix/gfx/worker/socket_utils.h
@@ -430,7 +430,7 @@ RUN set -eux; \
             -e 's/--std=c++11/--std=c++17/g' \
             {} +; \
     # Export compiler flags favouring C++17 + permissive warnings.
-    # (No longer need -Wno-register or auto_ptr workarounds — master branch
+    # (No longer need -Wno-register or auto_ptr workarounds — v7.0.0
     # doesn't use either. Keep -fpermissive as belt-and-suspenders.)
     export CXXFLAGS="-std=c++17 -O2 -fPIC \
         -Wno-error=deprecated-declarations \
@@ -490,8 +490,8 @@ RUN set -eux; \
     ls -la /usr/local/lib/libmega.so* 2>/dev/null || echo "WARNING: no libmega.so in /usr/local/lib"; \
     echo "=== ldconfig cache (libmega entries) ==="; \
     ldconfig -p | grep libmega || echo "WARNING: libmega not in ldconfig cache"; \
-    echo "=== Mega SDK Python binding (including MegaUploadOptions) ==="; \
-    python3 -c "from mega import MegaApi, MegaUploadOptions; print('Mega SDK Python: OK (with MegaUploadOptions)')"; \
+    echo "=== Mega SDK Python binding ==="; \
+    python3 -c "from mega import MegaApi; print('Mega SDK Python: OK')"; \
     echo "=== megacmd CLI ==="; \
     (mega-version || mega-cmd-version || true); \
     echo "=== Download tools ==="; \
