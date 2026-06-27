@@ -11,8 +11,12 @@ ENV LANG=C.UTF-8 \
 
 WORKDIR /usr/src/app
 
-# Create the virtual environment (was missing — uv can't install into a non-existent venv)
-RUN python3 -m venv /amaterasuvenv
+# Create the virtual environment WITH --system-site-packages.
+# This is CRITICAL: the Mega SDK Python bindings are installed in system
+# Python's site-packages (by Dockerfile.base Block 7). Without this flag,
+# the venv is isolated and can't import 'mega.MegaApi' → Mega download/upload
+# fails with "Mega SDK Python bindings are not installed in this image".
+RUN python3 -m venv --system-site-packages /amaterasuvenv
 
 # Install uv into the venv for fast package installation
 # (sabnzbdplus is installed via apt in the base image, not pip — it's not on PyPI)

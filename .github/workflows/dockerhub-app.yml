@@ -17,12 +17,7 @@ name: Publish Amaterasu App Image
 #    * Manual dispatch
 #
 #  Cache: cache-from only (no cache-to).
-#    Both Docker Hub blob storage and GitHub Actions Cache (Azure-backed) have
-#    intermittent outages that cause cache EXPORT to fail, marking the build
-#    job as failed even though the image was already pushed. This blocks the
-#    merge job from running.
-#    Fix: keep cache-from (read-only, never fails — just skips if cache is
-#    empty), drop cache-to entirely.
+#    See dockerhub-amaterasu.yml header for rationale.
 # =============================================================================
 
 on:
@@ -115,10 +110,8 @@ jobs:
           for attempt in $(seq 1 30); do
             if docker buildx imagetools inspect "$BASE_IMAGE" >/dev/null 2>&1; then
               echo "Base image tag exists: $BASE_IMAGE"
-              # Verify this arch is present in the manifest
               if docker buildx imagetools inspect "$BASE_IMAGE" | grep -q "linux/${{ matrix.platform }}"; then
                 echo "linux/${{ matrix.platform }} entry found in base manifest"
-                # Print the manifest for the build log (helps diagnose stale tags)
                 echo "=== Base manifest contents ==="
                 docker buildx imagetools inspect "$BASE_IMAGE"
                 exit 0

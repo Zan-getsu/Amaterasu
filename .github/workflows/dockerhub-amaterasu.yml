@@ -105,17 +105,14 @@ jobs:
           context: .
           file: ./Dockerfile.base
           platforms: linux/${{ matrix.platform }}
-          # push-by-digest: the merge job will assemble the final :v1 manifest
-          # with all arches + apply tags in one atomic operation.
           outputs: |
             type=image,name=docker.io/${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=true
           provenance: false
           # no-cache: FORCED TRUE permanently.
           # Stale GHA cache layers from broken earlier builds were being
           # reused even when the Dockerfile changed, producing a 439 MB
-          # image instead of the expected ~2 GB. The "Bust cache" checkbox
-          # approach didn't reliably work, so we force no-cache:true on
-          # EVERY build. Slower (~25 min per arch) but correct.
+          # image instead of the expected ~2 GB. Forcing no-cache:true on
+          # EVERY build guarantees a clean rebuild.
           # cache-from/cache-to removed entirely — no-cache makes them useless.
           no-cache: true
 
@@ -180,13 +177,11 @@ jobs:
           SHORT_SHA="$(echo '${{ github.sha }}' | cut -c1-7)"
           IMAGE="docker.io/${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}"
 
-          # Tag list (matches original :v1 + adds traceability tag)
           TAGS=(
             "-t" "${IMAGE}:${{ env.IMAGE_TAG }}"
             "-t" "${IMAGE}:${{ env.IMAGE_TAG }}-sha-${SHORT_SHA}"
           )
 
-          # Source digests (one per arch)
           SOURCES=""
           for f in *; do
             SOURCES="${SOURCES} ${IMAGE}@sha256:${f}"
