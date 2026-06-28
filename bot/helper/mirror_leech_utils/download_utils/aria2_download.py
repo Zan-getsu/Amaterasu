@@ -16,9 +16,21 @@ from ...telegram_helper.message_utils import send_status_message, send_message
 
 def _sourceforge_filename(link):
     parsed = urlparse(link)
-    if parsed.hostname != "downloads.sourceforge.net":
+    if not parsed.hostname:
         return ""
-    filename = unquote(parsed.path.rsplit("/", 1)[-1])
+    path_parts = [part for part in parsed.path.split("/") if part]
+    if parsed.hostname == "downloads.sourceforge.net":
+        filename = path_parts[-1] if path_parts else ""
+    elif parsed.hostname.endswith("sourceforge.net"):
+        if "files" not in path_parts:
+            return ""
+        file_parts = path_parts[path_parts.index("files") + 1 :]
+        if file_parts and file_parts[-1] == "download":
+            file_parts = file_parts[:-1]
+        filename = file_parts[-1] if file_parts else ""
+    else:
+        return ""
+    filename = unquote(filename)
     return filename if filename and "." in filename else ""
 
 
