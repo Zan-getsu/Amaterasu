@@ -113,6 +113,91 @@ class HypertgDownload(HypertgTransfer):
                 return m
         raise ValueError("No downloadable media")
 
+    async def _copy_to_dump(self, message, dump_chat):
+        errors = []
+        seen_clients = set()
+
+        async def _copy_with_caption_fallback(copy_call):
+            try:
+                return await copy_call()
+            except Exception as e:
+                if "MEDIA_CAPTION_TOO_LONG" not in str(e):
+                    raise
+                return await copy_call(caption=None)
+
+        async def _try_copy(label, client=None, bound=False):
+            if bound:
+                copy_method = getattr(message, "copy", None)
+                if copy_method is None:
+                    return None
+                msg_client = getattr(message, "_client", None)
+                key = (
+                    ("client", id(msg_client))
+                    if msg_client is not None
+                    else ("bound", id(copy_method))
+                )
+                if key in seen_clients:
+                    return None
+                seen_clients.add(key)
+
+                async def _copy_bound(**kwargs):
+                    return await copy_method(
+                        chat_id=dump_chat,
+                        disable_notification=True,
+                        **kwargs,
+                    )
+
+                return await _copy_with_caption_fallback(_copy_bound)
+
+            if client is None:
+                return None
+            key = ("client", id(client))
+            if key in seen_clients:
+                return None
+            seen_clients.add(key)
+
+            async def _copy_client(**kwargs):
+                return await client.copy_message(
+                    chat_id=dump_chat,
+                    from_chat_id=message.chat.id,
+                    message_id=message.id,
+                    disable_notification=True,
+                    **kwargs,
+                )
+
+            return await _copy_with_caption_fallback(_copy_client)
+
+        candidates = [("source", None, True)]
+        listener_client = getattr(self._listener, "client", None)
+        if listener_client is not None:
+            candidates.append(("listener", listener_client, False))
+        candidates.extend(
+            (
+                ("bot", TgClient.bot, False),
+                ("user", TgClient.user, False),
+            )
+        )
+
+        for label, client, bound in candidates:
+            try:
+                copied = await _try_copy(label, client=client, bound=bound)
+                if copied is None:
+                    continue
+                self._media_of(copied)
+                LOGGER.info(f"HypertgDL copied source to dump chat via {label}")
+                return copied
+            except (FloodWait, FloodPremiumWait):
+                raise
+            except Exception as e:
+                errors.append(f"{label}: {e}")
+
+        detail = f" ({'; '.join(errors)})" if errors else ""
+        LOGGER.warning(
+            "HypertgDL cannot copy source to dump chat; "
+            f"falling back to standard download{detail}"
+        )
+        return None
+
     async def _do_req(self, sess, client, location, off, csz, attempt=0):
         try:
             r = await sess.invoke(
@@ -713,16 +798,9 @@ class HypertgDownload(HypertgTransfer):
                 except (ValueError, TypeError):
                     dump_chat = None
             if dump_chat:
-                try:
-                    self.message = await TgClient.bot.copy_message(
-                        chat_id=dump_chat,
-                        from_chat_id=message.chat.id,
-                        message_id=message.id,
-                        disable_notification=True,
-                    )
-                except Exception as e:
-                    LOGGER.warning(f"HypertgDL copy fail: {e} (from={message.chat.id} to={dump_chat})")
-                    raise RuntimeError(f"Cannot copy to dump chat: {e}") from e
+                self.message = await self._copy_to_dump(message, dump_chat)
+                if self.message is None:
+                    return None
             self.dump_chat = dump_chat or message.chat.id
             self.message = self.message or message
             media = self._media_of(self.message)

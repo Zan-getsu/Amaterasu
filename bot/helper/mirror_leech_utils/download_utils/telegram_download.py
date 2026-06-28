@@ -196,13 +196,14 @@ class TelegramDownloadHelper:
                         f"{hyper_err}); falling back to standard Pyrogram download"
                     )
                     download = None
-                # If HypertgDL returned None, the download was incomplete
-                # (failed offsets or size mismatch). Fall back to standard
-                # Pyrogram download instead of uploading a corrupt file.
+                # If HypertgDL returned None, the fast path was unavailable
+                # for this message or it detected an incomplete file. Fall
+                # back to standard Pyrogram download instead of uploading a
+                # corrupt file.
                 if download is None and not self._listener.is_cancelled:
                     self._hyper_dl = False
                     LOGGER.info(
-                        "HypertgDL returned incomplete download; falling back "
+                        "HypertgDL returned no complete download; falling back "
                         "to standard Pyrogram download (slower but reliable)"
                     )
                     download = await self._standard_download(message, path)
