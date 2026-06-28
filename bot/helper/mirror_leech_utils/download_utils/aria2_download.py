@@ -3,6 +3,7 @@ from aiofiles import open as aiopen
 from base64 import b64encode
 from aiohttp.client_exceptions import ClientError
 from asyncio import TimeoutError
+from urllib.parse import unquote, urlparse
 
 from .... import task_dict_lock, task_dict, LOGGER
 from ....core.config_manager import Config
@@ -11,6 +12,14 @@ from ...ext_utils.bot_utils import DEFAULT_BROWSER_USER_AGENT, bt_selection_butt
 from ...ext_utils.task_manager import check_running_tasks
 from ...mirror_leech_utils.status_utils.aria2_status import Aria2Status
 from ...telegram_helper.message_utils import send_status_message, send_message
+
+
+def _sourceforge_filename(link):
+    parsed = urlparse(link)
+    if parsed.hostname != "downloads.sourceforge.net":
+        return ""
+    filename = unquote(parsed.path.rsplit("/", 1)[-1])
+    return filename if filename and "." in filename else ""
 
 
 async def add_aria2_download(
@@ -25,6 +34,8 @@ async def add_aria2_download(
     a2c_opt = {"dir": dpath}
     if listener.name:
         a2c_opt["out"] = listener.name
+    elif filename := _sourceforge_filename(listener.link):
+        a2c_opt["out"] = filename
     if header:
         a2c_opt["header"] = header
     if listener.link.startswith(("http://", "https://", "ftp://")) and (

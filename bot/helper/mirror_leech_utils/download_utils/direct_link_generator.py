@@ -971,16 +971,25 @@ def sourceforge(url):
     ):
         return url
 
-    path = parsed_url.path.rstrip("/")
-    if not path.endswith("/download"):
-        path = f"{path}/download"
+    path_parts = [part for part in parsed_url.path.split("/") if part]
+    try:
+        projects_index = path_parts.index("projects")
+        files_index = path_parts.index("files", projects_index + 2)
+        project = path_parts[projects_index + 1]
+        file_parts = path_parts[files_index + 1 :]
+    except (ValueError, IndexError) as e:
+        raise DirectDownloadLinkException("ERROR: SourceForge file path not found") from e
 
+    if file_parts and file_parts[-1] == "download":
+        file_parts = file_parts[:-1]
+    if not file_parts:
+        raise DirectDownloadLinkException("ERROR: SourceForge file path not found")
+
+    direct_path = "/".join([project, *file_parts])
+    direct_url = f"https://downloads.sourceforge.net/project/{direct_path}"
     query = parsed_url.query
-    if "use_mirror" not in parse_qs(query):
-        query = f"{query}&use_mirror=autoselect" if query else "use_mirror=autoselect"
-
-    direct_url = f"{parsed_url.scheme}://{parsed_url.netloc}{path}"
-    return f"{direct_url}?{query}" if query else direct_url
+    direct_url = f"{direct_url}?{query}" if query else direct_url
+    return direct_url, [f"Referer: {url}", f"User-Agent: {user_agent}"]
 
 
 def yandex_disk(url: str) -> str:

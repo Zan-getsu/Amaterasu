@@ -640,9 +640,16 @@ class Mirror(TaskListener):
                         await self.remove_from_same_dir()
                         await delete_links(self.message)
                         return
-                    LOGGER.info(f"{e}. Checking yt-dlp fallback for: {self.link}")
+                    no_direct_link = e.startswith("No Direct link function found")
+                    if no_direct_link:
+                        LOGGER.info(
+                            f"{e}. Checking yt-dlp for a real extractor; "
+                            f"generic matches will fall back to aria2: {self.link}"
+                        )
+                    else:
+                        LOGGER.info(f"{e}. Checking yt-dlp fallback for: {self.link}")
                     use_ytdlp_fallback = True
-                    retry_aria2_after_generic = content_type is None
+                    retry_aria2_after_generic = no_direct_link or content_type is None
                     ytdlp_fallback_error = e
                 except Exception as e:
                     await send_message(self.message, e)
