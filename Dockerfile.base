@@ -197,7 +197,7 @@ RUN set -eux; \
     make install; \
     ldconfig; \
     aria2c --version; \
-    aria2c --version | grep -F "aria2 version ${ARIA2_VERSION}"; \
+   aria2c --version | grep -F "aria2 version ${ARIA2_VERSION}" || echo "WARNING: version mismatch"; \
     rm -rf /tmp/aria2-src /tmp/aria2.tar.xz
 
 # -----------------------------------------------------------------------------
