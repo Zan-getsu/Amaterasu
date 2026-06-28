@@ -451,6 +451,8 @@ def direct_link_generator(link):
         return mediafile(link)
     elif "mediafire.com" in domain:
         return mediafire(link)
+    elif "sourceforge.net" in domain:
+        return sourceforge(link)
     elif "osdn.net" in domain:
         return osdn(link)
     elif "github.com" in domain:
@@ -960,6 +962,25 @@ def osdn(url):
         if not (direct_link := html.xpath('//a[@class="mirror_link"]/@href')):
             raise DirectDownloadLinkException("ERROR: Direct link not found")
         return f"https://osdn.net{direct_link[0]}"
+
+
+def sourceforge(url):
+    parsed_url = urlparse(url)
+    if parsed_url.hostname and parsed_url.hostname.startswith(
+        "downloads.sourceforge.net"
+    ):
+        return url
+
+    path = parsed_url.path.rstrip("/")
+    if not path.endswith("/download"):
+        path = f"{path}/download"
+
+    query = parsed_url.query
+    if "use_mirror" not in parse_qs(query):
+        query = f"{query}&use_mirror=autoselect" if query else "use_mirror=autoselect"
+
+    direct_url = f"{parsed_url.scheme}://{parsed_url.netloc}{path}"
+    return f"{direct_url}?{query}" if query else direct_url
 
 
 def yandex_disk(url: str) -> str:
