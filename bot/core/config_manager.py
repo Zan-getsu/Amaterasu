@@ -99,6 +99,9 @@ class Config:
     AUTHOR_URL = "https://t.me/itsniloybhowmick"
     INSTADL_API = ""
     IMDB_TEMPLATE = ""
+    # JioDrive (Indian cloud storage) bypass token.
+    # Default empty: scraper raises a clear error if invoked without a token.
+    JIODRIVE_TOKEN = ""
     IMAGES = []
     IMG_SEARCH = ""
     IMG_PAGE = 1

@@ -139,6 +139,10 @@ IMG_PAGE = 1
 USE_IMAGES = False
 IMDB_TEMPLATE = ""
 INSTADL_API = ""
+# JioDrive (Indian cloud storage) bypass token.
+# Required for the jiodrive scraper to authenticate against jiodrive.xyz.
+# Leave empty to disable jiodrive link resolution (default-off).
+JIODRIVE_TOKEN = ""
 HYDRA_IP = ""
 HYDRA_API_KEY = ""
 

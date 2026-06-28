@@ -26,118 +26,387 @@ user_agent = (
 )
 
 debrid_link_supported_sites = [
+    "1dl.net",
     "1fichier.com",
+    "24hd.club",
+    "449unceremoniousnasoseptal.com",
+    "4tube.com",
+    "academicearth.org",
+    "acast.com",
+    "add-anime.net",
+    "ahctv.com",
+    "air.mozilla.org",
+    "albavido.xyz",
+    "allocine.fr",
+    "alphaporno.com",
+    "alterupload.com",
+    "animalist.com",
+    "animalplanet.com",
+    "anime789.com",
     "anonfiles.com",
+    "anysex.com",
+    "aparat.com",
+    "apkadmin.com",
+    "audi-mediacenter.com",
+    "audioboom.com",
+    "audiomack.com",
     "bayfiles.com",
+    "beeg.com",
+    "camdemy.com",
+    "chilloutzone.net",
+    "cinema.arte.tv",
+    "cjoint.net",
+    "clickndownload.org",
+    "clicknupload.cc",
+    "clicknupload.club",
+    "clicknupload.co",
+    "clicknupload.download",
     "clicknupload.link",
     "clicknupload.org",
-    "clicknupload.co",
-    "clicknupload.cc",
-    "clicknupload.download",
-    "clicknupload.club",
+    "clubic.com",
+    "clyp.it",
+    "concert.arte.tv",
+    "creative.arte.tv",
+    "daclips.in",
+    "dailymail.co.uk",
+    "dailymotion.com",
+    "dailyplanet.pw",
     "dailyuploads.net",
+    "ddc.arte.tv",
     "ddl.to",
     "ddownload.com",
     "ddownload.link",
+    "democracynow.org",
+    "depositfiles.com",
+    "desfichiers.com",
+    "destinationamerica.com",
+    "dfichiers.com",
+    "dfile.eu",
+    "diasfem.com",
+    "discovery.com",
+    "discoverylife.com",
+    "dl.free.fr",
+    "dl4free.com",
+    "dotsub.com",
     "drop.download",
+    "dropapk.to",
     "dropbox.com",
     "dropboxusercontent.com",
+    "dutrag.com",
+    "e.pcloud.link",
+    "easybytez.com",
+    "easybytez.eu",
+    "easybytez.me",
     "easyupload.io",
+    "ebaumsworld.com",
+    "eitb.tv",
+    "elfile.net",
+    "elitefile.net",
+    "ellentube.com",
+    "ellentv.com",
+    "embed.redtube.com",
+    "embedsito.com",
     "emload.com",
+    "fastfile.cc",
+    "fcdn.stream",
+    "femax20.com",
+    "fembed-hd.com",
+    "fembed.com",
+    "fembed9hd.com",
+    "femoload.xyz",
+    "feurl.com",
+    "fikper.com",
     "file.al",
     "fileaxa.com",
     "filecat.net",
     "filedot.to",
     "filedot.xyz",
-    "filextras.com",
+    "filefactory.com",
+    "filenext.com",
     "filer.net",
+    "filerice.com",
+    "filesfly.cc",
     "filespace.com",
     "filestore.me",
+    "filextras.com",
+    "flashbit.cc",
+    "flipagram.com",
+    "footyroom.com",
+    "formula1.com",
+    "franceculture.fr",
+    "free.fr",
+    "future.arte.tv",
+    "gameinformer.com",
+    "gamersyde.com",
+    "gcloud.live",
     "gigapeta.com",
     "gofile.io",
+    "goloady.com",
+    "gorillavid.in",
+    "hbo.com",
+    "hellporno.com",
+    "hentai.animestigma.com",
     "hexupload.net",
+    "highload.to",
+    "hitf.cc",
     "hitfile.net",
+    "hornbunny.com",
+    "html5-player.libsyn.com",
     "hulkshare.com",
+    "icerbox.com",
+    "imdb.com",
+    "info.arte.tv",
+    "instagram.com",
+    "investigationdiscovery.com",
     "isra.cloud",
+    "itar-tass.com",
+    "jamendo.com",
+    "jove.com",
+    "jplayer.net",
+    "jumploads.com",
+    "k.to",
+    "k2s.cc",
     "katfile.com",
+    "keek.com",
+    "keep2share.cc",
+    "keep2share.com",
+    "keezmovies.com",
+    "khanacademy.org",
+    "kickstarter.com",
+    "krasview.ru",
     "kshared.com",
+    "la7.it",
+    "lci.fr",
+    "libsyn.com",
+    "liveleak.com",
+    "livestream.com",
+    "load.to",
+    "m.mgoon.com",
+    "m6.fr",
+    "mediafile.cc",
     "mediafire.com",
-    "mega.nz",
+    "mediashore.org",
     "mega.co.nz",
+    "mega.nz",
+    "megadl.fr",
+    "megadl.org",
+    "mesfichiers.fr",
+    "mesfichiers.org",
+    "metacritic.com",
+    "mexa.sh",
     "mexashare.com",
-    "mixdrop.co",
-    "mixdrop.to",
-    "mixdrop.sx",
+    "mgoon.com",
+    "mixcloud.com",
     "mixdrop.club",
+    "mixdrop.co",
+    "mixdrop.sx",
+    "mixdrop.to",
     "modsbase.com",
+    "mojvideo.com",
+    "movieclips.com",
+    "moviemaniac.org",
+    "movpod.in",
+    "mrdhan.com",
+    "musicplayon.com",
+    "mx-sh.net",
+    "myspass.de",
+    "myvidster.com",
+    "ncdnstm.com",
     "nelion.me",
+    "new.livestream.com",
+    "news.yahoo.com",
+    "nitro.download",
+    "nitroflare.com",
+    "noregx.debrid.link",
+    "odatv.com",
+    "onionstudios.com",
+    "opvid.online",
+    "opvid.org",
+    "ora.tv",
+    "piecejointe.net",
     "pixeldrain.com",
+    "pjointe.com",
+    "play.fm",
+    "play.lcp.fr",
+    "player.vimeo.com",
+    "player.vimeopro.com",
+    "plays.tv",
+    "playvid.com",
+    "pornhd.com",
+    "pornhub.com",
     "prefiles.com",
+    "pyvideo.org",
     "racaty.net",
-    "rapidgator.net",
     "rapidgator.asia",
+    "rapidgator.net",
+    "redtube.com",
+    "reputationsheriffkennethsand.com",
+    "reverbnation.com",
+    "revision3.com",
     "rg.to",
+    "rts.ch",
+    "rtve.es",
+    "salefiles.com",
+    "sbs.com.au",
+    "sciencechannel.com",
+    "screen.yahoo.com",
+    "screencast.com",
     "scribd.com",
+    "seeker.com",
     "send.cm",
+    "sendspace.com",
+    "sexhd.co",
     "sharemods.com",
+    "sharinglink.club",
     "silkfiles.com",
+    "sites.arte.tv",
+    "skysports.com",
+    "slmaxed.com",
+    "sltube.org",
+    "slutload.com",
+    "slwatch.co",
     "soundcloud.com",
+    "soundgasm.net",
+    "sports.yahoo.com",
+    "steamcommunity.com",
+    "steampowered.com",
+    "store.steampowered.com",
+    "stream.cz",
+    "streamable.com",
+    "streamcloud.eu",
+    "streamlare.com",
     "streamtape.com",
+    "subyshare.com",
+    "sunporno.com",
+    "superplayxyz.club",
+    "supervideo.tv",
+    "suzihaza.com",
+    "tass.ru",
+    "teachertube.com",
+    "teamcoco.com",
+    "ted.com",
+    "tenvoi.com",
     "terabox.com",
     "teraboxapp.com",
     "tezfiles.com",
-    "turb.cc",
-    "turb.to",
-    "turbobit.net",
-    "turbobit.cc",
-    "turbobit.pw",
-    "turbobit.online",
-    "turbobit.ru",
-    "turbobit.live",
+    "tfo.org",
+    "there.to",
+    "thescene.com",
+    "thesixtyone.com",
+    "tlc.com",
+    "tnaflix.com",
+    "touch.dailymotion.com",
+    "transfert.free.fr",
     "trubobit.com",
+    "trutv.com",
+    "tu.tv",
+    "turb.cc",
+    "turb.pw",
+    "turb.to",
+    "turbabit.com",
+    "turbo.fr",
+    "turbo.to",
+    "turbobit.cc",
+    "turbobit.live",
+    "turbobit.net",
+    "turbobit.online",
+    "turbobit.pw",
+    "turbobit.ru",
     "turboblt.co",
+    "turboget.net",
+    "tweakers.net",
+    "ubiqfile.com",
     "uloz.to",
+    "ulozto.cz",
     "ulozto.net",
     "ulozto.sk",
-    "ulozto.cz",
-    "upload.ee",
-    "uploadhaven.com",
+    "unsafespeech.com",
     "up-4ever.com",
     "up-4ever.net",
+    "upload-4ever.com",
+    "upload.ee",
+    "uploadhaven.com",
     "uptobox.com",
-    "uptobox.fr",
     "uptobox.eu",
+    "uptobox.fr",
     "uptobox.link",
     "uptostream.com",
-    "uptostream.fr",
     "uptostream.eu",
+    "uptostream.fr",
     "uptostream.link",
-    "upvid.pro",
-    "upvid.live",
-    "upvid.host",
     "upvid.biz",
     "upvid.cloud",
-    "uqload.com",
+    "upvid.co",
+    "upvid.host",
+    "upvid.live",
+    "upvid.pro",
     "uqload.co",
+    "uqload.com",
     "uqload.io",
     "userload.co",
     "usersdrive.com",
+    "ustream.tv",
+    "vanfem.com",
+    "vbox7.com",
+    "vcdn.io",
+    "vcdnplay.com",
+    "veehd.com",
+    "velocity.com",
+    "veoh.com",
+    "vid.me",
+    "video.arte.tv",
+    "video.foxbusiness.com",
+    "video.foxnews.com",
+    "video.insider.foxnews.com",
+    "video.yahoo.com",
+    "videodetective.com",
+    "videos.sapo.ao",
+    "videos.sapo.cv",
+    "videos.sapo.mz",
+    "videos.sapo.pt",
+    "videos.sapo.tl",
+    "vidohd.com",
     "vidoza.net",
-    "voe.sx",
+    "vidsource.me",
+    "vimeo.com",
+    "vimeopro.com",
+    "viplayer.cc",
+    "voe-un-block.com",
     "voe-unblock.com",
-    "voeunblock1.com",
-    "voeunblock2.com",
-    "voeunblock3.com",
+    "voe.sx",
+    "voeun-block.net",
     "voeunbl0ck.com",
     "voeunblck.com",
     "voeunblk.com",
-    "voe-un-block.com",
-    "voeun-block.net",
+    "voeunblock1.com",
+    "voeunblock2.com",
+    "voeunblock3.com",
+    "votrefile.xyz",
+    "votrefiles.club",
+    "wat.tv",
+    "wdupload.com",
+    "wimp.com",
     "workupload.com",
     "world-bytez.com",
-    "worldbytez.com",
     "world-files.com",
+    "worldbytez.com",
     "wupfile.com",
+    "www.arte.tv",
+    "www.dailymail.co.uk",
+    "www.m6.fr",
+    "www.pornhub.com",
+    "www.redtube.com",
+    "www.sbs.com.au",
+    "xstreamcdn.com",
+    "xtube.com",
+    "yahoo.com",
+    "yodbox.com",
+    "youdbox.com",
+    "youporn.com",
+    "youtu.be",
+    "youtube.com",
+    "zachowajto.pl",
+    "zidiplay.com",
     "zippyshare.com",
 ]
 
@@ -330,6 +599,20 @@ def direct_link_generator(link):
         return linkBox(link)
     elif is_share_link(link):
         return filepress(link) if "filepress" in domain else sharer_scraper(link)
+    # Phase 1 port P9 — JioDrive resolver (must come BEFORE the
+    # 'No Direct link function found' fallback so jiodrive.xyz URLs
+    # route to jiodrive() instead of falling through). Default-off:
+    # if JIODRIVE_TOKEN is empty, jiodrive() raises a clear error.
+    elif "jiodrive" in domain:
+        return jiodrive(link)
+    # Phase 1 port P7 — fembed video-hosting family (10 domains).
+    # Rule 3 (additive): new elif branch positioned AFTER existing
+    # branches so existing URL routing is unchanged.
+    elif any(x in domain for x in FEMBED_DOMAINS):
+        return fembed(link)
+    # Phase 1 port P8 — sbembed video-hosting family (4 domains).
+    elif any(x in domain for x in SBEMBED_DOMAINS):
+        return sbembed(link)
     elif any(
         x in domain
         for x in [
@@ -1318,6 +1601,166 @@ def filepress(url):
     if "data" not in res:
         raise DirectDownloadLinkException(f'ERROR: {res["statusText"]}')
     return f'https://drive.google.com/uc?id={res["data"]}&export=download'
+
+
+def jiodrive(url):
+    """Phase 1 port P9 — JioDrive (Indian cloud storage) link resolver.
+
+    JioDrive is Reliance Jio's consumer cloud storage. Public share
+    links look like https://www.jiodrive.xyz/?file_id=XXX and require
+    an access token to download. The token is set by the operator via
+    Config.JIODRIVE_TOKEN (default empty = feature disabled).
+
+    Returns the direct download URL on success.
+    Raises DirectDownloadLinkException on any failure, including:
+      - "JIODRIVE_TOKEN not configured" if the operator didn't set it
+      - "Drive storage quota exceeded" if JioDrive returns code != 200
+      - The exception class name on any HTTP/JSON error
+    """
+    # Rule 1 (default-off): refuse to run if JIODRIVE_TOKEN is empty
+    if not Config.JIODRIVE_TOKEN:
+        raise DirectDownloadLinkException(
+            "ERROR: JIODRIVE_TOKEN not configured. Set it in config.env "
+            "to enable jiodrive link resolution."
+        )
+    with create_scraper() as session:
+        try:
+            url = session.get(url).url
+            cookies = {"access_token": Config.JIODRIVE_TOKEN}
+            # Extract the file ID from the resolved URL (last path segment)
+            data = {"id": url.split("/")[-1]}
+            resp = session.post(
+                "https://www.jiodrive.xyz/ajax.php?ajax=download",
+                cookies=cookies,
+                data=data,
+            ).json()
+        except Exception as e:
+            raise DirectDownloadLinkException(
+                f"ERROR: {e.__class__.__name__}"
+            ) from e
+        if resp.get("code") != "200":
+            raise DirectDownloadLinkException(
+                "ERROR: The user's Drive storage quota has been exceeded."
+            )
+        return resp["file"]
+
+
+# Phase 1 port P7 — fembed video-hosting family (10 domains).
+# These sites all share the same API: POST /api/source/{video_id}
+# returns a JSON array of {file, label, type} quality variants.
+FEMBED_DOMAINS = [
+    "fembed.net",
+    "fembed.com",
+    "femax20.com",
+    "fcdn.stream",
+    "feurl.com",
+    "layarkacaxxi.icu",
+    "naniplay.nanime.in",
+    "naniplay.nanime.biz",
+    "naniplay.com",
+    "mm9842.com",
+]
+
+
+def fembed(link):
+    """Phase 1 port P7 — fembed video-hosting family scraper.
+
+    Supports 10 fembed-family domains (FEMBED_DOMAINS). All share the
+    same API: POST https://{domain}/api/source/{video_id} returns
+    {"success": true, "data": [{"file": url, "label": "360p", ...}, ...]}.
+
+    Returns the highest-quality (last) direct MP4 URL. The caller
+    (aria2) downloads it as a normal HTTP file.
+
+    Implemented without the lk21 dependency that WZML-X uses — this
+    avoids adding a git+https requirement to requirements.txt.
+    """
+    raw = urlparse(link)
+    domain = raw.hostname or ""
+    # Extract video ID: usually the last path segment of the URL
+    # e.g. https://fembed.com/v/{id} or https://fembed.com/f/{id}
+    path_parts = [p for p in raw.path.split("/") if p]
+    if not path_parts:
+        raise DirectDownloadLinkException(
+            "ERROR: Could not extract video ID from fembed URL"
+        )
+    video_id = path_parts[-1]
+    api_url = f"{raw.scheme}://{domain}/api/source/{video_id}"
+    try:
+        # timeout=30: prevents indefinite hang if fembed API is unresponsive.
+        # Aligns with the 30-second timeout used by _torbox() in debrid_utils.
+        resp = post(api_url, headers={"Referer": link}, timeout=30).json()
+    except Exception as e:
+        raise DirectDownloadLinkException(
+            f"ERROR: {e.__class__.__name__} While fetching fembed API"
+        ) from e
+    if not resp.get("success"):
+        raise DirectDownloadLinkException(
+            f"ERROR: fembed API returned success=false: "
+            f"{resp.get('message', 'no message')}"
+        )
+    data = resp.get("data") or []
+    if not data:
+        raise DirectDownloadLinkException(
+            "ERROR: fembed API returned no playable streams"
+        )
+    # Return the last (typically highest-quality) stream URL
+    return data[-1]["file"]
+
+
+# Phase 1 port P8 — sbembed video-hosting family (4 domains).
+SBEMBED_DOMAINS = [
+    "sbembed.com",
+    "watchsb.com",
+    "streamsb.net",
+    "sbplay.org",
+]
+
+
+def sbembed(link):
+    """Phase 1 port P8 — sbembed video-hosting family scraper.
+
+    Supports 4 sbembed-family domains (SBEMBED_DOMAINS). The sbembed
+    API uses a different pattern than fembed: it requires scraping the
+    HTML page to extract a 'sources' JSON, then POSTing to download
+    endpoints. To keep the implementation simple and dependency-free,
+    we scrape the HTML for the sources array and return the last URL.
+
+    The HTML page contains a JavaScript block like:
+        sources = [{"file":"https://...","label":"360p"}, ...]
+    """
+    try:
+        # timeout=30: prevents indefinite hang if sbembed page is unresponsive.
+        # Aligns with the 30-second timeout used by fembed() and _torbox().
+        html_text = get(link, headers={"Referer": link}, timeout=30).text
+    except Exception as e:
+        raise DirectDownloadLinkException(
+            f"ERROR: {e.__class__.__name__} While fetching sbembed page"
+        ) from e
+    # Look for the sources array in the HTML/JavaScript.
+    # Use (?s) inline flag so '.' matches newlines (sources arrays
+    # often span multiple lines in the page's JavaScript).
+    sources = findall(r"(?s)sources\s*[:=]\s*(\[.*?\])", html_text)
+    if not sources:
+        raise DirectDownloadLinkException(
+            "ERROR: sbembed sources array not found in page HTML — "
+            "the site may have changed its layout."
+        )
+    try:
+        # Parse the JSON-like array
+        from json import loads as json_loads
+        # findall returns strings; try to parse the first match
+        sources_json = json_loads(sources[0])
+    except Exception as e:
+        raise DirectDownloadLinkException(
+            f"ERROR: Could not parse sbembed sources: {e.__class__.__name__}"
+        ) from e
+    if not sources_json:
+        raise DirectDownloadLinkException(
+            "ERROR: sbembed sources array is empty"
+        )
+    # Return the last (typically highest-quality) source URL
+    return sources_json[-1]["file"]
 
 
 def sharer_scraper(url):

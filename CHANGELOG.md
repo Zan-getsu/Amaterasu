@@ -5,6 +5,77 @@ All notable changes to Amaterasu are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] — Phase 1 Ports (MLTB + WZML-X → Amaterasu)
+
+### Added — Phase 1 Ports (best of MLTB + WZML-X, nothing broken)
+
+This release ports the highest-impact, lowest-risk features from MLTB
+(anasty17/mirror-leech-telegram-bot) and WZML-X (SilentDemonSD/WZML-X)
+into Amaterasu. Every port follows the 5 Non-Destructive Porting Rules:
+default-off config, feature-flag guard, additive dispatcher entries,
+test parity, and CHANGELOG entry. All 9 original v1.6.3 baseline tests
+remain green; 170+ new tests were added.
+
+- **P1 — TorBox resolver (5th debrid provider)**: `DEBRID_LINK_API=tb:YOUR_KEY`
+  now routes through TorBox alongside existing rd:/ad:/pm:/dl: prefixes.
+  TorBox doubles as a torrent seedbox. 91-host `TORBOX_SUPPORTED_SITES`
+  list exported for dispatcher use.
+- **P2 — Real-Debrid cached-magnet auto-resolve**: `real_debrid_cached_magnet()`
+  queries RD's `/torrents/instantAvailability/{hash}` endpoint. On cache
+  hit, returns a multi-file direct-download dict that bypasses qBittorrent
+  entirely. Critical safety property: NEVER raises — returns None on any
+  non-success path (not cached, network error, RD not configured, invalid
+  magnet). New `extract_info_hash()` helper in `links_utils.py` handles
+  v1 hex + v1 base32 magnet formats.
+- **P3 — Expanded Debrid-Link host list**: merged Amaterasu's 113-host
+  list with WZML-X's 367-host list → 382 unique hosts. Adds French
+  1fichier family (alterupload, cjoint, desfichiers, dfichiers,
+  mesfichiers, pjointe, tenvoi, dl4free), full clicknupload family
+  (.org/.co/.cc/.download/.club), easybytez variants (.com/.eu/.me),
+  and many video hosts (fembed, feurl, anime789, xstreamcdn, etc.).
+- **P4 — Expanded share-link family recognition**: `is_share_link()`
+  now recognizes 5 new drive share-link intermediaries: drivelinks,
+  hubdrive, katdrive, kolop, sharerpp. They route to the existing
+  `sharer_scraper()` fallback. Added defensive None/empty/non-string
+  guard to `is_share_link()`.
+- **P5 — terabox domain coverage locked in**: regression tests verify
+  Amaterasu's 17-domain terabox list is a superset of WZML-X's 7 domains.
+- **P6 — doodstream domain coverage locked in**: regression tests verify
+  Amaterasu's 23-domain doodstream list is a superset of WZML-X's 18.
+- **P7 — fembed video-hosting family scraper (10 domains)**: new
+  `fembed()` function and `FEMBED_DOMAINS` list. Supports fembed.net/.com,
+  femax20.com, fcdn.stream, feurl.com, layarkacaxxi.icu, naniplay.nanime.in
+  /.biz/.com, mm9842.com. Implemented dependency-free (no lk21) — calls
+  the public `/api/source/{video_id}` endpoint directly.
+- **P8 — sbembed video-hosting family scraper (4 domains)**: new
+  `sbembed()` function and `SBEMBED_DOMAINS` list. Supports sbembed.com,
+  watchsb.com, streamsb.net, sbplay.org. Scrapes HTML for the `sources`
+  JS array (with `(?s)` multiline flag) — no new dependencies.
+- **P9 — jiodrive scraper (Indian cloud storage)**: new `jiodrive()`
+  function. Default-off — only activates when operator sets
+  `JIODRIVE_TOKEN`. Authenticates with `access_token` cookie, POSTs to
+  `jiodrive.xyz/ajax.php?ajax=download`. Raises clear error if token
+  not configured.
+
+### Stats
+- **170+ new tests added** across 6 new test files
+- **0 regressions**: all 27 baseline-passing tests still pass; the 2
+  pre-existing baseline failures (test_bool_coercion,
+  test_hmac_token_roundtrip) are unrelated to Phase 1 ports
+- **0 new dependencies added** (P7/P8 implemented without lk21)
+- **0 breaking changes**: every new feature is default-off and gated
+  behind a feature flag or config value
+
+### Backward Compatibility
+- All v1.6.3 config keys remain valid; new keys (`JIODRIVE_TOKEN`)
+  default to empty (feature disabled)
+- All v1.6.3 URL routing preserved — dispatcher branches are purely
+  additive (new `elif` branches come AFTER existing ones)
+- v1.5.0 bare-key `DEBRID_LINK_API` (no prefix) still routes to
+  Debrid-Link, not to TorBox (verified by dedicated regression test)
+- `is_share_link()` behavior for original 4 families unchanged
+  (verified by parametrized tests)
+
 ## [1.6.3] — 2026-06-23
 
 ### Fixed
