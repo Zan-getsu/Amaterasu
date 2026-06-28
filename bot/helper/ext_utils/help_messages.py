@@ -214,6 +214,11 @@ force_start = """<b>Force Start</b>: -f -fd -fu
 /cmd link -fd (force download only)
 /cmd link -fu (force upload directly after download finish)"""
 
+ytdlp_fallback = """<b>Force yt-dlp fallback</b>: -yf or -ytdlp-fallback
+
+/cmd link -yf
+For /mirror links, aria2 remains the default. Automatic yt-dlp fallback is used only when yt-dlp detects a real site extractor. This flag allows yt-dlp fallback even for generic HTTP links."""
+
 gdrive = """<b>Gdrive</b>: link
 If DEFAULT_UPLOAD is `rc` then you can pass up: `gd` to upload using gdrive tools to GDRIVE_ID.
 /cmd gdriveLink or gdl or gdriveId -up gdl or gdriveId or gd
@@ -347,6 +352,7 @@ MIRROR_HELP_DICT = {
     "Screenshot": screenshot,
     "Convert-Media": convert_media,
     "Force-Start": force_start,
+    "YT-DLP-Fallback": ytdlp_fallback,
     "User-Download": user_download,
     "Name-Swap": name_swap,
     "TG-Transmission": transmission,

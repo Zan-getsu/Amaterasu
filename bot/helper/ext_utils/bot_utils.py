@@ -289,6 +289,8 @@ def arg_parser(items, arg_base):
         "-ut",
         "-bt",
         "-yt",
+        "-yf",
+        "-ytdlp-fallback",
         "-en",
         # Phase 4.1/4.3 — boolean flags using --word syntax
         "--stream",
@@ -327,6 +329,8 @@ def arg_parser(items, arg_base):
                     "-ut",
                     "-bt",
                     "-yt",
+                    "-yf",
+                    "-ytdlp-fallback",
                 ]
             ):
                 arg_base[part] = True

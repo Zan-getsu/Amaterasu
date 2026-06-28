@@ -64,6 +64,18 @@ def extract_ytdlp_info(link, options):
         return result
 
 
+def get_ytdlp_extractor(result):
+    extractor = result.get("extractor_key") or result.get("extractor") or ""
+    if extractor:
+        return str(extractor).split(":", 1)[0]
+    return ""
+
+
+def is_generic_ytdlp_result(result):
+    extractor = get_ytdlp_extractor(result).lower()
+    return not extractor or extractor == "generic"
+
+
 class Mirror(TaskListener):
     def __init__(
         self,
@@ -97,10 +109,15 @@ class Mirror(TaskListener):
         self.is_nzb = is_nzb
         self.is_uphoster = is_uphoster
 
-    async def _add_ytdlp_fallback(self, path, forced_name=None):
-        self.is_ytdlp = True
-        self._set_mode_engine()
-
+    async def _add_ytdlp_fallback(
+        self,
+        path,
+        forced_name=None,
+        force_generic=False,
+        fallback_error=None,
+        notify_generic_error=True,
+        notify_extract_error=True,
+    ):
         opt = self.user_dict.get("YT_DLP_OPTIONS") or Config.YT_DLP_OPTIONS or {}
         if not isinstance(opt, dict):
             opt = {}
@@ -126,9 +143,34 @@ class Mirror(TaskListener):
             result = await sync_to_async(extract_ytdlp_info, self.link, options)
         except Exception as e:
             msg = str(e).replace("<", " ").replace(">", " ")
-            await send_message(self.message, f"{self.tag} {msg}")
-            await self.remove_from_same_dir()
-            return
+            if notify_extract_error:
+                await self.on_download_error(msg)
+                return None
+            self.ytdlp_fallback_error = msg
+            return False
+
+        extractor = get_ytdlp_extractor(result) or "unknown"
+        if is_generic_ytdlp_result(result) and not force_generic:
+            msg = (
+                fallback_error
+                or "Aria2 could not download this link, and yt-dlp only matched it "
+                "as a generic HTTP URL."
+            )
+            msg = (
+                f"{msg}\n\nSkipped automatic yt-dlp fallback to avoid treating a "
+                "normal file link as media. Use -yf to force yt-dlp fallback."
+            )
+            LOGGER.info(
+                f"Skipping automatic yt-dlp fallback for generic extractor: {self.link}"
+            )
+            if notify_generic_error:
+                await self.on_download_error(msg)
+                return None
+            return False
+
+        LOGGER.info(f"Using yt-dlp fallback extractor: {extractor}")
+        self.is_ytdlp = True
+        self._set_mode_engine()
 
         playlist = "entries" in result
         ydl = YoutubeDLHelper(self)
@@ -141,6 +183,31 @@ class Mirror(TaskListener):
             extra_postprocess=False,
             forced_name=forced_name,
         )
+        return True
+
+    async def _add_aria2_download_with_fallback(self, path, headers, ratio, seed_time):
+        can_fallback = self.link.startswith(("http://", "https://", "ftp://"))
+        self.allow_ytdlp_fallback = can_fallback
+        self.aria2_fallback_retried = False
+        self.ytdlp_fallback_path = path
+        self.aria2_fallback_headers = headers
+        self.aria2_fallback_ratio = ratio
+        self.aria2_fallback_seed_time = seed_time
+        self.aria2_fallback_error = ""
+        self.aria2_fallback_completed = 0
+        aria2_started = await add_aria2_download(
+            self,
+            path,
+            headers,
+            ratio,
+            seed_time,
+            notify_error=not can_fallback,
+        )
+        if not aria2_started and can_fallback:
+            LOGGER.info(
+                f"Aria2 could not start download. Retrying before yt-dlp fallback for: {self.link}"
+            )
+            await self._retry_aria2_or_ytdlp(path)
 
     async def _retry_aria2_or_ytdlp(self, path):
         if not getattr(self, "aria2_fallback_retried", False):
@@ -169,9 +236,22 @@ class Mirror(TaskListener):
             if aria2_started:
                 return
 
+        force_generic = getattr(self, "force_ytdlp_fallback", False)
+        if not force_generic and getattr(self, "aria2_fallback_completed", 0) > 0:
+            error = getattr(self, "aria2_fallback_error", "Aria2 download failed.")
+            await self.on_download_error(
+                f"{error}\n\nSkipped yt-dlp fallback because aria2 already started "
+                "receiving data. Use -yf to force yt-dlp fallback."
+            )
+            return
+
         LOGGER.info(f"Aria2 retry failed. Falling back to yt-dlp for: {self.link}")
         self.allow_ytdlp_fallback = False
-        await self._add_ytdlp_fallback(path)
+        await self._add_ytdlp_fallback(
+            path,
+            force_generic=force_generic,
+            fallback_error=getattr(self, "aria2_fallback_error", None),
+        )
 
     async def new_event(self):
 
@@ -205,6 +285,8 @@ class Mirror(TaskListener):
             "-bt": False,
             "-ut": False,
             "-yt": False,
+            "-yf": False,
+            "-ytdlp-fallback": False,
             "-i": 0,
             "-sp": 0,
             "link": "",
@@ -301,6 +383,7 @@ class Mirror(TaskListener):
         self.bot_trans = args["-bt"]
         self.user_trans = args["-ut"]
         self.is_yt = args["-yt"]
+        self.force_ytdlp_fallback = args["-yf"] or args["-ytdlp-fallback"]
         self.is_encode = args["-en"]
         self.encode_metadata = args["-enmeta"]
         # Phase 3.2 — parallel multi-source download. Parse the --multi
@@ -335,6 +418,8 @@ class Mirror(TaskListener):
         file_ = None
         session = ""
         use_ytdlp_fallback = False
+        retry_aria2_after_generic = False
+        ytdlp_fallback_error = ""
         ytdlp_fallback_name = ""
 
         try:
@@ -555,8 +640,10 @@ class Mirror(TaskListener):
                         await self.remove_from_same_dir()
                         await delete_links(self.message)
                         return
-                    LOGGER.info(f"{e}. Falling back to yt-dlp for: {self.link}")
+                    LOGGER.info(f"{e}. Checking yt-dlp fallback for: {self.link}")
                     use_ytdlp_fallback = True
+                    retry_aria2_after_generic = content_type is None
+                    ytdlp_fallback_error = e
                 except Exception as e:
                     await send_message(self.message, e)
                     await self.remove_from_same_dir()
@@ -566,12 +653,47 @@ class Mirror(TaskListener):
         await delete_links(self.message)
         self.ytdlp_fallback_name = ytdlp_fallback_name
 
+        ussr = args["-au"]
+        pssw = args["-ap"]
+        if ussr or pssw:
+            auth = f"{ussr}:{pssw}"
+            headers += (
+                f" authorization: Basic {b64encode(auth.encode()).decode('ascii')}"
+            )
+
         if file_ is not None:
             await TelegramDownloadHelper(self).add_download(
                 reply_to, f"{path}/", session
             )
         elif use_ytdlp_fallback:
-            await self._add_ytdlp_fallback(path, ytdlp_fallback_name)
+            ytdlp_started = await self._add_ytdlp_fallback(
+                path,
+                ytdlp_fallback_name,
+                force_generic=self.force_ytdlp_fallback,
+                fallback_error=ytdlp_fallback_error,
+                notify_generic_error=False,
+                notify_extract_error=False,
+            )
+            if ytdlp_started is not False:
+                return
+            if self.force_ytdlp_fallback and getattr(self, "ytdlp_fallback_error", ""):
+                await self.on_download_error(self.ytdlp_fallback_error)
+                return
+            if not retry_aria2_after_generic:
+                fallback_detail = getattr(
+                    self, "ytdlp_fallback_error", "yt-dlp only matched a generic HTTP URL"
+                )
+                await self.on_download_error(
+                    f"{ytdlp_fallback_error}\n\nSkipped automatic yt-dlp fallback "
+                    f"because {fallback_detail}. Use -yf to force yt-dlp fallback."
+                )
+                return
+            LOGGER.info(
+                f"yt-dlp fallback did not start. Trying aria2 for: {self.link}"
+            )
+            await self._add_aria2_download_with_fallback(
+                path, headers, ratio, seed_time
+            )
         elif isinstance(self.link, dict):
             await add_direct_download(self, path)
         elif self.is_jd:
@@ -609,33 +731,9 @@ class Mirror(TaskListener):
             rc_helper = RcloneTransferHelper(self)
             await rc_helper.c2c_transfer(self.link, self.up_dest)
         else:
-            ussr = args["-au"]
-            pssw = args["-ap"]
-            if ussr or pssw:
-                auth = f"{ussr}:{pssw}"
-                headers += (
-                    f" authorization: Basic {b64encode(auth.encode()).decode('ascii')}"
-                )
-            can_fallback = self.link.startswith(("http://", "https://", "ftp://"))
-            self.allow_ytdlp_fallback = can_fallback
-            self.aria2_fallback_retried = False
-            self.ytdlp_fallback_path = path
-            self.aria2_fallback_headers = headers
-            self.aria2_fallback_ratio = ratio
-            self.aria2_fallback_seed_time = seed_time
-            aria2_started = await add_aria2_download(
-                self,
-                path,
-                headers,
-                ratio,
-                seed_time,
-                notify_error=not can_fallback,
+            await self._add_aria2_download_with_fallback(
+                path, headers, ratio, seed_time
             )
-            if not aria2_started and can_fallback:
-                LOGGER.info(
-                    f"Aria2 could not start download. Retrying before yt-dlp fallback for: {self.link}"
-                )
-                await self._retry_aria2_or_ytdlp(path)
 
 
 async def mirror(client, message):

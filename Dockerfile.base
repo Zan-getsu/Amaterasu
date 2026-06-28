@@ -9,7 +9,7 @@
 #  - AV1 stack:   SVT-AV1 + libaom + dav1d (all built from source)
 #  - Mega SDK:    v7.0.0 official C++ SDK Python bindings (autotools build)
 #  - megacmd:     installed from Mega's official Debian 12 apt repo
-#  - Download:    aria2, qbittorrent-nox, sabnzbdplus, p7zip, rclone, cloudflared, java
+#  - Download:    aria2 1.37.0 from source, qbittorrent-nox, sabnzbdplus, p7zip, rclone, cloudflared, java
 #
 #  Why Debian 12 (Bookworm)?
 #    * Provides native arm64 megacmd package (Debian 11 does not).
@@ -66,11 +66,14 @@ RUN echo '/usr/local/lib' > /etc/ld.so.conf.d/local.conf && ldconfig
 #      auto-disabled and libmega.so ends up with an undefined symbol that
 #      crashes _mega.so at runtime. See Block 7 comments for details.
 #
-#      NOTE: Download tools (aria2, qbittorrent-nox, sabnzbdplus, p7zip-full,
-#      rclone, default-jre-headless, gunicorn) are installed here so the bot's
-#      setpkgs.sh startup script can find aria2c, qbittorrent-nox, sabnzbdplus,
-#      7z, rclone, java, and gunicorn at runtime. cloudflared is installed
-#      separately in Block 1b (it's not in Debian repos).
+#      NOTE: Download tool dependencies and apt-provided tools
+#      (qbittorrent-nox, sabnzbdplus, p7zip-full, rclone,
+#      default-jre-headless, gunicorn) are installed here so the bot's
+#      setpkgs.sh startup script can find qbittorrent-nox, sabnzbdplus, 7z,
+#      rclone, java, and gunicorn at runtime. aria2 is built from the upstream
+#      release in Block 1a so we are not pinned to Debian's older 1.36.x
+#      package. cloudflared is installed separately in Block 1b (it's not in
+#      Debian repos).
 # -----------------------------------------------------------------------------
 RUN set -eux; \
     sed -i -E 's/^Components: main(\s|$)/Components: main contrib non-free non-free-firmware\1/' \
@@ -115,9 +118,13 @@ RUN set -eux; \
         python3-setuptools \
         swig \
         libssl-dev \
+        libgnutls28-dev \
+        nettle-dev \
+        libgmp-dev \
         libcrypto++-dev \
         libgpgme-dev \
         libcurl4-gnutls-dev \
+        libnghttp2-dev \
         libsqlite3-dev \
         libfreeimage-dev \
         libmediainfo-dev \
@@ -125,6 +132,7 @@ RUN set -eux; \
         libzen-dev \
         libsodium-dev \
         libc-ares-dev \
+        libssh2-1-dev \
         zlib1g-dev \
         libexpat1-dev \
         libxml2-dev \
@@ -151,7 +159,6 @@ RUN set -eux; \
         libvidstab-dev \
         libxvidcore-dev \
         libfuse-dev \
-        aria2 \
         qbittorrent-nox \
         p7zip-full \
         rclone \
@@ -166,6 +173,32 @@ RUN set -eux; \
         gawk \
     ; \
     rm -rf /var/lib/apt/lists/*
+
+# -----------------------------------------------------------------------------
+# 1a. aria2 — build latest upstream release instead of Debian's 1.36.x package
+#     Releases: https://github.com/aria2/aria2/releases
+# -----------------------------------------------------------------------------
+ARG ARIA2_VERSION=1.37.0
+RUN set -eux; \
+    curl -fsSL "https://github.com/aria2/aria2/releases/download/release-${ARIA2_VERSION}/aria2-${ARIA2_VERSION}.tar.xz" \
+        -o /tmp/aria2.tar.xz; \
+    mkdir -p /tmp/aria2-src; \
+    tar -xJf /tmp/aria2.tar.xz -C /tmp/aria2-src --strip-components=1; \
+    cd /tmp/aria2-src; \
+    ./configure \
+        --prefix=/usr/local \
+        --with-ca-bundle=/etc/ssl/certs/ca-certificates.crt \
+        --with-gnutls \
+        --with-libcares \
+        --with-libssh2 \
+        --with-libxml2 \
+        --with-sqlite3; \
+    make -j"$(nproc)"; \
+    make install; \
+    ldconfig; \
+    aria2c --version; \
+    aria2c --version | grep -F "aria2 version ${ARIA2_VERSION}"; \
+    rm -rf /tmp/aria2-src /tmp/aria2.tar.xz
 
 # -----------------------------------------------------------------------------
 # 1b. cloudflared — installed via direct binary download (NOT in Debian repos)
@@ -497,6 +530,8 @@ RUN set -eux; \
     (mega-version || mega-cmd-version || true); \
     echo "=== Download tools ==="; \
     which aria2c || echo "WARNING: aria2c not found"; \
+    aria2c --version | head -1; \
+    aria2c --version | grep -F "aria2 version ${ARIA2_VERSION}"; \
     which qbittorrent-nox || echo "WARNING: qbittorrent-nox not found"; \
     which sabnzbdplus || echo "WARNING: sabnzbdplus not found"; \
     which 7z || echo "WARNING: 7z not found"; \

@@ -80,6 +80,8 @@ async def add_aria2_download(
             )
     except (TimeoutError, ClientError, Exception) as e:
         LOGGER.info(f"Aria2c Download Error: {e}")
+        listener.aria2_fallback_error = str(e)
+        listener.aria2_fallback_completed = 0
         if notify_error:
             await listener.on_download_error(f"{e}")
         return False
@@ -87,6 +89,10 @@ async def add_aria2_download(
     if download.get("errorMessage"):
         error = str(download["errorMessage"]).replace("<", " ").replace(">", " ")
         LOGGER.info(f"Aria2c Download Error: {error}")
+        listener.aria2_fallback_error = error
+        listener.aria2_fallback_completed = int(
+            download.get("completedLength", "0") or 0
+        )
         await TorrentManager.aria2_remove(download)
         if notify_error:
             await listener.on_download_error(error)

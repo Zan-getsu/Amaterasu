@@ -194,6 +194,11 @@ async def _on_download_error(api, data):
             and not listener.is_cancelled
             and hasattr(listener, "_retry_aria2_or_ytdlp")
         ):
+            listener.aria2_fallback_error = error
+            with suppress(Exception):
+                listener.aria2_fallback_completed = int(
+                    download.get("completedLength", "0") or 0
+                )
             listener.allow_ytdlp_fallback = False
             LOGGER.info(
                 f"Aria2 download failed. Retrying before yt-dlp fallback for: {listener.link}"
