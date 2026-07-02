@@ -10,7 +10,7 @@ from yt_dlp import YoutubeDL, DownloadError
 from yt_dlp.networking.impersonate import ImpersonateTarget
 
 from .... import task_dict_lock, task_dict
-from ....core.config_manager import BinConfig
+from ....core.config_manager import BinConfig, Config
 from ...ext_utils.bot_utils import sync_to_async, async_to_sync, get_content_info
 from ...ext_utils.files_utils import get_mime_type
 from ...ext_utils.task_manager import (
@@ -27,6 +27,23 @@ LOGGER = getLogger(__name__)
 
 def _bin_path(name):
     return name if ospath.isabs(name) else f"/bin/{name}"
+
+
+def format_ytdlp_error(error, link=""):
+    error = str(error).replace("<", " ").replace(">", " ")
+    lower_error = error.lower()
+    lower_link = (link or "").lower()
+
+    if "cannot parse data" in lower_error and "facebook" in lower_link:
+        return (
+            "Facebook changed the page data that yt-dlp reads, so this video "
+            "could not be parsed by the current extractor. Update/rebuild yt-dlp, "
+            "refresh cookies.txt, try the original facebook.com video URL instead "
+            "of a share URL, or move the deployment to a yt-dlp nightly/pre-release "
+            "build if stable still fails."
+        )
+
+    return error
 
 
 class MyLogger:
@@ -182,7 +199,10 @@ class YoutubeDLHelper:
 
     def _on_download_error(self, error):
         self._listener.is_cancelled = True
-        async_to_sync(self._listener.on_download_error, error)
+        async_to_sync(
+            self._listener.on_download_error,
+            format_ytdlp_error(error, self._listener.link),
+        )
 
     @staticmethod
     def _valid_filename(name):
@@ -299,7 +319,7 @@ class YoutubeDLHelper:
                 if result is None:
                     raise ValueError("Info result is None")
             except Exception as e:
-                return self._on_download_error(str(e))
+                return self._on_download_error(e)
             if self.is_playlist:
                 self.playlist_count = result.get("playlist_count", 0)
             if "entries" in result:
@@ -336,7 +356,7 @@ class YoutubeDLHelper:
                         ydl.download([self._listener.link])
                     except DownloadError as e:
                         if not self._listener.is_cancelled:
-                            self._on_download_error(str(e))
+                            self._on_download_error(e)
                         return
                 self._repair_unknown_video_name(path)
                 if self.is_playlist and (

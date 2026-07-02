@@ -21,7 +21,10 @@ from ..helper.ext_utils.links_utils import is_url
 from ..helper.ext_utils.task_manager import pre_task_check
 from ..helper.ext_utils.status_utils import get_readable_file_size, get_readable_time
 from ..helper.listeners.task_listener import TaskListener
-from ..helper.mirror_leech_utils.download_utils.yt_dlp_download import YoutubeDLHelper
+from ..helper.mirror_leech_utils.download_utils.yt_dlp_download import (
+    YoutubeDLHelper,
+    format_ytdlp_error,
+)
 from ..helper.telegram_helper.button_build import ButtonMaker
 from ..helper.telegram_helper.message_utils import (
     auto_delete_message,
@@ -515,7 +518,7 @@ class YtDlp(TaskListener):
         try:
             result = await sync_to_async(extract_info, self.link, options)
         except Exception as e:
-            msg = str(e).replace("<", " ").replace(">", " ")
+            msg = format_ytdlp_error(e, self.link)
             await send_message(self.message, f"{self.tag} {msg}")
             await self.remove_from_same_dir()
             await delete_links(self.message)
@@ -549,4 +552,3 @@ async def ytdl_leech(client, message):
         await message.reply("YT-DLP downloads are currently disabled by the Bot Owner.")
         return
     bot_loop.create_task(YtDlp(client, message, is_leech=True).new_event())
-
