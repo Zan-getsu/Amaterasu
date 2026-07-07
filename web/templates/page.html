@@ -1,0 +1,689 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Amaterasu | Torrent File Selector</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <link rel="stylesheet" href="/static/css/main.css" />
+  <style>
+    body {
+      background: var(--bs-obsidian);
+      background-image:
+        linear-gradient(180deg, rgba(212,175,55,0.08), transparent 320px),
+        linear-gradient(90deg, rgba(255,255,255,0.025) 1px, transparent 1px),
+        linear-gradient(180deg, rgba(255,255,255,0.02) 1px, transparent 1px);
+      background-size: auto, 40px 40px, 40px 40px;
+      background-attachment: fixed;
+      display: flex; flex-direction: column; min-height: 100vh;
+      padding-top: 0;
+    }
+    .bs-center-wrap {
+      flex: 1; display: flex; align-items: center; justify-content: center;
+      padding: clamp(16px, 4vw, var(--bs-space-8)); width: 100%;
+    }
+    .pin-entry-card { max-width: 420px; width: 100%; text-align: center; }
+    .selector-shell { width: min(100%, 1120px); padding: clamp(8px, 2vw, 24px) 0; align-self: flex-start; }
+    .selector-hero {
+      display: flex; align-items: flex-end; justify-content: space-between; gap: var(--bs-space-5);
+      margin-bottom: var(--bs-space-6);
+    }
+    .selector-kicker {
+      display: inline-flex; align-items: center; gap: 8px; color: var(--bs-gold);
+      font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em;
+      margin-bottom: var(--bs-space-2);
+    }
+    .selector-title { color: var(--bs-text-primary); font-size: clamp(26px, 4vw, 40px); font-weight: 800; line-height: 1.08; letter-spacing: 0; margin: 0; }
+    .selector-subtitle { color: var(--bs-text-muted); font-size: 13px; margin-top: var(--bs-space-2); max-width: 560px; }
+    .selector-status {
+      display: inline-flex; align-items: center; gap: 8px; flex-shrink: 0;
+      padding: 9px 12px; border: 1px solid var(--bs-border); border-radius: var(--bs-radius-md);
+      background: rgba(13,17,23,0.72); color: var(--bs-text-secondary); font-size: 12px; font-weight: 600;
+    }
+    .selector-status i { color: var(--bs-gold); }
+    .selector-stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--bs-space-4); margin-bottom: var(--bs-space-5); }
+    .selector-stat {
+      display: flex; align-items: center; gap: var(--bs-space-4);
+      padding: clamp(16px, 3vw, 22px); border: 1px solid var(--bs-border);
+      border-radius: var(--bs-radius-lg); background: rgba(18,24,32,0.78);
+      box-shadow: 0 12px 36px rgba(0,0,0,0.18);
+    }
+    .selector-stat__icon {
+      width: 46px; height: 46px; border-radius: var(--bs-radius-md);
+      display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;
+      background: var(--bs-gold-dim); color: var(--bs-gold); border: 1px solid var(--bs-gold-border);
+    }
+    .selector-stat__label { font-size: 11px; color: var(--bs-text-muted); font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 4px; }
+    .selector-stat__value { color: var(--bs-text-primary); font-size: clamp(20px, 3vw, 28px); font-weight: 800; letter-spacing: 0; line-height: 1.1; overflow-wrap: anywhere; }
+    .selector-stat__value small { color: var(--bs-text-muted); font-size: 0.72em; font-weight: 700; }
+    .file-browser {
+      border: 1px solid var(--bs-border); border-radius: var(--bs-radius-xl);
+      background: rgba(18,24,32,0.82); overflow: hidden; box-shadow: var(--bs-shadow-xl);
+    }
+    .browser-toolbar {
+      display: flex; align-items: center; justify-content: space-between; gap: var(--bs-space-4);
+      padding: var(--bs-space-5); border-bottom: 1px solid var(--bs-border);
+      background: rgba(13,17,23,0.58);
+    }
+    .toolbar-actions { display: flex; align-items: center; gap: var(--bs-space-2); flex-wrap: wrap; min-width: 0; }
+    .selector-shell .bs-btn { letter-spacing: 0; }
+    .submit-control { flex-shrink: 0; }
+    .path-strip {
+      display: flex; align-items: center; gap: 10px; min-width: 0;
+      padding: 12px var(--bs-space-5); border-bottom: 1px solid var(--bs-border-subtle);
+      color: var(--bs-text-muted); background: rgba(11,15,20,0.38); font-size: 12px;
+    }
+    .path-strip i { color: var(--bs-gold); flex-shrink: 0; }
+    .path-strip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .file-tree {
+      max-height: min(62vh, 620px); overflow-y: auto; padding: 8px;
+      scrollbar-color: rgba(212,175,55,0.36) transparent;
+    }
+    .file-tree-item {
+      display: grid; grid-template-columns: 24px 42px minmax(0, 1fr); align-items: center; gap: 12px;
+      padding: 12px 14px; margin-bottom: 6px; border: 1px solid transparent;
+      border-radius: var(--bs-radius-md); transition: background var(--bs-transition-fast), border-color var(--bs-transition-fast), transform var(--bs-transition-fast);
+      cursor: pointer;
+    }
+    .file-tree-item:hover { background: rgba(255,255,255,0.035); border-color: var(--bs-border); transform: translateX(2px); }
+    .file-tree-item.folder-item { background: rgba(212,175,55,0.055); border-color: rgba(212,175,55,0.12); }
+    .file-tree-item.back-button { grid-template-columns: 42px minmax(0, 1fr); color: var(--bs-gold); background: rgba(212,175,55,0.08); }
+    .file-tree-item.back-button:hover { transform: none; border-color: var(--bs-gold-border); }
+    .icon-container {
+      width: 42px; height: 42px; display: inline-flex; align-items: center; justify-content: center;
+      border-radius: var(--bs-radius-md); color: var(--bs-text-muted); background: rgba(11,15,20,0.5); border: 1px solid var(--bs-border-subtle);
+    }
+    .icon-container i { font-size: 16px; }
+    .folder-item .icon-container { color: var(--bs-gold); background: var(--bs-gold-dim); border-color: var(--bs-gold-border); }
+    .file-info { min-width: 0; display: flex; flex-direction: column; gap: 7px; }
+    .file-main { display: flex; align-items: center; justify-content: space-between; gap: var(--bs-space-4); min-width: 0; }
+    .file-name { color: var(--bs-text-primary); font-size: 14px; line-height: 1.35; min-width: 0; overflow-wrap: anywhere; }
+    .folder-item .file-name { font-weight: 700; }
+    .file-meta { display: inline-flex; align-items: center; justify-content: flex-end; gap: 8px; flex-shrink: 0; color: var(--bs-text-muted); font-size: 12px; white-space: nowrap; }
+    .custom-checkbox {
+      -webkit-appearance: none; appearance: none; width: 20px; height: 20px; margin: 0;
+      border: 1px solid var(--bs-border); border-radius: 6px; background: rgba(11,15,20,0.72);
+      cursor: pointer; position: relative; transition: all var(--bs-transition-fast); flex-shrink: 0;
+    }
+    .custom-checkbox:hover { border-color: var(--bs-gold-border); background: var(--bs-gold-dim); }
+    .custom-checkbox:checked { background: var(--bs-gold); border-color: var(--bs-gold); }
+    .custom-checkbox:checked::after {
+      content: '\f00c'; font-family: 'Font Awesome 6 Free'; font-weight: 900; font-size: 11px;
+      color: #0B0F14; position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    }
+    .custom-checkbox:indeterminate { background: var(--bs-gold-hover); border-color: var(--bs-gold-hover); }
+    .custom-checkbox:indeterminate::after {
+      content: '\f068'; font-family: 'Font Awesome 6 Free'; font-weight: 900; font-size: 11px;
+      color: #0B0F14; position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    }
+    .edit-btn {
+      display: inline-flex; align-items: center; gap: 5px; background: transparent;
+      border: 1px solid var(--bs-border); color: var(--bs-text-secondary);
+      padding: 4px 8px; border-radius: var(--bs-radius-sm); font-size: 11px; font-weight: 700; cursor: pointer;
+      transition: all var(--bs-transition-fast);
+    }
+    .edit-btn:hover { background: var(--bs-gold-dim); color: var(--bs-gold); border-color: var(--bs-gold-border); }
+    .file-progress { display: flex; align-items: center; gap: 10px; max-width: 260px; }
+    .file-progress .bs-progress { flex: 1; margin: 0; }
+    .file-progress__value { color: var(--bs-gold); font-family: var(--bs-font-mono); font-size: 11px; font-weight: 700; }
+    @media (max-width: 780px) {
+      .selector-hero { align-items: flex-start; flex-direction: column; }
+      .selector-status { width: 100%; justify-content: center; }
+      .selector-stats { grid-template-columns: 1fr; }
+      .browser-toolbar { align-items: stretch; flex-direction: column; }
+      .toolbar-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .toolbar-actions .bs-btn, .submit-control { width: 100%; }
+      .submit-control { min-height: 44px; }
+    }
+    @media (max-width: 560px) {
+      .bs-center-wrap { padding: 0; align-items: stretch; }
+      .pin-entry-card { margin: var(--bs-space-5); }
+      .selector-shell { padding: 0; }
+      .selector-hero { padding: var(--bs-space-5) var(--bs-space-4) 0; }
+      .selector-stats { padding: 0 var(--bs-space-4); }
+      .selector-stat { padding: var(--bs-space-4); }
+      .file-browser { border-left: none; border-right: none; border-radius: 0; }
+      .browser-toolbar { padding: var(--bs-space-4); }
+      .toolbar-actions { grid-template-columns: 1fr; }
+      .path-strip { padding-left: var(--bs-space-4); padding-right: var(--bs-space-4); }
+      .file-tree { max-height: none; overflow: visible; padding: 8px var(--bs-space-3) var(--bs-space-4); }
+      .file-tree-item { grid-template-columns: 22px 38px minmax(0, 1fr); gap: 10px; padding: 11px 10px; }
+      .file-tree-item.back-button { grid-template-columns: 38px minmax(0, 1fr); }
+      .icon-container { width: 38px; height: 38px; }
+      .file-main { align-items: flex-start; flex-direction: column; gap: 6px; }
+      .file-meta { justify-content: flex-start; flex-wrap: wrap; white-space: normal; }
+    }
+  </style>
+</head>
+<body>
+  <div class="bs-center-wrap">
+    
+    <!-- PIN Entry UI -->
+    <div id="pinEntry" class="bs-card bs-card--glass pin-entry-card">
+      <div class="bs-mb-6" style="display: flex; justify-content: center;">
+        <svg class="bs-navbar__logo" viewBox="0 0 32 32" fill="none" style="width: 56px; height: 56px;" xmlns="http://www.w3.org/2000/svg">
+          <circle cx="16" cy="16" r="12" fill="#0B0F14" stroke="#D4AF37" stroke-width="2"/>
+          <path d="M32 16C32 24.8366 24.8366 32 16 32C7.16344 32 0 24.8366 0 16C0 7.16344 7.16344 0 16 0C24.8366 0 32 7.16344 32 16ZM28 16C28 9.37258 22.6274 4 16 4C9.37258 4 4 9.37258 4 16C4 22.6274 9.37258 28 16 28C22.6274 28 28 22.6274 28 16Z" fill="url(#paint0_radial)"/>
+          <defs>
+            <radialGradient id="paint0_radial" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(16 16) rotate(90) scale(16)">
+              <stop stop-color="#D4AF37" stop-opacity="0.25"/>
+              <stop offset="1" stop-color="#D4AF37" stop-opacity="0"/>
+            </radialGradient>
+          </defs>
+        </svg>
+      </div>
+      <h2 class="bs-h2 bs-mb-2">AMATERASU</h2>
+      <p class="bs-body-sm bs-text-muted bs-mb-6 uppercase" style="letter-spacing: 0.1em;">Access Control</p>
+      
+      <div class="bs-input-group bs-mb-6">
+        <input type="password" id="pinInput" class="bs-input bs-text-center bs-input--mono" placeholder="Enter PIN" title="Enter the code that you have got from Telegram">
+      </div>
+      
+      <button id="submitPin" class="bs-btn bs-btn--primary bs-w-full bs-btn--lg">Authenticate</button>
+    </div>
+
+    <!-- File Manager UI -->
+    <div id="fileManager" class="selector-shell" style="display: none;">
+      <div class="selector-hero">
+        <div>
+          <div class="selector-kicker"><i class="fa-solid fa-layer-group"></i> Torrent Selector</div>
+          <h1 class="selector-title">Choose Files</h1>
+          <p class="selector-subtitle">Browse the torrent directory, select what you need, and submit the final file list.</p>
+        </div>
+        <div class="selector-status"><i class="fa-solid fa-shield-halved"></i> Authenticated Session</div>
+      </div>
+
+      <div class="selector-stats">
+        <div class="selector-stat">
+          <div class="selector-stat__icon"><i class="fa-solid fa-file-shield" style="font-size: 20px;"></i></div>
+          <div>
+            <p class="selector-stat__label">Selected Files</p>
+            <div class="selector-stat__value"><span id="selectedCount" style="color: var(--bs-gold);">0</span> <small>/</small> <span id="totalCount">0</span></div>
+          </div>
+        </div>
+        <div class="selector-stat">
+          <div class="selector-stat__icon"><i class="fa-solid fa-database" style="font-size: 20px;"></i></div>
+          <div>
+            <p class="selector-stat__label">Total Size</p>
+            <div class="selector-stat__value"><span id="selectedSize" style="color: var(--bs-info);">0 B</span> <small>/</small> <span id="totalSize">0 B</span></div>
+          </div>
+        </div>
+      </div>
+
+      <section class="file-browser">
+        <div class="browser-toolbar">
+          <div class="toolbar-actions">
+            <button id="selectAllBtn" class="bs-btn bs-btn--secondary bs-btn--sm"><i class="fa-solid fa-list-check"></i> Select Folder</button>
+            <button id="invertSelectionBtn" class="bs-btn bs-btn--ghost bs-btn--sm"><i class="fa-solid fa-arrow-rotate-left"></i> Invert Selection</button>
+            <button id="selectEverythingBtn" class="bs-btn bs-btn--ghost bs-btn--sm"><i class="fa-solid fa-check-double"></i> Select Everything</button>
+          </div>
+          <button id="submitBtn" class="bs-btn bs-btn--primary submit-control"><i class="fa-solid fa-circle-check"></i> Submit Selection</button>
+        </div>
+        <div class="path-strip">
+          <i class="fa-solid fa-folder-tree"></i>
+          <span id="currentPath">Root</span>
+        </div>
+
+        <div id="fileTree" class="file-tree"></div>
+      </section>
+    </div>
+  </div>
+
+  <div id="bs-toast-container" class="bs-toast-container"></div>
+
+  <!-- Modal -->
+  <div id="reusableModal" class="bs-overlay" style="display: none;">
+    <div class="bs-modal">
+      <div class="bs-modal__header">
+        <h2 id="modalTitle" class="bs-modal__title"></h2>
+      </div>
+      <div id="modalBody" class="bs-body bs-mb-6"></div>
+      <div id="modalFooter" class="bs-flex bs-justify-end bs-gap-3"></div>
+    </div>
+  </div>
+
+  <script src="/static/js/ui.js"></script>
+  <script>
+    const fileTree = document.getElementById('fileTree');
+    const selectAllBtn = document.getElementById('selectAllBtn');
+    const submitBtn = document.getElementById('submitBtn');
+    const pinEntry = document.getElementById('pinEntry');
+    const pinInput = document.getElementById('pinInput');
+    const submitPin = document.getElementById('submitPin');
+    const fileManager = document.getElementById('fileManager');
+    const reusableModal = document.getElementById('reusableModal');
+    const modalTitle = document.getElementById('modalTitle');
+    const modalBody = document.getElementById('modalBody');
+    const modalFooter = document.getElementById('modalFooter');
+    const selectedCountEl = document.getElementById('selectedCount');
+    const totalCountEl = document.getElementById('totalCount');
+    const selectedSizeEl = document.getElementById('selectedSize');
+    const totalSizeEl = document.getElementById('totalSize');
+    const currentPathEl = document.getElementById('currentPath');
+
+    pinInput.focus();
+    const urlParams = new Proxy(new URLSearchParams(window.location.search), {
+        get: (searchParams, prop) => searchParams.get(prop),
+    });
+    if (urlParams.pin) {
+        pinInput.value = urlParams.pin;
+        setTimeout(() => submitPin.click(), 0);
+    }
+    let currentFolder = null;
+    let files = [];
+    let allowEdit = false;
+
+    function formatSize(size) {
+        const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+        let i = 0;
+        while (size >= 1024 && i < units.length - 1) {
+            size /= 1024;
+            i++;
+        }
+        return `${size.toFixed(2)} ${units[i]}`;
+    }
+
+    function calculateFolderSize(folder) {
+        let totalSize = 0;
+        const queue = [folder];
+        while (queue.length > 0) {
+            const node = queue.pop();
+            if (node.type === 'file') {
+                totalSize += node.size;
+            } else if (node.children) {
+                queue.push(...node.children);
+            }
+        }
+        return totalSize;
+    }
+
+    function renderCurrentPath() {
+        if (!currentPathEl) return;
+        if (!currentFolder) {
+            currentPathEl.textContent = 'Root';
+            return;
+        }
+        const fullPath = getFullPath(currentFolder);
+        currentPathEl.textContent = fullPath ? `Root / ${fullPath} / ${currentFolder.name}` : `Root / ${currentFolder.name}`;
+    }
+
+    function renderFileTree(nodes) {
+        renderCurrentPath();
+        fileTree.innerHTML = '';
+        if (currentFolder) {
+            const backButton = document.createElement('div');
+            backButton.className = 'file-tree-item back-button';
+            backButton.innerHTML = `
+                <span class="icon-container"><i class="fa-solid fa-arrow-left"></i></span>
+                <span class="file-name" style="font-weight: 700;">Back to parent directory</span>
+            `;
+            backButton.addEventListener('click', goBack);
+            fileTree.appendChild(backButton);
+        }
+        nodes.forEach(node => {
+            const div = document.createElement('div');
+            div.className = `file-tree-item ${node.type === 'folder' ? 'folder-item' : 'file-item'}`;
+            
+            const checkbox = document.createElement('input');
+            checkbox.type = 'checkbox';
+            checkbox.id = node.id;
+            checkbox.className = 'custom-checkbox';
+            checkbox.checked = node.selected;
+            checkbox.addEventListener('change', () => toggleFile(node));
+
+            const icon = document.createElement('span');
+            icon.className = 'icon-container';
+            if (node.type === 'folder') {
+                icon.innerHTML = '<i class="fa-solid fa-folder"></i>';
+            } else {
+                icon.innerHTML = '<i class="fa-solid fa-file"></i>';
+            }
+
+            const fileInfo = document.createElement('div');
+            fileInfo.className = 'file-info';
+
+            const topRow = document.createElement('div');
+            topRow.className = 'file-main';
+
+            const nameElement = document.createElement('div');
+            nameElement.className = 'file-name';
+            nameElement.textContent = node.name;
+
+            const sizeInfo = document.createElement('div');
+            sizeInfo.className = 'file-meta';
+            const size = node.type === 'folder' ? calculateFolderSize(node) : node.size;
+            sizeInfo.innerHTML = `<span>${formatSize(size)}</span>`;
+
+            if (allowEdit) {
+                const editBtn = document.createElement('button');
+                editBtn.innerHTML = '<i class="fa-solid fa-pen-to-square"></i> Rename';
+                editBtn.className = 'edit-btn';
+                sizeInfo.appendChild(editBtn);
+            }
+
+            topRow.appendChild(nameElement);
+            topRow.appendChild(sizeInfo);
+            fileInfo.appendChild(topRow);
+
+            if (node.type === 'file' && node.progress !== undefined) {
+                const prog = document.createElement('div');
+                prog.className = 'file-progress';
+                prog.innerHTML = `
+                    <div class="bs-progress">
+                        <div class="bs-progress__fill" style="width: ${node.progress}%;"></div>
+                    </div>
+                    <span class="file-progress__value">${node.progress}%</span>
+                `;
+                fileInfo.appendChild(prog);
+            }
+
+            div.appendChild(checkbox);
+            div.appendChild(icon);
+            div.appendChild(fileInfo);
+
+            if (node.type === 'folder') {
+                if (areAllChildrenSelected(node)) {
+                    checkbox.checked = true;
+                } else if (areSomeChildrenSelected(node)) {
+                    checkbox.indeterminate = true;
+                }
+            }
+
+            div.addEventListener('click', (event) => {
+                if (event.target.classList.contains('file-name')) {
+                    if (node.type === 'folder') {
+                        openFolder(node);
+                    } else {
+                        toggleFile(node);
+                    }
+                } else if (event.target.classList.contains('edit-btn') || event.target.closest('.edit-btn')) {
+                    openEditFileNameModal(node);
+                }
+            });
+
+            fileTree.appendChild(div);
+        });
+        updateSelectAllButtonText();
+        updateSelectEverythingButtonText();
+    }
+
+    function areAllChildrenSelected(folder) {
+        return folder.children.every(child => child.type === 'folder' ? areAllChildrenSelected(child) : child.selected);
+    }
+
+    function areSomeChildrenSelected(folder) {
+        return folder.children.some(child => child.type === 'folder' ? areSomeChildrenSelected(child) : child.selected);
+    }
+
+    function toggleFile(node) {
+        if (node.type === 'folder') {
+            const isSelected = !areAllChildrenSelected(node);
+            toggleFolder(node, isSelected);
+        } else {
+            node.selected = !node.selected;
+        }
+        updateParentFolders(node);
+        updateStats();
+        renderFileTree(currentFolder ? currentFolder.children : files);
+    }
+
+    function toggleFolder(folder, isSelected) {
+        folder.selected = isSelected;
+        const queue = [folder];
+        while (queue.length > 0) {
+            const node = queue.pop();
+            if (node.type === 'file') {
+                node.selected = isSelected;
+            } else if (node.children) {
+                node.selected = isSelected;
+                queue.push(...node.children);
+            }
+        }
+    }
+
+    function updateParentFolders(node) {
+        let parent = findParent(files[0], node.id);
+        while (parent) {
+            parent.selected = areAllChildrenSelected(parent);
+            parent = findParent(files[0], parent.id);
+        }
+    }
+
+    function findParent(root, id) {
+        if (root && root.children) {
+            for (const child of root.children) {
+                if (child.id === id) {
+                    return root;
+                }
+                const found = findParent(child, id);
+                if (found) return found;
+            }
+        }
+        return null;
+    }
+
+    function updateStats() {
+        const stats = calculateStats(files);
+        selectedCountEl.textContent = stats.selectedCount;
+        totalCountEl.textContent = stats.totalCount;
+        selectedSizeEl.textContent = formatSize(stats.selectedSize);
+        totalSizeEl.textContent = formatSize(stats.totalSize);
+    }
+
+    function calculateStats(nodes) {
+        let selectedCount = 0, totalCount = 0, selectedSize = 0, totalSize = 0;
+        const queue = [...nodes];
+        while (queue.length > 0) {
+            const node = queue.pop();
+            if (node.type === 'file') {
+                totalCount++;
+                totalSize += node.size;
+                if (node.selected) { selectedCount++; selectedSize += node.size; }
+            }
+            if (node.children) { queue.push(...node.children); }
+        }
+        return { selectedCount, totalCount, selectedSize, totalSize };
+    }
+
+    function openFolder(folder) {
+        currentFolder = folder;
+        renderFileTree(folder.children);
+        updateStats();
+    }
+
+    function goBack() {
+        if (currentFolder) {
+            const parent = findParent(files[0], currentFolder.id);
+            if (parent) {
+                currentFolder = parent;
+                renderFileTree(parent.children);
+            } else {
+                currentFolder = null;
+                renderFileTree(files);
+            }
+            updateStats();
+        }
+    }
+
+    function selectAll() {
+        const nodes = currentFolder ? currentFolder.children : files;
+        const allSelected = nodes.every(node => node.type === 'folder' ? areAllChildrenSelected(node) : node.selected);
+        nodes.forEach(node => {
+            if (node.type === 'folder') { toggleFolder(node, !allSelected); } 
+            else { node.selected = !allSelected; }
+        });
+        updateStats(); renderFileTree(nodes); updateSelectAllButtonText();
+    }
+
+    function invertSelection() {
+        const nodes = currentFolder ? currentFolder.children : files;
+        nodes.forEach(node => {
+            if (node.type === 'folder') { invertFolderSelection(node); } 
+            else { node.selected = !node.selected; }
+        });
+        updateStats(); renderFileTree(nodes);
+    }
+
+    function invertFolderSelection(folder) {
+        folder.selected = !folder.selected;
+        if (folder.children) {
+            folder.children.forEach(child => {
+                if (child.type === 'folder') { invertFolderSelection(child); } 
+                else { child.selected = !child.selected; }
+            });
+        }
+    }
+
+    function selectEverything() {
+        const allSelected = files.every(node => node.type === 'folder' ? areAllChildrenSelected(node) : node.selected);
+        function recursiveSelect(nodes, select) {
+            nodes.forEach(node => {
+                if (node.type === 'folder') {
+                    node.selected = select;
+                    if (node.children) recursiveSelect(node.children, select);
+                } else { node.selected = select; }
+            });
+        }
+        recursiveSelect(files, !allSelected);
+        updateStats(); renderFileTree(currentFolder ? currentFolder.children : files); updateSelectEverythingButtonText();
+    }
+
+    function getFullPath(node) {
+        const path = [];
+        let currentNode = findParent(files[0], node.id);
+        while (currentNode) {
+            path.unshift(currentNode.name);
+            currentNode = findParent(files[0], currentNode.id);
+        }
+        return path.length > 0 ? path.join('/') : '';
+    }
+
+    function openEditFileNameModal(node) {
+        modalTitle.textContent = `Edit ${node.type === 'folder' ? 'Folder' : 'File'} Name`;
+        modalBody.innerHTML = `<input type="text" id="editNameInput" class="bs-input" value="${node.name}">`;
+        modalFooter.innerHTML = `
+            <button class="bs-btn bs-btn--ghost" onClick="closeModal()">Cancel</button>
+            <button id="saveNameBtn" class="bs-btn bs-btn--primary">Save</button>
+        `;
+
+        const saveNameBtn = document.getElementById('saveNameBtn');
+        const editNameInput = document.getElementById('editNameInput');
+
+        saveNameBtn.addEventListener('click', () => {
+            closeModal();
+            const newName = editNameInput.value.trim();
+            if (newName && newName !== node.name) {
+                const fullPath = getFullPath(node);
+                const requestUrl = `/app/files/torrent?gid=${urlParams.gid}&pin=${pinInput.value}&mode=rename`;
+                const body = {
+                    old_path: fullPath ? `${fullPath}/${node.name}` : node.name,
+                    new_path: fullPath ? `${fullPath}/${newName}` : newName,
+                    type: node.type,
+                };
+                fetch(requestUrl, { 'method': 'POST', 'body': JSON.stringify(body) }).then(response => {
+                    if (response.ok) {
+                        showToast('Rename submitted successfully.', 'success');
+                        node.name = newName;
+                        renderFileTree(currentFolder ? currentFolder.children : files);
+                    } else {
+                        showToast('Error submitting rename.', 'error');
+                    }
+                });
+            }
+        });
+
+        editNameInput.addEventListener('keypress', (e) => { if (e.key === 'Enter') saveNameBtn.click(); });
+        openModal();
+        editNameInput.setSelectionRange(editNameInput.value.length, editNameInput.value.length);
+        editNameInput.focus();
+    }
+
+    function openModal() { reusableModal.style.display = 'flex'; }
+    function closeModal() { reusableModal.style.display = 'none'; }
+
+    function submitData() {
+        if (parseInt(selectedCountEl.innerText) === 0) {
+            showToast('No files selected.', 'error');
+            return;
+        }
+        
+        modalTitle.textContent = 'Processing...';
+        modalBody.innerHTML = `<p>Submitting ${selectedCountEl.innerText} file(s)...</p>`;
+        modalFooter.innerHTML = '';
+        openModal();
+        
+        const requestUrl = `/app/files/torrent?gid=${urlParams.gid}&pin=${pinInput.value}&mode=selection`;
+        fetch(requestUrl, { 'method': 'POST', 'body': JSON.stringify(files) }).then(response => {
+            closeModal();
+            if (response.ok) {
+                showToast('Your selection has been submitted successfully.', 'success');
+            } else {
+                showToast('An error occurred while submitting your selection.', 'error');
+            }
+        });
+    }
+
+    pinInput.addEventListener('keypress', (e) => { if (e.key === 'Enter') submitPin.click(); });
+    
+    submitPin.addEventListener('click', () => {
+        pinInput.blur();
+        if (pinInput.value === '') { showToast('The PIN is missing.', 'error'); return; }
+        if (!urlParams.gid) { showToast('The GID parameter is missing.', 'error'); return; }
+        
+        const requestUrl = `/app/files/torrent?gid=${urlParams.gid}&pin=${pinInput.value}&mode=get`;
+        fetch(requestUrl).then(response => {
+            if (response.ok) {
+                return response.json().then(data => {
+                    if (data.error) {
+                        showToast(data.message, 'error');
+                    } else {
+                        files = data.files;
+                        allowEdit = data.engine === "qbittorrent";
+                        pinEntry.style.display = 'none';
+                        fileManager.style.display = 'block';
+                        renderFileTree(files);
+                        updateStats();
+                    }
+                });
+            } else {
+                showToast('Status Code: ' + response.status, 'error');
+            }
+        }).catch(error => {
+            showToast('Connection error: ' + error.message, 'error');
+        });
+    });
+
+    const invertSelectionBtn = document.getElementById('invertSelectionBtn');
+    const selectEverythingBtn = document.getElementById('selectEverythingBtn');
+
+    invertSelectionBtn.addEventListener('click', invertSelection);
+    selectEverythingBtn.addEventListener('click', selectEverything);
+    selectAllBtn.addEventListener('click', selectAll);
+    submitBtn.addEventListener('click', submitData);
+
+    reusableModal.addEventListener('click', (event) => {
+        if (event.target === reusableModal) closeModal();
+    });
+
+    function updateSelectAllButtonText() {
+        const nodes = currentFolder ? currentFolder.children : files;
+        if (nodes.length === 0) { selectAllBtn.innerHTML = '<i class="fa-solid fa-list-check"></i> Select All'; return; }
+        const allSelected = nodes.every(node => node.type === 'folder' ? areAllChildrenSelected(node) : node.selected);
+        selectAllBtn.innerHTML = allSelected 
+            ? '<i class="fa-solid fa-list-check"></i> Deselect Folder' 
+            : '<i class="fa-solid fa-list-check"></i> Select Folder';
+    }
+
+    function updateSelectEverythingButtonText() {
+        const stats = calculateStats(files);
+        const allSelected = stats.selectedCount === stats.totalCount && stats.totalCount > 0;
+        selectEverythingBtn.innerHTML = allSelected 
+            ? '<i class="fa-solid fa-check-double"></i> Deselect Everything' 
+            : '<i class="fa-solid fa-check-double"></i> Select Everything';
+    }
+  </script>
+</body>
+</html>

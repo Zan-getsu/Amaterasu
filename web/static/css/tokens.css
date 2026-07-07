@@ -1,0 +1,89 @@
+:root {
+  /* Surfaces */
+  --bs-obsidian:        #0B0F14;   /* Page background — deepest layer */
+  --bs-graphite:        #131A22;   /* Card/panel background */
+  --bs-elevated:        #1A2430;   /* Elevated surfaces, inputs */
+  --bs-elevated-2:      #1F2D3D;   /* Dropdowns, tooltips, modals */
+  --bs-elevated-3:      #243447;   /* Hover states on elevated */
+
+  /* Typography */
+  --bs-text-primary:    #F5F7FA;   /* Headings, primary content */
+  --bs-text-secondary:  #AAB4C0;   /* Body text, descriptions */
+  --bs-text-muted:      #6B7A8D;   /* Placeholders, metadata, labels */
+  --bs-text-disabled:   #3D4F60;   /* Disabled states */
+
+  /* Accent — Solar Gold */
+  --bs-gold:            #D4AF37;   /* Primary accent, CTA, active states */
+  --bs-gold-hover:      #FFDF73;   /* Lighter gold on hover */
+  --bs-gold-dim:        rgba(212, 175, 55, 0.15);  /* Subtle gold bg */
+  --bs-gold-glow:       rgba(212, 175, 55, 0.25);  /* Gold ambient glow */
+  --bs-gold-border:     rgba(212, 175, 55, 0.40);  /* Gold borders */
+  
+  /* Premium Gradients */
+  --bs-gradient-gold:   linear-gradient(135deg, #FFDF73 0%, #D4AF37 100%);
+  --bs-gradient-glass:  linear-gradient(145deg, rgba(26, 36, 48, 0.7) 0%, rgba(19, 26, 34, 0.4) 100%);
+  --bs-gradient-card:   linear-gradient(180deg, #1A2430 0%, #131A22 100%);
+  --bs-glass-blur:      blur(24px);
+
+  /* Borders */
+  --bs-border:          rgba(255, 255, 255, 0.08);   /* Subtle transparent border for glass effect */
+  --bs-border-subtle:   rgba(255, 255, 255, 0.04);   /* Dimmed borders */
+  --bs-border-focus:    rgba(212, 175, 55, 0.6); /* Focus ring */
+
+  /* Semantic States */
+  --bs-success:         #2ECC71;   /* Success green */
+  --bs-success-dim:     rgba(46, 204, 113, 0.12);
+  --bs-warning:         #F39C12;   /* Warning amber */
+  --bs-warning-dim:     rgba(243, 156, 18, 0.12);
+  --bs-error:           #E74C3C;   /* Error red */
+  --bs-error-dim:       rgba(231, 76, 60, 0.12);
+  --bs-info:            #3498DB;   /* Info blue */
+  --bs-info-dim:        rgba(52, 152, 219, 0.12);
+
+  /* Typography Scale */
+  --bs-font-sans:       'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --bs-font-mono:       'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
+
+  /* Spacing System (8pt grid) */
+  --bs-space-1:  4px;
+  --bs-space-2:  8px;
+  --bs-space-3:  12px;
+  --bs-space-4:  16px;
+  --bs-space-5:  20px;
+  --bs-space-6:  24px;
+  --bs-space-8:  32px;
+  --bs-space-10: 40px;
+  --bs-space-12: 48px;
+  --bs-space-16: 64px;
+  --bs-space-20: 80px;
+
+  /* Border Radius */
+  --bs-radius-sm:   6px;
+  --bs-radius-md:   10px;
+  --bs-radius-lg:   14px;
+  --bs-radius-xl:   20px;
+  --bs-radius-pill: 9999px;
+
+  /* Shadows */
+  --bs-shadow-sm:  0 2px 8px rgba(0,0,0,0.4), 0 1px 2px rgba(0,0,0,0.3), inset 0 1px 1px rgba(255,255,255,0.05);
+  --bs-shadow-md:  0 8px 24px rgba(0,0,0,0.5), 0 2px 8px rgba(0,0,0,0.4), inset 0 1px 1px rgba(255,255,255,0.05);
+  --bs-shadow-lg:  0 16px 48px rgba(0,0,0,0.6), 0 4px 16px rgba(0,0,0,0.4), inset 0 1px 1px rgba(255,255,255,0.05);
+  --bs-shadow-xl:  0 32px 80px rgba(0,0,0,0.7), inset 0 1px 1px rgba(255,255,255,0.05);
+  --bs-shadow-gold: 0 0 24px rgba(212,175,55,0.2), 0 8px 24px rgba(0,0,0,0.5);
+  --bs-shadow-gold-inset: inset 0 1px 1px rgba(255,255,255,0.4), 0 4px 16px rgba(212,175,55,0.3);
+
+  /* Transitions */
+  --bs-transition-fast:   150ms cubic-bezier(0.22, 1, 0.36, 1);
+  --bs-transition-base:   250ms cubic-bezier(0.22, 1, 0.36, 1);
+  --bs-transition-slow:   400ms cubic-bezier(0.22, 1, 0.36, 1);
+
+  /* Z-Index Scale */
+  --bs-z-below:    -1;
+  --bs-z-base:      0;
+  --bs-z-raised:   10;
+  --bs-z-dropdown: 100;
+  --bs-z-sticky:   200;
+  --bs-z-overlay:  300;
+  --bs-z-modal:    400;
+  --bs-z-toast:    500;
+}

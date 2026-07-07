@@ -1,0 +1,676 @@
+{% extends "base.html" %}
+
+{% block title %}Amaterasu | Encoding Profile Creator{% endblock %}
+
+{% block extra_css %}
+<style>
+.encode-profiles-section { padding-top: clamp(24px, 5vw, var(--bs-space-10)); }
+.encode-profiles-section .bs-container--xl { padding-left: clamp(12px, 4vw, var(--bs-space-8)); padding-right: clamp(12px, 4vw, var(--bs-space-8)); }
+.encode-page { max-width: 1280px; margin: 0 auto; padding: var(--bs-space-8) var(--bs-space-6) var(--bs-space-16); }
+.encode-page-header { display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 16px; }
+.encode-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--bs-space-8); flex-wrap: wrap; gap: var(--bs-space-4); }
+.encode-title { font-size: clamp(22px, 3vw, 28px); font-weight: 700; letter-spacing: 0; color: var(--bs-text-primary); margin:0; }
+.encode-title-sub { font-size: 13px; color: var(--form-hint); margin-top: 4px; }
+.encode-actions { display: flex; gap: var(--bs-space-3); flex-wrap: wrap; justify-content: flex-end; }
+.encode-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(340px, 420px); gap: var(--bs-space-6); align-items: start; }
+.encode-layout > *, .encode-form-wrapper, .encode-preview { min-width: 0; }
+@media (max-width: 1024px) { .encode-layout { grid-template-columns: 1fr; } .encode-preview { position: static !important; } }
+.encode-preview { position: sticky; top: 80px; }
+#quick-presets-container { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr)); gap: 12px; }
+
+/* Accordion */
+.acc-item { border: 1px solid var(--bs-border); border-radius: var(--bs-radius-lg); overflow: hidden; margin-bottom: var(--bs-space-3); transition: border-color var(--bs-transition-base); }
+.acc-item:hover { border-color: rgba(212,175,55,0.15); }
+.acc-trigger { width: 100%; display: flex; align-items: center; justify-content: space-between; padding: 16px 20px; background: var(--bs-graphite); color: var(--bs-text-primary); font-size: 14px; font-weight: 600; cursor: pointer; border: none; transition: background var(--bs-transition-fast); gap: var(--bs-space-3); }
+.acc-trigger:hover { background: var(--bs-elevated); }
+.acc-trigger.open { color: var(--bs-gold); }
+.acc-trigger-left { display: flex; align-items: center; gap: var(--bs-space-3); }
+.acc-trigger-icon { width: 28px; height: 28px; border-radius: var(--bs-radius-sm); background: var(--bs-gold-dim); display: flex; align-items: center; justify-content: center; color: var(--bs-gold); flex-shrink: 0; }
+.acc-content { padding: var(--bs-space-5) var(--bs-space-5) var(--bs-space-6); background: var(--bs-graphite); border-top: 1px solid var(--bs-border); display: flex; flex-direction: column; gap: var(--bs-space-5); }
+.acc-trigger .chevron { transition: transform 0.25s ease; }
+.acc-trigger.open .chevron { transform: rotate(180deg); }
+
+/* Form Elements */
+.form-group { display: flex; flex-direction: column; gap: var(--bs-space-2); }
+.form-label { font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--bs-text-muted); display: flex; align-items: center; gap: 6px; }
+.form-input, .form-select { width: 100%; padding: 10px 14px; background: var(--bs-elevated); border: 1px solid var(--bs-border); border-radius: var(--bs-radius-md); color: var(--bs-text-primary); font-size: 14px; font-family: var(--bs-font-sans); transition: all var(--bs-transition-fast); outline: none; box-sizing: border-box; }
+.form-input::placeholder { color: var(--bs-text-disabled); }
+.form-input:hover, .form-select:hover { border-color: rgba(212,175,55,0.25); }
+.form-input:focus, .form-select:focus { border-color: var(--bs-gold-border); box-shadow: 0 0 0 3px var(--bs-gold-dim); background: var(--bs-elevated-2); }
+.form-select { appearance: none; cursor: pointer; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%236B7A8D' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 12px center; padding-right: 36px; }
+.form-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--bs-space-4); }
+.form-row-3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--bs-space-4); }
+@media (max-width: 640px) { .form-row { grid-template-columns: 1fr; } .form-row-3 { grid-template-columns: 1fr; } }
+.form-hint { font-size: 12px; color: var(--bs-text-disabled); }
+.form-input--mono { font-family: var(--bs-font-mono); font-size: 13px; }
+
+/* Sliders */
+.slider-wrap { display: flex; flex-direction: column; gap: 8px; }
+.slider-header { display: flex; align-items: center; justify-content: space-between; }
+.slider-input { -webkit-appearance: none; appearance: none; width: 100%; height: 4px; border-radius: 2px; background: var(--bs-elevated-2); outline: none; }
+.slider-input::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 16px; height: 16px; border-radius: 50%; background: var(--bs-gold); border: 2px solid var(--bs-graphite); cursor: pointer; box-shadow: 0 0 8px var(--bs-gold-glow); transition: transform var(--bs-transition-fast); }
+.slider-input::-webkit-slider-thumb:hover { transform: scale(1.2); }
+.slider-value { min-width: 40px; padding: 4px 8px; background: var(--bs-elevated); border: 1px solid var(--bs-border); border-radius: var(--bs-radius-sm); font-family: var(--bs-font-mono); font-size: 13px; color: var(--bs-gold); text-align: center; font-weight: 600; }
+.slider-hint { font-size: 11px; color: var(--bs-text-disabled); font-style: italic; }
+
+/* Toggles */
+.toggle-wrap { display: flex; align-items: center; gap: var(--bs-space-3); cursor: pointer; position: relative; }
+.toggle-wrap input { position: absolute; opacity: 0; width: 0; height: 0; }
+.toggle-track { width: 40px; height: 22px; border-radius: 11px; background: var(--bs-elevated-2); border: 1px solid var(--bs-border); position: relative; transition: all var(--bs-transition-base); flex-shrink: 0; }
+.toggle-wrap input:checked ~ .toggle-track { background: var(--bs-gold); border-color: var(--bs-gold); }
+.toggle-thumb { position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: var(--bs-graphite); transition: transform var(--bs-transition-fast); box-shadow: var(--bs-shadow-sm); }
+.toggle-wrap input:checked ~ .toggle-track .toggle-thumb { transform: translateX(18px); }
+.toggle-label { font-size: 13px; color: var(--bs-text-secondary); }
+
+/* Chips */
+.chip-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+.chip { display: inline-flex; align-items: center; padding: 3px 8px; border-radius: var(--bs-radius-sm); font-size: 11px; font-family: var(--bs-font-mono); background: var(--bs-elevated); color: var(--bs-gold); border: 1px solid var(--bs-gold-border); cursor: pointer; transition: all var(--bs-transition-fast); }
+.chip:hover { background: var(--bs-gold-dim); }
+
+/* Buttons */
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: var(--bs-space-2); padding: 9px 18px; border-radius: var(--bs-radius-md); font-size: 13px; font-weight: 600; border: none; cursor: pointer; transition: all var(--bs-transition-fast); white-space: nowrap; }
+.btn--primary { background: var(--bs-gold); color: #0B0F14; box-shadow: 0 2px 8px rgba(212,175,55,0.25); }
+.btn--primary:hover { background: var(--bs-gold-hover); box-shadow: 0 4px 16px rgba(212,175,55,0.35); transform: translateY(-1px); }
+.btn--ghost { background: transparent; color: var(--bs-text-secondary); border: 1px solid var(--bs-border); }
+.btn--ghost:hover { background: var(--bs-gold-dim); color: var(--bs-gold); border-color: var(--bs-gold-border); }
+.btn--sm { padding: 6px 12px; font-size: 12px; border-radius: var(--bs-radius-sm); }
+.btn--danger { color: #e74c3c; border-color: rgba(231,76,60,0.3); }
+.btn--danger:hover { background: rgba(231,76,60,0.1); color: #e74c3c; border-color: rgba(231,76,60,0.5); }
+.encode-profiles-section .btn, .profile-modal .btn { letter-spacing: 0; }
+
+/* Previews */
+.preview-card { background: var(--bs-graphite); border: 1px solid var(--bs-border); border-radius: var(--bs-radius-lg); overflow: hidden; }
+.preview-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 16px; background: var(--bs-elevated); border-bottom: 1px solid var(--bs-border); }
+.preview-tabs { display: flex; gap: 2px; background: var(--bs-graphite); border-radius: var(--bs-radius-sm); padding: 2px; }
+.preview-tab { padding: 4px 12px; font-size: 11px; font-weight: 600; font-family: var(--bs-font-mono); border: none; border-radius: var(--bs-radius-sm); cursor: pointer; transition: all var(--bs-transition-fast); display: flex; align-items: center; gap: 4px; background: transparent; color: var(--bs-text-muted); }
+.preview-tab--active { background: var(--bs-elevated-2); color: var(--bs-gold); }
+.preview-body { padding: var(--bs-space-4); max-height: 500px; overflow: auto; }
+.preview-code { font-family: var(--bs-font-mono); font-size: 12px; line-height: 1.7; color: var(--bs-text-secondary); white-space: pre-wrap; word-break: break-all; margin: 0; }
+
+/* Quick Presets */
+.preset-card { display: flex; flex-direction: column; padding: 12px 16px; border-radius: var(--bs-radius-md); background: var(--bs-graphite); border: 1px solid var(--bs-border); cursor: pointer; transition: all var(--bs-transition-fast); }
+.preset-card:hover { border-color: var(--bs-gold-border); background: var(--bs-gold-dim); }
+.preset-card-name { font-size: 13px; font-weight: 700; color: var(--bs-text-primary); margin-bottom: 4px; }
+.preset-card-desc { font-size: 11px; color: var(--bs-text-muted); font-family: var(--bs-font-mono); }
+
+/* Tooltips */
+.tooltip-wrap { position: relative; display: inline-flex; align-items: center; cursor: help; }
+.tooltip-icon { width: 14px; height: 14px; color: var(--bs-text-disabled); transition: color 0.15s; }
+.tooltip-wrap:hover .tooltip-icon { color: var(--bs-gold); }
+.tooltip-bubble { position: absolute; bottom: calc(100% + 8px); left: 50%; transform: translateX(-50%); padding: 6px 10px; background: var(--bs-elevated-2); border: 1px solid var(--bs-border); border-radius: var(--bs-radius-sm); font-size: 11px; color: var(--bs-text-secondary); white-space: normal; width: 200px; text-align: center; pointer-events: none; opacity: 0; visibility: hidden; transition: all 0.15s ease; z-index: 50; box-shadow: var(--bs-shadow-md); text-transform: none; letter-spacing: normal; font-weight: 400; }
+.tooltip-wrap:hover .tooltip-bubble { opacity: 1; visibility: visible; }
+
+/* Stream Tag Builder */
+.tag-builder { display: flex; flex-direction: column; gap: 8px; }
+.tag-builder-header { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.tag-builder-empty { text-align: center; padding: 16px; background: var(--bs-elevated); border: 1px dashed var(--bs-border); border-radius: var(--bs-radius-md); color: var(--bs-text-disabled); font-size: 12px; }
+.tag-row { display: flex; gap: 8px; align-items: center; }
+.tag-row select, .tag-row input { padding: 8px 10px; background: var(--bs-elevated); border: 1px solid var(--bs-border); border-radius: var(--bs-radius-sm); color: var(--bs-text-primary); font-size: 12px; outline: none; font-family: var(--bs-font-sans); }
+.tag-row select:focus, .tag-row input:focus { border-color: var(--bs-gold-border); }
+.tag-row select { appearance: none; cursor: pointer; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%236B7A8D' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 8px center; padding-right: 24px; }
+.tag-row .tag-track { width: 100px; flex-shrink: 0; }
+.tag-row .tag-type { width: 110px; flex-shrink: 0; }
+.tag-row .tag-value { flex: 1; min-width: 0; }
+.tag-row .tag-remove { width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; background: transparent; border: 1px solid var(--bs-border); border-radius: var(--bs-radius-sm); color: var(--bs-text-disabled); cursor: pointer; flex-shrink: 0; transition: all 0.15s; }
+.tag-row .tag-remove:hover { color: #e74c3c; border-color: rgba(231,76,60,0.3); background: rgba(231,76,60,0.08); }
+
+/* Section Divider */
+.section-divider { border-top: 1px solid var(--bs-border); padding-top: 16px; margin-top: 8px; }
+.section-divider-title { font-size: 12px; font-weight: 700; color: var(--bs-text-muted); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 12px; }
+
+/* Profile List */
+.profile-modal-overlay { padding: clamp(12px, 3vw, var(--bs-space-5)); }
+.profile-modal { width: min(100%, 760px); max-width: 760px; max-height: min(86vh, 760px); display: flex; flex-direction: column; padding: clamp(16px, 3vw, var(--bs-space-8)); }
+.profile-modal .bs-modal__header { flex-shrink: 0; gap: 16px; }
+.profile-modal-close { display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; background: transparent; border: 1px solid transparent; border-radius: var(--bs-radius-sm); color: var(--bs-text-muted); cursor: pointer; padding: 0; flex-shrink: 0; transition: all var(--bs-transition-fast); }
+.profile-modal-close:hover { color: var(--bs-text-primary); background: var(--bs-elevated); border-color: var(--bs-border); }
+.profiles-list { min-height: 0; max-height: min(58vh, 520px); overflow-y: auto; display: flex; flex-direction: column; gap: 12px; padding: 4px; overscroll-behavior: contain; }
+.profile-card { background: var(--bs-graphite); border: 1px solid var(--bs-border); border-radius: var(--bs-radius-md); overflow: hidden; transition: border-color 0.15s; }
+.profile-card:hover { border-color: rgba(212,175,55,0.15); }
+.profile-card-header { display: flex; justify-content: space-between; align-items: center; padding: 16px; gap: 14px; flex-wrap: wrap; }
+.profile-card-info { flex: 1 1 240px; min-width: 0; }
+.profile-card-name { font-weight: 700; color: var(--bs-text-primary); margin-bottom: 4px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.profile-card-meta { font-size: 12px; color: var(--bs-text-muted); display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.profile-card-meta-item { display: inline-flex; align-items: center; gap: 4px; min-width: 0; }
+.profile-card-actions { display: flex; gap: 6px; flex: 0 1 auto; justify-content: flex-end; flex-wrap: wrap; }
+.profile-card-actions .btn { min-height: 36px; }
+.profile-card-preview { border-top: 1px solid var(--bs-border); padding: 16px; background: var(--bs-elevated); }
+.profile-card-preview pre { font-family: var(--bs-font-mono); font-size: 11px; color: var(--bs-text-secondary); line-height: 1.6; white-space: pre-wrap; word-break: break-all; margin: 0; padding: 12px; background: rgba(0,0,0,0.3); border-radius: var(--bs-radius-sm); border: 1px solid var(--bs-border); max-height: 300px; overflow: auto; }
+.badge-default { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 99px; font-size: 10px; font-weight: 700; background: rgba(46,204,113,0.12); color: #2ecc71; border: 1px solid rgba(46,204,113,0.25); text-transform: uppercase; letter-spacing: 0.05em; }
+.badge-chip { display: inline-flex; padding: 2px 6px; border-radius: var(--bs-radius-sm); font-size: 10px; font-family: var(--bs-font-mono); background: var(--bs-elevated); color: var(--bs-text-muted); border: 1px solid var(--bs-border); }
+
+@media (max-width: 768px) {
+  .encode-page-header { margin-bottom: var(--bs-space-7); }
+  .encode-actions { width: 100%; justify-content: stretch; }
+  .encode-actions .btn { flex: 1 1 calc(50% - var(--bs-space-3)); padding-left: 12px; padding-right: 12px; }
+  .acc-trigger { padding: 14px 16px; }
+  .acc-content { padding: var(--bs-space-4); }
+  .preview-header { align-items: stretch; flex-direction: column; }
+  .preview-tabs { width: 100%; }
+  .preview-tab { flex: 1; justify-content: center; }
+  .tag-builder-header { align-items: stretch; flex-direction: column; }
+  .tag-builder-header .btn { width: 100%; }
+}
+
+@media (max-width: 640px) {
+  .encode-profiles-section { padding-bottom: var(--bs-space-8); }
+  .encode-profiles-section .bs-section-header { margin-bottom: var(--bs-space-7); }
+  .encode-title { font-size: 24px; }
+  .encode-title-sub { max-width: 42rem; }
+  .encode-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .encode-actions .btn { width: 100%; min-width: 0; }
+  #btn-save { grid-column: 1 / -1; }
+  .preset-card { padding: 12px; }
+  .tag-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 36px; align-items: stretch; }
+  .tag-row .tag-track, .tag-row .tag-type { width: 100%; }
+  .tag-row .tag-value { grid-column: 1 / 3; width: 100%; }
+  .tag-row .tag-remove { width: 36px; height: 36px; grid-column: 3; grid-row: 1 / 3; align-self: stretch; }
+  .profile-modal-overlay { align-items: flex-start; overflow-y: auto; }
+  .profile-modal { max-height: none; }
+  .profiles-list { max-height: none; overflow-y: visible; }
+  .profile-card-header { align-items: stretch; padding: 14px; }
+  .profile-card-info { flex-basis: 100%; }
+  .profile-card-actions { width: 100%; display: grid; grid-template-columns: repeat(auto-fit, minmax(44px, 1fr)); justify-content: stretch; }
+  .profile-card-actions .btn { width: 100%; padding-left: 8px; padding-right: 8px; }
+  .profile-card-meta { gap: 8px; }
+}
+
+@media (max-width: 420px) {
+  .encode-actions { grid-template-columns: 1fr; }
+  .profile-modal .bs-modal__header { align-items: flex-start; }
+  .profile-card-actions { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+
+/* Conditional visibility helper */
+.hidden { display: none !important; }
+</style>
+{% endblock %}
+
+{% block content %}
+<section class="bs-section bs-section--sm encode-profiles-section">
+  <div class="bs-container bs-container--xl">
+    
+    <!-- Page Header -->
+    <div class="bs-section-header encode-page-header">
+      <div>
+        <h1 class="bs-h2 encode-title" style="margin-bottom: 0;">Encoding Profile Creator</h1>
+        <p class="encode-title-sub" style="margin-top: 4px;">Visually build FFmpeg encoding profiles. Syncs directly to your Telegram bot.</p>
+      </div>
+      <div class="encode-actions">
+        <button id="btn-copy" class="btn btn--ghost" title="Copy to Clipboard">
+          <i data-lucide="copy" style="width:14px;height:14px;"></i> Copy
+        </button>
+        <button id="btn-import" class="btn btn--ghost" title="Import JSON">
+          <i data-lucide="download" style="width:14px;height:14px;"></i> Import
+        </button>
+        <button id="btn-delete" class="btn btn--ghost btn--danger" title="Delete Profile" style="display: none;">
+          <i data-lucide="trash-2" style="width:14px;height:14px;"></i>
+        </button>
+        <button id="btn-reset" class="btn btn--ghost" title="Reset All Settings">
+          <i data-lucide="rotate-ccw" style="width:14px;height:14px;"></i>
+        </button>
+        <button id="btn-my-profiles" class="btn btn--ghost">
+          <i data-lucide="list" style="width:14px;height:14px;"></i> My Profiles
+        </button>
+        <button id="btn-save" class="btn btn--primary"><i data-lucide="check" style="width:14px;height:14px;"></i> Save Profile
+        </button>
+      </div>
+    </div>
+
+    <!-- Quick Presets -->
+    <div style="margin-bottom: 32px;">
+      <h3 style="font-size: 13px; font-weight: 700; color: var(--bs-text-muted); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 16px; margin-left: 8px;">Quick Presets</h3>
+      <div id="quick-presets-container">
+        <!-- Populated via JS -->
+      </div>
+    </div>
+
+    <!-- Two-column layout -->
+    <div class="encode-layout">
+      
+      <!-- LEFT: Profile Builder -->
+      <div class="encode-form-wrapper">
+        
+        <!-- [1] Profile Identity -->
+        <div class="acc-item">
+          <button class="acc-trigger open">
+            <div class="acc-trigger-left"><div class="acc-trigger-icon"><i data-lucide="contact" style="width:14px;height:14px;"></i></div><span>Profile Identity</span></div>
+            <i data-lucide="chevron-down" style="width:18px;height:18px;" class="chevron"></i>
+          </button>
+          <div class="acc-content" style="display: block;">
+            <div class="form-row">
+              <div class="form-group">
+                <label class="form-label">Profile Name</label>
+                <input type="text" id="p-name" class="form-input" placeholder="e.g. x265-1080p" value="Custom Profile">
+              </div>
+              <div class="form-group" style="display: none;">
+                <!-- Placeholder to keep form-row grid happy or we can just remove form-row class -->
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- [2] Video Settings -->
+        <div class="acc-item">
+          <button class="acc-trigger">
+            <div class="acc-trigger-left"><div class="acc-trigger-icon"><i data-lucide="film" style="width:14px;height:14px;"></i></div><span>Video Settings</span></div>
+            <i data-lucide="chevron-down" style="width:18px;height:18px;" class="chevron"></i>
+          </button>
+          <div class="acc-content" style="display: none;">
+            <div class="form-row">
+              <div class="form-group">
+                <label class="form-label">Video Codec</label>
+                <select id="v-codec" class="form-input form-select">
+                  <option value="libsvtav1">SVT-AV1 (Best for 4K/HDR)</option>
+                  <option value="libx265" selected>H.265 / HEVC (Best for 1080p)</option>
+                  <option value="libx264">H.264 / AVC (Most Compatible)</option>
+                  <option value="libvpx-vp9">VP9 (YouTube format)</option>
+                  <option value="mpeg4">MPEG-4 (Legacy)</option>
+                  <option value="copy">Copy (No re-encode)</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label class="form-label">Pixel Format
+                  <span class="tooltip-wrap"><i data-lucide="help-circle" class="tooltip-icon"></i><span class="tooltip-bubble">Bit depth and chroma subsampling. 10-bit is recommended for AV1/HEVC to prevent banding.</span></span>
+                </label>
+                <select id="v-pix_fmt" class="form-input form-select">
+                  <option value="yuv420p10le">10-bit YUV 4:2:0 (HDR/Banding prevention)</option>
+                  <option value="yuv420p">8-bit YUV 4:2:0 (Standard)</option>
+                  <option value="yuv422p">8-bit YUV 4:2:2</option>
+                  <option value="yuv444p">8-bit YUV 4:4:4</option>
+                </select>
+              </div>
+            </div>
+            
+            <!-- CRF Slider (hidden when codec=copy) -->
+            <div id="v-crf-group" class="form-group" style="margin-top: 16px;">
+              <div class="slider-wrap">
+                <div class="slider-header">
+                  <label class="form-label">CRF (Quality)
+                    <span class="tooltip-wrap"><i data-lucide="help-circle" class="tooltip-icon"></i><span class="tooltip-bubble">Constant Rate Factor. Lower = higher quality and larger file. 18 is near lossless, 24-28 is standard for AV1/HEVC.</span></span>
+                  </label>
+                  <span class="slider-value" id="v-crf-val">24</span>
+                </div>
+                <input type="range" id="v-crf" class="slider-input" min="0" max="63" value="24">
+                <div class="slider-hint" id="v-crf-hint"></div>
+              </div>
+            </div>
+
+            <!-- Preset (dynamically swapped) -->
+            <div id="v-preset-group" class="form-group" style="margin-top: 16px;">
+              <div class="slider-header" style="margin-bottom: 8px;">
+                <label class="form-label">Preset / Speed
+                  <span class="tooltip-wrap"><i data-lucide="help-circle" class="tooltip-icon"></i><span class="tooltip-bubble">Slower presets provide better compression efficiency at the cost of encoding time.</span></span>
+                </label>
+                <span id="v-preset-val" style="font-family: var(--bs-font-mono); color: var(--bs-text-primary); font-weight: 600; font-size: 13px;">medium</span>
+              </div>
+              <select id="v-preset-select" class="form-input form-select">
+                <!-- Populated dynamically by JS based on selected codec -->
+              </select>
+            </div>
+
+            <!-- Advanced Video Row -->
+            <div class="form-row" style="margin-top: 16px;">
+              <div class="form-group">
+                <label class="form-label">Format Profile</label>
+                <select id="v-profile" class="form-input form-select">
+                  <option value="">Default / Auto</option>
+                  <option value="0">0 / Main (AV1)</option>
+                  <option value="1">1 / High (AV1)</option>
+                  <option value="2">2 / Professional (AV1)</option>
+                  <option value="baseline">Baseline (H.264)</option>
+                  <option value="main">Main (H.264/H.265)</option>
+                  <option value="high">High (H.264)</option>
+                  <option value="high10">High 10 (H.264)</option>
+                  <option value="main10">Main 10 (H.265)</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label class="form-label">Format Level</label>
+                <select id="v-level" class="form-input form-select">
+                  <option value="">Default / Auto</option>
+                  <option value="3.0">3.0</option>
+                  <option value="3.1">3.1</option>
+                  <option value="4.0">4.0 (1080p30)</option>
+                  <option value="4.1">4.1 (1080p60)</option>
+                  <option value="5.0">5.0</option>
+                  <option value="5.1">5.1 (4K)</option>
+                  <option value="5.2">5.2</option>
+                  <option value="6.0">6.0 (8K)</option>
+                  <option value="6.1">6.1</option>
+                  <option value="6.2">6.2</option>
+                </select>
+              </div>
+            </div>
+
+            <!-- Color Settings -->
+            <div class="form-row-3" style="margin-top: 16px;">
+              <div class="form-group">
+                <label class="form-label">Color Primaries</label>
+                <select id="v-color-prim" class="form-input form-select">
+                  <option value="">Default / Auto</option>
+                  <option value="bt709">BT.709 (HD/SDR)</option>
+                  <option value="bt2020">BT.2020 (HDR/UHD)</option>
+                  <option value="smpte170m">SMPTE 170M (SD/NTSC)</option>
+                  <option value="smpte240m">SMPTE 240M</option>
+                  <option value="bt470bg">BT.470 BG (SD/PAL)</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label class="form-label">Color TRC</label>
+                <select id="v-color-trc" class="form-input form-select">
+                  <option value="">Default / Auto</option>
+                  <option value="bt709">BT.709 (HD/SDR)</option>
+                  <option value="bt2020">BT.2020 (HDR/UHD)</option>
+                  <option value="smpte170m">SMPTE 170M (SD/NTSC)</option>
+                  <option value="smpte240m">SMPTE 240M</option>
+                  <option value="bt470bg">BT.470 BG (SD/PAL)</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label class="form-label">Colorspace</label>
+                <select id="v-colorspace" class="form-input form-select">
+                  <option value="">Default / Auto</option>
+                  <option value="bt709">BT.709 (HD/SDR)</option>
+                  <option value="bt2020nc">BT.2020 NC (HDR/UHD)</option>
+                  <option value="smpte170m">SMPTE 170M (SD/NTSC)</option>
+                  <option value="smpte240m">SMPTE 240M</option>
+                  <option value="bt470bg">BT.470 BG (SD/PAL)</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="form-group" style="margin-top: 16px;">
+              <label class="form-label">Extra FFmpeg Parameters
+                <span class="tooltip-wrap"><i data-lucide="help-circle" class="tooltip-icon"></i><span class="tooltip-bubble">Additional codec-specific parameters. Use colon-separated format for x265-params, e.g. tune=animation:film-grain=4</span></span>
+              </label>
+              <input type="text" id="v-extra" class="form-input form-input--mono" placeholder="e.g. tune=animation:film-grain=4">
+            </div>
+
+            <!-- Video Track Selection & Tags -->
+            <div class="section-divider">
+              <div class="section-divider-title">Video Track Selection & Tags</div>
+              
+              <div class="form-group" style="margin-bottom: 16px;">
+                <label class="form-label">Video Tracks to Keep</label>
+                <select id="m-v_track-select" class="form-select form-input--mono track-selector-dropdown" data-target="m-v_track">
+                  <option value="?">Keep All Tracks (?)</option>
+                  <option value="0">Track 1 Only (0)</option>
+                  <option value="1">Track 2 Only (1)</option>
+                  <option value="0,1">Tracks 1 & 2 (0,1)</option>
+                  <option value="1,0">Tracks 2 & 1 (1,0)</option>
+                  <option value="custom">Custom Mapping...</option>
+                </select>
+                <input type="text" id="m-v_track" class="form-input form-input--mono" placeholder="e.g. 0,1 or ?" style="display: none; margin-top: 8px;">
+              </div>
+
+              <div class="form-row" style="margin-top: 12px;">
+                <div class="tag-builder" id="v-meta-tags">
+                  <div class="tag-builder-header">
+                    <label class="form-label" style="margin: 0;">Video Metadata Tags</label>
+                    <button type="button" class="btn btn--ghost btn--sm" data-add-meta="v">
+                      <i data-lucide="plus" style="width:12px;height:12px;"></i> Add Tag
+                    </button>
+                  </div>
+                  <div class="tag-builder-rows" data-prefix="s:v:"></div>
+                </div>
+                <div class="tag-builder" id="v-disp-tags">
+                  <div class="tag-builder-header">
+                    <label class="form-label" style="margin: 0;">Video Disposition Flags</label>
+                    <button type="button" class="btn btn--ghost btn--sm" data-add-disp="v">
+                      <i data-lucide="plus" style="width:12px;height:12px;"></i> Add Flag
+                    </button>
+                  </div>
+                  <div class="tag-builder-rows" data-prefix="v:"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- [3] Audio Settings -->
+        <div class="acc-item">
+          <button class="acc-trigger">
+            <div class="acc-trigger-left"><div class="acc-trigger-icon"><i data-lucide="music" style="width:14px;height:14px;"></i></div><span>Audio Settings</span></div>
+            <i data-lucide="chevron-down" style="width:18px;height:18px;" class="chevron"></i>
+          </button>
+          <div class="acc-content" style="display: none;">
+            <div class="form-row">
+              <div class="form-group">
+                <label class="form-label">Audio Codec</label>
+                <select id="a-codec" class="form-input form-select">
+                  <option value="libopus" selected>Opus (Best Quality/Size)</option>
+                  <option value="aac">AAC (Most Compatible)</option>
+                  <option value="flac">FLAC (Lossless)</option>
+                  <option value="libmp3lame">MP3</option>
+                  <option value="ac3">AC-3 (Dolby Digital)</option>
+                  <option value="copy">Copy (No re-encode)</option>
+                </select>
+              </div>
+              <div class="form-group" id="a-bitrate-group">
+                <label class="form-label">Bitrate</label>
+                <select id="a-bitrate" class="form-input form-select">
+                  <option value="64k">64 kbps (Low)</option>
+                  <option value="96k">96 kbps</option>
+                  <option value="128k" selected>128 kbps (Standard)</option>
+                  <option value="192k">192 kbps (High)</option>
+                  <option value="256k">256 kbps</option>
+                  <option value="320k">320 kbps (Maximum)</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="form-group" id="a-channels-group" style="margin-top: 16px;">
+              <label class="form-label">Channels</label>
+              <select id="a-channels" class="form-input form-select">
+                <option value="0">Keep Original</option>
+                <option value="1">Mono (1.0)</option>
+                <option value="2" selected>Stereo (2.0)</option>
+                <option value="6">Surround (5.1)</option>
+                <option value="8">Surround (7.1)</option>
+              </select>
+            </div>
+
+            <div id="a-vbr-group" style="margin-top: 16px;">
+              <label class="toggle-wrap">
+                <input type="checkbox" id="a-vbr" checked>
+                <div class="toggle-track"><div class="toggle-thumb"></div></div>
+                <span class="form-label" style="text-transform: none; font-size: 13px;">Variable Bitrate (VBR)</span>
+              </label>
+              <div class="form-hint" style="margin-top: 4px; margin-left: 52px;">Optimize bitrate based on audio complexity</div>
+            </div>
+
+            <!-- Audio Track Selection & Tags -->
+            <div class="section-divider">
+              <div class="section-divider-title">Audio Track Selection & Tags</div>
+              
+              <div class="form-group" style="margin-bottom: 16px;">
+                <label class="form-label">Audio Tracks to Keep</label>
+                <select id="m-a_track-select" class="form-select form-input--mono track-selector-dropdown" data-target="m-a_track">
+                  <option value="?">Keep All Tracks (?)</option>
+                  <option value="0">Track 1 Only (0)</option>
+                  <option value="1">Track 2 Only (1)</option>
+                  <option value="0,1">Tracks 1 & 2 (0,1)</option>
+                  <option value="1,0">Tracks 2 & 1 (1,0)</option>
+                  <option value="custom">Custom Mapping...</option>
+                </select>
+                <input type="text" id="m-a_track" class="form-input form-input--mono" placeholder="e.g. 0,1 or ?" style="display: none; margin-top: 8px;">
+              </div>
+
+              <div class="form-row" style="margin-top: 12px;">
+                <div class="tag-builder" id="a-meta-tags">
+                  <div class="tag-builder-header">
+                    <label class="form-label" style="margin: 0;">Audio Metadata Tags</label>
+                    <button type="button" class="btn btn--ghost btn--sm" data-add-meta="a">
+                      <i data-lucide="plus" style="width:12px;height:12px;"></i> Add Tag
+                    </button>
+                  </div>
+                  <div class="tag-builder-rows" data-prefix="s:a:"></div>
+                </div>
+                <div class="tag-builder" id="a-disp-tags">
+                  <div class="tag-builder-header">
+                    <label class="form-label" style="margin: 0;">Audio Disposition Flags</label>
+                    <button type="button" class="btn btn--ghost btn--sm" data-add-disp="a">
+                      <i data-lucide="plus" style="width:12px;height:12px;"></i> Add Flag
+                    </button>
+                  </div>
+                  <div class="tag-builder-rows" data-prefix="a:"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- [4] Subtitle Settings -->
+        <div class="acc-item">
+          <button class="acc-trigger">
+            <div class="acc-trigger-left"><div class="acc-trigger-icon"><i data-lucide="subtitles" style="width:14px;height:14px;"></i></div><span>Subtitle Settings</span></div>
+            <i data-lucide="chevron-down" style="width:18px;height:18px;" class="chevron"></i>
+          </button>
+          <div class="acc-content" style="display: none;">
+            <div class="form-group" style="margin-bottom: 16px;">
+              <label class="form-label">Subtitle Mode
+                <span class="tooltip-wrap"><i data-lucide="help-circle" class="tooltip-icon"></i><span class="tooltip-bubble">Choose how subtitles are handled in the output file.</span></span>
+              </label>
+              <select id="s-mode" class="form-input form-select">
+                <option value="copy" selected>Copy original subtitles</option>
+                <option value="none">Remove subtitles</option>
+                <option value="burn">Burn-in (Hardsubs)</option>
+              </select>
+            </div>
+
+            <!-- Subtitle Track Selection & Tags -->
+            <div class="form-group" style="margin-bottom: 16px;">
+              <label class="form-label">Subtitle Tracks to Keep</label>
+              <select id="m-s_track-select" class="form-select form-input--mono track-selector-dropdown" data-target="m-s_track">
+                <option value="?">Keep All Tracks (?)</option>
+                <option value="0">Track 1 Only (0)</option>
+                <option value="1">Track 2 Only (1)</option>
+                <option value="0,1">Tracks 1 & 2 (0,1)</option>
+                <option value="1,0">Tracks 2 & 1 (1,0)</option>
+                <option value="custom">Custom Mapping...</option>
+              </select>
+              <input type="text" id="m-s_track" class="form-input form-input--mono" placeholder="e.g. 0,1 or ?" style="display: none; margin-top: 8px;">
+            </div>
+
+            <div class="form-row">
+              <div class="tag-builder" id="s-meta-tags">
+                <div class="tag-builder-header">
+                  <label class="form-label" style="margin: 0;">Subtitle Metadata Tags</label>
+                  <button type="button" class="btn btn--ghost btn--sm" data-add-meta="s">
+                    <i data-lucide="plus" style="width:12px;height:12px;"></i> Add Tag
+                  </button>
+                </div>
+                <div class="tag-builder-rows" data-prefix="s:s:"></div>
+              </div>
+              <div class="tag-builder" id="s-disp-tags">
+                <div class="tag-builder-header">
+                  <label class="form-label" style="margin: 0;">Subtitle Disposition Flags</label>
+                  <button type="button" class="btn btn--ghost btn--sm" data-add-disp="s">
+                    <i data-lucide="plus" style="width:12px;height:12px;"></i> Add Flag
+                  </button>
+                </div>
+                <div class="tag-builder-rows" data-prefix="s:"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- [5] Global Metadata & Output -->
+        <div class="acc-item">
+          <button class="acc-trigger">
+            <div class="acc-trigger-left"><div class="acc-trigger-icon"><i data-lucide="tag" style="width:14px;height:14px;"></i></div><span>Global Metadata & Output</span></div>
+            <i data-lucide="chevron-down" style="width:18px;height:18px;" class="chevron"></i>
+          </button>
+          <div class="acc-content" style="display: none;">
+            <div class="form-row">
+              <div class="form-group">
+                <label class="form-label">Rename File To</label>
+                <input type="text" id="g-rename" class="form-input form-input--mono" placeholder="e.g. {title} - {episode}.mkv">
+                <div class="chip-row">
+                  <button type="button" class="chip" onclick="insertChip('g-rename', '{title}')">{title}</button>
+                  <button type="button" class="chip" onclick="insertChip('g-rename', '{episode}')">{episode}</button>
+                  <button type="button" class="chip" onclick="insertChip('g-rename', '{quality}')">{quality}</button>
+                  <button type="button" class="chip" onclick="insertChip('g-rename', '{resolution}')">{resolution}</button>
+                  <button type="button" class="chip" onclick="insertChip('g-rename', '{source}')">{source}</button>
+                  <button type="button" class="chip" onclick="insertChip('g-rename', '{audio}')">{audio}</button>
+                  <button type="button" class="chip" onclick="insertChip('g-rename', '{codec}')">{codec}</button>
+                  <button type="button" class="chip" onclick="insertChip('g-rename', '{basename}')">{basename}</button>
+                  <button type="button" class="chip" onclick="insertChip('g-rename', '{filename}')">{filename}</button>
+                  <button type="button" class="chip" onclick="insertChip('g-rename', '{year}')">{year}</button>
+                  <button type="button" class="chip" onclick="insertChip('g-rename', '{audiolang}')">{audiolang}</button>
+                  <button type="button" class="chip" onclick="insertChip('g-rename', '{sublang}')">{sublang}</button>
+                </div>
+              </div>
+              <div class="form-group">
+                <label class="form-label">Global Title</label>
+                <input type="text" id="g-title" class="form-input" placeholder="e.g. {basename}">
+                <div class="chip-row">
+                  <button type="button" class="chip" onclick="insertChip('g-title', '{title}')">{title}</button>
+                  <button type="button" class="chip" onclick="insertChip('g-title', '{episode}')">{episode}</button>
+                  <button type="button" class="chip" onclick="insertChip('g-title', '{quality}')">{quality}</button>
+                  <button type="button" class="chip" onclick="insertChip('g-title', '{basename}')">{basename}</button>
+                  <button type="button" class="chip" onclick="insertChip('g-title', '{filename}')">{filename}</button>
+                  <button type="button" class="chip" onclick="insertChip('g-title', '{year}')">{year}</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="form-group" style="margin-top: 16px;">
+              <label class="form-label">Cover Image URL
+                <span class="tooltip-wrap"><i data-lucide="help-circle" class="tooltip-icon"></i><span class="tooltip-bubble">Direct image URL or Telegram channel link for the cover image used in the encode output.</span></span>
+              </label>
+              <input type="text" id="g-cover" class="form-input" placeholder="e.g. https://t.me/channel/123 or https://example.com/poster.jpg">
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- RIGHT: Live Preview Panel -->
+      <div class="encode-preview">
+        <div class="preview-card">
+          <div class="preview-header">
+            <div class="preview-tabs">
+              <button id="tab-json" class="preview-tab preview-tab--active">JSON</button>
+              <button id="tab-cmd" class="preview-tab">FFmpeg Command</button>
+            </div>
+            <div style="display:flex; gap:8px; align-items:center;">
+              <span class="form-hint" id="preview-lang" style="font-size:11px;">JSON</span>
+              <button id="preview-copy-btn" style="background:none;border:none;color:var(--bs-text-muted);cursor:pointer;padding:4px;" title="Copy preview">
+                <i data-lucide="copy" style="width:14px;height:14px;"></i>
+              </button>
+            </div>
+          </div>
+          <div class="preview-body"><pre class="preview-code" id="preview-code">{}</pre></div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<!-- Profiles Modal -->
+<div id="profiles-modal" class="bs-overlay profile-modal-overlay" style="display: none;">
+  <div class="bs-modal profile-modal">
+    <div class="bs-modal__header">
+      <h3 class="encode-title">My Profiles</h3>
+      <button id="btn-close-modal" class="profile-modal-close" title="Close profiles">
+        <i data-lucide="x" style="width:20px;height:20px;"></i>
+      </button>
+    </div>
+    
+    <!-- Profile List Container -->
+    <div id="profiles-list-container" class="profiles-list">
+      <div style="text-align:center; padding: 40px; color: var(--bs-text-muted);">
+        <i data-lucide="loader" class="fa-spin" style="width:24px;height:24px;margin-bottom:8px;"></i>
+        <h3>Loading profiles...</h3>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="/static/js/encode.js?v=2"></script>
+{% endblock %}

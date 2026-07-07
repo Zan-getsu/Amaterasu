@@ -1,0 +1,325 @@
+from asyncio import Lock, sleep
+from contextlib import suppress
+from time import time
+from secrets import token_hex
+from aiofiles.os import path as aiopath, remove as aioremove
+from pyrogram.errors import FloodWait, PeerIdInvalid, ChannelInvalid
+
+from bot.helper.ext_utils.hyperdl_utils import HypertgDownload
+
+try:
+    from pyrogram.errors import FloodPremiumWait
+except ImportError:
+    FloodPremiumWait = FloodWait
+
+from .... import (
+    LOGGER,
+    task_dict,
+    task_dict_lock,
+)
+from ....core.tg_client import TgClient
+from ....core.config_manager import Config
+from ...ext_utils.task_manager import check_running_tasks, stop_duplicate_check
+from ...mirror_leech_utils.status_utils.queue_status import QueueStatus
+from ...mirror_leech_utils.status_utils.telegram_status import TelegramStatus
+from ...telegram_helper.message_utils import send_status_message
+
+global_lock = Lock()
+GLOBAL_GID = dict()
+
+
+class TelegramDownloadHelper:
+    def __init__(self, listener):
+        self._processed_bytes = 0
+        self._start_time = 1
+        self._listener = listener
+        self._id = ""
+        self.session = ""
+        self._hyper_dl = Config.USE_HYPER and len(TgClient.helper_bots) != 0 and Config.LEECH_DUMP_CHAT
+        self._hyper_dl_instance = None
+
+    @property
+    def speed(self):
+        return self._processed_bytes / (time() - self._start_time)
+
+    @property
+    def processed_bytes(self):
+        return self._processed_bytes
+
+    async def _on_download_start(self, file_id, gid, from_queue):
+        async with global_lock:
+            GLOBAL_GID[file_id] = gid
+        self._id = file_id
+        async with task_dict_lock:
+            task_dict[self._listener.mid] = TelegramStatus(
+                self._listener, self, gid, "dl", "hdl" if self._hyper_dl else ""
+            )
+        if not from_queue:
+            await self._listener.on_download_start()
+            if self._listener.multi <= 1:
+                await send_status_message(self._listener.message)
+            LOGGER.info(f"Download from Telegram: {self._listener.name}")
+        else:
+            LOGGER.info(f"Start Queued Download from Telegram: {self._listener.name}")
+
+    async def _on_download_progress(self, current, _):
+        if self._listener.is_cancelled:
+            if self.session == "user":
+                TgClient.user.stop_transmission()
+            elif self.session == "hbots":
+                for hbot in TgClient.helper_bots.values():
+                    hbot.stop_transmission()
+            else:
+                TgClient.bot.stop_transmission()
+        self._processed_bytes = current
+
+    async def _on_download_error(self, error):
+        async with global_lock:
+            if self._id in GLOBAL_GID:
+                GLOBAL_GID.pop(self._id)
+        await self._listener.on_download_error(error)
+
+    async def _on_download_complete(self):
+        await self._listener.on_download_complete()
+        async with global_lock:
+            GLOBAL_GID.pop(self._id)
+        return
+
+    async def _remove_bad_download(self, download):
+        if download and await aiopath.exists(download):
+            with suppress(Exception):
+                await aioremove(download)
+
+    async def _validate_download(self, download, label):
+        if not download:
+            return None
+        try:
+            size = await aiopath.getsize(download)
+        except Exception as e:
+            LOGGER.warning(f"Telegram download validation failed ({label}): {e}")
+            return None
+
+        expected = self._listener.size or 0
+        if size <= 0:
+            LOGGER.warning(
+                f"Telegram download produced zero-byte file via {label}; retrying"
+            )
+            await self._remove_bad_download(download)
+            return None
+        if expected and size != expected:
+            LOGGER.warning(
+                f"Telegram download size mismatch via {label}: "
+                f"{size}/{expected} bytes; retrying"
+            )
+            await self._remove_bad_download(download)
+            return None
+        return download
+
+    async def _standard_download_once(self, message, path, label):
+        download = await message.download(
+            file_name=path,
+            progress=self._on_download_progress,
+        )
+        return await self._validate_download(download, label)
+
+    async def _standard_download(self, message, path):
+        candidates = [("current", message)]
+
+        if Config.TRANSMISSION_MODE in ("user", "both") and TgClient.user:
+            try:
+                user_message = await TgClient.user.get_messages(
+                    chat_id=message.chat.id,
+                    message_ids=message.id,
+                )
+                candidates.insert(0, ("user", user_message))
+            except Exception as e:
+                LOGGER.warning(f"Telegram user fallback message refresh failed: {e}")
+
+        try:
+            fresh_message = await self._listener.client.get_messages(
+                chat_id=message.chat.id,
+                message_ids=message.id,
+            )
+            candidates.append(("listener", fresh_message))
+        except Exception as e:
+            LOGGER.warning(f"Telegram listener fallback message refresh failed: {e}")
+
+        if TgClient.bot:
+            try:
+                bot_message = await TgClient.bot.get_messages(
+                    chat_id=message.chat.id,
+                    message_ids=message.id,
+                )
+                candidates.append(("bot", bot_message))
+            except Exception as e:
+                LOGGER.warning(f"Telegram bot fallback message refresh failed: {e}")
+
+        tried = set()
+        for label, candidate in candidates:
+            if candidate is None:
+                continue
+            key = (label, id(candidate))
+            if key in tried:
+                continue
+            tried.add(key)
+            if self._listener.is_cancelled:
+                return None
+            self._processed_bytes = 0
+            try:
+                download = await self._standard_download_once(candidate, path, label)
+            except (FloodWait, FloodPremiumWait):
+                raise
+            except Exception as e:
+                LOGGER.warning(
+                    f"Telegram standard download failed via {label}: {e}"
+                )
+                download = None
+            if download:
+                return download
+        return None
+
+    async def _download(self, message, path):
+        try:
+            # TODO : Add support for user session ( Huh ??)
+            if self._hyper_dl:
+                download = None
+                try:
+                    self._hyper_dl_instance = HypertgDownload(self)
+                    download = await self._hyper_dl_instance.download_media(
+                        message,
+                        file_name=path,
+                        dump_chat=Config.LEECH_DUMP_CHAT,
+                    )
+                except Exception as hyper_err:
+                    LOGGER.warning(
+                        f"HypertgDL failed ({type(hyper_err).__name__}: "
+                        f"{hyper_err}); falling back to standard Pyrogram download"
+                    )
+                    download = None
+                # If HypertgDL returned None, the fast path was unavailable
+                # for this message or it detected an incomplete file. Fall
+                # back to standard Pyrogram download instead of uploading a
+                # corrupt file.
+                if download is None and not self._listener.is_cancelled:
+                    self._hyper_dl = False
+                    LOGGER.info(
+                        "HypertgDL returned no complete download; falling back "
+                        "to standard Pyrogram download (slower but reliable)"
+                    )
+                    download = await self._standard_download(message, path)
+            else:
+                download = await self._standard_download(message, path)
+            if self._listener.is_cancelled:
+                return
+        except (FloodWait, FloodPremiumWait) as f:
+            LOGGER.warning(str(f))
+            await sleep(f.value)
+            await self._download(message, path)
+            return
+        except Exception as e:
+            LOGGER.error(str(e), exc_info=True)
+            await self._on_download_error(str(e))
+            return
+        if download is not None:
+            await self._on_download_complete()
+        elif not self._listener.is_cancelled:
+            await self._on_download_error(
+                "Download failed: HypertgDL produced an incomplete file and "
+                "the standard Pyrogram fallback also failed. Try again, or "
+                "ask the bot owner to check the logs."
+            )
+        return
+
+    async def add_download(self, message, path, session):
+        self.session = session
+        if not self.session:
+            if self._hyper_dl:
+                self.session = "hbots"
+            elif (
+                TgClient.user
+                and self._listener.transmission_mode in ("user", "both")
+                and self._listener.is_super_chat
+            ):
+                self.session = "user"
+                try:
+                    message = await TgClient.user.get_messages(
+                        chat_id=message.chat.id, message_ids=message.id
+                    )
+                except (PeerIdInvalid, ChannelInvalid):
+                    LOGGER.warning(
+                        "User session is not in this chat!, Downloading with bot session"
+                    )
+                    self.session = "bot"
+            else:
+                self.session = "bot"
+        media = getattr(message, message.media.value) if message.media else None
+
+        if media is not None:
+            async with global_lock:
+                download = media.file_unique_id not in GLOBAL_GID
+
+            if download:
+                if not self._listener.name:
+                    if hasattr(media, "file_name") and media.file_name:
+                        if "/" in media.file_name:
+                            self._listener.name = media.file_name.rsplit("/", 1)[-1]
+                            path = path + self._listener.name
+                        else:
+                            self._listener.name = media.file_name
+                    else:
+                        self._listener.name = "None"
+                else:
+                    path = path + self._listener.name
+                self._listener.size = media.file_size
+                gid = token_hex(5)
+
+                msg, button = await stop_duplicate_check(self._listener)
+                if msg:
+                    await self._listener.on_download_error(msg, button)
+                    return
+
+                add_to_queue, event = await check_running_tasks(self._listener)
+                if add_to_queue:
+                    LOGGER.info(f"Added to Queue/Download: {self._listener.name}")
+                    async with task_dict_lock:
+                        task_dict[self._listener.mid] = QueueStatus(
+                            self._listener, gid, "dl"
+                        )
+                    await self._listener.on_download_start()
+                    if self._listener.multi <= 1:
+                        await send_status_message(self._listener.message)
+                    await event.wait()
+                    if self.session == "bot":
+                        message = await self._listener.client.get_messages(
+                            chat_id=message.chat.id, message_ids=message.id
+                        )
+                    else:
+                        try:
+                            message = await TgClient.user.get_messages(
+                                chat_id=message.chat.id, message_ids=message.id
+                            )
+                        except (PeerIdInvalid, ChannelInvalid):
+                            message = await self._listener.client.get_messages(
+                                chat_id=message.chat.id, message_ids=message.id
+                            )
+                    if self._listener.is_cancelled:
+                        async with global_lock:
+                            if self._id in GLOBAL_GID:
+                                GLOBAL_GID.pop(self._id)
+                        return
+                self._start_time = time()
+                await self._on_download_start(media.file_unique_id, gid, add_to_queue)
+                await self._download(message, path)
+            else:
+                await self._on_download_error("File already being downloaded!")
+        else:
+            await self._on_download_error(
+                "No document in the replied message! Use SuperGroup incase you are trying to download with User session!"
+            )
+
+    async def cancel_task(self):
+        self._listener.is_cancelled = True
+        LOGGER.info(
+            f"Cancelling download on user request: name: {self._listener.name} id: {self._id}"
+        )
+        await self._on_download_error("Stopped by user!")

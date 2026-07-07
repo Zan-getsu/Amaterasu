@@ -1,0 +1,84 @@
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+exclude = [
+    ".git",
+    ".venv",
+    "__pycache__",
+    "build",
+    "dist",
+    "myjd",        # vendored JDownloader API client — not our code
+    "sabnzbdapi",  # vendored SABnzbd client — not our code
+    "gen_scripts", # standalone CLI scripts, not the bot proper
+]
+
+[tool.ruff.lint]
+# Start conservative — focus on bugs, not style. Add more rule sets
+# incrementally as the codebase is cleaned up.
+select = [
+    "E",   # pycodestyle errors
+    "F",   # pyflakes (undefined names, unused imports, etc.)
+    "W",   # pycodestyle warnings
+    "B",   # flake8-bugbear (likely bugs)
+    "S",   # bandit (security)
+    "UP",  # pyupgrade
+    "I",   # isort
+]
+ignore = [
+    "E501",   # line too long — handled by formatter
+    "S101",   # use of assert — fine in tests
+    "S603",   # subprocess call — we use it intentionally for download engines
+    "S607",   # partial executable path — we use it intentionally
+    "S404",   # subprocess module — used for download engines
+    "S403",   # pickle — used for token.pickle
+    "S301",   # pickle.load — used for token.pickle
+    "B008",   # function call in default argument — used by Pyrogram filters
+    "UP038",  # isinstance tuple — Python 3.11 still slow
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S", "B", "UP"]  # relax security/bugbear rules in tests
+"bot/modules/shell.py" = ["S603", "S607"]  # /shell is intentionally a shell executor
+"bot/modules/exec.py" = ["S102"]  # /exec is intentionally an exec() of user input
+"update.py" = ["S603", "S607"]  # git self-update uses subprocess
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+asyncio_mode = "auto"
+addopts = [
+    "-v",
+    "--tb=short",
+    "--strict-markers",
+    "--showlocals",
+    "-ra",
+]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "integration: marks tests that require external services",
+]
+
+[tool.coverage.run]
+source = ["bot", "web"]
+omit = [
+    "*/tests/*",
+    "*/__pycache__/*",
+    "myjd/*",
+    "sabnzbdapi/*",
+    "gen_scripts/*",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+]

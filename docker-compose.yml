@@ -1,0 +1,42 @@
+services:
+  amaterasu:
+    image: nbots/amaterasu:latest
+    pull_policy: always
+    container_name: amaterasu-bot
+    restart: always
+    environment:
+      - TZ=Asia/Dhaka
+      - BIND_TO_LOOPBACK=${BIND_TO_LOOPBACK:-true}
+    ports:
+      - "82:8080"
+    volumes:
+      - .:/usr/src/app:z
+      - tunnel_data:/data
+    cap_add:
+      - SYS_ADMIN
+      - SYS_PTRACE
+      - SYS_NICE
+      - DAC_READ_SEARCH
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+
+  tunnel:
+    profiles:
+      - tunnel
+    build:
+      context: .
+      dockerfile: tunnel.Dockerfile
+    container_name: amaterasu-tunnel
+    restart: always
+    network_mode: "service:amaterasu"
+    volumes:
+      - tunnel_data:/data
+    depends_on:
+      - amaterasu
+
+volumes:
+  tunnel_data:

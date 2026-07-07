@@ -1,0 +1,209 @@
+{% extends "base.html" %}
+
+{% block title %}Amaterasu Stream | {{ file_name }}{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="/static/css/player.css" />
+{% endblock %}
+
+{% block content %}
+<div class="stream-page">
+  <div class="stream-card">
+    <div class="stream-player stream-player--{{ 'doc' if file_type == 'doc' else file_type }}" style="{% if file_type not in ['video', 'audio', 'image', 'pdf', 'doc'] %}display:none;{% endif %}">
+      {% if file_type == 'video' %}
+      <div class="am-player is-paused" id="am-player" data-player-shell>
+        <video id="player" playsinline controls preload="metadata">
+          <source src="{{ file_url }}" type="{{ mime_type }}" />
+          {% for sub in subtitles %}
+          <track kind="subtitles" src="{{ sub.url }}" label="{{ sub.label }}" srclang="{{ sub.srclang }}" />
+          {% endfor %}
+        </video>
+
+        <div class="am-topbar" aria-hidden="false">
+          <button class="am-btn" id="help-btn" type="button" aria-label="Show keyboard shortcuts" title="Keyboard shortcuts">
+            <i data-lucide="circle-help"></i>
+          </button>
+        </div>
+
+        <div class="am-overlay" id="tap-layer" aria-hidden="true"></div>
+        <div class="am-toast-stack" id="player-toasts" aria-live="polite" aria-atomic="false"></div>
+        <div class="am-seek-indicator" id="seek-indicator">+10s</div>
+        <div class="am-gesture-indicator" id="gesture-left" data-side="left" aria-hidden="true">
+          <i data-lucide="sun"></i>
+          <div class="am-gesture-track"><div class="am-gesture-fill"></div></div>
+        </div>
+        <div class="am-gesture-indicator" id="gesture-right" data-side="right" aria-hidden="true">
+          <i data-lucide="volume-2"></i>
+          <div class="am-gesture-track"><div class="am-gesture-fill"></div></div>
+        </div>
+
+        <div class="am-stats" id="stats-panel" hidden></div>
+
+        <div class="am-error-card" id="error-card" hidden>
+          <h2>Playback failed</h2>
+          <p id="error-message">The browser could not load this stream.</p>
+          <div class="am-error-actions">
+            <button type="button" id="retry-btn" aria-label="Retry playback">Retry</button>
+            <a id="error-download" href="#">Download Instead</a>
+          </div>
+        </div>
+
+        <div class="am-panel" id="audio-panel" hidden>
+          <h2>Audio tracks</h2>
+          <div class="am-track-list" id="audio-track-list"></div>
+        </div>
+
+        <div class="am-panel" id="subtitle-panel" hidden>
+          <h2>Subtitles</h2>
+          <div class="am-track-list" id="subtitle-track-list"></div>
+        </div>
+
+        <div class="am-panel" id="settings-panel" hidden>
+          <h2>Settings</h2>
+          <h3>Playback speed</h3>
+          <div class="am-speed-grid" id="speed-grid"></div>
+          <div class="am-panel-row">
+            <span>Resolution</span>
+            <strong id="info-resolution">Unknown</strong>
+          </div>
+          <div class="am-panel-row">
+            <span>MIME type</span>
+            <strong id="info-mime">{{ mime_type }}</strong>
+          </div>
+          <div class="am-panel-row">
+            <span>File size</span>
+            <strong id="info-size">{{ file_size }}</strong>
+          </div>
+          <div class="am-panel-row">
+            <span>Picture in Picture</span>
+            <button class="am-toggle" id="pip-btn" type="button" aria-label="Toggle Picture in Picture">Open</button>
+          </div>
+          <div class="am-panel-row">
+            <span>Loop</span>
+            <button class="am-toggle" id="loop-btn" type="button" aria-label="Toggle loop" aria-pressed="false">Off</button>
+          </div>
+          <div class="am-panel-row">
+            <span>Autoplay Next</span>
+            <button class="am-toggle" id="autoplay-next-btn" type="button" aria-label="Autoplay next instructions">Setup</button>
+          </div>
+        </div>
+
+        <div class="am-controls" id="controls">
+          <div class="am-control-surface">
+            <button class="am-btn am-seek-btn" id="backward-btn" type="button" aria-label="Seek backward 10 seconds">-10s</button>
+            <button class="am-btn" id="play-btn" type="button" aria-label="Play">
+              <i data-lucide="play"></i>
+            </button>
+            <button class="am-btn am-seek-btn" id="forward-btn" type="button" aria-label="Seek forward 10 seconds">+10s</button>
+
+            <div class="am-progress-wrap">
+              <span class="am-time" id="current-time">0:00</span>
+              <div class="am-progress" id="progress" role="slider" aria-label="Playback progress" aria-valuemin="0" aria-valuemax="0" aria-valuenow="0" tabindex="0">
+                <div class="am-progress-buffer" id="buffered-bar"></div>
+                <div class="am-progress-fill" id="progress-fill"></div>
+                <div class="am-progress-thumb" id="progress-thumb"></div>
+                <div class="am-tooltip" id="progress-tooltip">0:00</div>
+              </div>
+              <span class="am-time" id="duration-time">0:00</span>
+            </div>
+
+            <button class="am-btn am-extra-desktop" id="mute-btn" type="button" aria-label="Mute">
+              <i data-lucide="volume-2"></i>
+            </button>
+            <button class="am-btn" id="audio-btn" type="button" aria-label="Audio tracks" hidden>
+              <i data-lucide="languages"></i>
+            </button>
+            <button class="am-btn" id="subtitle-btn" type="button" aria-label="Subtitle tracks" hidden>
+              <i data-lucide="captions"></i>
+            </button>
+            <button class="am-btn" id="settings-btn" type="button" aria-label="Settings">
+              <i data-lucide="settings"></i>
+            </button>
+            <button class="am-btn am-extra-desktop" id="theater-btn" type="button" aria-label="Toggle theater mode">
+              <i data-lucide="rectangle-horizontal"></i>
+            </button>
+            <button class="am-btn" id="fullscreen-btn" type="button" aria-label="Fullscreen">
+              <i data-lucide="maximize"></i>
+            </button>
+          </div>
+        </div>
+      </div>
+      {% elif file_type == 'audio' %}
+      <audio id="player" controls preload="metadata">
+        <source src="{{ file_url }}" type="{{ mime_type }}" />
+      </audio>
+      {% elif file_type == 'image' %}
+      <img src="{{ file_url }}" alt="{{ file_name }}" />
+      {% elif file_type == 'pdf' or file_type == 'doc' %}
+      {% set doc_url = 'https://docs.google.com/gview?url=' ~ file_url ~ '&embedded=true' if file_type == 'doc' else file_url %}
+      <iframe src="{{ doc_url }}"></iframe>
+      {% endif %}
+    </div>
+
+    <div class="stream-info">
+      <h1 class="stream-filename">{{ file_name }}</h1>
+
+      <div class="stream-meta">
+        <div class="stream-meta-item">
+          <i data-lucide="hard-drive"></i>
+          <span>{{ file_size }}</span>
+        </div>
+        <div class="stream-meta-item">
+          <i data-lucide="file-type"></i>
+          <span>{{ file_type | upper }}</span>
+        </div>
+      </div>
+
+      <div class="stream-actions" id="action-buttons"></div>
+
+      <a id="main-download-btn" href="#" style="text-decoration: none;">
+        <button class="stream-download-btn" type="button" aria-label="Download file">
+          <i data-lucide="download" style="width: 16px; height: 16px;"></i>
+          Download File
+        </button>
+      </a>
+
+      <div class="stream-security">
+        <i data-lucide="shield" style="width: 12px; height: 12px;"></i>
+        Protected by Amaterasu token authentication
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="am-modal" id="help-modal" hidden>
+  <div class="am-modal-card" role="dialog" aria-modal="true" aria-labelledby="help-title">
+    <div class="am-modal-head">
+      <h2 id="help-title">Keyboard shortcuts</h2>
+      <button class="am-btn" id="help-close-btn" type="button" aria-label="Close keyboard shortcuts">
+        <i data-lucide="x"></i>
+      </button>
+    </div>
+    <div class="am-shortcut-grid">
+      <div class="am-shortcut"><span>Play or pause</span><kbd>Space / K</kbd></div>
+      <div class="am-shortcut"><span>Seek backward</span><kbd>Left</kbd></div>
+      <div class="am-shortcut"><span>Seek forward</span><kbd>Right</kbd></div>
+      <div class="am-shortcut"><span>Volume up</span><kbd>Up</kbd></div>
+      <div class="am-shortcut"><span>Volume down</span><kbd>Down</kbd></div>
+      <div class="am-shortcut"><span>Mute</span><kbd>M</kbd></div>
+      <div class="am-shortcut"><span>Fullscreen</span><kbd>F</kbd></div>
+      <div class="am-shortcut"><span>Debug stats</span><kbd>Ctrl Shift D</kbd></div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+window.AMATERASU_PLAYER = {
+  fileUrl: {{ file_url | tojson }},
+  downloadUrl: {{ download_url | tojson }},
+  fileType: {{ file_type | tojson }},
+  fileName: {{ file_name | tojson }},
+  fileSize: {{ file_size | tojson }},
+  mimeType: {{ mime_type | tojson }},
+  subtitles: {{ subtitles | tojson }}
+};
+</script>
+<script src="/static/js/player.js" defer></script>
+{% endblock %}

@@ -1,0 +1,24 @@
+.bs-card {
+  background: var(--bs-gradient-card);
+  border: 1px solid var(--bs-border);
+  border-radius: var(--bs-radius-lg);
+  padding: var(--bs-space-6);
+  transition: border-color var(--bs-transition-slow), box-shadow var(--bs-transition-slow), transform var(--bs-transition-base);
+}
+.bs-card:hover {
+  border-color: var(--bs-gold-border);
+  box-shadow: var(--bs-shadow-gold);
+}
+.bs-card--interactive:hover {
+  transform: translateY(-2px);
+}
+.bs-card--elevated { 
+  background: var(--bs-elevated); 
+  box-shadow: var(--bs-shadow-md);
+}
+.bs-card--glass {
+  background: var(--bs-gradient-glass);
+  backdrop-filter: var(--bs-glass-blur);
+  -webkit-backdrop-filter: var(--bs-glass-blur);
+  border: 1px solid var(--bs-border-subtle);
+}

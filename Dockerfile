@@ -1,0 +1,37 @@
+ARG BASE_IMAGE=nbots/amaterasu:v1
+FROM ${BASE_IMAGE}
+
+ENV LANG=C.UTF-8 \
+    DEBIAN_FRONTEND=noninteractive \
+    TZ=Asia/Dhaka \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    VIRTUAL_ENV=/amaterasuvenv \
+    PATH="/amaterasuvenv/bin:${PATH}"
+
+WORKDIR /usr/src/app
+
+# Create the virtual environment WITH --system-site-packages.
+# This is CRITICAL: the Mega SDK Python bindings are installed in system
+# Python's site-packages (by Dockerfile.base Block 7). Without this flag,
+# the venv is isolated and can't import 'mega.MegaApi' → Mega download/upload
+# fails with "Mega SDK Python bindings are not installed in this image".
+RUN python3 -m venv --system-site-packages /amaterasuvenv
+
+# Install uv into the venv for fast package installation
+# (sabnzbdplus is installed via apt in the base image, not pip — it's not on PyPI)
+RUN /amaterasuvenv/bin/pip install --no-cache-dir uv
+
+# Install python dependencies using uv
+COPY requirements.txt .
+RUN /amaterasuvenv/bin/uv pip install --python /amaterasuvenv/bin/python --no-cache-dir -r requirements.txt
+
+# Copy all the project files
+COPY . .
+
+# Setup permissions and convert Windows line endings to Unix just in case
+RUN sed -i 's/\r$//' *.sh \
+    && chmod +x start.sh
+
+# Start the bot
+CMD ["bash", "start.sh"]

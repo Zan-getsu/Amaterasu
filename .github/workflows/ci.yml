@@ -1,0 +1,64 @@
+# Phase 6.2 — CI workflow for Amaterasu
+# Runs on every push and PR to main. Executes:
+#   1. ruff check (lint)
+#   2. ruff format --check (format verification)
+#   3. pip-audit (CVE scan — non-blocking unless CRITICAL)
+#   4. pytest (smoke tests)
+name: CI
+
+on:
+  push:
+    branches: ["*"]
+  pull_request:
+    branches: ["main"]
+
+jobs:
+  lint:
+    name: Lint & Format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install ruff
+        run: pip install ruff
+      - name: Ruff check
+        run: ruff check .
+      - name: Ruff format check
+        run: ruff format --check .
+
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Run smoke tests
+        run: pytest tests/ -v
+
+  audit:
+    name: Security Audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install pip-audit
+        run: pip install pip-audit
+      - name: Run pip-audit
+        # Non-blocking — report CVEs but only fail on CRITICAL severity.
+        # pip-audit doesn't have a severity filter, so we run it and
+        # continue on failure. Review the output manually.
+        continue-on-error: true
+        run: pip-audit -r requirements.txt

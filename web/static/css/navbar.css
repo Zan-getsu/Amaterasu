@@ -1,0 +1,55 @@
+.bs-navbar {
+  position: fixed; top: 0; left: 0; right: 0;
+  z-index: var(--bs-z-sticky);
+  background: rgba(11, 15, 20, 0.85);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  border-bottom: 1px solid var(--bs-border);
+  height: 60px;
+}
+.bs-navbar__inner {
+  max-width: 1280px; margin: 0 auto;
+  padding: 0 var(--bs-space-6);
+  height: 100%; display: flex; align-items: center; gap: var(--bs-space-8);
+}
+.bs-navbar__brand {
+  display: flex; align-items: center; gap: var(--bs-space-3);
+  text-decoration: none; color: var(--bs-text-primary);
+}
+.bs-navbar__logo { width: 28px; height: 28px; }
+.bs-navbar__title {
+  font-size: 13px; font-weight: 800; letter-spacing: 0.12em;
+  color: var(--bs-gold); font-family: var(--bs-font-mono);
+}
+.bs-nav-link {
+  font-size: 13px; font-weight: 500; color: var(--bs-text-muted);
+  text-decoration: none; padding: 6px 12px; border-radius: var(--bs-radius-md);
+  transition: all var(--bs-transition-fast);
+}
+.bs-nav-link:hover, .bs-nav-link--active {
+  color: var(--bs-text-primary); background: rgba(212,175,55,0.08);
+}
+.bs-navbar__actions {
+  margin-left: auto; display: flex; align-items: center; gap: var(--bs-space-4);
+}
+@media (max-width: 400px) {
+  .bs-navbar__inner { padding: 0 var(--bs-space-3); gap: var(--bs-space-4); }
+  .bs-navbar__title { display: none; } /* Hide title text on very small screens, keep logo */
+}
+
+@media (max-width: 640px) {
+  .bs-navbar__links {
+    display: none;
+    position: absolute; top: 60px; left: 0; right: 0;
+    background: var(--bs-obsidian);
+    flex-direction: column; padding: var(--bs-space-4);
+    border-bottom: 1px solid var(--bs-border);
+  }
+  .bs-navbar__links--open { display: flex; }
+  .bs-nav-link { width: 100%; text-align: left; padding: 12px; }
+  .bs-navbar__mobile-toggle { display: block; background: transparent; border: none; color: var(--bs-text-primary); cursor: pointer; }
+}
+@media (min-width: 641px) {
+  .bs-navbar__links { display: flex; gap: var(--bs-space-2); }
+  .bs-navbar__mobile-toggle { display: none; }
+}

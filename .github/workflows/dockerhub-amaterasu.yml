@@ -1,0 +1,218 @@
+name: Publish Amaterasu Docker Image
+
+# =============================================================================
+#  Builds Dockerfile.base → <user>/amaterasu:v1  (multi-arch: amd64 + arm64)
+#
+#  Strategy: NATIVE runners (no QEMU)
+#    * amd64 runs on ubuntu-24.04       (x86_64 GitHub-hosted runner)
+#    * arm64 runs on ubuntu-24.04-arm   (native ARM64 GitHub-hosted runner)
+#    * A final merge job stitches both into a single multi-arch manifest
+#      tagged :v1 (plus :v1-sha-<short> for traceability).
+#
+#  Why native runners, not QEMU:
+#    * FFmpeg + AV1 + Mega SDK source compile under QEMU takes 45-90 min;
+#      native runners do it in ~15-25 min.
+#    * ARM runners are GA and free for PUBLIC repositories.
+#      For PRIVATE repos they bill at standard Linux runner rates.
+#
+#  Triggers:
+#    * Push to main/master touching Dockerfile.base or this workflow
+#    * Manual dispatch (with optional "Bust cache" checkbox — kept for
+#      backward compat but no longer needed since no-cache is forced true)
+#
+#  Cache: DISABLED ENTIRELY (no-cache: true forced).
+#    Stale GHA cache layers from broken earlier builds were being reused
+#    even when the Dockerfile changed, producing a 439 MB image instead
+#    of the expected ~2 GB. The "Bust cache" checkbox approach didn't
+#    reliably work, so we force no-cache:true on EVERY build.
+#    Slower (~25 min per arch) but correct.
+# =============================================================================
+
+on:
+  workflow_dispatch:
+    inputs:
+      no_cache:
+        description: 'Bust cache (kept for backward compat — no-cache is now forced true always)'
+        type: boolean
+        default: false
+  push:
+    branches:
+      - main
+      - master
+    paths:
+      - Dockerfile.base
+      - .github/workflows/dockerhub-amaterasu.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dockerhub-amaterasu-v1
+  cancel-in-progress: false   # never cancel a mid-flight base build
+
+env:
+  IMAGE_NAME: amaterasu
+  IMAGE_TAG: v1
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Build per-arch images in PARALLEL on native runners
+  # ---------------------------------------------------------------------------
+  build:
+    name: Build linux/${{ matrix.platform }}
+    strategy:
+      fail-fast: false   # if ARM fails, let AMD64 still finish so you can debug
+      matrix:
+        include:
+          - platform: amd64
+            runner: ubuntu-24.04
+          - platform: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Validate Docker Hub secrets
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          if [ -z "$DOCKERHUB_USERNAME" ] || [ -z "$DOCKERHUB_TOKEN" ]; then
+            echo "::error::Set DOCKERHUB_USERNAME and DOCKERHUB_TOKEN repository secrets before publishing."
+            exit 1
+          fi
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          driver-opts: |
+            image=moby/buildkit:v0.19.0
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push (by digest, no tag yet)
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile.base
+          platforms: linux/${{ matrix.platform }}
+          outputs: |
+            type=image,name=docker.io/${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=true
+          provenance: false
+          # no-cache: FORCED TRUE permanently.
+          # Stale GHA cache layers from broken earlier builds were being
+          # reused even when the Dockerfile changed, producing a 439 MB
+          # image instead of the expected ~2 GB. Forcing no-cache:true on
+          # EVERY build guarantees a clean rebuild.
+          # cache-from/cache-to removed entirely — no-cache makes them useless.
+          no-cache: true
+
+      - name: Export digest to file
+        run: |
+          mkdir -p /tmp/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
+          echo "Wrote digest marker for ${digest}"
+
+      - name: Upload digest artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: digest-${{ matrix.platform }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Summary
+        run: |
+          {
+            echo "## Built linux/${{ matrix.platform }}"
+            echo ""
+            echo "- Image: \`docker.io/${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}\`"
+            echo "- Digest: \`${{ steps.build.outputs.digest }}\`"
+            echo "- Runner: \`${{ matrix.runner }}\` (native — no QEMU)"
+            echo "- no-cache: forced true (clean rebuild)"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # ---------------------------------------------------------------------------
+  # Merge per-arch digests into one multi-arch manifest with all tags applied
+  # ---------------------------------------------------------------------------
+  merge:
+    name: Merge into multi-arch manifest (:v1)
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download all digest artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests
+          pattern: digest-*
+          merge-multiple: true
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Create manifest list and push
+        working-directory: /tmp/digests
+        run: |
+          set -euo pipefail
+          SHORT_SHA="$(echo '${{ github.sha }}' | cut -c1-7)"
+          IMAGE="docker.io/${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}"
+
+          TAGS=(
+            "-t" "${IMAGE}:${{ env.IMAGE_TAG }}"
+            "-t" "${IMAGE}:${{ env.IMAGE_TAG }}-sha-${SHORT_SHA}"
+          )
+
+          SOURCES=""
+          for f in *; do
+            SOURCES="${SOURCES} ${IMAGE}@sha256:${f}"
+          done
+
+          echo "Tags:    ${TAGS[*]}"
+          echo "Sources:${SOURCES}"
+
+          docker buildx imagetools create "${TAGS[@]}" ${SOURCES}
+
+      - name: Inspect resulting manifest
+        run: |
+          IMAGE="docker.io/${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}"
+          docker buildx imagetools inspect "${IMAGE}:${{ env.IMAGE_TAG }}"
+
+      - name: Summary
+        run: |
+          IMAGE="docker.io/${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}"
+          SHORT_SHA="$(echo '${{ github.sha }}' | cut -c1-7)"
+          {
+            echo "## Multi-arch manifest published"
+            echo ""
+            echo "Pull command (auto-selects arch on host):"
+            echo ""
+            echo '```bash'
+            echo "docker pull ${IMAGE}:${{ env.IMAGE_TAG }}"
+            echo '```'
+            echo ""
+            echo "Tags applied:"
+            echo "- \`${IMAGE}:${{ env.IMAGE_TAG }}\`"
+            echo "- \`${IMAGE}:${{ env.IMAGE_TAG }}-sha-${SHORT_SHA}\`"
+            echo ""
+            echo "Manifest contains both \`linux/amd64\` and \`linux/arm64\`."
+          } >> "$GITHUB_STEP_SUMMARY"

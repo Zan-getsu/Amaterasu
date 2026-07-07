@@ -1,0 +1,10 @@
+.bs-accordion-item { border: 1px solid var(--bs-border); border-radius: var(--bs-radius-lg); overflow: hidden; margin-bottom: var(--bs-space-3); }
+.bs-accordion-trigger {
+  width: 100%; display: flex; align-items: center; justify-content: space-between;
+  padding: 16px 20px; background: var(--bs-graphite);
+  color: var(--bs-text-primary); font-size: 14px; font-weight: 600;
+  cursor: pointer; border: none; transition: background var(--bs-transition-fast);
+}
+.bs-accordion-trigger:hover { background: var(--bs-elevated); }
+.bs-accordion-trigger.open { color: var(--bs-gold); }
+.bs-accordion-content { padding: var(--bs-space-5) var(--bs-space-5) var(--bs-space-6); background: var(--bs-graphite); border-top: 1px solid var(--bs-border); }

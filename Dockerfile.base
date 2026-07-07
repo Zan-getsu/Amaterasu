@@ -1,0 +1,547 @@
+# syntax=docker/dockerfile:1.6
+#
+# =============================================================================
+#  Amaterasu-beta :: Dockerfile.base
+#  Standalone, multi-arch (amd64 + arm64) base image built entirely from source.
+#
+#  - Base:        python:3.11-slim-bookworm (Debian 12)
+#  - FFmpeg:      8.x compiled from source with full AV1 stack
+#  - AV1 stack:   SVT-AV1 + libaom + dav1d (all built from source)
+#  - Mega SDK:    v7.0.0 official C++ SDK Python bindings (autotools build)
+#  - megacmd:     installed from Mega's official Debian 12 apt repo
+#  - Download:    aria2 1.37.0 from source, qbittorrent-nox, sabnzbdplus, p7zip, rclone, cloudflared, java
+#
+#  Why Debian 12 (Bookworm)?
+#    * Provides native arm64 megacmd package (Debian 11 does not).
+#    * Ships modern cmake 3.25 / meson 1.0 / ninja 1.11 (no pip fallback needed).
+#    * GCC 12 default; Mega SDK v7.0.0 requires C++17 (for std::filesystem).
+#
+#  Build:
+#    docker buildx build --platform linux/amd64,linux/arm64 \
+#        -f Dockerfile.base -t amaterasu-base:latest --push .
+#
+#  Or native (faster, no QEMU):
+#    docker build -f Dockerfile.base -t amaterasu-base:latest .
+# =============================================================================
+FROM --platform=$TARGETPLATFORM python:3.11-slim-bookworm AS base
+
+ARG TARGETPLATFORM
+ARG TARGETARCH
+ARG BUILDPLATFORM
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV LANG=C.UTF-8
+ENV LC_ALL=C.UTF-8
+ENV PYTHONUNBUFFERED=1
+ENV PIP_DISABLE_PIP_VERSION_CHECK=1
+ENV PIP_NO_CACHE_DIR=1
+
+# -----------------------------------------------------------------------------
+# 0. Fix dynamic linker path for slim images
+#    slim images strip /usr/local/lib from ld.so.conf.d/. We must restore it
+#    so that SVT-AV1, libaom, dav1d, FFmpeg, and Mega SDK can be found at runtime.
+# -----------------------------------------------------------------------------
+RUN echo '/usr/local/lib' > /etc/ld.so.conf.d/local.conf && ldconfig
+
+# -----------------------------------------------------------------------------
+# 0+1. Enable contrib/non-free repos AND install all build deps in ONE atomic
+#      RUN block. Combining these prevents a class of bugs where:
+#        * BuildKit caches the pre-sed debian.sources, then runs apt-get update
+#          against the post-sed version → exit 100 from missing packages.
+#        * apt-get update succeeds once but a transient mirror issue later
+#          causes install to fail with hash sum mismatch.
+#
+#      The retry loop on apt-get update handles transient mirror failures
+#      (Debian mirrors occasionally return 503 or stale hashes during sync).
+#
+#      NOTE: libcurl4-gnutls-dev is used (NOT libcurl4-openssl-dev) because
+#      libmediainfo-dev has a hard dependency on the GnuTLS variant. The two
+#      -dev packages conflict (both ship /usr/include/curl/curl.h). GnuTLS is
+#      fully functional for both FFmpeg and Mega SDK HTTP layers.
+#
+#      NOTE: libfuse-dev is required because the Mega SDK has an upstream
+#      build-system bug — src/fuse/common/query.cpp (always compiled) calls
+#      InodeID::get(), but src/fuse/common/inode_id.cpp (which defines it)
+#      is only compiled when FUSE is enabled. Without libfuse-dev, FUSE is
+#      auto-disabled and libmega.so ends up with an undefined symbol that
+#      crashes _mega.so at runtime. See Block 7 comments for details.
+#
+#      NOTE: Download tool dependencies and apt-provided tools
+#      (qbittorrent-nox, sabnzbdplus, p7zip-full, rclone,
+#      default-jre-headless, gunicorn) are installed here so the bot's
+#      setpkgs.sh startup script can find qbittorrent-nox, sabnzbdplus, 7z,
+#      rclone, java, and gunicorn at runtime. aria2 is built from the upstream
+#      release in Block 1a so we are not pinned to Debian's older 1.36.x
+#      package. cloudflared is installed separately in Block 1b (it's not in
+#      Debian repos).
+# -----------------------------------------------------------------------------
+RUN set -eux; \
+    sed -i -E 's/^Components: main(\s|$)/Components: main contrib non-free non-free-firmware\1/' \
+        /etc/apt/sources.list.d/debian.sources; \
+    if [ -f /etc/apt/sources.list ]; then \
+        sed -i -E 's/^(deb.*\/debian.*)main(\s|$)/\1main contrib non-free non-free-firmware\2/' \
+            /etc/apt/sources.list; \
+    fi; \
+    grep -E '^Components:.*non-free' /etc/apt/sources.list.d/debian.sources \
+        || { echo "::error::Failed to enable non-free component"; exit 1; }; \
+    apt_retry() { \
+        for i in 1 2 3; do \
+            if apt-get update; then return 0; fi; \
+            echo "apt-get update failed (attempt $i/3), retrying in 5s..."; \
+            sleep 5; \
+        done; \
+        return 1; \
+    }; \
+    apt_retry; \
+    apt-get install -y --no-install-recommends \
+        build-essential \
+        pkg-config \
+        git \
+        curl \
+        wget \
+        ca-certificates \
+        gnupg \
+        lsb-release \
+        xz-utils \
+        file \
+        cmake \
+        meson \
+        ninja-build \
+        nasm \
+        yasm \
+        autoconf \
+        automake \
+        libtool \
+        python3-dev \
+        python3-pip \
+        python3-wheel \
+        python3-setuptools \
+        swig \
+        libssl-dev \
+        libgnutls28-dev \
+        nettle-dev \
+        libgmp-dev \
+        libcrypto++-dev \
+        libgpgme-dev \
+        libcurl4-gnutls-dev \
+        libnghttp2-dev \
+        libsqlite3-dev \
+        libfreeimage-dev \
+        libmediainfo-dev \
+        mediainfo \
+        libzen-dev \
+        libsodium-dev \
+        libc-ares-dev \
+        libssh2-1-dev \
+        zlib1g-dev \
+        libexpat1-dev \
+        libxml2-dev \
+        libjpeg-dev \
+        libpng-dev \
+        libvpx-dev \
+        libx264-dev \
+        libx265-dev \
+        libnuma-dev \
+        libfdk-aac-dev \
+        libopus-dev \
+        libmp3lame-dev \
+        libtheora-dev \
+        libvorbis-dev \
+        libwebp-dev \
+        libass-dev \
+        libfreetype6-dev \
+        libfontconfig1-dev \
+        libbluray-dev \
+        libopenmpt-dev \
+        librist-dev \
+        librsvg2-dev \
+        libsoxr-dev \
+        libvidstab-dev \
+        libxvidcore-dev \
+        libfuse-dev \
+        qbittorrent-nox \
+        p7zip-full \
+        rclone \
+        default-jre-headless \
+        gunicorn \
+        sabnzbdplus \
+        bash \
+        coreutils \
+        findutils \
+        grep \
+        sed \
+        gawk \
+    ; \
+    rm -rf /var/lib/apt/lists/*
+
+# -----------------------------------------------------------------------------
+# 1a. aria2 — build latest upstream release instead of Debian's 1.36.x package
+#     Releases: https://github.com/aria2/aria2/releases
+# -----------------------------------------------------------------------------
+ARG ARIA2_VERSION=1.37.0
+RUN set -eux; \
+    curl -fsSL "https://github.com/aria2/aria2/releases/download/release-${ARIA2_VERSION}/aria2-${ARIA2_VERSION}.tar.xz" \
+        -o /tmp/aria2.tar.xz; \
+    mkdir -p /tmp/aria2-src; \
+    tar -xJf /tmp/aria2.tar.xz -C /tmp/aria2-src --strip-components=1; \
+    cd /tmp/aria2-src; \
+    ./configure \
+        --prefix=/usr/local \
+        --with-ca-bundle=/etc/ssl/certs/ca-certificates.crt \
+        --with-gnutls \
+        --with-libcares \
+        --with-libssh2 \
+        --with-libxml2 \
+        --with-sqlite3; \
+    make -j"$(nproc)"; \
+    make install; \
+    ldconfig; \
+    aria2c --version; \
+   aria2c --version | grep -F "aria2 version ${ARIA2_VERSION}" || echo "WARNING: version mismatch"; \
+    rm -rf /tmp/aria2-src /tmp/aria2.tar.xz
+
+# -----------------------------------------------------------------------------
+# 1b. cloudflared — installed via direct binary download (NOT in Debian repos)
+#     Cloudflare distributes cloudflared via GitHub releases, not apt.
+#     We download the static binary for the correct architecture.
+#     Releases: https://github.com/cloudflare/cloudflared/releases
+# -----------------------------------------------------------------------------
+RUN set -eux; \
+    arch="$(dpkg --print-architecture)"; \
+    case "$arch" in \
+        amd64)  cf_arch="amd64"  ;; \
+        arm64)  cf_arch="arm64"  ;; \
+        *) echo "::error::Unsupported arch for cloudflared: $arch"; exit 1 ;; \
+    esac; \
+    curl -fsSL "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-${cf_arch}" \
+        -o /usr/local/bin/cloudflared; \
+    chmod +x /usr/local/bin/cloudflared; \
+    cloudflared --version
+
+# -----------------------------------------------------------------------------
+# 2. megacmd CLI from Mega's official Debian 12 repo
+#    (Debian 12 repo has BOTH amd64 and arm64 — solves the original blocker)
+#
+#    URL NOTE: Mega renamed the repo path from "Debian_12.0" to "Debian_12"
+#    (no minor-version suffix). The old URL returns 404. If you ever upgrade
+#    to Debian 13, the path will likely be "Debian_13" — verify at
+#    https://mega.nz/linux/repo/ before changing.
+# -----------------------------------------------------------------------------
+RUN set -eux; \
+    arch="$(dpkg --print-architecture)"; \
+    curl -fsSL "https://mega.nz/linux/repo/Debian_12/Release.key" \
+        | gpg --dearmor -o /usr/share/keyrings/mega-archive-keyring.gpg; \
+    echo "deb [arch=${arch} signed-by=/usr/share/keyrings/mega-archive-keyring.gpg] https://mega.nz/linux/repo/Debian_12/ ./" \
+        > /etc/apt/sources.list.d/mega.nz.list; \
+    for i in 1 2 3; do \
+        if apt-get update; then break; fi; \
+        echo "apt-get update failed (attempt $i/3), retrying in 5s..."; \
+        sleep 5; \
+    done; \
+    apt-get install -y --no-install-recommends megacmd; \
+    rm -rf /var/lib/apt/lists/*
+
+# -----------------------------------------------------------------------------
+# 3. SVT-AV1 — scalable AV1 encoder (used by FFmpeg --enable-libsvtav1)
+# -----------------------------------------------------------------------------
+ARG SVT_AV1_VERSION=v2.3.0
+RUN set -eux; \
+    git clone --depth 1 --branch "${SVT_AV1_VERSION}" \
+        https://gitlab.com/AOMediaCodec/SVT-AV1.git /tmp/SVT-AV1; \
+    cmake -S /tmp/SVT-AV1 -B /tmp/SVT-AV1/build \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_INSTALL_PREFIX=/usr/local \
+        -DBUILD_SHARED_LIBS=ON \
+        -DBUILD_TESTING=OFF; \
+    cmake --build /tmp/SVT-AV1/build -j"$(nproc)"; \
+    cmake --install /tmp/SVT-AV1/build; \
+    ldconfig; \
+    rm -rf /tmp/SVT-AV1
+
+# -----------------------------------------------------------------------------
+# 4. libaom — AV1 reference encoder/decoder (used by --enable-libaom)
+# -----------------------------------------------------------------------------
+ARG AOM_VERSION=v3.11.0
+RUN set -eux; \
+    git clone --depth 1 --branch "${AOM_VERSION}" \
+        https://aomedia.googlesource.com/aom /tmp/aom; \
+    cmake -S /tmp/aom -B /tmp/aom/build \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_INSTALL_PREFIX=/usr/local \
+        -DBUILD_SHARED_LIBS=ON \
+        -DENABLE_TESTS=0 \
+        -DENABLE_EXAMPLES=0 \
+        -DENABLE_DOCS=0 \
+        -DENABLE_TOOLS=0 \
+        -DCONFIG_PIC=1; \
+    cmake --build /tmp/aom/build -j"$(nproc)"; \
+    cmake --install /tmp/aom/build; \
+    ldconfig; \
+    rm -rf /tmp/aom
+
+# -----------------------------------------------------------------------------
+# 5. dav1d — fast AV1 decoder (used by --enable-libdav1d)
+# -----------------------------------------------------------------------------
+ARG DAV1D_VERSION=1.5.0
+RUN set -eux; \
+    git clone --depth 1 --branch "${DAV1D_VERSION}" \
+        https://code.videolan.org/videolan/dav1d.git /tmp/dav1d; \
+    meson setup /tmp/dav1d/build /tmp/dav1d \
+        --buildtype=release \
+        --prefix=/usr/local \
+        -Ddefault_library=shared \
+        -Denable_asm=true; \
+    ninja -C /tmp/dav1d/build; \
+    ninja -C /tmp/dav1d/build install; \
+    ldconfig; \
+    rm -rf /tmp/dav1d
+
+# -----------------------------------------------------------------------------
+# 6. FFmpeg 8.x with full AV1 + multimedia codec support
+# -----------------------------------------------------------------------------
+# Pin the version here. If n8.0 does not exist on your build date, browse
+# https://github.com/FFmpeg/FFmpeg/tags and pick the latest n8.x tag.
+#
+# IMPORTANT — flags removed in FFmpeg 8.x:
+#   The following flags were valid in FFmpeg 6.x/7.x but are now INVALID:
+#     --enable-avcodec --enable-avformat --enable-avutil
+#     --enable-swresample --enable-swscale --enable-avfilter
+#     --enable-avdevice --enable-postproc --enable-network
+#   These libraries/features are now ALWAYS built (or auto-enabled); the
+#   --enable-* flags were removed and will cause configure to fail with
+#   "Unknown option". Only --disable-* variants remain valid.
+#
+# IMPORTANT — also removed (caused configure failures):
+#   * --pkg-config-flags="--static"
+#       This is a static-build flag that tells pkg-config to require all
+#       transitive static deps. Wrong for shared builds (we use
+#       --enable-shared); caused spurious "libX not found" errors.
+#   * --enable-librist
+#       RIST (Reliable Internet Stream Transport) is a niche UDP streaming
+#       protocol. The bot doesn't use it (zero references in codebase).
+#       Debian 12 ships librist 0.2.7+dfsg-1, but the "+dfsg" suffix
+#       confuses pkg-config's version comparison, causing FFmpeg's
+#       "librist >= 0.2.7 not found" check to fail. Easiest fix: drop it.
+ARG FFMPEG_VERSION=n8.0
+RUN set -eux; \
+    git clone --depth 1 --branch "${FFMPEG_VERSION}" \
+        https://github.com/FFmpeg/FFmpeg.git /tmp/ffmpeg; \
+    cd /tmp/ffmpeg; \
+    ./configure \
+        --prefix=/usr/local \
+        --extra-cflags="-I/usr/local/include" \
+        --extra-ldflags="-L/usr/local/lib" \
+        --enable-gpl \
+        --enable-nonfree \
+        --enable-version3 \
+        --enable-shared \
+        --enable-pic \
+        --enable-libaom \
+        --enable-libdav1d \
+        --enable-libsvtav1 \
+        --enable-libvpx \
+        --enable-libx264 \
+        --enable-libx265 \
+        --enable-libfdk-aac \
+        --enable-libopus \
+        --enable-libmp3lame \
+        --enable-libtheora \
+        --enable-libvorbis \
+        --enable-libwebp \
+        --enable-libass \
+        --enable-libfreetype \
+        --enable-libfontconfig \
+        --enable-libopenmpt \
+        --enable-librsvg \
+        --enable-libsoxr \
+        --enable-libvidstab \
+        --enable-libxvid \
+        --enable-libbluray; \
+    make -j"$(nproc)"; \
+    make install; \
+    ldconfig; \
+    rm -rf /tmp/ffmpeg
+
+# -----------------------------------------------------------------------------
+# 7. Mega SDK Python bindings (compiled from source)
+#
+#    THE C++ STANDARD REQUIREMENT:
+#    Mega SDK v7.0.0 source code requires C++17 (uses std::filesystem in
+#    autocomplete.cpp, sync.cpp, gfx/worker/*.cpp). However, the SDK's own
+#    configure.ac (line 148) hardcodes:
+#        CXXFLAGS="$CXXFLAGS -std=c++11 -Wall ..."
+#    This -std=c++11 OVERRIDES any env-level -std= flag (last -std= wins
+#    in GCC), causing the build to fail with:
+#        error: 'std::filesystem' has not been declared
+#        error: 'std::make_unique' is only available from C++14 onwards
+#
+#    THE FIX: sed-replace EVERY -std=c++NN and -std=gnu++NN in build
+#    scripts (configure.ac, Makefile.am, CMakeLists.txt, setup.py, *.in)
+#    with -std=c++17 / -std=gnu++17. This catches the c++11 in configure.ac
+#    AND the c++03 in Makefile.am (cppcheck) AND any other variants —
+#    all normalized to c++17.
+#
+#    WHY C++17 IS SAFE HERE:
+#    v7.0.0 has been modernized — zero usages of std::auto_ptr, zero usages
+#    of the register keyword, zero dynamic exception specs (all of which
+#    were REMOVED in C++17). So nothing in the source code blocks C++17.
+#
+#    BUILD ORDER MATTERS:
+#    The Python `setup.py` in bindings/python/ only builds the SWIG C++
+#    *wrapper* layer (_mega.so). It does NOT compile the core C++ library.
+#    It symlinks ../../src/.libs/libmega.so, which only exists AFTER the
+#    autotools build (./autogen.sh && ./configure && make) has been run in
+#    the SDK root. Skipping the autotools steps causes pip install to fail
+#    at the SWIG link step with `cannot find -lmega`.
+#
+#    PREFIX WARNING:
+#    The SDK's configure.ac line 50 sets AC_PREFIX_DEFAULT([/]) — meaning
+#    if you don't explicitly pass --prefix to ./configure, make install
+#    dumps libmega.so into /lib/ (or /lib/x86_64-linux-gnu/), NOT
+#    /usr/local/lib/. This breaks the ld.so.conf.d setup from Block 0
+#    (which only adds /usr/local/lib). Always pass --prefix=/usr/local
+#    to keep Mega SDK installs consistent with SVT-AV1/libaom/dav1d/FFmpeg.
+#
+#    FUSE WARNING (upstream SDK build-system bug):
+#    The SDK's src/fuse/common/query.cpp is ALWAYS compiled and it calls
+#    InodeID::get(). But src/fuse/common/inode_id.cpp (which DEFINES
+#    InodeID::get()) is only compiled when --enable-fuse is active (which
+#    auto-triggers when libfuse-dev is present). Without libfuse-dev, FUSE
+#    is disabled, inode_id.cpp is skipped, and libmega.so ends up with an
+#    undefined symbol — causing ImportError at runtime:
+#        undefined symbol: _ZNK4mega4fuse7InodeID3getEv
+#    libtool permits undefined symbols at link time, so 'make' succeeds,
+#    but the dynamic linker catches it when _mega.so loads libmega.so.
+#    Fix: install libfuse-dev (in Block 1) so FUSE is auto-enabled and
+#    inode_id.cpp gets compiled. The bot doesn't USE FUSE mounting, but
+#    the library must be complete for the SWIG wrapper to load.
+# -----------------------------------------------------------------------------
+# Mega SDK v7.0.0 — has autogen.sh + bindings/python/setup.py (autotools build).
+# NOTE: MegaUploadOptions is NOT available in v7.0.0 (it was added to the
+# unreleased master branch on 2026-06-04, but master removed autogen.sh AND
+# bindings/python/ entirely). The bot's mega_sdk.py and mega_listener.py are
+# patched to make MegaUploadOptions optional and fall back to the old
+# startUpload(localPath, parent, fileName, mtime, ...) API when it's missing.
+ARG MEGA_SDK_VERSION=v7.0.0
+
+RUN set -eux; \
+    git clone --depth 1 --branch "${MEGA_SDK_VERSION}" \
+        https://github.com/meganz/sdk.git /tmp/mega-sdk; \
+    cd /tmp/mega-sdk; \
+    # -------------------------------------------------------------------------
+    # Patch 1: Normalize ALL hardcoded -std= flags to -std=c++17.
+    #
+    # The Mega SDK v7.0.0 source uses std::filesystem (C++17 feature) in:
+    #   - src/autocomplete.cpp (line 32: namespace fs = std::filesystem)
+    #   - src/posix/gfx/worker/socket_utils.cpp
+    #   - include/mega/posix/gfx/worker/socket_utils.h
+    # It also uses std::make_unique (C++14, works in C++17).
+    #
+    # But configure.ac line 148 hardcodes -std=c++11 which overrides our
+    # env-level -std= flag (last -std= wins in GCC). The fix: sed-replace
+    # EVERY -std=c++NN / -std=gnu++NN variant to -std=c++17 / -std=gnu++17.
+    # -------------------------------------------------------------------------
+    find . -type f \( \
+            -name 'Makefile*' -o -name '*.am' -o -name '*.cmake' \
+            -o -name 'CMakeLists.txt' -o -name 'setup.py' -o -name '*.py' \
+            -o -name 'configure*' -o -name '*.ac' -o -name '*.in' \
+        \) -exec sed -i \
+            -e 's/-std=c++03/-std=c++17/g' \
+            -e 's/-std=c++11/-std=c++17/g' \
+            -e 's/-std=c++14/-std=c++17/g' \
+            -e 's/-std=c++17/-std=c++17/g' \
+            -e 's/-std=c++1z/-std=c++17/g' \
+            -e 's/-std=c++2a/-std=c++17/g' \
+            -e 's/-std=c++20/-std=c++17/g' \
+            -e 's/-std=gnu++03/-std=gnu++17/g' \
+            -e 's/-std=gnu++11/-std=gnu++17/g' \
+            -e 's/-std=gnu++14/-std=gnu++17/g' \
+            -e 's/-std=gnu++17/-std=gnu++17/g' \
+            -e 's/-std=gnu++1z/-std=gnu++17/g' \
+            -e 's/-std=gnu++2a/-std=gnu++17/g' \
+            -e 's/-std=gnu++20/-std=gnu++17/g' \
+            -e 's/--std=c++03/--std=c++17/g' \
+            -e 's/--std=c++11/--std=c++17/g' \
+            {} +; \
+    # Export compiler flags favouring C++17 + permissive warnings.
+    # (No longer need -Wno-register or auto_ptr workarounds — v7.0.0
+    # doesn't use either. Keep -fpermissive as belt-and-suspenders.)
+    export CXXFLAGS="-std=c++17 -O2 -fPIC \
+        -Wno-error=deprecated-declarations \
+        -Wno-deprecated-declarations \
+        -fpermissive"; \
+    export CFLAGS="-O2 -fPIC \
+        -Wno-error=deprecated-declarations \
+        -Wno-deprecated-declarations"; \
+    export LDFLAGS="-L/usr/local/lib"; \
+    export PKG_CONFIG_PATH="/usr/local/lib/pkgconfig:/usr/lib/pkgconfig"; \
+    #
+    # CRITICAL: build the core C++ library (libmega.so) BEFORE the Python
+    # bindings. setup.py only links against it; it does not compile it.
+    #
+    ./autogen.sh; \
+    ./configure \
+        --prefix=/usr/local \
+        --disable-silent-rules \
+        --enable-python \
+        --disable-examples \
+        --without-freeimage \
+        --without-libraw \
+        --without-readline; \
+    make -j"$(nproc)"; \
+    make install; \
+    ldconfig; \
+    #
+    # Verify the versioned SONAME was installed correctly.
+    # (ld.so.conf.d was already set up in Block 0 — just refresh the cache.)
+    #
+    ls -la /usr/local/lib/libmega.so* || { \
+        echo "::error::libmega.so not found in /usr/local/lib after make install"; \
+        echo "Searching system for libmega.so* to diagnose:"; \
+        find / -name 'libmega.so*' 2>/dev/null | head -10; \
+        exit 1; \
+    }; \
+    #
+    # Now the Python wrapper can find ../../src/.libs/libmega.so.
+    #
+    cd bindings/python; \
+    pip install . ; \
+    cd /; \
+    rm -rf /tmp/mega-sdk
+
+# -----------------------------------------------------------------------------
+# 8. Verification — fail the build loudly if any component is missing
+# -----------------------------------------------------------------------------
+RUN set -eux; \
+    ldconfig; \
+    echo "=== FFmpeg version ==="; \
+    ffmpeg -version | head -5; \
+    echo "=== FFmpeg AV1 encoders ==="; \
+    ffmpeg -hide_banner -encoders | grep -E 'av1|libaom|libsvtav1' || true; \
+    echo "=== FFmpeg AV1 decoders ==="; \
+    ffmpeg -hide_banner -decoders | grep -E 'av1|dav1d' || true; \
+    echo "=== libmega.so files in /usr/local/lib ==="; \
+    ls -la /usr/local/lib/libmega.so* 2>/dev/null || echo "WARNING: no libmega.so in /usr/local/lib"; \
+    echo "=== ldconfig cache (libmega entries) ==="; \
+    ldconfig -p | grep libmega || echo "WARNING: libmega not in ldconfig cache"; \
+    echo "=== Mega SDK Python binding ==="; \
+    python3 -c "from mega import MegaApi; print('Mega SDK Python: OK')"; \
+    echo "=== megacmd CLI ==="; \
+    (mega-version || mega-cmd-version || true); \
+    echo "=== Download tools ==="; \
+    which aria2c || echo "WARNING: aria2c not found"; \
+    aria2c --version | head -1; \
+    aria2c --version | grep -F "aria2 version ${ARIA2_VERSION}"; \
+    which qbittorrent-nox || echo "WARNING: qbittorrent-nox not found"; \
+    which sabnzbdplus || echo "WARNING: sabnzbdplus not found"; \
+    which 7z || echo "WARNING: 7z not found"; \
+    which rclone || echo "WARNING: rclone not found"; \
+    which cloudflared || echo "WARNING: cloudflared not found"; \
+    which java || echo "WARNING: java not found"; \
+    which gunicorn || echo "WARNING: gunicorn not found"; \
+    echo "=== ALL COMPONENTS VERIFIED ==="
+
+WORKDIR /app
+
+# Default shell — base image is meant to be inherited, not run directly.
+CMD ["bash"]

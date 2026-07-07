@@ -1,0 +1,245 @@
+name: Publish Amaterasu App Image
+
+# =============================================================================
+#  Builds Dockerfile (app) on top of <user>/amaterasu:v1
+#  → pushes <user>/amaterasu:latest  (multi-arch: amd64 + arm64)
+#
+#  Strategy: NATIVE runners (no QEMU) — same pattern as dockerhub-amaterasu.yml
+#    * amd64 runs on ubuntu-24.04
+#    * arm64 runs on ubuntu-24.04-arm
+#    * Final merge job stitches both into a single multi-arch manifest
+#      tagged :latest (plus :latest-sha-<short> for traceability).
+#
+#  Triggers:
+#    * workflow_run after "Publish Amaterasu Docker Image" completes successfully
+#    * Push to main/master touching only app files (Dockerfile, requirements.txt,
+#      start.sh, bot/, config/) — NOT Dockerfile.base (that triggers base workflow)
+#    * Manual dispatch
+#
+#  Cache: cache-from only (no cache-to).
+#    See dockerhub-amaterasu.yml header for rationale.
+# =============================================================================
+
+on:
+  workflow_dispatch:
+  workflow_run:
+    workflows:
+      - Publish Amaterasu Docker Image
+    types:
+      - completed
+  push:
+    branches:
+      - main
+      - master
+    paths:
+      - 'Dockerfile'
+      - 'requirements.txt'
+      - 'start.sh'
+      - 'qBittorrent.sh'
+      - 'aria.sh'
+      - '.github/workflows/dockerhub-app.yml'
+      - 'bot/**'
+      - 'config/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dockerhub-app
+  cancel-in-progress: true
+
+env:
+  IMAGE_NAME: amaterasu
+  BASE_TAG: v1
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Build per-arch app images in PARALLEL on native runners
+  # ---------------------------------------------------------------------------
+  build:
+    name: Build app linux/${{ matrix.platform }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: amd64
+            runner: ubuntu-24.04
+          - platform: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    # Strict guard: skip app build if base workflow didn't succeed.
+    # workflow_run fires on ANY completion (success OR failure), so we must
+    # explicitly check the conclusion. For other triggers (push, dispatch),
+    # we assume the user knows the base is ready.
+    if: >-
+      github.event_name != 'workflow_run' ||
+      github.event.workflow_run.conclusion == 'success'
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Validate Docker Hub secrets
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          if [ -z "$DOCKERHUB_USERNAME" ] || [ -z "$DOCKERHUB_TOKEN" ]; then
+            echo "::error::Set DOCKERHUB_USERNAME and DOCKERHUB_TOKEN repository secrets before publishing."
+            exit 1
+          fi
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          driver-opts: |
+            image=moby/buildkit:v0.19.0
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Wait for base image (with freshness check)
+        env:
+          BASE_IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:${{ env.BASE_TAG }}
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 30); do
+            if docker buildx imagetools inspect "$BASE_IMAGE" >/dev/null 2>&1; then
+              echo "Base image tag exists: $BASE_IMAGE"
+              if docker buildx imagetools inspect "$BASE_IMAGE" | grep -q "linux/${{ matrix.platform }}"; then
+                echo "linux/${{ matrix.platform }} entry found in base manifest"
+                echo "=== Base manifest contents ==="
+                docker buildx imagetools inspect "$BASE_IMAGE"
+                exit 0
+              fi
+              echo "Waiting for linux/${{ matrix.platform }} in base manifest ($attempt/30)..."
+            else
+              echo "Base image not available yet ($attempt/30): $BASE_IMAGE"
+            fi
+            sleep 60
+          done
+          echo "::error::Base image or linux/${{ matrix.platform }} was not available after 30 minutes: $BASE_IMAGE"
+          echo "This usually means the base workflow's merge job failed."
+          echo "Check: https://github.com/${{ github.repository }}/actions/workflows/dockerhub-amaterasu.yml"
+          exit 1
+
+      - name: Build and push (by digest, no tag yet)
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/${{ matrix.platform }}
+          build-args: |
+            BASE_IMAGE=${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:${{ env.BASE_TAG }}
+          outputs: |
+            type=image,name=docker.io/${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=true
+          cache-from: |
+            type=gha,scope=app-${{ matrix.platform }}
+          provenance: false
+
+      - name: Export digest to file
+        run: |
+          mkdir -p /tmp/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
+          echo "Wrote digest marker for ${digest}"
+
+      - name: Upload digest artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-digest-${{ matrix.platform }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Summary
+        run: |
+          {
+            echo "## Built app linux/${{ matrix.platform }}"
+            echo ""
+            echo "- Image: \`docker.io/${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}\`"
+            echo "- Digest: \`${{ steps.build.outputs.digest }}\`"
+            echo "- Base: \`${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:${{ env.BASE_TAG }}\`"
+            echo "- Runner: \`${{ matrix.runner }}\` (native — no QEMU)"
+            echo "- Cache scope: \`app-${{ matrix.platform }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # ---------------------------------------------------------------------------
+  # Merge per-arch app digests into one multi-arch manifest with tags applied
+  # ---------------------------------------------------------------------------
+  merge:
+    name: Merge app into multi-arch manifest (:latest)
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download all digest artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests
+          pattern: app-digest-*
+          merge-multiple: true
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Create manifest list and push
+        working-directory: /tmp/digests
+        run: |
+          set -euo pipefail
+          SHORT_SHA="$(echo '${{ github.sha }}' | cut -c1-7)"
+          IMAGE="docker.io/${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}"
+
+          TAGS=(
+            "-t" "${IMAGE}:latest"
+            "-t" "${IMAGE}:latest-sha-${SHORT_SHA}"
+          )
+
+          SOURCES=""
+          for f in *; do
+            SOURCES="${SOURCES} ${IMAGE}@sha256:${f}"
+          done
+
+          echo "Tags:    ${TAGS[*]}"
+          echo "Sources:${SOURCES}"
+
+          docker buildx imagetools create "${TAGS[@]}" ${SOURCES}
+
+      - name: Inspect resulting manifest
+        run: |
+          IMAGE="docker.io/${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}"
+          docker buildx imagetools inspect "${IMAGE}:latest"
+
+      - name: Summary
+        run: |
+          IMAGE="docker.io/${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}"
+          SHORT_SHA="$(echo '${{ github.sha }}' | cut -c1-7)"
+          {
+            echo "## Multi-arch app manifest published"
+            echo ""
+            echo "Pull command (auto-selects arch on host):"
+            echo ""
+            echo '```bash'
+            echo "docker pull ${IMAGE}:latest"
+            echo '```'
+            echo ""
+            echo "Tags applied:"
+            echo "- \`${IMAGE}:latest\`"
+            echo "- \`${IMAGE}:latest-sha-${SHORT_SHA}\`"
+            echo ""
+            echo "Manifest contains both \`linux/amd64\` and \`linux/arm64\`."
+          } >> "$GITHUB_STEP_SUMMARY"

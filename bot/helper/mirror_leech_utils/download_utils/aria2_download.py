@@ -1,0 +1,166 @@
+from aiofiles.os import remove, path as aiopath
+from aiofiles import open as aiopen
+from base64 import b64encode
+from aiohttp.client_exceptions import ClientError
+from asyncio import TimeoutError
+from urllib.parse import unquote, urlparse
+
+from .... import task_dict_lock, task_dict, LOGGER
+from ....core.config_manager import Config
+from ....core.torrent_manager import TorrentManager, is_metadata, aria2_name
+from ...ext_utils.bot_utils import DEFAULT_BROWSER_USER_AGENT, bt_selection_buttons
+from ...ext_utils.task_manager import check_running_tasks
+from ...mirror_leech_utils.status_utils.aria2_status import Aria2Status
+from ...telegram_helper.message_utils import send_status_message, send_message
+
+
+def _sourceforge_filename(link):
+    parsed = urlparse(link)
+    if not parsed.hostname:
+        return ""
+    path_parts = [part for part in parsed.path.split("/") if part]
+    if parsed.hostname == "downloads.sourceforge.net":
+        filename = path_parts[-1] if path_parts else ""
+    elif parsed.hostname.endswith("sourceforge.net"):
+        if "files" not in path_parts:
+            return ""
+        file_parts = path_parts[path_parts.index("files") + 1 :]
+        if file_parts and file_parts[-1] == "download":
+            file_parts = file_parts[:-1]
+        filename = file_parts[-1] if file_parts else ""
+    else:
+        return ""
+    filename = unquote(filename)
+    return filename if filename and "." in filename else ""
+
+
+async def add_aria2_download(
+    listener, dpath, header, ratio, seed_time, notify_error=True
+):
+    if Config.DISABLE_TORRENTS and (
+        listener.link.startswith("magnet:") or listener.link.endswith(".torrent")
+    ):
+        if notify_error:
+            await listener.on_download_error("Torrent and magnet downloads are disabled.")
+        return False
+    a2c_opt = {"dir": dpath}
+    if listener.name:
+        a2c_opt["out"] = listener.name
+    elif filename := _sourceforge_filename(listener.link):
+        a2c_opt["out"] = filename
+    if header:
+        a2c_opt["header"] = header
+    if listener.link.startswith(("http://", "https://", "ftp://")) and (
+        "user-agent" not in str(header).lower()
+    ):
+        a2c_opt["user-agent"] = DEFAULT_BROWSER_USER_AGENT
+    if ratio:
+        a2c_opt["seed-ratio"] = ratio
+    if seed_time:
+        a2c_opt["seed-time"] = seed_time
+    if TORRENT_TIMEOUT := Config.TORRENT_TIMEOUT:
+        a2c_opt["bt-stop-timeout"] = f"{TORRENT_TIMEOUT}"
+    # Phase 4.1 — sequential torrent streaming. When --stream flag is
+    # set, prioritize first and last pieces so the file can be streamed
+    # while still downloading. aria2's bt-prioritize-piece=head,tail
+    # downloads the first and last pieces first (for fast seek/preview).
+    if getattr(listener, "is_stream", False) and (
+        listener.link.startswith("magnet:") or listener.link.endswith(".torrent")
+    ):
+        a2c_opt["bt-prioritize-piece"] = "head,tail"
+        a2c_opt["bt-request-peer-speed-limit"] = "0"
+        LOGGER.info(f"Sequential streaming enabled for aria2 torrent: {listener.link[:80]}")
+
+    add_to_queue, event = await check_running_tasks(listener)
+    if add_to_queue:
+        if listener.link.startswith("magnet:"):
+            a2c_opt["pause-metadata"] = "true"
+        else:
+            a2c_opt["pause"] = "true"
+
+    try:
+        if await aiopath.exists(listener.link):
+            async with aiopen(listener.link, "rb") as tf:
+                torrent = await tf.read()
+            encoded = b64encode(torrent).decode()
+            params = [encoded, [], a2c_opt]
+            gid = await TorrentManager.aria2.jsonrpc("addTorrent", params)
+            """gid = await TorrentManager.aria2.add_torrent(path=listener.link, options=a2c_opt)"""
+        else:
+            # Phase 3.2 — parallel multi-source download. If the listener
+            # has a --multi flag with multiple URLs, pass them all to
+            # aria2's addUri. aria2 downloads from all sources in parallel
+            # and picks the fastest mirror for each byte range.
+            uris = [listener.link]
+            multi_urls = getattr(listener, "multi_urls", None)
+            if multi_urls:
+                # multi_urls is a list of additional URLs (already split
+                # from the --multi flag value in the mirror handler)
+                uris = [listener.link] + [u for u in multi_urls if u and u != listener.link]
+                LOGGER.info(f"Aria2 multi-source download: {len(uris)} URLs")
+            gid = await TorrentManager.aria2.addUri(
+                uris=uris, options=a2c_opt
+            )
+    except (TimeoutError, ClientError, Exception) as e:
+        LOGGER.info(f"Aria2c Download Error: {e}")
+        listener.aria2_fallback_error = str(e)
+        listener.aria2_fallback_completed = 0
+        if notify_error:
+            await listener.on_download_error(f"{e}")
+        return False
+    download = await TorrentManager.aria2.tellStatus(gid)
+    if download.get("errorMessage"):
+        error = str(download["errorMessage"]).replace("<", " ").replace(">", " ")
+        LOGGER.info(f"Aria2c Download Error: {error}")
+        listener.aria2_fallback_error = error
+        listener.aria2_fallback_completed = int(
+            download.get("completedLength", "0") or 0
+        )
+        await TorrentManager.aria2_remove(download)
+        if notify_error:
+            await listener.on_download_error(error)
+        return False
+    if await aiopath.exists(listener.link):
+        await remove(listener.link)
+
+    name = aria2_name(download)
+    async with task_dict_lock:
+        task_dict[listener.mid] = Aria2Status(listener, gid, queued=add_to_queue)
+    if add_to_queue:
+        LOGGER.info(f"Added to Queue/Download: {name}. Gid: {gid}")
+        if (
+            not listener.select or "bittorrent" not in download
+        ) and listener.multi <= 1:
+            await send_status_message(listener.message)
+    else:
+        LOGGER.info(f"Aria2Download started: {name}. Gid: {gid}")
+
+    await listener.on_download_start()
+
+    if (
+        not add_to_queue
+        and (not listener.select or not Config.BASE_URL)
+        and listener.multi <= 1
+    ):
+        await send_status_message(listener.message)
+    elif listener.select and "bittorrent" in download and not is_metadata(download):
+        if not add_to_queue:
+            await TorrentManager.aria2.forcePause(gid)
+        SBUTTONS = bt_selection_buttons(gid)
+        msg = "<b>Download Paused!</b>\n\n<i>Select your files &amp; press <b>Done Selecting</b> to start.</i>"
+        await send_message(listener.message, msg, SBUTTONS)
+
+    if add_to_queue:
+        await event.wait()
+        if listener.is_cancelled:
+            return
+        async with task_dict_lock:
+            task = task_dict[listener.mid]
+            task.queued = False
+            await task.update()
+            new_gid = task.gid()
+
+        await TorrentManager.aria2.unpause(new_gid)
+        LOGGER.info(f"Start Queued Download from Aria2c: {name}. Gid: {new_gid}")
+
+    return True
