@@ -8,7 +8,7 @@ from pyrogram.errors import FloodWait
 
 from bot import LOGGER
 from bot.core.config_manager import Config
-from bot.helper.ext_utils.bot_utils import get_web_secret
+from bot.helper.ext_utils.bot_utils import arg_parser, get_web_secret
 from bot.helper.ext_utils.status_utils import get_readable_file_size
 from bot.helper.ext_utils.shortener_utils import short_url
 from bot.helper.telegram_helper.button_build import ButtonMaker
@@ -155,6 +155,22 @@ def build_caption(title, filename, readable_size, stream_link, download_link):
     return caption
 
 
+def parse_link_batch_count(command_text):
+    input_list = (command_text or "").split()
+    args = {"-i": 0, "link": ""}
+    arg_parser(input_list[1:], args)
+
+    has_i_flag = "-i" in input_list[1:]
+    raw_count = args["-i"] if has_i_flag else args["link"]
+    if raw_count in ("", None) or (has_i_flag and raw_count == 0):
+        return None if has_i_flag else 1
+
+    raw_count = str(raw_count).strip()
+    if not raw_count.isdigit():
+        return None
+    return int(raw_count)
+
+
 async def process_media_message(client, message, reply_to_msg):
     media = get_media(reply_to_msg)
     if not media:
@@ -192,17 +208,14 @@ async def link_command_handler(client, message):
         await send_message(message, "Please reply to a media file to generate links.")
         return
         
-    args = message.text.split()
-    batch_count = 1
     max_batch = max(1, int(Config.MAX_BATCH_FILES or 50))
-    if len(args) > 1:
-        if not args[1].isdigit():
-            await send_message(message, "Batch count must be a number.")
-            return
-        batch_count = int(args[1])
-        if batch_count < 1 or batch_count > max_batch:
-            await send_message(message, f"Batch count must be between 1 and {max_batch}.")
-            return
+    batch_count = parse_link_batch_count(message.text)
+    if batch_count is None:
+        await send_message(message, "Batch count must be a number. Example: /link -i 10")
+        return
+    if batch_count < 1 or batch_count > max_batch:
+        await send_message(message, f"Batch count must be between 1 and {max_batch}.")
+        return
         
     if batch_count > 1:
         start_msg_id = message.reply_to_message.id
@@ -290,4 +303,3 @@ async def channel_media_handler(client, message):
             await send_message(message, caption, markup)
     except Exception as e:
         LOGGER.error(f"Error in channel FileToLink processing: {e}")
-

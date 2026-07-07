@@ -1539,6 +1539,8 @@ Amaterasu includes a built-in FastAPI web server that converts any Telegram file
 2. The bot generates a direct download URL and a streaming URL.
 3. These links are **seekable** (HTTP 206 Range Requests), meaning you can play videos directly in VLC, MX Player, or any browser without downloading the full file.
 
+For multiple consecutive files, reply to the first file and use `/link -i 10` to generate links for 10 files in one command.
+
 ### Multi-Token Load Balancing
 Configure `MULTI_TOKEN1`, `MULTI_TOKEN2`, `MULTI_TOKEN3` with additional bot tokens. The server automatically distributes file requests across tokens to avoid Telegram's FloodWait rate limits.
 
