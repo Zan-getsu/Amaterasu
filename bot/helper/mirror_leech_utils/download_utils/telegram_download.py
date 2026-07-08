@@ -25,6 +25,7 @@ from ...mirror_leech_utils.status_utils.telegram_status import TelegramStatus
 from ...telegram_helper.message_utils import send_status_message
 
 global_lock = Lock()
+standard_download_lock = Lock()
 GLOBAL_GID = dict()
 
 
@@ -122,8 +123,40 @@ class TelegramDownloadHelper:
         )
         return await self._validate_download(download, label)
 
-    async def _standard_download(self, message, path):
-        candidates = [("current", message)]
+    @staticmethod
+    def _has_downloadable_media(message):
+        if message is None:
+            return False
+        media_type = getattr(message, "media", None)
+        if media_type is not None:
+            return getattr(message, media_type.value, None) is not None
+        return any(
+            getattr(message, attr, None)
+            for attr in (
+                "audio",
+                "document",
+                "photo",
+                "sticker",
+                "animation",
+                "video",
+                "voice",
+                "video_note",
+            )
+        )
+
+    async def _standard_download(
+        self, message, path, fallback_message=None, serialize=False
+    ):
+        if serialize:
+            async with standard_download_lock:
+                return await self._standard_download(
+                    message, path, fallback_message=fallback_message
+                )
+
+        candidates = []
+        if fallback_message is not None:
+            candidates.append(("hyper-dump", fallback_message))
+        candidates.append(("current", message))
 
         if Config.TRANSMISSION_MODE in ("user", "both") and TgClient.user:
             try:
@@ -164,15 +197,19 @@ class TelegramDownloadHelper:
             tried.add(key)
             if self._listener.is_cancelled:
                 return None
+            if not self._has_downloadable_media(candidate):
+                LOGGER.warning(
+                    f"Telegram standard download skipped via {label}: "
+                    "message has no downloadable media"
+                )
+                continue
             self._processed_bytes = 0
             try:
                 download = await self._standard_download_once(candidate, path, label)
             except (FloodWait, FloodPremiumWait):
                 raise
             except Exception as e:
-                LOGGER.warning(
-                    f"Telegram standard download failed via {label}: {e}"
-                )
+                LOGGER.warning(f"Telegram standard download failed via {label}: {e}")
                 download = None
             if download:
                 return download
@@ -202,11 +239,19 @@ class TelegramDownloadHelper:
                 # corrupt file.
                 if download is None and not self._listener.is_cancelled:
                     self._hyper_dl = False
+                    fallback_message = getattr(self._hyper_dl_instance, "message", None)
+                    if not self._has_downloadable_media(fallback_message):
+                        fallback_message = None
                     LOGGER.info(
                         "HypertgDL returned no complete download; falling back "
                         "to standard Pyrogram download (slower but reliable)"
                     )
-                    download = await self._standard_download(message, path)
+                    download = await self._standard_download(
+                        message,
+                        path,
+                        fallback_message=fallback_message,
+                        serialize=True,
+                    )
             else:
                 download = await self._standard_download(message, path)
             if self._listener.is_cancelled:

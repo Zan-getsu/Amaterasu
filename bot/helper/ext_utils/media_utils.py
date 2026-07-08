@@ -291,10 +291,14 @@ async def get_video_frame_count(path, duration=0):
 
 async def get_document_type(path):
     is_video, is_audio, is_image = False, False, False
+    path_lower = path.lower()
     if (
-        is_archive(path)
-        or is_archive_split(path)
-        or re_search(r".+(\.|_)(rar|7z|zip|bin)(\.0*\d+)?$", path)
+        is_archive(path_lower)
+        or is_archive_split(path_lower)
+        # Disk/firmware images can contain byte patterns that ffprobe sees as
+        # media streams. Keep them as Telegram documents unless the user
+        # explicitly converts/renames them to a media container.
+        or re_search(r".+(\.|_)(rar|7z|zip|bin|img)(\.0*\d+)?$", path_lower)
     ):
         return is_video, is_audio, is_image
     mime_type = await sync_to_async(get_mime_type, path)
@@ -501,11 +505,13 @@ async def get_video_thumbnail(video_file, duration):
         "-i",
         video_file,
         "-vf",
-        "thumbnail",
+        "thumbnail,scale=320:-2:flags=lanczos,format=yuvj420p",
         "-q:v",
         "1",
         "-frames:v",
         "1",
+        "-f",
+        "image2",
         "-threads",
         f"{threads}",
         output,
@@ -513,12 +519,12 @@ async def get_video_thumbnail(video_file, duration):
     try:
         _, err, code = await wait_for(cmd_exec(cmd), timeout=60)
         if code != 0 or not await aiopath.exists(output):
-            LOGGER.error(
+            LOGGER.warning(
                 f"Error while extracting thumbnail from video. Name: {video_file} stderr: {err}"
             )
             return None
     except Exception:
-        LOGGER.error(
+        LOGGER.warning(
             f"Error while extracting thumbnail from video. Name: {video_file}. Error: Timeout some issues with ffmpeg with specific arch!"
         )
         return None
