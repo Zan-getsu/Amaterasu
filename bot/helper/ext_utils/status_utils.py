@@ -306,7 +306,11 @@ async def get_readable_message(sid, is_user, page_no=1, status="All", page_step=
             MirrorStatus.STATUS_PAUSED,
             MirrorStatus.STATUS_QUEUEDL,
         ]:
-            if not task.listener.is_nzb and not task.listener.is_jd:
+            if (
+                task.listener.is_torrent
+                or task.listener.is_qbit
+                or task.listener.is_nzb
+            ):
                 msg += f"\n├─ {'Select':<9}: </code>/{BotCommands.SelectCommand[1]}_{task.gid()[:8]}<code>"
 
         msg += f"\n├─ {'User':<9}: </code>{_user_mention}<code>"
@@ -355,4 +359,3 @@ async def get_readable_message(sid, is_user, page_no=1, status="All", page_step=
         else:
             msg += f"├─ {m}\n"
     return msg, button
-
