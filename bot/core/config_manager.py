@@ -188,7 +188,7 @@ class Config:
     UPLOAD_PATHS = {}
     DRIVE_CATEGORY_MODE = False
     DRIVE_CATEGORY_SA = ""
-    UPSTREAM_REPO = ""
+    UPSTREAM_REPO = "https://github.com/Zan-getsu/Amaterasu"
     UPSTREAM_BRANCH = "main"
     UPDATE_PKGS = False  # default off — pin and update explicitly to avoid surprises
     USENET_SERVERS = []

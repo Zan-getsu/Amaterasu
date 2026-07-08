@@ -15,8 +15,8 @@
 
 <p align="center">
   <a href="#"><img src="https://img.shields.io/badge/Version-1.6.3-orange?style=for-the-badge&logo=rocket"></a>
-  <a href="#"><img src="https://img.shields.io/github/repo-size/its-niloy/Amaterasu?color=FF4500&label=Size&style=for-the-badge"></a>
-  <a href="#"><img src="https://img.shields.io/github/license/its-niloy/Amaterasu?style=for-the-badge&color=FF8C00"></a>
+  <a href="#"><img src="https://img.shields.io/github/repo-size/Zan-getsu/Amaterasu?color=FF4500&label=Size&style=for-the-badge"></a>
+  <a href="#"><img src="https://img.shields.io/github/license/Zan-getsu/Amaterasu?style=for-the-badge&color=FF8C00"></a>
   <br>
   <a href="#"><img src="https://img.shields.io/badge/Powered%20By-Python_3.11-blue?style=for-the-badge&logo=python"></a>
   <a href="#"><img src="https://img.shields.io/badge/Deployed_Via-Docker-2496ED?style=for-the-badge&logo=docker"></a>
@@ -327,7 +327,7 @@ Connect to your VPS and install the container runtime of your choice:
 
 ```bash
 # Clone the repository
-git clone https://github.com/its-niloy/Amaterasu.git && cd Amaterasu
+git clone https://github.com/Zan-getsu/Amaterasu.git && cd Amaterasu
 
 
 # Create your config file from the sample
@@ -889,7 +889,7 @@ For an additional layer of protection on the web UI itself (beyond the file-down
 
 | Variable | Type | Default | Description |
 |---|---|---|---|
-| `UPSTREAM_REPO` | `str` | `""` | Git repo URL for auto-update. Empty disables auto-update |
+| `UPSTREAM_REPO` | `str` | `https://github.com/Zan-getsu/Amaterasu` | Git repo URL for auto-update. Empty disables auto-update |
 | `UPSTREAM_BRANCH` | `str` | `"main"` | Branch to track |
 | `UPDATE_PKGS` | `bool` | `False` | Run `uv pip install -U -r requirements.txt` on every boot. Off by default to avoid surprises — pin and update explicitly |
 | `UPSTREAM_ALLOWLIST` | `str` | (3 default patterns) | Comma-separated regex patterns for allowed `UPSTREAM_REPO` URLs. Default allows `github.com`, `raw.githubusercontent.com`, and `git.nbmirror.qzz.io`. Add your own fork URL here to enable auto-update from a custom fork |
@@ -930,7 +930,7 @@ Each pattern is a Python regex. Invalid patterns are skipped with a warning. If 
 | `DISABLE_BULK` | `bool` | `False` | Disable bulk download feature |
 | `DISABLE_MULTI` | `bool` | `False` | Disable multi-link feature |
 | `DISABLE_FF_MODE` | `bool` | `False` | Disable FFmpeg processing |
-| `UPSTREAM_REPO` | `str` | empty | Repository URL for auto-updates on restart. Leave empty to skip code reset/update. Allowed hosts: `github.com`, `raw.githubusercontent.com`, `git.nbmirror.qzz.io` |
+| `UPSTREAM_REPO` | `str` | `https://github.com/Zan-getsu/Amaterasu` | Repository URL for auto-updates on restart. Leave empty to skip code reset/update. Allowed hosts: `github.com`, `raw.githubusercontent.com`, `git.nbmirror.qzz.io` |
 | `UPSTREAM_BRANCH` | `str` | `main` | Branch to pull updates from |
 | `UPDATE_PKGS` | `bool` | `True` | Auto-update pip packages on restart |
 | `RSS_DELAY` | `int` | `0` | Seconds between RSS feed checks |

@@ -246,7 +246,7 @@ DISABLE_SEARCH = False
 DISABLE_YTDLP = False
 CPU_LIMIT = 20
 THROTTLE_SERVICES = "auto"
-UPSTREAM_REPO = ""
+UPSTREAM_REPO = "https://github.com/Zan-getsu/Amaterasu"
 UPSTREAM_BRANCH = "main"
 UPDATE_PKGS = False
 # Comma-separated regex patterns for allowed UPSTREAM_REPO URLs.

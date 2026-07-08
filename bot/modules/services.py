@@ -34,7 +34,7 @@ async def start(_, message):
     lang = Language()
     buttons = ButtonMaker()
     buttons.url_button(
-        lang.START_BUTTON1, "https://github.com/its-niloy/Amaterasu"
+        lang.START_BUTTON1, "https://github.com/Zan-getsu/Amaterasu"
     )
     buttons.url_button(lang.START_BUTTON2, "https://t.me/itsniloybhowmick")
     reply_markup = buttons.build_menu(2)
@@ -329,4 +329,3 @@ async def log_cb(_, query):
             await edit_reply_markup(message, btn.build_menu(1))
         else:
             await query.answer("Web Paste Failed ! Check Logs", show_alert=True)
-
