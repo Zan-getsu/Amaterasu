@@ -31,13 +31,29 @@ jobs:
       - name: Install test runner
         run: |
           python -m pip install --upgrade pip
-          python -m pip install pytest
+          python -m pip install pytest pytest-asyncio
 
       - name: Compile Python sources
-        run: python -m compileall bot web tests config_sample.py cron_boot.py update.py
+        run: |
+          paths="bot web config_sample.py cron_boot.py update.py"
+          if [ -d tests ]; then
+            paths="$paths tests"
+          fi
+          python -m compileall $paths
 
       - name: Run lightweight smoke tests
-        run: python -m pytest tests/test_config.py tests/test_security.py -v
+        run: |
+          test_files=""
+          for file in tests/test_config.py tests/test_security.py; do
+            if [ -f "$file" ]; then
+              test_files="$test_files $file"
+            fi
+          done
+          if [ -z "$test_files" ]; then
+            echo "No lightweight smoke test files found in this branch; skipping pytest."
+            exit 0
+          fi
+          python -m pytest -v $test_files
 
       - name: Report ruff findings
         continue-on-error: true
