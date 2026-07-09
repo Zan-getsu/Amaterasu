@@ -149,28 +149,30 @@ def _stream_token(chat_id, message_id, unique_id):
 
 
 async def copy_to_bin(message):
+    async def copy_message(**kwargs):
+        copied = await message.copy(
+            chat_id=Config.BIN_CHANNEL,
+            reply_markup=None,
+            **kwargs,
+        )
+        with suppress(Exception):
+            await copied.edit_reply_markup(reply_markup=None)
+        return copied
+
     try:
         try:
-            return await message.copy(chat_id=Config.BIN_CHANNEL, reply_markup=None)
+            return await copy_message()
         except FloodWait as e:
             await sleep(e.value)
-            return await message.copy(chat_id=Config.BIN_CHANNEL, reply_markup=None)
+            return await copy_message()
     except Exception as e:
         if "MEDIA_CAPTION_TOO_LONG" in str(e):
             try:
                 try:
-                    return await message.copy(
-                        chat_id=Config.BIN_CHANNEL,
-                        caption=None,
-                        reply_markup=None,
-                    )
+                    return await copy_message(caption=None)
                 except FloodWait as flood:
                     await sleep(flood.value)
-                    return await message.copy(
-                        chat_id=Config.BIN_CHANNEL,
-                        caption=None,
-                        reply_markup=None,
-                    )
+                    return await copy_message(caption=None)
             except Exception as copy_error:
                 LOGGER.error(f"Failed to copy FileToLink media without caption: {copy_error}")
                 return None
