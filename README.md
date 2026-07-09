@@ -857,6 +857,8 @@ All limits are in **GB**. Set `0` to disable the limit.
 | `GLOBAL_RATE_LIMIT` | `bool` | `False` | Reserved legacy setting; not currently enforced |
 | `RATE_LIMIT_ENABLED` | `bool` | `False` | Reserved legacy setting; not currently enforced |
 
+Runtime cache tuning is environment-driven: set `FILETOLINK_CACHE_MAX_MB` to cap a single cached file (default `256`) and `FILETOLINK_CACHE_TOTAL_MAX_MB` to cap total FileToLink cache usage (default `2048`). Use `/link status` to inspect stream clients, storage config, and cache usage.
+
 ### 14. Web Server
 
 | Variable | Type | Default | Description |
@@ -1541,8 +1543,12 @@ Amaterasu includes a built-in FastAPI web server that converts any Telegram file
 
 For multiple consecutive files, reply to the first file and use `/link -i 10` to generate links for 10 files in one command.
 
+Use `/link status` to check the active `BASE_URL`, stream bot pool, current stream loads, and FileToLink cache usage.
+
+The web server serves an existing cached file immediately when available. For uncached full-file opens, the active transfer stays live-first and cache warming starts only after a successful full transfer; Range playback is kept live-first to avoid competing with initial seek/buffer requests.
+
 ### Multi-Token Load Balancing
-Configure `MULTI_TOKEN1`, `MULTI_TOKEN2`, `MULTI_TOKEN3` with additional bot tokens. The server automatically distributes file requests across tokens to avoid Telegram's FloodWait rate limits.
+Configure `MULTI_TOKEN1`, `MULTI_TOKEN2`, `MULTI_TOKEN3` with additional bot tokens. The server automatically distributes file requests across tokens to avoid Telegram's FloodWait rate limits, and temporarily cools down a stream bot after repeated fetch/stream failures so another available token can take over.
 
 ### Access Control
 | Feature | Variable | Description |

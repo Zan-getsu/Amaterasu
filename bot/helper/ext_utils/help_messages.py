@@ -604,7 +604,7 @@ def get_help_string():
                 f"{cmd_str}: Generate a Pyrogram string session (Only Owner & Sudo)."
             )
         elif key == "FileToLink":
-            help_lines.append(f"{cmd_str}: Generate direct stream and download links for a media file or batch of files.")
+            help_lines.append(f"{cmd_str} [reply|-i count|status]: Generate FileToLink links or show streaming status.")
         elif key == "Rename":
             help_lines.append(f"{cmd_str}: Toggle Rename Mode (automatically prompts you to rename files during PM sends or leech tasks).")
         elif key == "AutoRename":

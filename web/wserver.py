@@ -1,5 +1,6 @@
+import mimetypes
 import re
-from asyncio import sleep
+from asyncio import create_task, sleep
 from contextlib import asynccontextmanager, suppress
 from hashlib import sha256
 from importlib import import_module
@@ -7,6 +8,7 @@ from logging import FileHandler, StreamHandler, basicConfig, getLogger, INFO, WA
 from os import environ
 from pathlib import Path
 from re import compile as re_compile
+from time import monotonic
 from urllib.parse import quote, urlparse
 
 from aioaria2 import Aria2HttpClient
@@ -979,6 +981,7 @@ async def qbittorrent_proxy(path: str = "", request: Request = None):
 # FileToLink dynamic load-balanced streaming endpoints
 CHUNK_SIZE = 1024 * 1024
 MAX_CONCURRENT_PER_CLIENT = 8
+STREAM_CLIENT_COOLDOWN_SECONDS = 45
 FILETOLINK_CACHE_DIR = environ.get("FILETOLINK_CACHE_DIR", "/tmp/amaterasu-filetolink")
 VALID_DISPOSITIONS = {"inline", "attachment"}
 RANGE_REGEX = re.compile(r"^bytes=(?P<start>\d*)-(?P<end>\d*)$")
@@ -989,6 +992,8 @@ CORS_HEADERS = {
     "Access-Control-Expose-Headers": "Content-Length, Content-Range, Content-Disposition",
 }
 _filetolink_cache_locks = {}
+_filetolink_cache_warm_tasks = set()
+_stream_client_health = {}
 
 
 def _resolve_cache_max_bytes() -> int:
@@ -999,7 +1004,16 @@ def _resolve_cache_max_bytes() -> int:
     return max(cache_max_mb, 0) * 1024 * 1024
 
 
+def _resolve_cache_total_max_bytes() -> int:
+    try:
+        cache_total_max_mb = int(environ.get("FILETOLINK_CACHE_TOTAL_MAX_MB", "2048"))
+    except (TypeError, ValueError):
+        cache_total_max_mb = 2048
+    return max(cache_total_max_mb, 0) * 1024 * 1024
+
+
 FILETOLINK_CACHE_MAX_BYTES = _resolve_cache_max_bytes()
+FILETOLINK_CACHE_TOTAL_MAX_BYTES = _resolve_cache_total_max_bytes()
 
 
 def _release_stream_load(client_id: int) -> None:
@@ -1011,20 +1025,59 @@ def _release_stream_load(client_id: int) -> None:
     )
 
 
-def select_optimal_client() -> tuple[int, any]:
+def _stream_health(client_id: int) -> dict:
+    return _stream_client_health.setdefault(
+        client_id,
+        {"failures": 0, "cooldown_until": 0.0, "last_error": ""},
+    )
+
+
+def _stream_client_available(client_id: int) -> bool:
+    return monotonic() >= float(_stream_health(client_id).get("cooldown_until") or 0)
+
+
+def _record_stream_success(client_id: int) -> None:
+    health = _stream_health(client_id)
+    health["failures"] = 0
+    health["cooldown_until"] = 0.0
+    health["last_error"] = ""
+
+
+def _record_stream_failure(client_id: int, reason: str) -> None:
+    health = _stream_health(client_id)
+    failures = int(health.get("failures") or 0) + 1
+    health["failures"] = failures
+    health["last_error"] = str(reason)[:160]
+    if failures >= 2:
+        health["cooldown_until"] = monotonic() + STREAM_CLIENT_COOLDOWN_SECONDS
+
+
+def _stream_client_choices() -> list[tuple[int, any]]:
     from bot.core.tg_client import TgClient
+
     if not TgClient.stream_clients:
-        return 0, TgClient.bot
-    
-    available_clients = [
-        (cid, load) for cid, load in TgClient.stream_loads.items()
-        if load < MAX_CONCURRENT_PER_CLIENT
-    ]
-    if available_clients:
-        client_id = min(available_clients, key=lambda x: x[1])[0]
-    else:
-        client_id = min(TgClient.stream_loads, key=TgClient.stream_loads.get)
-    return client_id, TgClient.stream_clients[client_id]
+        return [(0, TgClient.bot)]
+
+    for client_id in TgClient.stream_clients:
+        TgClient.stream_loads.setdefault(client_id, 0)
+
+    def client_rank(item):
+        client_id, _ = item
+        load = TgClient.stream_loads.get(client_id, 0)
+        unavailable = not _stream_client_available(client_id)
+        return (unavailable, load >= MAX_CONCURRENT_PER_CLIENT, load, client_id)
+
+    return sorted(TgClient.stream_clients.items(), key=client_rank)
+
+
+def _acquire_stream_client(client_id: int) -> None:
+    from bot.core.tg_client import TgClient
+
+    TgClient.stream_loads[client_id] = TgClient.stream_loads.get(client_id, 0) + 1
+
+
+def select_optimal_client() -> tuple[int, any]:
+    return _stream_client_choices()[0]
 
 def get_media(message):
     # Phase 2.12 — delegate to canonical implementation in tg_utils.py
@@ -1053,6 +1106,28 @@ async def get_message(client, chat_id: int, message_id: int) -> any:
     if not message or not get_media(message):
         raise HTTPException(status_code=404, detail="Message does not contain media")
     return message
+
+
+async def get_message_with_stream_client(chat_id: int, message_id: int) -> tuple[int, any, any]:
+    last_error = None
+    for client_id, client in _stream_client_choices():
+        _acquire_stream_client(client_id)
+        try:
+            message = await get_message(client, chat_id, message_id)
+            _record_stream_success(client_id)
+            return client_id, client, message
+        except HTTPException as e:
+            last_error = e
+            _record_stream_failure(client_id, e.detail)
+            _release_stream_load(client_id)
+            LOGGER.warning(
+                f"FileToLink stream client {client_id} cannot fetch "
+                f"{chat_id}/{message_id}: {e.detail}"
+            )
+
+    if last_error:
+        raise last_error
+    raise HTTPException(status_code=503, detail="No stream client is available")
 
 
 def _decode_stream_route_token(token: str) -> tuple[int, int]:
@@ -1087,6 +1162,26 @@ def _resolve_filename(message, media, message_id: int) -> str:
     return f"Amaterasu_FileToLink_{message_id}.{ext or 'bin'}"
 
 
+def _file_extension(filename: str) -> str:
+    return filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+
+
+def _normalize_mime_type(filename: str, mime_type: str | None) -> str:
+    mime = (mime_type or "").strip().lower()
+    guessed = mimetypes.guess_type(filename)[0]
+    if not mime or mime == "application/octet-stream":
+        return guessed or mime or "application/octet-stream"
+    return mime
+
+
+def _absolute_public_url(request: Request, path: str) -> str:
+    if path.startswith(("http://", "https://")):
+        return path
+    config_base = getattr(_get_config(), "BASE_URL", "") or ""
+    base_url = config_base.rstrip("/") or str(request.base_url).rstrip("/")
+    return f"{base_url}{path if path.startswith('/') else '/' + path}"
+
+
 def _classify_file_type(filename: str, mime_type: str | None) -> str:
     mime = (mime_type or "").lower()
     if mime.startswith("video/"):
@@ -1097,8 +1192,15 @@ def _classify_file_type(filename: str, mime_type: str | None) -> str:
         return "image"
     if mime == "application/pdf":
         return "pdf"
+    if mime.startswith("text/") or mime in {
+        "application/json",
+        "application/xml",
+        "application/x-subrip",
+        "text/vtt",
+    }:
+        return "text"
 
-    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    ext = _file_extension(filename)
     if ext in ["mp4", "mkv", "webm", "avi", "mov", "flv", "wmv", "m4v"]:
         return "video"
     if ext in ["mp3", "ogg", "wav", "flac", "m4a", "aac"]:
@@ -1107,7 +1209,9 @@ def _classify_file_type(filename: str, mime_type: str | None) -> str:
         return "image"
     if ext == "pdf":
         return "pdf"
-    if ext in ["doc", "docx", "txt"]:
+    if ext in ["txt", "log", "md", "nfo", "srt", "vtt", "json", "xml", "csv", "tsv"]:
+        return "text"
+    if ext in ["doc", "docx", "xls", "xlsx", "ppt", "pptx"]:
         return "doc"
     return "unknown"
 
@@ -1246,6 +1350,67 @@ def _cache_path_for_media(chat_id, message_id: int, unique_id: str, filename: st
     return Path(FILETOLINK_CACHE_DIR) / f"{cache_key}{ext}"
 
 
+def _existing_cached_media(
+    chat_id,
+    message_id: int,
+    unique_id: str,
+    filename: str,
+    file_size: int,
+) -> Path | None:
+    if file_size <= 0:
+        return None
+
+    cache_path = _cache_path_for_media(chat_id, message_id, unique_id, filename)
+    try:
+        if cache_path.exists() and cache_path.stat().st_size == file_size:
+            with suppress(OSError):
+                cache_path.touch()
+            return cache_path
+        if cache_path.exists():
+            with suppress(FileNotFoundError):
+                cache_path.unlink()
+    except OSError:
+        return None
+    return None
+
+
+def _prune_filetolink_cache(required_bytes: int = 0) -> None:
+    if FILETOLINK_CACHE_TOTAL_MAX_BYTES <= 0:
+        return
+
+    cache_dir = Path(FILETOLINK_CACHE_DIR)
+    if not cache_dir.exists():
+        return
+
+    entries = []
+    total_size = 0
+    try:
+        iterator = cache_dir.iterdir()
+    except OSError:
+        return
+
+    for path in iterator:
+        try:
+            if not path.is_file() or path.name.endswith(".part"):
+                continue
+            stat = path.stat()
+        except OSError:
+            continue
+        total_size += stat.st_size
+        entries.append((stat.st_mtime, path, stat.st_size))
+
+    target_size = max(FILETOLINK_CACHE_TOTAL_MAX_BYTES - max(required_bytes, 0), 0)
+    if total_size <= target_size:
+        return
+
+    for _, path, size in sorted(entries):
+        with suppress(OSError):
+            path.unlink()
+            total_size -= size
+        if total_size <= target_size:
+            break
+
+
 async def _get_cached_media(
     preferred_client_id: int,
     preferred_client,
@@ -1258,17 +1423,23 @@ async def _get_cached_media(
 ) -> Path | None:
     if file_size <= 0 or file_size > FILETOLINK_CACHE_MAX_BYTES:
         return None
+    if FILETOLINK_CACHE_TOTAL_MAX_BYTES and file_size > FILETOLINK_CACHE_TOTAL_MAX_BYTES:
+        return None
 
     import asyncio
     from pyrogram.errors import FloodWait
     from bot.core.tg_client import TgClient
 
+    if cached_path := _existing_cached_media(
+        chat_id,
+        message_id,
+        unique_id,
+        filename,
+        file_size,
+    ):
+        return cached_path
+
     cache_path = _cache_path_for_media(chat_id, message_id, unique_id, filename)
-    if cache_path.exists() and cache_path.stat().st_size == file_size:
-        return cache_path
-    if cache_path.exists():
-        with suppress(FileNotFoundError):
-            cache_path.unlink()
 
     try:
         cache_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1279,11 +1450,16 @@ async def _get_cached_media(
     lock = _filetolink_cache_locks.setdefault(lock_key, asyncio.Lock())
 
     async with lock:
-        if cache_path.exists() and cache_path.stat().st_size == file_size:
-            return cache_path
-        if cache_path.exists():
-            with suppress(FileNotFoundError):
-                cache_path.unlink()
+        if cached_path := _existing_cached_media(
+            chat_id,
+            message_id,
+            unique_id,
+            filename,
+            file_size,
+        ):
+            return cached_path
+
+        _prune_filetolink_cache(file_size)
 
         temp_path = cache_path.with_suffix(f"{cache_path.suffix}.part")
         with suppress(FileNotFoundError):
@@ -1349,6 +1525,50 @@ async def _get_cached_media(
     return None
 
 
+def _schedule_cache_warm(
+    preferred_client_id: int,
+    preferred_client,
+    message,
+    chat_id,
+    message_id: int,
+    unique_id: str,
+    filename: str,
+    file_size: int,
+) -> None:
+    if file_size <= 0 or file_size > FILETOLINK_CACHE_MAX_BYTES:
+        return
+    if FILETOLINK_CACHE_TOTAL_MAX_BYTES and file_size > FILETOLINK_CACHE_TOTAL_MAX_BYTES:
+        return
+    if _existing_cached_media(chat_id, message_id, unique_id, filename, file_size):
+        return
+
+    cache_key = _cache_path_for_media(chat_id, message_id, unique_id, filename).stem
+    if cache_key in _filetolink_cache_warm_tasks:
+        return
+    _filetolink_cache_warm_tasks.add(cache_key)
+
+    async def warm_cache():
+        _acquire_stream_client(preferred_client_id)
+        try:
+            await _get_cached_media(
+                preferred_client_id,
+                preferred_client,
+                message,
+                chat_id,
+                message_id,
+                unique_id,
+                filename,
+                file_size,
+            )
+        except Exception as e:
+            LOGGER.warning(f"FileToLink background cache warm failed for {filename}: {e}")
+        finally:
+            _release_stream_load(preferred_client_id)
+            _filetolink_cache_warm_tasks.discard(cache_key)
+
+    create_task(warm_cache())
+
+
 @app.options("/watch/{path:path}")
 @app.options("/stream/{path:path}")
 @app.options("/dl/{path:path}")
@@ -1369,15 +1589,10 @@ async def watch_media(chat_id: str, message_id: int, request: Request, filename:
         chat_id = int(chat_id)
     except ValueError:
         pass
-    from bot.core.tg_client import TgClient
 
-    client_id, client = select_optimal_client()
-    if client_id not in TgClient.stream_loads:
-        TgClient.stream_loads[client_id] = 0
-    TgClient.stream_loads[client_id] += 1
-    
+    client_id, client, message = await get_message_with_stream_client(chat_id, message_id)
+
     try:
-        message = await get_message(client, chat_id, message_id)
         media = get_media(message)
         
         unique_id = getattr(media, "file_unique_id", "")
@@ -1392,7 +1607,7 @@ async def watch_media(chat_id: str, message_id: int, request: Request, filename:
             filename = _resolve_filename(message, media, message_id)
             
         file_size = getattr(media, "file_size", 0) or 0
-        mime_type = getattr(media, "mime_type", None)
+        mime_type = _normalize_mime_type(filename, getattr(media, "mime_type", None))
         from bot.helper.ext_utils.status_utils import get_readable_file_size
         readable_size = get_readable_file_size(file_size)
             
@@ -1404,16 +1619,27 @@ async def watch_media(chat_id: str, message_id: int, request: Request, filename:
             download_url = f"/dl/{chat_id}/{message_id}/{quote(filename, safe='')}?hash={secure_hash}"
         
         file_type = _classify_file_type(filename, mime_type)
+        absolute_file_url = _absolute_public_url(request, stream_url)
+        absolute_download_url = _absolute_public_url(request, download_url)
+        doc_preview_url = (
+            f"https://docs.google.com/gview?url={quote(absolute_file_url, safe='')}&embedded=true"
+            if file_type == "doc"
+            else ""
+        )
         LOGGER.info(f"Watch page: {filename} | client={client_id} | type={file_type} | size={readable_size}")
         subtitles = await _find_companion_subtitles(client, chat_id, message_id) if file_type == "video" else []
 
         return templates.TemplateResponse(request, "player.html", {
             "file_name": filename,
             "file_url": stream_url,
+            "absolute_file_url": absolute_file_url,
             "download_url": download_url,
+            "absolute_download_url": absolute_download_url,
+            "doc_preview_url": doc_preview_url,
             "file_size": readable_size,
             "file_type": file_type,
-            "mime_type": mime_type or "application/octet-stream",
+            "file_extension": _file_extension(filename) or "file",
+            "mime_type": mime_type,
             "subtitles": subtitles,
         })
     finally:
@@ -1441,16 +1667,11 @@ async def stream_media(chat_id: str, message_id: int, request: Request, filename
         chat_id = int(chat_id)
     except ValueError:
         pass
-    from bot.core.tg_client import TgClient
     from fastapi.responses import StreamingResponse
 
-    client_id, client = select_optimal_client()
-    if client_id not in TgClient.stream_loads:
-        TgClient.stream_loads[client_id] = 0
-    TgClient.stream_loads[client_id] += 1
-    
+    client_id, client, message = await get_message_with_stream_client(chat_id, message_id)
+
     try:
-        message = await get_message(client, chat_id, message_id)
         media = get_media(message)
         
         unique_id = getattr(media, "file_unique_id", "")
@@ -1475,6 +1696,7 @@ async def stream_media(chat_id: str, message_id: int, request: Request, filename
         
         if not filename:
             filename = _resolve_filename(message, media, message_id)
+        mime_type = _normalize_mime_type(filename, mime_type)
         
         range_header = request.headers.get("Range")
         start, end, ranged_response = _parse_range_header(range_header, file_size)
@@ -1517,10 +1739,7 @@ async def stream_media(chat_id: str, message_id: int, request: Request, filename
             _release_stream_load(client_id)
             return response
 
-        cached_path = await _get_cached_media(
-            client_id,
-            client,
-            message,
+        cached_path = _existing_cached_media(
             chat_id,
             message_id,
             unique_id,
@@ -1599,6 +1818,7 @@ async def stream_media(chat_id: str, message_id: int, request: Request, filename
                         await asyncio.sleep(e.value)
                     except TimeoutError as e:
                         if retries_left <= 0:
+                            _record_stream_failure(client_id, f"stream timeout: {e}")
                             LOGGER.warning(
                                 f"Telegram stream timed out for {filename} after "
                                 f"{bytes_sent}/{content_length} bytes: {e}"
@@ -1609,6 +1829,7 @@ async def stream_media(chat_id: str, message_id: int, request: Request, filename
                     except Exception as e:
                         if e.__class__.__name__ == "TimeoutError":
                             if retries_left <= 0:
+                                _record_stream_failure(client_id, f"stream timeout: {e}")
                                 LOGGER.warning(
                                     f"Telegram stream timed out for {filename} after "
                                     f"{bytes_sent}/{content_length} bytes: {e}"
@@ -1618,12 +1839,27 @@ async def stream_media(chat_id: str, message_id: int, request: Request, filename
                             await asyncio.sleep(2)
                             continue
                         if started_stream:
+                            _record_stream_failure(client_id, f"stream interrupted: {e}")
                             LOGGER.warning(
                                 f"Telegram stream interrupted for {filename} after "
                                 f"{bytes_sent}/{content_length} bytes: {e}"
                             )
                             return
+                        _record_stream_failure(client_id, f"stream failed: {e}")
                         raise HTTPException(status_code=404, detail="Failed to stream media") from e
+                if bytes_sent >= content_length:
+                    _record_stream_success(client_id)
+                    if not range_header:
+                        _schedule_cache_warm(
+                            client_id,
+                            client,
+                            message,
+                            chat_id,
+                            message_id,
+                            unique_id,
+                            filename,
+                            file_size,
+                        )
             finally:
                 _release_stream_load(client_id)
                 

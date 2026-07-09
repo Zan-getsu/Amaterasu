@@ -9,7 +9,7 @@
 {% block content %}
 <div class="stream-page">
   <div class="stream-card">
-    <div class="stream-player stream-player--{{ 'doc' if file_type == 'doc' else file_type }}" style="{% if file_type not in ['video', 'audio', 'image', 'pdf', 'doc'] %}display:none;{% endif %}">
+    <div class="stream-player stream-player--{{ 'doc' if file_type == 'doc' else file_type }}">
       {% if file_type == 'video' %}
       <div class="am-player is-paused" id="am-player" data-player-shell>
         <video id="player" playsinline controls preload="metadata">
@@ -129,14 +129,28 @@
         </div>
       </div>
       {% elif file_type == 'audio' %}
-      <audio id="player" controls preload="metadata">
-        <source src="{{ file_url }}" type="{{ mime_type }}" />
-      </audio>
+      <div class="stream-audio-panel">
+        <div class="stream-preview-icon"><i data-lucide="audio-lines"></i></div>
+        <audio id="player" controls preload="metadata">
+          <source src="{{ file_url }}" type="{{ mime_type }}" />
+        </audio>
+      </div>
       {% elif file_type == 'image' %}
-      <img src="{{ file_url }}" alt="{{ file_name }}" />
-      {% elif file_type == 'pdf' or file_type == 'doc' %}
-      {% set doc_url = 'https://docs.google.com/gview?url=' ~ file_url ~ '&embedded=true' if file_type == 'doc' else file_url %}
-      <iframe src="{{ doc_url }}"></iframe>
+      <a class="stream-image-preview" href="{{ file_url }}" target="_blank" rel="noopener">
+        <img src="{{ file_url }}" alt="{{ file_name }}" loading="lazy" />
+      </a>
+      {% elif file_type == 'pdf' %}
+      <iframe class="stream-doc-frame" src="{{ file_url }}" title="{{ file_name }}"></iframe>
+      {% elif file_type == 'text' %}
+      <iframe class="stream-doc-frame stream-doc-frame--text" src="{{ file_url }}" title="{{ file_name }}" sandbox></iframe>
+      {% elif file_type == 'doc' %}
+      <iframe class="stream-doc-frame" src="{{ doc_preview_url }}" title="{{ file_name }}"></iframe>
+      {% else %}
+      <div class="stream-generic-preview">
+        <div class="stream-preview-icon"><i data-lucide="file-down"></i></div>
+        <div class="stream-preview-title">{{ file_extension | upper }} file</div>
+        <div class="stream-preview-subtitle">{{ mime_type }}</div>
+      </div>
       {% endif %}
     </div>
 
@@ -197,7 +211,9 @@
 <script>
 window.AMATERASU_PLAYER = {
   fileUrl: {{ file_url | tojson }},
+  absoluteFileUrl: {{ absolute_file_url | tojson }},
   downloadUrl: {{ download_url | tojson }},
+  absoluteDownloadUrl: {{ absolute_download_url | tojson }},
   fileType: {{ file_type | tojson }},
   fileName: {{ file_name | tojson }},
   fileSize: {{ file_size | tojson }},

@@ -87,25 +87,96 @@ body.theater-mode .stream-player--video {
 }
 
 .stream-player--audio {
-  padding: var(--bs-space-5);
+  padding: var(--bs-space-6);
 }
 
-.stream-player--audio audio {
+.stream-audio-panel {
+  width: min(100%, 720px);
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: var(--bs-space-5);
+}
+
+.stream-audio-panel audio {
   width: 100%;
 }
 
-.stream-player--image img {
+.stream-image-preview {
   width: 100%;
+  display: flex;
+  justify-content: center;
+  background:
+    linear-gradient(45deg, rgba(255, 255, 255, 0.035) 25%, transparent 25%),
+    linear-gradient(-45deg, rgba(255, 255, 255, 0.035) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, rgba(255, 255, 255, 0.035) 75%),
+    linear-gradient(-45deg, transparent 75%, rgba(255, 255, 255, 0.035) 75%);
+  background-size: 24px 24px;
+  background-position: 0 0, 0 12px, 12px -12px, -12px 0;
+}
+
+.stream-image-preview img {
+  max-width: 100%;
+  max-height: min(78vh, 860px);
+  width: auto;
+  height: auto;
   display: block;
+  object-fit: contain;
 }
 
-.stream-player--doc iframe,
-.stream-player--pdf iframe {
+.stream-doc-frame {
   width: 100%;
   height: min(75vh, 760px);
   min-height: 420px;
   border: none;
   background: white;
+}
+
+.stream-doc-frame--text {
+  background: #f8fafc;
+}
+
+.stream-generic-preview {
+  width: 100%;
+  min-height: 320px;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: var(--bs-space-3);
+  padding: var(--bs-space-8);
+  text-align: center;
+}
+
+.stream-preview-icon {
+  width: 72px;
+  height: 72px;
+  border-radius: var(--bs-radius-md);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--bs-gold);
+  background: var(--bs-elevated);
+  border: 1px solid var(--bs-border);
+}
+
+.stream-preview-icon i {
+  width: 34px;
+  height: 34px;
+}
+
+.stream-preview-title {
+  max-width: 100%;
+  color: var(--bs-text-primary);
+  font-size: 16px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.stream-preview-subtitle {
+  max-width: 100%;
+  color: var(--bs-text-muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
 }
 
 .stream-info {
@@ -818,6 +889,15 @@ body.theater-mode .stream-player--video {
   .stream-actions {
     grid-template-columns: 1fr;
     gap: var(--bs-space-3);
+  }
+
+  .stream-audio-panel {
+    grid-template-columns: 1fr;
+    gap: var(--bs-space-4);
+  }
+
+  .stream-audio-panel .stream-preview-icon {
+    margin: 0 auto;
   }
 
   .stream-download-btn {

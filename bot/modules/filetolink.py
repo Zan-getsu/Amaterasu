@@ -1,5 +1,9 @@
 from asyncio import sleep
+from contextlib import suppress
 from datetime import datetime
+from html import escape
+from os import environ
+from pathlib import Path
 from urllib.parse import quote
 
 from pyrogram import ContinuePropagation
@@ -56,6 +60,59 @@ def is_streamable(filename):
         'pdf', 'doc', 'docx', 'txt' # Docs
     ]
     return ext in streamable_exts
+
+
+def _cache_usage():
+    cache_dir = Path(environ.get("FILETOLINK_CACHE_DIR", "/tmp/amaterasu-filetolink"))
+    total_size = 0
+    file_count = 0
+    with suppress(OSError):
+        for path in cache_dir.iterdir():
+            with suppress(OSError):
+                if path.is_file() and not path.name.endswith(".part"):
+                    total_size += path.stat().st_size
+                    file_count += 1
+    return cache_dir, file_count, total_size
+
+
+async def send_filetolink_status(message):
+    from bot.core.tg_client import TgClient
+
+    stream_clients = getattr(TgClient, "stream_clients", {}) or {}
+    stream_loads = getattr(TgClient, "stream_loads", {}) or {}
+    client_lines = []
+    for client_id in sorted(stream_clients):
+        client = stream_clients[client_id]
+        username = getattr(getattr(client, "me", None), "username", None)
+        name = f"@{username}" if username else ("main bot" if client_id == 0 else "stream bot")
+        load = stream_loads.get(client_id, 0)
+        client_lines.append(f"├─ #{client_id}: {escape(str(name))} | load {load}")
+
+    cache_dir, cache_files, cache_size = _cache_usage()
+    cache_max_mb = environ.get("FILETOLINK_CACHE_MAX_MB", "256")
+    cache_total_mb = environ.get("FILETOLINK_CACHE_TOTAL_MAX_MB", "2048")
+    base_url = Config.BASE_URL or "Not configured"
+    bin_channel = Config.BIN_CHANNEL or "Disabled"
+    leech_dump = Config.LEECH_DUMP_CHAT or "Disabled"
+    stream_count = len(stream_clients) or 1
+    client_block = "\n".join(client_lines) if client_lines else "└─ #0: main bot | load 0"
+
+    text = (
+        "<b>❖ FILETOLINK STATUS</b>\n"
+        "<code>"
+        f"┌─ {'Base URL':<12}: {escape(str(base_url))}\n"
+        f"├─ {'BIN_CHANNEL':<12}: {escape(str(bin_channel))}\n"
+        f"├─ {'Dump Chat':<12}: {escape(str(leech_dump))}\n"
+        f"├─ {'Stream Bots':<12}: {stream_count}\n"
+        f"├─ {'Cache Files':<12}: {cache_files}\n"
+        f"├─ {'Cache Size':<12}: {get_readable_file_size(cache_size)}\n"
+        f"├─ {'File Cap':<12}: {cache_max_mb} MB\n"
+        f"├─ {'Total Cap':<12}: {cache_total_mb} MB\n"
+        f"└─ {'Cache Dir':<12}: {escape(str(cache_dir))}\n\n"
+        f"{client_block}"
+        "</code>"
+    )
+    await send_message(message, text)
 
 
 async def maybe_shorten(link: str) -> str:
@@ -208,6 +265,11 @@ async def process_media_message(client, message, reply_to_msg):
         await edit_message(status_msg, f"<b>⚑ ERROR:</b> <i>Failed to generate links. {str(e)}</i>")
 
 async def link_command_handler(client, message):
+    input_list = (message.text or "").split()
+    if len(input_list) > 1 and input_list[1].lower() in {"status", "stats", "health"}:
+        await send_filetolink_status(message)
+        return
+
     if not Config.BASE_URL:
         await send_message(message, "BASE_URL is not configured in the bot settings.")
         return

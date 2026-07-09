@@ -9,8 +9,8 @@ document.addEventListener("DOMContentLoaded", () => {
     const SUBTITLES = Array.isArray(config.subtitles) ? config.subtitles : [];
     const LOG_PREFIX = "[Amaterasu Player]";
 
-    const absoluteStreamUrl = new URL(FILE_URL, window.location.origin).href;
-    const absoluteDownloadUrl = new URL(config.downloadUrl || FILE_URL, window.location.origin).href;
+    const absoluteStreamUrl = config.absoluteFileUrl || new URL(FILE_URL, window.location.origin).href;
+    const absoluteDownloadUrl = config.absoluteDownloadUrl || new URL(config.downloadUrl || FILE_URL, window.location.origin).href;
     const mainDownload = document.getElementById("main-download-btn");
     if (mainDownload) mainDownload.href = absoluteDownloadUrl;
 
@@ -54,8 +54,38 @@ document.addEventListener("DOMContentLoaded", () => {
       return Promise.resolve();
     }
 
+    function copyStreamUrl() {
+      const text = absoluteStreamUrl;
+      if (navigator.clipboard && window.isSecureContext) {
+        return navigator.clipboard.writeText(text).then(() => showToast("Stream URL copied", "copy"));
+      }
+      const input = document.createElement("textarea");
+      input.value = text;
+      input.setAttribute("readonly", "");
+      input.style.position = "fixed";
+      input.style.opacity = "0";
+      document.body.appendChild(input);
+      input.select();
+      try {
+        document.execCommand("copy");
+        showToast("Stream URL copied", "copy");
+      } catch (error) {
+        console.error(LOG_PREFIX, "Clipboard fallback failed", error);
+        window.prompt("Copy the link below:", text);
+      } finally {
+        input.remove();
+      }
+      return Promise.resolve();
+    }
+
     function buildActions() {
       const actions = [
+        {
+          text: "Copy Stream",
+          desc: "Copy preview address",
+          click: copyStreamUrl,
+          icon: "link",
+        },
         {
           text: "Copy Download",
           desc: "Copy direct download address",
@@ -63,6 +93,15 @@ document.addEventListener("DOMContentLoaded", () => {
           icon: "copy",
         },
       ];
+
+      if (!["video", "audio"].includes(FILE_TYPE)) {
+        actions.unshift({
+          text: "Open Preview",
+          desc: "Open in a new tab",
+          url: absoluteStreamUrl,
+          icon: "external-link",
+        });
+      }
 
       if (FILE_TYPE === "video" || FILE_TYPE === "audio") {
         actions.push(
