@@ -1,23 +1,11 @@
-# Reliable smoke CI for Amaterasu.
-#
-# The full bot runtime has large optional downloader/service dependencies.
-# This workflow avoids installing that whole stack on every push and instead
-# runs deterministic checks that catch broken Python syntax plus lightweight
-# config/security regressions.
 name: CI
 
-on:
+"on":
   push:
-    branches: ["**"]
   pull_request:
-    branches: ["**"]
 
 permissions:
   contents: read
-
-concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
 
 env:
   PIP_DISABLE_PIP_VERSION_CHECK: "1"
@@ -27,8 +15,8 @@ env:
   AMATERASU_DB_PARTITION_SALT: "wzmlx_v3_db_partition_salt"
 
 jobs:
-  checks:
-    name: Python Smoke Checks
+  smoke:
+    name: Smoke Checks
     runs-on: ubuntu-latest
 
     steps:
@@ -39,12 +27,11 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-          cache: "pip"
 
-      - name: Install CI tools
+      - name: Install test runner
         run: |
           python -m pip install --upgrade pip
-          python -m pip install pytest ruff
+          python -m pip install pytest
 
       - name: Compile Python sources
         run: python -m compileall bot web tests config_sample.py cron_boot.py update.py
@@ -53,11 +40,14 @@ jobs:
         run: python -m pytest tests/test_config.py tests/test_security.py -v
 
       - name: Report ruff findings
+        continue-on-error: true
         run: |
-          ruff check . --output-format=github || true
-          ruff format --check . || true
+          python -m pip install ruff
+          ruff check . --output-format=github
+          ruff format --check .
 
       - name: Report dependency audit
+        continue-on-error: true
         run: |
-          python -m pip install pip-audit || exit 0
-          pip-audit -r requirements.txt || true
+          python -m pip install pip-audit
+          pip-audit -r requirements.txt

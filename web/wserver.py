@@ -1332,7 +1332,7 @@ def _parse_range_header(range_header: str | None, file_size: int) -> tuple[int, 
             detail="Requested range not satisfiable",
             headers={"Content-Range": f"bytes */{file_size}"},
         )
-    return start, end, not (start == 0 and end == file_size - 1)
+    return start, end, True
 
 
 def _cache_path_for_media(chat_id, message_id: int, unique_id: str, filename: str) -> Path:
