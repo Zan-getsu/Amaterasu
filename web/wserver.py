@@ -1729,6 +1729,7 @@ async def stream_media(chat_id: str, message_id: int, request: Request, filename
         
         if ranged_response:
             headers["Content-Range"] = f"bytes {start}-{end}/{file_size}"
+            headers["Content-Length"] = str(content_length)
             
         if request.method == "HEAD":
             headers["Content-Length"] = str(content_length)
@@ -1863,9 +1864,9 @@ async def stream_media(chat_id: str, message_id: int, request: Request, filename
             finally:
                 _release_stream_load(client_id)
                 
-        # Do not send Content-Length for live Telegram streams. If Telegram
-        # times out mid-transfer, chunked streaming can end cleanly instead
-        # of tripping h11's "Too little data for declared Content-Length".
+        # Keep Content-Length off full live Telegram streams. If Telegram
+        # times out mid-transfer, chunked streaming can end cleanly. Range
+        # seeks still include it above so browsers can keep playback position.
         return StreamingResponse(
             stream_generator(),
             status_code=206 if ranged_response else 200,
