@@ -60,6 +60,7 @@ from .speedtest import speedtest
 from .stats import bot_stats, get_packages_version, stats_pages
 from .status import status_pages, task_status
 from .telegraph_upload import telegraph_upload
+from .token_generator import token_generator
 from .uphoster import uphoster
 from .users_settings import edit_user_settings, get_users_settings, send_user_settings
 from .ytdlp import ytdl, ytdl_leech
@@ -152,6 +153,7 @@ __all__ = [
     "status_pages",
     "task_status",
     "telegraph_upload",
+    "token_generator",
     "torrent_search",
     "torrent_search_update",
     "unauthorize",

@@ -435,6 +435,7 @@ def get_bot_commands():
         "Restart": "[SUDO] Reboot bot",
         "RestartSessions": "[SUDO] Reboot User Sessions",
         "GenPyroSess": "[SUDO] Generate Pyrogram string session",
+        "TokenGen": "Create or download your private Google Drive token.pickle",
         "SpeedTest": "Check Bot Speed using Speedtest.com",
         "Telegraph": "[reply] Upload Image/Video (under 5MB) to Telegraph",
         "FileToLink": "[reply/batch] Generate direct stream and download links for media files",
@@ -602,6 +603,10 @@ def get_help_string():
         elif key == "GenPyroSess":
             help_lines.append(
                 f"{cmd_str}: Generate a Pyrogram string session (Only Owner & Sudo)."
+            )
+        elif key == "TokenGen":
+            help_lines.append(
+                f"{cmd_str}: Create, replace, or download your private Google Drive token.pickle."
             )
         elif key == "FileToLink":
             help_lines.append(f"{cmd_str} [reply|-i count|status]: Generate FileToLink links or show streaming status.")

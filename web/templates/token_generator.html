@@ -1,0 +1,506 @@
+{% extends "base.html" %}
+
+{% block title %}Amaterasu | Google Token Generator{% endblock %}
+
+{% block extra_css %}
+<style>
+html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+body { overflow-x: hidden; }
+.token-page {
+  width: 100%;
+  min-width: 0;
+  padding: clamp(24px, 4vw, 48px) 0 clamp(48px, 7vw, 80px);
+}
+.token-page__container {
+  width: min(100%, 1280px);
+  min-width: 0;
+  margin: 0 auto;
+  padding-inline: clamp(12px, 3vw, 32px);
+}
+.token-header { margin-bottom: clamp(24px, 4vw, 34px); }
+.token-title {
+  margin: 0;
+  color: var(--bs-text-primary);
+  font-size: clamp(28px, 4vw, 38px);
+  line-height: 1.15;
+  letter-spacing: -0.035em;
+}
+.token-subtitle {
+  max-width: 720px;
+  margin: 8px 0 0;
+  color: var(--bs-text-secondary);
+  font-size: clamp(14px, 2vw, 16px);
+}
+.token-alert {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-bottom: 18px;
+  padding: 13px 15px;
+  border: 1px solid var(--bs-border);
+  border-radius: var(--bs-radius-md);
+  background: var(--bs-graphite);
+  color: var(--bs-text-secondary);
+  font-size: 13px;
+}
+.token-alert svg { flex: 0 0 auto; margin-top: 1px; }
+.token-alert--error { color: #ffb0a8; border-color: rgba(231, 76, 60, .35); background: var(--bs-error-dim); }
+.token-alert--success { color: #99e9b9; border-color: rgba(46, 204, 113, .32); background: var(--bs-success-dim); }
+.token-alert--warning { color: #ffd28a; border-color: rgba(243, 156, 18, .3); background: var(--bs-warning-dim); }
+.token-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.55fr) minmax(310px, .85fr);
+  gap: clamp(18px, 2.4vw, 26px);
+  align-items: start;
+}
+.token-layout > * { min-width: 0; }
+.token-panel {
+  min-width: 0;
+  border: 1px solid var(--bs-border);
+  border-radius: var(--bs-radius-lg);
+  background: linear-gradient(145deg, rgba(26, 36, 48, .72), rgba(19, 26, 34, .82));
+  box-shadow: var(--bs-shadow-sm);
+}
+.token-panel__body { padding: clamp(20px, 3vw, 30px); }
+.token-step + .token-step {
+  margin-top: 28px;
+  padding-top: 28px;
+  border-top: 1px solid var(--bs-border);
+}
+.token-step__title, .saved-title {
+  margin: 0;
+  color: var(--bs-text-primary);
+  font-size: clamp(19px, 2.6vw, 23px);
+  line-height: 1.3;
+  letter-spacing: -.02em;
+}
+.token-step__copy {
+  margin: 7px 0 18px;
+  color: var(--bs-text-muted);
+  font-size: 13px;
+  line-height: 1.55;
+}
+.field-group { min-width: 0; margin-top: 16px; }
+.field-label {
+  display: block;
+  margin-bottom: 7px;
+  color: var(--bs-text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+}
+.field-label small { color: var(--bs-text-muted); font-weight: 400; }
+.token-input, .token-textarea {
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
+  padding: 11px 13px;
+  border: 1px solid var(--bs-border);
+  border-radius: var(--bs-radius-md);
+  outline: none;
+  background: rgba(11, 15, 20, .48);
+  color: var(--bs-text-primary);
+  font-family: var(--bs-font-sans);
+  font-size: 14px;
+  line-height: 1.5;
+  transition: border-color var(--bs-transition-fast), box-shadow var(--bs-transition-fast), background var(--bs-transition-fast);
+}
+.token-input::placeholder, .token-textarea::placeholder { color: var(--bs-text-disabled); }
+.token-input:hover, .token-textarea:hover { border-color: rgba(212, 175, 55, .24); }
+.token-input:focus, .token-textarea:focus {
+  border-color: var(--bs-gold-border);
+  background: var(--bs-elevated);
+  box-shadow: 0 0 0 3px var(--bs-gold-dim);
+}
+.token-input--mono, .token-textarea--mono { font-family: var(--bs-font-mono); }
+.token-input[readonly] { color: var(--bs-text-secondary); cursor: text; }
+.token-textarea { min-height: 92px; resize: vertical; overflow-wrap: anywhere; }
+.callback-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 9px;
+  align-items: stretch;
+  min-width: 0;
+}
+.callback-row .token-input { overflow-x: auto; white-space: nowrap; }
+.token-button {
+  min-height: 44px;
+  padding: 10px 17px;
+  border: 1px solid transparent;
+  border-radius: var(--bs-radius-md);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--bs-text-primary);
+  background: transparent;
+  font-family: var(--bs-font-sans);
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 1.2;
+  text-decoration: none;
+  cursor: pointer;
+  transition: transform var(--bs-transition-fast), border-color var(--bs-transition-fast), color var(--bs-transition-fast), background var(--bs-transition-fast), box-shadow var(--bs-transition-fast);
+}
+.token-button:hover:not(:disabled) { transform: translateY(-1px); }
+.token-button:focus-visible { outline: 3px solid var(--bs-gold-dim); outline-offset: 2px; }
+.token-button--primary {
+  border-color: rgba(255, 255, 255, .18);
+  background: var(--bs-gradient-gold);
+  color: #0b0f14;
+  box-shadow: var(--bs-shadow-gold-inset);
+}
+.token-button--primary:hover:not(:disabled) { box-shadow: 0 8px 22px rgba(212, 175, 55, .28); }
+.token-button--outline { border-color: var(--bs-gold-border); color: var(--bs-gold); }
+.token-button--outline:hover:not(:disabled) { background: var(--bs-gold-dim); }
+.token-button--danger { border-color: rgba(231, 76, 60, .48); color: #ff6f61; }
+.token-button--danger:hover:not(:disabled) { background: var(--bs-error-dim); }
+.token-button--copy { border-color: var(--bs-border); color: var(--bs-gold); white-space: nowrap; }
+.token-button--copy:hover { border-color: var(--bs-gold-border); background: var(--bs-gold-dim); }
+.token-button:disabled, .token-button[aria-disabled="true"] { opacity: .42; cursor: not-allowed; pointer-events: none; }
+.auth-methods {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+  margin: 20px 0 4px;
+  padding: 4px;
+  border: 1px solid var(--bs-border);
+  border-radius: var(--bs-radius-md);
+  background: rgba(11, 15, 20, .38);
+}
+.auth-method {
+  min-height: 44px;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid transparent;
+  border-radius: calc(var(--bs-radius-md) - 3px);
+  background: transparent;
+  color: var(--bs-text-muted);
+  font: 600 12px/1.25 var(--bs-font-sans);
+  cursor: pointer;
+}
+.auth-method[aria-selected="true"] {
+  border-color: var(--bs-gold-border);
+  background: var(--bs-gold-dim);
+  color: var(--bs-gold);
+}
+.auth-pane[hidden] { display: none !important; }
+.upload-control { position: relative; margin-top: 16px; }
+.upload-control input { position: absolute; inline-size: 1px; block-size: 1px; opacity: 0; pointer-events: none; }
+.upload-box {
+  min-height: 102px;
+  padding: 17px;
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  border: 1px dashed rgba(170, 180, 192, .38);
+  border-radius: var(--bs-radius-md);
+  background: rgba(11, 15, 20, .32);
+  cursor: pointer;
+  transition: border-color var(--bs-transition-fast), background var(--bs-transition-fast);
+}
+.upload-box:hover, .upload-control input:focus-visible + .upload-box { border-color: var(--bs-gold-border); background: var(--bs-gold-dim); }
+.upload-box__icon { flex: 0 0 auto; color: var(--bs-gold); }
+.upload-box__copy { min-width: 0; }
+.upload-box__title { display: block; color: var(--bs-text-primary); font-size: 14px; font-weight: 650; }
+.upload-box__name { display: block; margin-top: 3px; color: var(--bs-text-muted); font-family: var(--bs-font-mono); font-size: 12px; overflow-wrap: anywhere; }
+.manual-grid { display: grid; grid-template-columns: 1fr; gap: 0; }
+.field-hint, .privacy-note {
+  margin: 7px 0 0;
+  color: var(--bs-text-muted);
+  font-size: 11px;
+  line-height: 1.55;
+}
+.privacy-note { display: flex; align-items: flex-start; gap: 8px; margin-top: 15px; }
+.privacy-note svg { flex: 0 0 auto; margin-top: 1px; color: var(--bs-gold); }
+.continue-button { width: 100%; margin-top: 20px; }
+.saved-panel { position: sticky; top: 80px; }
+.saved-panel .token-panel__body { padding: clamp(20px, 3vw, 28px); }
+.saved-state {
+  min-height: 52px;
+  margin-top: 18px;
+  padding: 12px 14px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  border: 1px solid rgba(46, 204, 113, .28);
+  border-radius: var(--bs-radius-md);
+  background: var(--bs-success-dim);
+  color: var(--bs-success);
+  font-size: 14px;
+  font-weight: 650;
+}
+.saved-state--ready { border-color: var(--bs-gold-border); background: var(--bs-gold-dim); color: var(--bs-gold); }
+.saved-meta { margin: 20px 0 0; padding: 0; }
+.saved-meta__row {
+  min-width: 0;
+  padding: 9px 0;
+  display: grid;
+  grid-template-columns: 105px minmax(0, 1fr);
+  gap: 12px;
+  border-bottom: 1px solid var(--bs-border-subtle);
+}
+.saved-meta dt { color: var(--bs-text-muted); font-size: 12px; }
+.saved-meta dd { min-width: 0; margin: 0; color: var(--bs-text-secondary); font-size: 12px; overflow-wrap: anywhere; }
+.saved-meta code { color: var(--bs-text-secondary); font-family: var(--bs-font-mono); font-size: 11px; }
+.download-actions { display: grid; gap: 10px; margin-top: 22px; padding-top: 22px; border-top: 1px solid var(--bs-border); }
+.download-actions .token-button { width: 100%; }
+.security-note {
+  margin-top: 22px;
+  padding-top: 18px;
+  display: flex;
+  gap: 10px;
+  border-top: 1px solid var(--bs-border);
+  color: var(--bs-text-muted);
+  font-size: 11px;
+  line-height: 1.6;
+}
+.security-note svg { flex: 0 0 auto; color: var(--bs-gold); margin-top: 1px; }
+.empty-token {
+  margin-top: 18px;
+  padding: 22px 0 8px;
+  color: var(--bs-text-muted);
+  font-size: 13px;
+}
+.empty-token__icon {
+  width: 42px;
+  height: 42px;
+  margin-bottom: 12px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--bs-radius-md);
+  background: var(--bs-gold-dim);
+  color: var(--bs-gold);
+}
+@media (max-width: 980px) {
+  .token-layout { grid-template-columns: minmax(0, 1fr); }
+  .saved-panel { position: static; }
+}
+@media (max-width: 640px) {
+  .token-page { padding-top: 25px; }
+  .token-page__container { padding-inline: 12px; }
+  .token-title { font-size: clamp(26px, 9vw, 32px); }
+  .token-panel__body, .saved-panel .token-panel__body { padding: 18px 16px; }
+  .token-step + .token-step { margin-top: 22px; padding-top: 22px; }
+  .token-input, .token-textarea { font-size: 16px; }
+  .token-button { min-height: 46px; font-size: 14px; }
+  .auth-method { min-height: 46px; }
+  .upload-box { min-height: 96px; }
+  .saved-meta__row { grid-template-columns: 92px minmax(0, 1fr); }
+}
+@media (max-width: 380px) {
+  .callback-row { grid-template-columns: minmax(0, 1fr); }
+  .token-button--copy { width: 100%; }
+  .auth-methods { grid-template-columns: minmax(0, 1fr); }
+  .saved-meta__row { grid-template-columns: minmax(0, 1fr); gap: 3px; }
+  .upload-box { padding: 14px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .token-button, .token-input, .token-textarea, .upload-box { transition: none; }
+  .token-button:hover:not(:disabled) { transform: none; }
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<section class="token-page">
+  <div class="token-page__container">
+    <header class="token-header">
+      <h1 class="token-title">Google Token Generator</h1>
+      <p class="token-subtitle">Create and securely save your personal Google Drive token.pickle.</p>
+    </header>
+
+    {% if error %}
+    <div class="token-alert token-alert--error" role="alert">
+      <i data-lucide="circle-alert" style="width:18px;height:18px"></i>
+      <span>{{ error }}</span>
+    </div>
+    {% endif %}
+    {% if success %}
+    <div class="token-alert token-alert--success" role="status">
+      <i data-lucide="circle-check" style="width:18px;height:18px"></i>
+      <span>Your token.pickle was generated, encrypted, and saved to your private download library. Your active Drive token was not changed.</span>
+    </div>
+    {% endif %}
+    {% if activation_success %}
+    <div class="token-alert token-alert--success" role="status">
+      <i data-lucide="circle-check" style="width:18px;height:18px"></i>
+      <span>This generated token is now your active per-user Google Drive token in Amaterasu.</span>
+    </div>
+    {% endif %}
+    {% if refresh_warning %}
+    <div class="token-alert token-alert--warning" role="status">
+      <i data-lucide="triangle-alert" style="width:18px;height:18px"></i>
+      <span>Google did not return a refresh token. Revoke the app in your Google Account, then replace this token if long-term offline access is required.</span>
+    </div>
+    {% endif %}
+
+    <div class="token-layout">
+      <section class="token-panel" aria-labelledby="oauth-config-title">
+        <div class="token-panel__body">
+          <div class="token-step">
+            <h2 id="oauth-config-title" class="token-step__title">1. Configure Google OAuth</h2>
+            <p class="token-step__copy">Create a Web application OAuth client in Google Cloud and add this exact callback URL.</p>
+            <div class="field-group">
+              <label class="field-label" for="callback-url">Authorized redirect URI (read-only)</label>
+              <div class="callback-row">
+                <input id="callback-url" class="token-input token-input--mono" type="text" value="{{ callback_url }}" readonly aria-describedby="callback-hint">
+                <button id="copy-callback" class="token-button token-button--copy" type="button">
+                  <i data-lucide="copy" style="width:16px;height:16px"></i><span>Copy</span>
+                </button>
+              </div>
+              <p id="callback-hint" class="field-hint">It must match Google Cloud character-for-character.</p>
+            </div>
+          </div>
+
+          <div class="token-step">
+            <h2 class="token-step__title">2. Authorize your account</h2>
+            <p class="token-step__copy">Upload your OAuth Web client file or enter the same values manually.</p>
+
+            <form id="oauth-form" method="post" enctype="multipart/form-data" action="/api/token-generator/start?user_id={{ user_id }}&amp;token={{ page_token }}">
+              <input id="auth-method-value" type="hidden" name="auth_method" value="upload">
+              <div class="auth-methods" role="tablist" aria-label="OAuth credential method">
+                <button id="upload-tab" class="auth-method" type="button" role="tab" aria-selected="true" aria-controls="upload-pane" data-auth-method="upload">Upload credentials.json</button>
+                <button id="manual-tab" class="auth-method" type="button" role="tab" aria-selected="false" aria-controls="manual-pane" data-auth-method="manual">Enter manually</button>
+              </div>
+
+              <div id="upload-pane" class="auth-pane" role="tabpanel" aria-labelledby="upload-tab">
+                <div class="upload-control">
+                  <input id="credentials-file" name="credentials_file" type="file" accept=".json,application/json" required>
+                  <label class="upload-box" for="credentials-file">
+                    <i class="upload-box__icon" data-lucide="cloud-upload" style="width:28px;height:28px"></i>
+                    <span class="upload-box__copy">
+                      <span class="upload-box__title">Choose credentials.json</span>
+                      <span id="credentials-file-name" class="upload-box__name">No file selected</span>
+                    </span>
+                  </label>
+                </div>
+                <p class="privacy-note"><i data-lucide="lock-keyhole" style="width:15px;height:15px"></i><span>Your file is encrypted only for this pending OAuth attempt, consumed once, and never saved as a standalone file.</span></p>
+              </div>
+
+              <div id="manual-pane" class="auth-pane" role="tabpanel" aria-labelledby="manual-tab" hidden>
+                <div class="manual-grid">
+                  <div class="field-group">
+                    <label class="field-label" for="client-id">Google OAuth Client ID</label>
+                    <input id="client-id" class="token-input token-input--mono" name="client_id" type="text" maxlength="512" autocomplete="off" spellcheck="false" placeholder="123456789.apps.googleusercontent.com" disabled>
+                  </div>
+                  <div class="field-group">
+                    <label class="field-label" for="client-secret">Google OAuth Client Secret</label>
+                    <input id="client-secret" class="token-input token-input--mono" name="client_secret" type="password" maxlength="512" autocomplete="off" spellcheck="false" disabled>
+                  </div>
+                </div>
+                <p class="privacy-note"><i data-lucide="lock-keyhole" style="width:15px;height:15px"></i><span>Client values expire after 15 minutes, are consumed once, and are not retained separately from your generated token.</span></p>
+              </div>
+
+              <div class="field-group">
+                <label class="field-label" for="login-hint">Google account hint <small>(optional)</small></label>
+                <input id="login-hint" class="token-input" name="login_hint" type="email" maxlength="320" autocomplete="email" placeholder="you@example.com">
+              </div>
+              <div class="field-group">
+                <label class="field-label" for="scopes">Scopes</label>
+                <textarea id="scopes" class="token-textarea token-textarea--mono" name="scopes" maxlength="4096" rows="3">{{ default_scope }}</textarea>
+                <p class="field-hint">Separate multiple scopes with spaces or new lines. The default grants Google Drive access.</p>
+              </div>
+              <button class="token-button token-button--primary continue-button" type="submit">
+                <span aria-hidden="true" style="font-size:17px;font-weight:800">G</span>
+                <span>Continue with Google</span>
+              </button>
+            </form>
+          </div>
+        </div>
+      </section>
+
+      <aside class="token-panel saved-panel" aria-labelledby="saved-token-title">
+        <div class="token-panel__body">
+          <h2 id="saved-token-title" class="saved-title">Your saved token</h2>
+          {% if token_status %}
+          <div class="saved-state{% if not token_status.is_active %} saved-state--ready{% endif %}">
+            <i data-lucide="{% if token_status.is_active %}circle-check{% else %}download{% endif %}" style="width:20px;height:20px"></i>
+            <span>{% if token_status.is_active %}In use by Amaterasu{% else %}Saved and ready{% endif %}</span>
+          </div>
+          <dl class="saved-meta">
+            <div class="saved-meta__row"><dt>Updated</dt><dd>{{ token_status.updated }}</dd></div>
+            <div class="saved-meta__row"><dt>File size</dt><dd>{{ token_status.size }}</dd></div>
+            <div class="saved-meta__row"><dt>Scope</dt><dd>{% for scope in token_status.scopes %}<code>{{ scope }}</code>{% if not loop.last %}<br>{% endif %}{% endfor %}</dd></div>
+          </dl>
+          <div class="download-actions">
+            <a class="token-button token-button--primary" href="/api/token-generator/download/pickle?user_id={{ user_id }}&amp;token={{ page_token }}" download="token.pickle"><i data-lucide="download" style="width:17px;height:17px"></i>Download token.pickle</a>
+            {% if token_status.is_active %}
+            <span class="token-button token-button--outline" aria-disabled="true"><i data-lucide="circle-check" style="width:17px;height:17px"></i>In use by Amaterasu</span>
+            {% else %}
+            <form method="post" action="/api/token-generator/activate?user_id={{ user_id }}&amp;token={{ page_token }}">
+              <button class="token-button token-button--outline" type="submit"><i data-lucide="cloud-check" style="width:17px;height:17px"></i>Use in Amaterasu</button>
+            </form>
+            {% endif %}
+            {% if token_status.json_available %}
+            <a class="token-button token-button--outline" href="/api/token-generator/download/json?user_id={{ user_id }}&amp;token={{ page_token }}" download="token.json"><i data-lucide="file-json" style="width:17px;height:17px"></i>Download token.json</a>
+            {% else %}
+            <span class="token-button token-button--outline" aria-disabled="true" title="token.json is available after generating a token on this page"><i data-lucide="file-json" style="width:17px;height:17px"></i>token.json unavailable</span>
+            {% endif %}
+            <button id="replace-token" class="token-button token-button--danger" type="button"><i data-lucide="refresh-cw" style="width:17px;height:17px"></i>Replace token</button>
+          </div>
+          {% else %}
+          <div class="empty-token">
+            <div class="empty-token__icon"><i data-lucide="key-round" style="width:21px;height:21px"></i></div>
+            <strong style="display:block;color:var(--bs-text-secondary);margin-bottom:4px">No token saved yet</strong>
+            Complete Google authorization and your downloads will stay available here.
+          </div>
+          {% endif %}
+          <div class="security-note"><i data-lucide="shield-check" style="width:18px;height:18px"></i><span>Your token is encrypted in your private database record and can only be downloaded through a fresh private link from <code>/tokengen</code>.</span></div>
+        </div>
+      </aside>
+    </div>
+  </div>
+</section>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.addEventListener("DOMContentLoaded", () => {
+  const methodValue = document.getElementById("auth-method-value");
+  const fileInput = document.getElementById("credentials-file");
+  const clientId = document.getElementById("client-id");
+  const clientSecret = document.getElementById("client-secret");
+  const tabs = Array.from(document.querySelectorAll("[data-auth-method]"));
+
+  function selectMethod(method) {
+    const upload = method === "upload";
+    methodValue.value = method;
+    document.getElementById("upload-pane").hidden = !upload;
+    document.getElementById("manual-pane").hidden = upload;
+    fileInput.disabled = !upload;
+    fileInput.required = upload;
+    clientId.disabled = upload;
+    clientSecret.disabled = upload;
+    clientId.required = !upload;
+    clientSecret.required = !upload;
+    tabs.forEach((tab) => tab.setAttribute("aria-selected", String(tab.dataset.authMethod === method)));
+  }
+
+  tabs.forEach((tab) => tab.addEventListener("click", () => selectMethod(tab.dataset.authMethod)));
+  fileInput.addEventListener("change", () => {
+    document.getElementById("credentials-file-name").textContent = fileInput.files?.[0]?.name || "No file selected";
+  });
+
+  document.getElementById("copy-callback").addEventListener("click", async () => {
+    const input = document.getElementById("callback-url");
+    try {
+      await navigator.clipboard.writeText(input.value);
+    } catch (_) {
+      input.focus();
+      input.select();
+      document.execCommand("copy");
+    }
+    const label = document.querySelector("#copy-callback span");
+    label.textContent = "Copied";
+    window.setTimeout(() => { label.textContent = "Copy"; }, 1400);
+  });
+
+  document.getElementById("replace-token")?.addEventListener("click", () => {
+    document.getElementById("oauth-config-title").scrollIntoView({ behavior: "smooth", block: "start" });
+    window.setTimeout(() => fileInput.focus(), 350);
+  });
+
+  selectMethod("upload");
+});
+</script>
+{% endblock %}

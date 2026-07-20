@@ -1,4 +1,5 @@
 from asyncio import create_subprocess_exec, create_subprocess_shell, gather, sleep
+from contextlib import suppress
 from importlib import import_module
 from os import environ, path as ospath, getenv
 from time import time
@@ -232,7 +233,26 @@ async def load_settings():
 
                 for key, path in paths.items():
                     if row.get(key):
-                        await save_file(path, row[key])
+                        content = row[key]
+                        if key == "TOKEN_PICKLE":
+                            from ..helper.ext_utils.google_token import unprotect_blob
+                            from ..helper.ext_utils.secrets import get_web_secret
+
+                            try:
+                                content = unprotect_blob(
+                                    content,
+                                    get_web_secret(),
+                                    "token-pickle",
+                                )
+                            except ValueError as exc:
+                                LOGGER.error(
+                                    f"Could not restore Google token for user {uid}: {exc}"
+                                )
+                                with suppress(OSError):
+                                    await remove(path)
+                                row.pop(key, None)
+                                continue
+                        await save_file(path, content)
                         row[key] = path
                 user_data[uid] = row
             LOGGER.info("Users Data has been imported from MongoDB")

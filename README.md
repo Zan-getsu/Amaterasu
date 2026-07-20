@@ -75,6 +75,7 @@
 - [🎭 Auto-Rename Engine](#auto-rename)
 - [🗂️ File Sorting Mode](#file-sorting-mode)
 - [🎨 Encoding Profile Creator (Web UI)](#encoding-profile-creator-web-ui)
+- [🔐 Google Token Generator (Web UI)](#google-token-generator-web-ui)
 - [🧰 Advanced Usage & Arguments](#advanced-usage--arguments)
   - [Argument Quick Reference](#argument-quick-reference)
   - [Telegram Link Downloads](#telegram-link-downloads)
@@ -1010,6 +1011,7 @@ Each pattern is a Python regex. Invalid patterns are skipped with a warning. If 
 | Command | Shortcut | Description |
 |---|---|---|
 | `/usetting` | `/us` | Open your personal settings panel (thumbnail, prefix, upload destination, etc.) |
+| `/tokengen` | — | Open your private Google OAuth token generator and download manager |
 | `/stats` | `/st` | View server hardware stats (CPU, RAM, Disk, Network) |
 | `/ping` | — | Check bot response latency |
 | `/help` | `/h` | Show all available commands with descriptions |
@@ -1440,6 +1442,38 @@ Here's what a typical anime encoding profile looks like when built through the W
 ```
 
 The above profile was built entirely through visual dropdowns and selectors — **zero FFmpeg knowledge required**.
+
+---
+
+<a id="google-token-generator-web-ui"></a>
+
+## 🔐 Google Token Generator (Web UI)
+
+Send `/tokengen` as an authorized user. The bot replies with a private, signed
+link that expires after 15 minutes; run the command again whenever you need a
+fresh link. The page is dedicated to that Telegram user and provides:
+
+- **Upload credentials.json** for a Google OAuth **Web application** client.
+- **Enter manually** using the same OAuth Client ID and Client Secret.
+- A read-only callback URL to add under Google Cloud's **Authorized redirect URIs**.
+- Legacy-compatible `token.pickle` and `token.json` downloads.
+- Encrypted, per-user MongoDB storage so the generated files remain available
+  through future `/tokengen` links.
+- **Use in Amaterasu**, which explicitly copies the saved generated token into
+  that user's existing `TOKEN_PICKLE` setting. Generation alone never replaces
+  the user's active Drive token.
+
+OAuth client input is encrypted only for the pending authorization attempt,
+expires after 15 minutes, and is consumed once. The generated credential is
+encrypted at the application layer before MongoDB storage. Keep
+`AMATERASU_WEB_SECRET` stable: changing it intentionally makes previously saved
+encrypted tokens unreadable.
+
+The callback URL is always derived from `BASE_URL`, so configure a public
+`https://` URL before using `/tokengen`. `DATABASE_URL` is also required.
+
+> `token.pickle` and `token.json` contain sensitive Google credentials. Never
+> share the private bot link or either downloaded file.
 
 ---
 

@@ -11,8 +11,13 @@ cloudscraper
 curl_cffi>=0.7.0
 dnspython
 feedparser
-google-api-python-client
-google-auth-oauthlib
+# Pinned so generated token.pickle files stay compatible with older Google
+# Drive mirror and automation clients (matching SiamReal/ForgePort).
+google-auth==2.17.3
+google-auth-oauthlib==1.0.0
+google-auth-httplib2==0.1.0
+google-api-python-client==2.86.0
+cryptography>=42
 gunicorn
 langcodes
 language-data
@@ -38,6 +43,7 @@ yt-dlp-ejs
 pyrotgfork==2.2.24
 yt-dlp[default,curl-cffi]==2026.6.9
 fastapi==0.115.0
+python-multipart>=0.0.9,<1
 uvicorn==0.32.0
 motor==3.7.1
 pymongo==4.17.0

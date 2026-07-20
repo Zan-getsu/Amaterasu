@@ -2,28 +2,36 @@ import mimetypes
 import re
 from asyncio import create_task, sleep
 from contextlib import asynccontextmanager, suppress
+from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 from importlib import import_module
-from logging import FileHandler, StreamHandler, basicConfig, getLogger, INFO, WARNING
+from json import loads as json_loads
+from logging import INFO, WARNING, FileHandler, StreamHandler, basicConfig, getLogger
 from os import environ
 from pathlib import Path
 from re import compile as re_compile
+from secrets import token_urlsafe
 from time import monotonic
-from urllib.parse import quote, urlparse
+from urllib.parse import quote, urlencode, urlparse
 
 from aioaria2 import Aria2HttpClient
+from aiohttp import ClientSession, ClientTimeout
 from aiohttp.client_exceptions import ClientError
 from aioqbt.client import create_client
-from fastapi import FastAPI, Request, HTTPException
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
-from fastapi.templating import Jinja2Templates
-from fastapi.staticfiles import StaticFiles
-from sabnzbdapi import SabnzbdClient
 from aioqbt.exc import AQError
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
 
+from sabnzbdapi import SabnzbdClient
 from web.nodes import extract_file_ids, make_tree
-from web.security import make_route_token, verify_route_token, verify_short_token, verify_signed_token
-from aiohttp import ClientSession
+from web.security import (
+    make_route_token,
+    verify_route_token,
+    verify_short_token,
+    verify_signed_token,
+)
 
 getLogger("httpx").setLevel(WARNING)
 getLogger("aiohttp").setLevel(WARNING)
@@ -275,6 +283,81 @@ def _require_profile_user(request: Request) -> int:
     return user_id
 
 
+def _require_google_token_user(request: Request) -> int:
+    try:
+        user_id = int(request.query_params.get("user_id", ""))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid user_id") from exc
+    token = request.query_params.get("token")
+    if not verify_signed_token(token, _web_secret(), "google-token", user_id):
+        raise HTTPException(status_code=403, detail="This private token-generator link is invalid or expired")
+    return user_id
+
+
+def _require_google_token_database(database) -> None:
+    if database.db is None:
+        raise HTTPException(
+            status_code=503,
+            detail="The token database is unavailable. Configure DATABASE_URL and try again.",
+        )
+
+
+def _google_token_base_url() -> str:
+    config = _get_config()
+    base_url = (config.BASE_URL or "").strip().rstrip("/")
+    parsed = urlparse(base_url)
+    if not base_url or parsed.scheme not in ("http", "https") or not parsed.netloc:
+        raise HTTPException(
+            status_code=503,
+            detail="BASE_URL must be configured with the public HTTPS address before using /tokengen.",
+        )
+    return base_url
+
+
+def _google_token_callback_url() -> str:
+    return f"{_google_token_base_url()}/app/token-generator/callback"
+
+
+def _google_token_page_location(user_id: int, page_token: str, **values) -> str:
+    query = {"user_id": int(user_id), "token": page_token}
+    query.update({key: value for key, value in values.items() if value not in (None, "")})
+    return f"/app/token-generator?{urlencode(query)}"
+
+
+def _no_store(response: Response) -> Response:
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, private"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    return response
+
+
+def _readable_bytes(size: int) -> str:
+    value = float(max(0, size))
+    for unit in ("B", "KB", "MB"):
+        if value < 1024 or unit == "MB":
+            return f"{value:.0f} {unit}" if unit == "B" else f"{value:.2f} {unit}"
+        value /= 1024
+    return f"{value:.2f} MB"
+
+
+def _display_datetime(value) -> str:
+    if not isinstance(value, datetime):
+        return "Saved in Amaterasu"
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=UTC)
+    return value.astimezone(UTC).strftime("%b %d, %Y %I:%M %p UTC")
+
+
+def _datetime_is_expired(value) -> bool:
+    if not isinstance(value, datetime):
+        return True
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=UTC)
+    return value <= datetime.now(UTC)
+
+
 @app.api_route("/api/status", methods=["GET"])
 async def get_bot_status():
     from bot import task_dict, bot_start_time
@@ -453,6 +536,382 @@ async def encode_profiles_page(request: Request):
     response.headers["Pragma"] = "no-cache"
     response.headers["Expires"] = "0"
     return response
+
+
+@app.get("/app/token-generator", response_class=HTMLResponse)
+async def google_token_generator_page(
+    request: Request,
+    error: str = "",
+    success: str = "",
+    refresh: str = "",
+    active: str = "",
+):
+    from bot.helper.ext_utils.db_handler import database
+    from bot.helper.ext_utils.google_token import (
+        GOOGLE_DRIVE_SCOPE,
+        unprotect_blob,
+    )
+
+    user_id = _require_google_token_user(request)
+    _require_google_token_database(database)
+    page_token = request.query_params.get("token", "")
+    record = await database.get_generated_google_token(user_id)
+
+    token_status = None
+    if record:
+        metadata = record.get("metadata") or {}
+        pickle_size = metadata.get("pickle_size")
+        if not isinstance(pickle_size, int):
+            try:
+                pickle_size = len(
+                    unprotect_blob(
+                        record["token_pickle"],
+                        _web_secret(),
+                        "token-pickle",
+                    )
+                )
+            except ValueError:
+                pickle_size = 0
+        scopes = metadata.get("scopes") or [GOOGLE_DRIVE_SCOPE]
+        token_status = {
+            "updated": _display_datetime(metadata.get("updated_at")),
+            "size": _readable_bytes(pickle_size),
+            "scopes": scopes,
+            "json_available": bool(metadata.get("token_json")),
+            "has_refresh_token": metadata.get("has_refresh_token", True),
+            "is_active": bool(record.get("is_active")),
+        }
+
+    response = templates.TemplateResponse(
+        request,
+        "token_generator.html",
+        {
+            "user_id": user_id,
+            "page_token": page_token,
+            "callback_url": _google_token_callback_url(),
+            "default_scope": GOOGLE_DRIVE_SCOPE,
+            "token_status": token_status,
+            "error": error,
+            "success": success == "1",
+            "activation_success": active == "1",
+            "refresh_warning": refresh == "0",
+        },
+    )
+    return _no_store(response)
+
+
+@app.post("/api/token-generator/start")
+async def google_token_generator_start(
+    request: Request,
+    auth_method: str = Form("upload"),
+    credentials_file: UploadFile | None = File(None),
+    client_id: str = Form(""),
+    client_secret: str = Form(""),
+    login_hint: str = Form(""),
+    scopes: str = Form(""),
+):
+    from bot.helper.ext_utils.db_handler import database
+    from bot.helper.ext_utils.google_token import (
+        GOOGLE_OAUTH_STATE_TTL_SECONDS,
+        MAX_CREDENTIALS_FILE_SIZE,
+        build_google_authorization_url,
+        oauth_state_payload,
+        parse_google_credentials_file,
+        parse_google_scopes,
+        protect_blob,
+        validate_google_client_values,
+        validate_login_hint,
+    )
+
+    user_id = _require_google_token_user(request)
+    _require_google_token_database(database)
+    page_token = request.query_params.get("token", "")
+
+    try:
+        if auth_method == "upload":
+            if credentials_file is None:
+                raise ValueError("Choose a credentials.json file.")
+            try:
+                credential_bytes = await credentials_file.read(
+                    MAX_CREDENTIALS_FILE_SIZE + 1
+                )
+            finally:
+                await credentials_file.close()
+            client_id, client_secret = parse_google_credentials_file(credential_bytes)
+        elif auth_method == "manual":
+            client_id, client_secret = validate_google_client_values(client_id, client_secret)
+        else:
+            raise ValueError("Choose a valid OAuth credential method.")
+
+        if len(scopes) > 4096:
+            raise ValueError("The OAuth scopes value is too long.")
+        requested_scopes = parse_google_scopes(scopes)
+        if len(requested_scopes) > 20 or any(len(scope) > 512 for scope in requested_scopes):
+            raise ValueError("The OAuth scopes value is invalid.")
+        clean_login_hint = validate_login_hint(login_hint)
+        redirect_uri = _google_token_callback_url()
+        state = token_urlsafe(32)
+        created_at = datetime.now(UTC)
+        expires_at = created_at + timedelta(seconds=GOOGLE_OAUTH_STATE_TTL_SECONDS)
+        payload = oauth_state_payload(
+            client_id=client_id,
+            client_secret=client_secret,
+            scopes=requested_scopes,
+            redirect_uri=redirect_uri,
+        )
+        encrypted_payload = protect_blob(payload, _web_secret(), "google-oauth-state")
+        created = await database.create_google_oauth_state(
+            state,
+            user_id,
+            encrypted_payload,
+            created_at,
+            expires_at,
+        )
+        if not created:
+            raise RuntimeError("The token database is unavailable.")
+
+        authorization_url = build_google_authorization_url(
+            client_id,
+            redirect_uri,
+            state,
+            requested_scopes,
+            clean_login_hint,
+        )
+        return _no_store(RedirectResponse(authorization_url, status_code=303))
+    except Exception as exc:
+        location = _google_token_page_location(
+            user_id,
+            page_token,
+            error=str(exc),
+        )
+        return _no_store(RedirectResponse(location, status_code=303))
+
+
+@app.get("/app/token-generator/callback", response_class=HTMLResponse)
+@app.get("/app/token-generator/callback/", response_class=HTMLResponse)
+@app.get("/google-token/callback", response_class=HTMLResponse)
+async def google_token_generator_callback(request: Request):
+    from bot.helper.ext_utils.db_handler import database
+    from bot.helper.ext_utils.google_token import (
+        GOOGLE_TOKEN_URI,
+        TOKEN_PAGE_TTL_SECONDS,
+        parse_oauth_state_payload,
+        protect_blob,
+        serialize_google_credentials,
+        unprotect_blob,
+    )
+    from web.security import make_signed_token
+
+    _require_google_token_database(database)
+    state = request.query_params.get("state", "")
+    if not state or len(state) > 128:
+        response = templates.TemplateResponse(
+            request,
+            "token_generator_error.html",
+            {"message": "The OAuth attempt is missing or invalid. Run /tokengen again."},
+            status_code=400,
+        )
+        return _no_store(response)
+
+    stored = await database.consume_google_oauth_state(state)
+    if not stored or _datetime_is_expired(stored.get("expires_at")):
+        response = templates.TemplateResponse(
+            request,
+            "token_generator_error.html",
+            {"message": "This OAuth attempt expired or was already used. Run /tokengen again."},
+            status_code=400,
+        )
+        return _no_store(response)
+
+    user_id = int(stored["user_id"])
+    page_token = make_signed_token(
+        _web_secret(),
+        "google-token",
+        user_id,
+        ttl=TOKEN_PAGE_TTL_SECONDS,
+    )
+
+    try:
+        payload = parse_oauth_state_payload(
+            unprotect_blob(stored["payload"], _web_secret(), "google-oauth-state")
+        )
+        oauth_error = request.query_params.get("error", "")
+        if oauth_error:
+            description = request.query_params.get("error_description", "")[:300]
+            raise RuntimeError(
+                f"Google OAuth error: {oauth_error}"
+                + (f" — {description}" if description else "")
+            )
+        code = request.query_params.get("code", "")
+        if not code or len(code) > 4096:
+            raise RuntimeError("Google did not return a valid authorization code.")
+
+        exchange_data = {
+            "code": code,
+            "client_id": payload["client_id"],
+            "client_secret": payload["client_secret"],
+            "redirect_uri": payload["redirect_uri"],
+            "grant_type": "authorization_code",
+        }
+        timeout = ClientTimeout(total=30)
+        async with ClientSession(timeout=timeout) as session:
+            async with session.post(
+                GOOGLE_TOKEN_URI,
+                data=exchange_data,
+                headers={"Accept": "application/json"},
+            ) as google_response:
+                response_text = await google_response.text()
+                if google_response.status >= 400:
+                    raise RuntimeError(
+                        f"Google token exchange failed ({google_response.status}). "
+                        "Check the client credentials, redirect URI, and consent configuration."
+                    )
+        try:
+            token_data = json_loads(response_text)
+        except Exception as exc:
+            raise RuntimeError("Google returned an invalid token response.") from exc
+
+        pickle_bytes, json_bytes, has_refresh_token = serialize_google_credentials(
+            token_data,
+            payload["client_id"],
+            payload["client_secret"],
+            payload["scopes"],
+        )
+        encrypted_pickle = protect_blob(pickle_bytes, _web_secret(), "token-pickle")
+        encrypted_json = protect_blob(json_bytes, _web_secret(), "token-json")
+        saved = await database.save_generated_google_token(
+            user_id,
+            encrypted_pickle,
+            encrypted_json,
+            len(pickle_bytes),
+            payload["scopes"],
+            datetime.now(UTC),
+            has_refresh_token,
+        )
+        if not saved:
+            raise RuntimeError("The generated token could not be saved.")
+
+        location = _google_token_page_location(
+            user_id,
+            page_token,
+            success="1",
+            refresh="1" if has_refresh_token else "0",
+        )
+        return _no_store(RedirectResponse(location, status_code=303))
+    except Exception as exc:
+        location = _google_token_page_location(
+            user_id,
+            page_token,
+            error=str(exc),
+        )
+        return _no_store(RedirectResponse(location, status_code=303))
+
+
+@app.post("/api/token-generator/activate")
+async def activate_generated_google_token(request: Request):
+    from aiofiles import open as aiopen
+
+    from bot.helper.ext_utils.bot_utils import update_user_ldata
+    from bot.helper.ext_utils.db_handler import database
+    from bot.helper.ext_utils.google_token import unprotect_blob
+
+    user_id = _require_google_token_user(request)
+    _require_google_token_database(database)
+    page_token = request.query_params.get("token", "")
+    record = await database.get_generated_google_token(user_id)
+    if not record:
+        location = _google_token_page_location(
+            user_id,
+            page_token,
+            error="Generate a token before activating it in Amaterasu.",
+        )
+        return _no_store(RedirectResponse(location, status_code=303))
+    pending_path = None
+    try:
+        pickle_bytes = unprotect_blob(
+            record["token_pickle"],
+            _web_secret(),
+            "token-pickle",
+        )
+        token_path = Path("tokens", f"{user_id}.pickle")
+        token_path.parent.mkdir(parents=True, exist_ok=True)
+        pending_path = token_path.with_name(
+            f".{user_id}.{token_urlsafe(8)}.pickle.tmp"
+        )
+        async with aiopen(pending_path, "wb") as token_file:
+            await token_file.write(pickle_bytes)
+        activated = await database.activate_generated_google_token(
+            user_id,
+            datetime.now(UTC),
+        )
+        if not activated:
+            raise RuntimeError("The generated token could not be activated.")
+        pending_path.replace(token_path)
+        update_user_ldata(user_id, "TOKEN_PICKLE", str(token_path))
+    except (OSError, ValueError, RuntimeError) as exc:
+        location = _google_token_page_location(
+            user_id,
+            page_token,
+            error=str(exc),
+        )
+        return _no_store(RedirectResponse(location, status_code=303))
+    finally:
+        if pending_path is not None:
+            with suppress(OSError):
+                pending_path.unlink(missing_ok=True)
+
+    location = _google_token_page_location(
+        user_id,
+        page_token,
+        active="1",
+    )
+    return _no_store(RedirectResponse(location, status_code=303))
+
+
+@app.get("/api/token-generator/download/pickle")
+async def download_generated_google_pickle(request: Request):
+    from bot.helper.ext_utils.db_handler import database
+    from bot.helper.ext_utils.google_token import unprotect_blob
+
+    user_id = _require_google_token_user(request)
+    _require_google_token_database(database)
+    record = await database.get_generated_google_token(user_id)
+    if not record:
+        raise HTTPException(status_code=404, detail="token.pickle not found")
+    try:
+        content = unprotect_blob(record["token_pickle"], _web_secret(), "token-pickle")
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    response = Response(
+        content=content,
+        media_type="application/octet-stream",
+        headers={"Content-Disposition": 'attachment; filename="token.pickle"'},
+    )
+    return _no_store(response)
+
+
+@app.get("/api/token-generator/download/json")
+async def download_generated_google_json(request: Request):
+    from bot.helper.ext_utils.db_handler import database
+    from bot.helper.ext_utils.google_token import unprotect_blob
+
+    user_id = _require_google_token_user(request)
+    _require_google_token_database(database)
+    record = await database.get_generated_google_token(user_id)
+    metadata = (record or {}).get("metadata") or {}
+    encrypted_json = metadata.get("token_json")
+    if not encrypted_json:
+        raise HTTPException(status_code=404, detail="token.json is unavailable for this token")
+    try:
+        content = unprotect_blob(encrypted_json, _web_secret(), "token-json")
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    response = Response(
+        content=content,
+        media_type="application/json",
+        headers={"Content-Disposition": 'attachment; filename="token.json"'},
+    )
+    return _no_store(response)
 
 @app.get("/api/profiles")
 async def list_profiles(request: Request):
@@ -780,6 +1239,13 @@ button:hover { background: #155a7e; }
 
 # Admin routes that require login when LOGIN_PASS is set
 _ADMIN_PATH_PREFIXES = ("/app/", "/api/profiles", "/qbit/", "/nzb/")
+# These user tools carry their own short-lived, per-user signed links and must
+# remain reachable from Telegram even when the owner-only web login is enabled.
+_SIGNED_USER_TOOL_PATH_PREFIXES = (
+    "/app/token-generator",
+    "/api/token-generator",
+    "/google-token/callback",
+)
 # Public routes that never require login
 _PUBLIC_PATHS = frozenset({"/", "/api/status", "/healthz", "/metrics", "/login"})
 
@@ -869,6 +1335,8 @@ async def login_gate(request: Request, call_next):
     path = request.url.path
     # Always allow public paths
     if path in _PUBLIC_PATHS or path.startswith(("/stream/", "/dl/", "/watch/")):
+        return await call_next(request)
+    if path.startswith(_SIGNED_USER_TOOL_PATH_PREFIXES):
         return await call_next(request)
     # If LOGIN_PASS is not set, allow everything (v1.5.0 behavior)
     if not _login_pass_configured():

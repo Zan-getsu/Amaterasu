@@ -56,6 +56,7 @@ class BotCommands:
         "Select": ["select", "sel"],
         "NzbSearch": ["nzbsearch", "ns"],
         "GenPyroSess": "exportsession",
+        "TokenGen": "tokengen",
         "CategorySelect": ["category", "ctsel"],
         "GDClean": ["gdclean", "gdc"],
         "Plugins": "plugins",

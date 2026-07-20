@@ -485,6 +485,13 @@ def add_handlers():
     )
     TgClient.bot.add_handler(
         MessageHandler(
+            token_generator,
+            filters=command(BotCommands.TokenGenCommand, case_sensitive=True)
+            & CustomFilters.authorized,
+        )
+    )
+    TgClient.bot.add_handler(
+        MessageHandler(
             speedtest,
             filters=command(BotCommands.SpeedTestCommand, case_sensitive=True)
             & CustomFilters.authorized,

@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block title %}Amaterasu | Token Generator{% endblock %}
+{% block content %}
+<section class="bs-section">
+  <div class="bs-container bs-container--sm">
+    <div style="padding:clamp(24px,6vw,42px);border:1px solid var(--bs-border);border-radius:var(--bs-radius-lg);background:var(--bs-graphite);text-align:center;">
+      <div style="width:48px;height:48px;margin:0 auto 18px;display:grid;place-items:center;border-radius:var(--bs-radius-md);background:var(--bs-error-dim);color:var(--bs-error);"><i data-lucide="circle-alert" style="width:24px;height:24px"></i></div>
+      <h1 class="bs-h3" style="margin-bottom:10px;">OAuth attempt unavailable</h1>
+      <p style="margin:0;color:var(--bs-text-muted);overflow-wrap:anywhere;">{{ message }}</p>
+    </div>
+  </div>
+</section>
+{% endblock %}

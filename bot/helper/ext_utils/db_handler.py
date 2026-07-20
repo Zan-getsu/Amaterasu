@@ -85,6 +85,14 @@ class DbManager:
                 await self.db.user_stats.create_index(
                     "user_id", unique=True, background=True, name="uniq_user_id"
                 )
+                # OAuth attempts are encrypted, one-time records.  MongoDB's
+                # TTL cleanup is a safety net; callback consumption deletes
+                # them immediately during the normal flow.
+                await self.db.google_oauth_states.create_index(
+                    "expires_at",
+                    expireAfterSeconds=0,
+                    name="ttl_expires_at",
+                )
                 # tasks: index on the partition key (_id already indexed
                 # by MongoDB). Add user_id index for per-user task queries.
                 # The tasks collection is sharded by _bot_id(), so we
@@ -299,6 +307,11 @@ class DbManager:
         if path:
             async with aiopen(path, "rb+") as doc:
                 doc_bin = await doc.read()
+            if key == "TOKEN_PICKLE":
+                from .google_token import protect_blob
+                from .secrets import get_web_secret
+
+                doc_bin = protect_blob(doc_bin, get_web_secret(), "token-pickle")
             await self.db.users[_part()].update_one(
                 {"_id": user_id}, {"$set": {key: doc_bin}}, upsert=True
             )
@@ -483,6 +496,130 @@ class DbManager:
             return {}
         profiles = await self.db.encode_profiles.find_one({"_id": f"{TgClient.ID}_{user_id}"})
         return profiles or {}
+
+    async def create_google_oauth_state(
+        self,
+        state,
+        user_id,
+        encrypted_payload,
+        created_at,
+        expires_at,
+    ):
+        """Create one pending OAuth attempt for a user.
+
+        A new attempt invalidates any previous unfinished attempt by the same
+        user on the same bot deployment.
+        """
+
+        if self._return:
+            return False
+        bot_id = _bot_id()
+        await self.db.google_oauth_states.delete_many(
+            {"bot_id": bot_id, "user_id": int(user_id)}
+        )
+        await self.db.google_oauth_states.insert_one(
+            {
+                "_id": state,
+                "bot_id": bot_id,
+                "user_id": int(user_id),
+                "payload": encrypted_payload,
+                "created_at": created_at,
+                "expires_at": expires_at,
+            }
+        )
+        return True
+
+    async def consume_google_oauth_state(self, state):
+        """Atomically return and delete a pending OAuth attempt."""
+
+        if self._return:
+            return None
+        return await self.db.google_oauth_states.find_one_and_delete(
+            {"_id": state, "bot_id": _bot_id()}
+        )
+
+    async def save_generated_google_token(
+        self,
+        user_id,
+        encrypted_pickle,
+        encrypted_json,
+        pickle_size,
+        scopes,
+        updated_at,
+        has_refresh_token,
+    ):
+        """Persist a generated token in its private per-user download record."""
+
+        if self._return:
+            return False
+        await self.db.google_tokens.update_one(
+            {"_id": f"{_bot_id()}_{int(user_id)}"},
+            {
+                "$set": {
+                    "bot_id": _bot_id(),
+                    "user_id": int(user_id),
+                    "token_pickle": encrypted_pickle,
+                    "token_json": encrypted_json,
+                    "pickle_size": int(pickle_size),
+                    "scopes": list(scopes),
+                    "updated_at": updated_at,
+                    "has_refresh_token": bool(has_refresh_token),
+                },
+                "$unset": {"activated_at": ""},
+            },
+            upsert=True,
+        )
+        return True
+
+    async def get_generated_google_token(self, user_id):
+        """Return the user's saved pickle plus generator metadata, if any."""
+
+        if self._return:
+            return None
+        metadata = await self.db.google_tokens.find_one(
+            {"_id": f"{_bot_id()}_{int(user_id)}"}
+        )
+        if not metadata or not metadata.get("token_pickle"):
+            return None
+        active_user = await self.db.users[_part()].find_one(
+            {"_id": int(user_id)}, {"TOKEN_PICKLE": 1}
+        )
+        return {
+            "token_pickle": metadata["token_pickle"],
+            "metadata": metadata,
+            "is_active": bool(
+                active_user
+                and active_user.get("TOKEN_PICKLE") == metadata["token_pickle"]
+            ),
+        }
+
+    async def activate_generated_google_token(self, user_id, activated_at):
+        """Use the saved generated token as the user's Amaterasu Drive token."""
+
+        if self._return:
+            return None
+        doc_id = f"{_bot_id()}_{int(user_id)}"
+        metadata = await self.db.google_tokens.find_one(
+            {"_id": doc_id}, {"token_pickle": 1}
+        )
+        if not metadata or not metadata.get("token_pickle"):
+            return None
+        await self.db.users[_part()].update_one(
+            {"_id": int(user_id)},
+            {"$set": {"TOKEN_PICKLE": metadata["token_pickle"]}},
+            upsert=True,
+        )
+        try:
+            await self.db.google_tokens.update_one(
+                {"_id": doc_id},
+                {"$set": {"activated_at": activated_at}},
+            )
+        except PyMongoError as exc:
+            # Activation is determined by the exact TOKEN_PICKLE value in the
+            # native user record. A metadata timestamp must not make a
+            # successful activation look like a failure to the web route.
+            LOGGER.warning(f"Could not record Google token activation time: {exc}")
+        return metadata["token_pickle"]
 
     async def save_encode_profile(self, user_id, profile_id, profile_data):
         if self._return:

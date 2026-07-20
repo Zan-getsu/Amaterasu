@@ -64,8 +64,8 @@ def _setup_message(step, state):
             "<b>❖ Setup — Step 2/5: Google Drive</b>\n\n"
             f"<b>Status:</b> {status}\n\n"
             "<i>To configure GDrive as an upload destination:\n"
-            "1. Run <code>python3 gen_scripts/gen_token_pickle/script.py</code>\n"
-            "2. Upload the resulting token.pickle via /usetting\n"
+            "1. Run <code>/tokengen</code> and open your private web link\n"
+            "2. Generate a token, then choose Use in Amaterasu\n"
             "3. Set GDRIVE_ID to your destination folder ID\n\n"
             "Or skip if you don't need GDrive uploads.</i>"
         )
