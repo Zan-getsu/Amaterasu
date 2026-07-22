@@ -212,6 +212,102 @@ body { overflow-x: hidden; }
 }
 .privacy-note { display: flex; align-items: flex-start; gap: 8px; margin-top: 15px; }
 .privacy-note svg { flex: 0 0 auto; margin-top: 1px; color: var(--bs-gold); }
+.setup-guide {
+  margin-top: 22px;
+  padding-top: 20px;
+  border-top: 1px solid var(--bs-border);
+}
+.setup-guide__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+.setup-guide__intro { min-width: 0; }
+.setup-guide__eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 8px;
+  color: var(--bs-gold);
+  font-size: 11px;
+  font-weight: 750;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.setup-guide__title {
+  margin: 0;
+  color: var(--bs-text-primary);
+  font-size: 15px;
+  line-height: 1.35;
+}
+.setup-guide__copy {
+  max-width: 650px;
+  margin: 6px 0 0;
+  color: var(--bs-text-muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.setup-guide__console {
+  flex: 0 0 auto;
+  min-height: 38px;
+  padding-inline: 13px;
+  font-size: 12px;
+}
+.setup-guide__list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 16px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: setup-step;
+}
+.setup-guide__item {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr);
+  gap: 10px;
+  counter-increment: setup-step;
+}
+.setup-guide__marker {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--bs-gold-border);
+  border-radius: var(--bs-radius-sm);
+  color: var(--bs-gold);
+  background: var(--bs-gold-dim);
+  font: 750 11px/1 var(--bs-font-mono);
+}
+.setup-guide__marker::before { content: counter(setup-step, decimal-leading-zero); }
+.setup-guide__item strong {
+  display: block;
+  color: var(--bs-text-secondary);
+  font-size: 12px;
+  line-height: 1.35;
+}
+.setup-guide__item span {
+  display: block;
+  margin-top: 3px;
+  color: var(--bs-text-muted);
+  font-size: 11px;
+  line-height: 1.55;
+}
+.setup-guide__note {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--bs-border-subtle);
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 9px;
+  color: var(--bs-text-muted);
+  font-size: 11px;
+  line-height: 1.6;
+}
+.setup-guide__note svg { color: var(--bs-gold); margin-top: 1px; }
 .continue-button { width: 100%; margin-top: 20px; }
 .saved-panel { position: sticky; top: 80px; }
 .saved-panel .token-panel__body { padding: clamp(20px, 3vw, 28px); }
@@ -285,6 +381,9 @@ body { overflow-x: hidden; }
   .token-button { min-height: 46px; font-size: 14px; }
   .auth-method { min-height: 46px; }
   .upload-box { min-height: 96px; }
+  .setup-guide__header { display: block; }
+  .setup-guide__console { width: 100%; margin-top: 13px; }
+  .setup-guide__list { grid-template-columns: minmax(0, 1fr); gap: 14px; }
   .saved-meta__row { grid-template-columns: 92px minmax(0, 1fr); }
 }
 @media (max-width: 380px) {
@@ -349,6 +448,57 @@ body { overflow-x: hidden; }
                 </button>
               </div>
               <p id="callback-hint" class="field-hint">It must match Google Cloud character-for-character.</p>
+            </div>
+
+            <div class="setup-guide" aria-labelledby="cloud-setup-guide-title">
+              <div class="setup-guide__header">
+                <div class="setup-guide__intro">
+                  <div class="setup-guide__eyebrow"><i data-lucide="route" style="width:14px;height:14px"></i><span>Google Cloud flight checklist</span></div>
+                  <h3 id="cloud-setup-guide-title" class="setup-guide__title">Prepare your OAuth client before you press Continue with Google.</h3>
+                  <p class="setup-guide__copy">Use the same Google account for the Cloud project, test user, login hint, and final authorization. On mobile, switch Google Cloud Console to desktop mode first.</p>
+                </div>
+                <a class="token-button token-button--outline setup-guide__console" href="https://console.cloud.google.com/" target="_blank" rel="noopener noreferrer">
+                  <i data-lucide="external-link" style="width:15px;height:15px"></i><span>Open Console</span>
+                </a>
+              </div>
+              <ol class="setup-guide__list">
+                <li class="setup-guide__item">
+                  <span class="setup-guide__marker" aria-hidden="true"></span>
+                  <div><strong>Secure the account</strong><span>Enable 2-Step Verification, then create or select a Google Cloud project.</span></div>
+                </li>
+                <li class="setup-guide__item">
+                  <span class="setup-guide__marker" aria-hidden="true"></span>
+                  <div><strong>Enable Drive API</strong><span>Go to APIs &amp; Services, open Library, search Google Drive API, and enable it.</span></div>
+                </li>
+                <li class="setup-guide__item">
+                  <span class="setup-guide__marker" aria-hidden="true"></span>
+                  <div><strong>Set consent screen</strong><span>Open OAuth consent screen, click Get Started, enter an app name, choose External, add your Gmail, and save.</span></div>
+                </li>
+                <li class="setup-guide__item">
+                  <span class="setup-guide__marker" aria-hidden="true"></span>
+                  <div><strong>Add test user</strong><span>In OAuth consent screen, open Audience, add the same Gmail under Test users.</span></div>
+                </li>
+                <li class="setup-guide__item">
+                  <span class="setup-guide__marker" aria-hidden="true"></span>
+                  <div><strong>Create Web client</strong><span>Go to Credentials, create an OAuth client ID, and choose Web application.</span></div>
+                </li>
+                <li class="setup-guide__item">
+                  <span class="setup-guide__marker" aria-hidden="true"></span>
+                  <div><strong>Paste this redirect URI</strong><span>Copy the URI above into Authorized redirect URIs, then create the client.</span></div>
+                </li>
+                <li class="setup-guide__item">
+                  <span class="setup-guide__marker" aria-hidden="true"></span>
+                  <div><strong>Download credentials</strong><span>Download the OAuth client JSON and rename it exactly to credentials.json.</span></div>
+                </li>
+                <li class="setup-guide__item">
+                  <span class="setup-guide__marker" aria-hidden="true"></span>
+                  <div><strong>Authorize here</strong><span>Upload credentials.json below, enter the same Gmail as the login hint, continue, review Google's warning, and allow access.</span></div>
+                </li>
+              </ol>
+              <div class="setup-guide__note">
+                <i data-lucide="shield-alert" style="width:17px;height:17px"></i>
+                <span>Only continue past Google's unverified-app warning when the Cloud project and OAuth credentials belong to you. Keep credentials.json, token.pickle, and this private bot link away from public repos and shared chats.</span>
+              </div>
             </div>
           </div>
 

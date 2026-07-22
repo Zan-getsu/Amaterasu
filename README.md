@@ -362,7 +362,7 @@ These files are **not required** but unlock additional functionality. Place them
 
 | File | Purpose | How to Generate |
 |---|---|---|
-| `token.pickle` | Google Drive authentication (OAuth2 token) | Run the Google OAuth flow using the [Google API Console](https://console.cloud.google.com). Create OAuth credentials → download `credentials.json` → run `python3 gen_scripts/generate_token.py` |
+| `token.pickle` | Google Drive authentication (OAuth2 token) | Send `/tokengen`, create a Google OAuth Web application client, upload `credentials.json`, then download or activate the generated token |
 | `accounts.zip` | Service Account keys for GDrive (bypasses quota limits) | Create multiple Service Accounts in GCP → download JSON keys → zip all `.json` files into `accounts.zip` |
 | `rclone.conf` | Rclone remote configurations for cloud storage | Run `rclone config` on your local machine → copy `~/.config/rclone/rclone.conf` to the project |
 | `cookies.txt` | Browser cookies for authenticated site downloads | Export cookies from your browser using a "Get cookies.txt" extension (Netscape format) |
@@ -1474,6 +1474,52 @@ The callback URL is always derived from `BASE_URL`, so configure a public
 
 > `token.pickle` and `token.json` contain sensitive Google credentials. Never
 > share the private bot link or either downloaded file.
+
+### Google Drive API and OAuth Setup
+
+Use this flow when you want Amaterasu to upload to your own Google Drive account.
+The short version: Google Cloud creates `credentials.json`; Amaterasu turns it
+into your private `token.pickle`.
+
+1. Open [Google Cloud Console](https://console.cloud.google.com/).
+2. Enable 2-Step Verification on the Google account you will authorize.
+3. If you are on a phone or tablet, enable desktop site or desktop mode in the browser.
+4. Create a new Google Cloud project, or select the project you want to use.
+5. Open the navigation menu, then go to **APIs & Services -> Library**.
+6. Click **Enable APIs and Services**.
+7. Search for **Google Drive API**, open it, and click **Enable**.
+8. Open **APIs & Services -> OAuth consent screen**.
+9. Click **Get Started**.
+10. Enter an app name.
+11. Under **Audience**, select **External**.
+12. Enter your Gmail address anywhere Google asks for a contact email.
+13. Save the OAuth consent screen configuration.
+14. Open **APIs & Services -> OAuth consent screen -> Audience**.
+15. Under **Test users**, click **Add users**.
+16. Add the same Gmail account you plan to use for authorization.
+17. Open **APIs & Services -> Credentials**.
+18. Click **Create credentials**, then select **OAuth client ID**.
+19. For **Application type**, select **Web application**.
+20. In Telegram, send `/tokengen` and open the private bot link.
+21. Copy the **Authorized redirect URI** shown on the token generator page.
+22. Return to Google Cloud and paste that URI into **Authorized redirect URIs**.
+23. Click **Create**.
+24. Download the OAuth client JSON file.
+25. Rename the downloaded file exactly to `credentials.json`.
+26. Return to the bot link.
+27. In **Authorize your account**, upload `credentials.json`.
+28. In **Google account hint**, enter the same Gmail address you added as a test user.
+29. Click **Continue with Google**.
+30. Sign in with the same Google account.
+31. If Google shows an unverified-app warning, continue only after confirming
+    the app and OAuth credentials belong to you.
+32. Review the requested permissions and allow access.
+33. After authorization completes, download `token.pickle` or click
+    **Use in Amaterasu** to make the generated token the active Drive token for
+    that Telegram user.
+
+Keep `credentials.json` and `token.pickle` private. Do not upload them to a
+public repository, paste them in chat, or share them with anyone.
 
 ---
 
