@@ -39,12 +39,10 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from .core.config_manager import Config
 from sabnzbdapi import SabnzbdClient
 
-getLogger("requests").setLevel(WARNING)
-getLogger("urllib3").setLevel(WARNING)
+getLogger("niquests").setLevel(WARNING)
 getLogger("pyrogram").setLevel(ERROR)
 getLogger("pyrogram.methods.advanced.save_file").setLevel(CRITICAL)
 getLogger("apscheduler").setLevel(ERROR)
-getLogger("httpx").setLevel(WARNING)
 getLogger("pymongo").setLevel(WARNING)
 getLogger("aiohttp").setLevel(WARNING)
 

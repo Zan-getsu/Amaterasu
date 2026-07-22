@@ -1,12 +1,13 @@
-from httpx import RequestError, DecodingError
 from json import JSONDecodeError
+
+from niquests.exceptions import RequestException
 
 
 class APIError(Exception):
     """Base error for all exceptions from this Client."""
 
 
-class APIConnectionError(RequestError, APIError):
+class APIConnectionError(RequestException, APIError):
     """Base class for all communications errors including HTTP errors."""
 
 
@@ -17,7 +18,7 @@ class APIResponseError(APIError, JSONDecodeError):
         JSONDecodeError.__init__(self, msg, doc, pos)
 
 
-class LoginFailed(DecodingError, APIConnectionError, JSONDecodeError):
+class LoginFailed(APIConnectionError, JSONDecodeError):
     """This can technically be raised with any request since log in may be attempted for
     any request and could fail."""
 

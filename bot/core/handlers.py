@@ -20,7 +20,7 @@ from ..modules import *
 from .tg_client import TgClient
 
 
-def add_handlers():
+async def add_handlers():
     global BOT_COMMANDS
     TgClient.bot.add_handler(
         MessageHandler(
@@ -598,7 +598,7 @@ def add_handlers():
                 BOT_COMMANDS, "Login", "[password] Login to Bot", 14
             )
 
-        TgClient.bot.set_bot_commands(
+        await TgClient.bot.set_bot_commands(
             [
                 BotCommand(
                     cmds[0] if isinstance(cmds, list) else cmds,

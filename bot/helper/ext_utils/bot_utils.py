@@ -6,6 +6,7 @@ from asyncio import (
     sleep,
 )
 from asyncio.subprocess import PIPE
+from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial, wraps
 from hashlib import sha256
@@ -18,7 +19,8 @@ from urllib.parse import unquote, urlparse
 from aiofiles import open as aiopen
 from aiofiles.os import mkdir
 from aiofiles.os import path as aiopath
-from httpx import AsyncClient, Limits
+from httpx import AsyncClient
+from niquests import AsyncSession
 from pyrogram.enums import ButtonStyle
 from pyrogram.handlers import MessageHandler
 
@@ -176,7 +178,7 @@ def _build_command_usage(help_dict, command_key):
             buttons.data_button(name, f"help {command_key} {name} {i}")
         if len(cmd_pages) > 1:
             if i > 0:
-                buttons.data_button("⫷", f"help pre {command_key} {i - 1}")
+                buttons.data_button("⫷", f"help pre {command_key} {i - 1}", "l_body")
             if i < len(cmd_pages) - 1:
                 buttons.data_button("⫸", f"help nex {command_key} {i + 1}")
         buttons.data_button("✕ CLOSE", "help close", "footer", style=ButtonStyle.DANGER)
@@ -421,11 +423,19 @@ async def get_content_info(url):
         async with AsyncClient(
             verify=verify, follow_redirects=True, timeout=30.0
         ) as client:
-            async with client.stream("GET", url, headers=headers) as response:
-                return (
-                    response.headers.get("Content-Type"),
-                    get_filename_from_headers(response.headers, str(response.url)),
-                )
+            response = await client.head(url, headers=headers)
+            if response.status_code in (405, 501) or not response.headers.get(
+                "Content-Type"
+            ):
+                async with client.stream("GET", url, headers=headers) as response:
+                    return (
+                        response.headers.get("Content-Type"),
+                        get_filename_from_headers(response.headers, str(response.url)),
+                    )
+            return (
+                response.headers.get("Content-Type"),
+                get_filename_from_headers(response.headers, str(response.url)),
+            )
     except Exception:
         return None, ""
 
@@ -504,6 +514,69 @@ def safe_int(value, default=0):
         return default
 
 
+class GitInfo:
+    def __init__(self):
+        self._hash = ""
+        self._repo_url = ""
+        self._commit_message = ""
+        self._commit_time = ""
+
+    async def init(self):
+        try:
+            self._hash = (await cmd_exec(["git", "rev-parse", "--short", "HEAD"]))[0]
+        except Exception:
+            self._hash = "unknown"
+        try:
+            url = (await cmd_exec(["git", "remote", "get-url", "origin"]))[0]
+            if url.startswith("https://") and "@" in url:
+                url = "https://" + url.split("@", 1)[1]
+            self._repo_url = url.rstrip(".git")
+        except Exception:
+            self._repo_url = ""
+        try:
+            self._commit_message = (
+                await cmd_exec(["git", "log", "-1", "--format=%s"])
+            )[0]
+        except Exception:
+            self._commit_message = ""
+        try:
+            self._commit_time = (await cmd_exec(["git", "log", "-1", "--format=%ci"]))[
+                0
+            ]
+        except Exception:
+            self._commit_time = ""
+
+    def commit_hash(self):
+        return self._hash or "unknown"
+
+    def commit_url(self):
+        h = self.commit_hash()
+        if self._repo_url and h != "unknown":
+            return f"{self._repo_url}/commit/{h}"
+        return ""
+
+    def commit_msg(self):
+        return self._commit_message or ""
+
+    def commit_time(self):
+        return self._commit_time or ""
+
+    def commit_date(self):
+        if not self._commit_time:
+            return ""
+        try:
+            dt = datetime.strptime(
+                self._commit_time.split(" +")[0].split(" -")[0],
+                "%Y-%m-%d %H:%M:%S",
+            )
+            return dt.strftime("%d/%m/%Y (%H:%M)")
+        except Exception:
+            return self._commit_time
+
+
+git_info = GitInfo()
+
+
 async def download_image_url(url):
     path = "Images/"
     if not await aiopath.isdir(path):
@@ -528,7 +601,7 @@ async def _fetch_wallpaperflare(client, query, page, seen):
     img_pattern = re_compile(r'data-src="(https://c4\.wallpaperflare\.com/wallpaper[^"]+)"')
     url = f"{base_url}?wallpaper={query}&width=1280&height=720&page={page}"
     try:
-        resp = await client.get(url, follow_redirects=True, timeout=15)
+        resp = await client.get(url, allow_redirects=True, timeout=15)
         if resp.status_code != 200:
             return []
         return [m for m in img_pattern.findall(resp.text) if m not in seen]
@@ -540,7 +613,7 @@ async def _fetch_wallpaperflare(client, query, page, seen):
 async def _fetch_peapix(client, country, seen):
     url = f"https://peapix.com/bing/feed?country={country}"
     try:
-        resp = await client.get(url, follow_redirects=True, timeout=15)
+        resp = await client.get(url, allow_redirects=True, timeout=15)
         if resp.status_code != 200:
             LOGGER.warning(f"Peapix fetch failed: status {resp.status_code}")
             return []
@@ -554,7 +627,7 @@ async def _fetch_peapix(client, country, seen):
 async def _fetch_wallhaven(client, query, page, seen):
     url = f"https://wallhaven.cc/api/v1/search?q={query}&categories=111&purity=100&sorting=relevance&page={page}"
     try:
-        resp = await client.get(url, follow_redirects=True, timeout=15)
+        resp = await client.get(url, allow_redirects=True, timeout=15)
         if resp.status_code != 200:
             LOGGER.warning(f"Wallhaven fetch failed [{query} p{page}]: status {resp.status_code}")
             return []
@@ -588,9 +661,8 @@ async def search_images():
     new_images = []
 
     try:
-        async with AsyncClient(
+        async with AsyncSession(
             headers={"User-Agent": "Mozilla/5.0"},
-            limits=Limits(max_connections=5),
         ) as client:
             if "wallpaperflare" in sources:
                 for query in query_list:

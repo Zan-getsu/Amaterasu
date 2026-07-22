@@ -1,6 +1,5 @@
 from json import dumps, loads, JSONDecodeError
-from httpx import AsyncClient, RequestError
-from httpx import AsyncHTTPTransport
+from niquests import AsyncSession
 from functools import wraps
 from asyncio import sleep
 
@@ -711,11 +710,11 @@ class Jddevice:
         return response["data"]
 
 
-class clientSession(AsyncClient):
-    @wraps(AsyncClient.request)
+class clientSession(AsyncSession):
+    @wraps(AsyncSession.request)
     async def request(self, method: str, url: str, **kwargs):
         kwargs.setdefault("timeout", 3)
-        kwargs.setdefault("follow_redirects", True)
+        kwargs.setdefault("allow_redirects", True)
         return await super().request(method, url, **kwargs)
 
 
@@ -729,9 +728,7 @@ class MyJdApi:
         if self._http_session is not None:
             return self._http_session
 
-        transport = AsyncHTTPTransport(retries=10)
-
-        self._http_session = clientSession(transport=transport)
+        self._http_session = clientSession(retries=10)
         self._http_session.verify = True
 
         return self._http_session
@@ -754,10 +751,10 @@ class MyJdApi:
                     "POST",
                     url,
                     headers={"Content-Type": "application/json; charset=utf-8"},
-                    content=data,
+                    data=data,
                 )
                 txt = res.text
-            except RequestError:
+            except Exception:
                 if attempt == 2:
                     return None
                 await sleep(1.2)

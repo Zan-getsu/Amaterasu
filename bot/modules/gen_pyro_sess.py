@@ -4,7 +4,8 @@ from os import getcwd
 from os.path import exists as path_exists, join as path_join
 
 from aiofiles.os import remove as aioremove
-from pyrogram import Client
+from pyrogram import Client, __version__ as wzgram_version
+from ..version import get_version
 from pyrogram.enums import ChatType
 from pyrogram.errors import (
     ApiIdInvalid,
@@ -58,7 +59,7 @@ def _stop_btns():
 
 def _header(user_name):
     return (
-        "<b><u>Pyrogram String Session Generator</u></b>\n\n"
+        "<b><u>WZGram String Session Generator</u></b>\n\n"
         f"<b>User:</b> <code>{_safe(user_name)}</code>"
     )
 
@@ -253,9 +254,13 @@ async def gen_pyro_string(_, message):
     try:
         pyro_client = Client(
             session_name,
+            in_memory=True,
             api_id=api_id,
             api_hash=api_hash,
             workdir=workdir,
+            app_version=f"Amaterasu {get_version()}",
+            device_model="Amaterasu Bot",
+            system_version="Amaterasu WZGram Server",
         )
     except Exception as e:
         return await edit_message(
@@ -369,9 +374,9 @@ async def gen_pyro_string(_, message):
         session_string = await pyro_client.export_session_string()
         await pyro_client.send_message(
             "me",
-            "<b><u>Pyrogram Session Generated</u></b>\n\n"
+            "<b><u>WZGram Session Generated</u></b>\n\n"
             f"<code>{_safe(session_string)}</code>\n\n"
-            "<b>Via Amaterasu</b>",
+            f"<b>WZGram v{wzgram_version} | Amaterasu {get_version()}</b>",
             disable_web_page_preview=True,
         )
         await _safe_disconnect(pyro_client)
@@ -380,7 +385,7 @@ async def gen_pyro_string(_, message):
             _with_state(
                 header,
                 state,
-                "<b>String session generated successfully.</b>\n\n"
+                "<b>WZGram string session generated successfully.</b>\n\n"
                 "<i>Check your Saved Messages.</i>",
             ),
         )

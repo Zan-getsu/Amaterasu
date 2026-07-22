@@ -687,6 +687,16 @@ async def get_user_settings(from_user, stype="main"):
         buttons.data_button(
             "Gofile Folder ID", f"userset {user_id} menu GOFILE_FOLDER_ID"
         )
+        auto_create = (
+            user_dict.get("GOFILE_AUTO_CREATE_FOLDER")
+            if "GOFILE_AUTO_CREATE_FOLDER" in user_dict
+            else Config.GOFILE_AUTO_CREATE_FOLDER
+        )
+        auto_state = "✓" if auto_create else ""
+        buttons.data_button(
+            f"Auto-Create Folder {auto_state}",
+            f"userset {user_id} tog GOFILE_AUTO_CREATE_FOLDER {'f' if auto_create else 't'}",
+        )
         buttons.data_button("↩ BACK", f"userset {user_id} back uphoster", "footer")
         buttons.data_button("✕ CLOSE", f"userset {user_id} close", "footer", style=ButtonStyle.DANGER)
         btns = buttons.build_menu(1)
@@ -710,7 +720,8 @@ async def get_user_settings(from_user, stype="main"):
         text = f"""<b>❖ GOFILE SETTINGS</b>
 <code>┌─ {'Name':<11}: {user_name}
 ├─ {'Token':<11}: {gftoken}
-└─ {'Folder ID':<11}: {gffolder}
+├─ {'Folder ID':<11}: {gffolder}
+└─ {'Auto Folder':<11}: {'Enabled' if auto_create else 'Disabled'}
 </code>
 """
 
@@ -1655,7 +1666,7 @@ async def edit_user_settings(client, query):
         buttons.data_button("↩ BACK", f"userset {user_id} back uphoster", "footer")
         buttons.data_button("✕ CLOSE", f"userset {user_id} close", "footer", style=ButtonStyle.DANGER)
 
-        text = f"""<b>❖ SELECT UPHOSTER DESTINATIONS</b>\n<code>"""
+        text = "<b>❖ SELECT UPHOSTER DESTINATIONS</b>\n<code>"
         await edit_message(message, text, buttons.build_menu(1))
     elif data[2] == "menu":
         await query.answer()
@@ -1669,6 +1680,8 @@ async def edit_user_settings(client, query):
             back_to = "mirror"
         elif data[3] in ["USER_TOKENS", "USE_DEFAULT_COOKIE"]:
             back_to = "general"
+        elif data[3] == "GOFILE_AUTO_CREATE_FOLDER":
+            back_to = "gofile"
         elif data[3] == "AUTO_FILETOLINK":
             back_to = "advanced"
         else:

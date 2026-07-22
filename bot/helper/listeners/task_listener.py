@@ -503,7 +503,9 @@ class TaskListener(TaskConfig):
             LOGGER.info(f"Uphoster Upload Name: {self.name}")
             uphoster_service = self.user_dict.get("UPHOSTER_SERVICE", "gofile")
             services = uphoster_service.split(",")
-            ddl = MultiUphosterUpload(self, up_path, services)
+            ddl = MultiUphosterUpload(
+                self, up_path, services, self.folder_name.strip("/")
+            )
             async with task_dict_lock:
                 task_dict[self.mid] = UphosterStatus(self, ddl, gid, "up")
             await gather(
@@ -651,7 +653,6 @@ class TaskListener(TaskConfig):
             multi_link_msg = ""
             multi_links = []
             if isinstance(link, dict) and not self.is_yt:
-                # MultiUphoster result
                 for service, result in link.items():
                     if "error" in result:
                         multi_link_msg += (
@@ -662,7 +663,7 @@ class TaskListener(TaskConfig):
                             (f"{service.capitalize()} Link", result["link"])
                         )
                 multi_link_msg = multi_link_msg.strip()
-                link = None  # Disable single link button logic
+                link = None
 
             if (
                 link
@@ -693,11 +694,9 @@ class TaskListener(TaskConfig):
                         "🔗 Rclone Link", share_url, style=ButtonStyle.PRIMARY
                     )
                 if not rclone_path and dir_id:
-                    INDEX_URL = ""
-                    if self.private_link:
-                        INDEX_URL = self.user_dict.get("INDEX_URL", "") or ""
-                    elif Config.INDEX_URL:
-                        INDEX_URL = Config.INDEX_URL
+                    INDEX_URL = self.user_dict.get("INDEX_URL", "") or ""
+                    if not INDEX_URL:
+                        INDEX_URL = Config.INDEX_URL or ""
                     if INDEX_URL and self.name:
                         safe_name = rutils.quote(self.name.strip("/"))
                         share_url = f"{INDEX_URL}/{safe_name}"
@@ -741,7 +740,7 @@ class TaskListener(TaskConfig):
             await start_from_queued()
             return
 
-        if self.pm_msg and (not Config.DELETE_LINKS or Config.CLEAN_LOG_MSG):
+        if self.pm_msg and not Config.DELETE_LINKS:
             await delete_message(self.pm_msg)
 
         await clean_download(self.dir)

@@ -9,7 +9,8 @@ from logging import (
     getLogger,
     ERROR,
 )
-from os import path, remove, environ
+from os import environ, path, remove
+from os.path import isdir
 from pathlib import Path
 from shutil import rmtree
 from pymongo import AsyncMongoClient
@@ -207,6 +208,7 @@ def _fetch_config_from_db(config_file, db_part):
     database_url = config_file.get("DATABASE_URL", "").strip()
     if not database_url:
         return
+
     db_config = run(_fetch_db_config(database_url, db_part))
     if db_config is not None:
         for key, value in db_config.items():
@@ -214,6 +216,34 @@ def _fetch_config_from_db(config_file, db_part):
         _LOGGER.info("Config imported from MongoDB")
     else:
         _LOGGER.warning("No saved config found in MongoDB, using defaults")
+        return
+
+    old_config = run(_fetch_db_config(database_url, db_part, collection="deployConfig"))
+    env_keys = {k: config_file[k] for k in _VAR_LIST if k in environ}
+
+    if old_config is not None and old_config != config_file:
+        merged = dict(config_file)
+        for k, v in db_config.items():
+            if k in old_config and config_file.get(k) is not None:
+                if old_config.get(k) == config_file.get(k):
+                    merged[k] = v
+            elif k not in merged or merged[k] is None:
+                merged[k] = v
+        config_file.clear()
+        config_file.update(merged)
+        _LOGGER.info("Config: config.py changed, takes priority over MongoDB")
+    else:
+        merged = dict(config_file)
+        if db_config:
+            merged.update(db_config)
+        config_file.clear()
+        config_file.update(merged)
+        _LOGGER.info(
+            "Config imported from MongoDB"
+            if old_config is not None
+            else "Config: first deploy, config.py fills gaps from MongoDB"
+        )
+    config_file.update(env_keys)
 
 
 def _run_update(upstream_repo, upstream_branch, version):
@@ -270,6 +300,15 @@ def _update_packages(update_pkgs):
             _LOGGER.info("Successfully Updated all the Packages !")
         else:
             _LOGGER.error(f"Failed to update packages: {pkg_update.stderr}")
+
+
+def _cleanup():
+    for d in ["gen_scripts", ".github"]:
+        if isdir(d):
+            rmtree(d, ignore_errors=True)
+    for f in ["README.md", "LICENSE", "Dockerfile", "docker-compose.yml"]:
+        if path.exists(f):
+            remove(f)
 
 
 def main():

@@ -37,13 +37,15 @@ from .. import (
     excluded_extensions,
     auth_chats,
     sudo_users,
+    var_list,
 )
 from ..helper.ext_utils.bot_utils import (
     SetInterval,
+    cmd_exec,
     new_task,
 )
 from ..core.config_manager import Config
-from ..core.tg_client import TgClient
+from ..core.tg_client import TgClient, db_partition_id
 from ..core.torrent_manager import TorrentManager
 from ..core.startup import (
     start_web_server,
@@ -212,7 +214,7 @@ DEFAULT_DESP = {
     "AUTHOR_NAME": "Author name shown on Telegraph pages.",
     "AUTHOR_URL": "Author URL for Telegraph pages. Use channel URL for join button.",
     "INSTADL_API": "Instagram downloader API key.",
-    "IMDB_TEMPLATE": "HTML template for IMDB results display.",
+    "IMDB_TEMPLATE": "Optional HTML template for IMDB results. If empty, uses Rich Messages.",
     "IMAGES": "List of image URLs or file_ids for the gallery. Managed via /addimage command.",
     "IMG_SEARCH": "Comma-separated keywords to auto-fetch wallpaper images on startup. e.g. anime, nature, space",
     "IMG_PAGE": "Number of pages to search for each keyword in IMG_SEARCH. Each page has ~70 images. Default: 1",
@@ -243,7 +245,6 @@ DEFAULT_DESP = {
     "LEECH_DUMP_CHAT": "Chat ID to dump all leeched files. Leave empty to disable.",
     "LINKS_LOG_ID": "Chat ID for link logging.",
     "MIRROR_LOG_ID": "Chat ID(s) for mirror logs. Space-separated for multiple.",
-    "CLEAN_LOG_MSG": "Clean leech log and bot PM task messages. Default: False.",
     "LEECH_PREFIX": "Prefix added to leeched file names.",
     "LEECH_CAPTION": "Custom caption for leeched files. Supports HTML.",
     "LEECH_SUFFIX": "Suffix added to leeched file names.",
@@ -976,9 +977,7 @@ async def sync_jdownloader():
         await jdownloader.device.system.exit_jd()
     if await aiopath.exists("cfg.zip"):
         await remove("cfg.zip")
-    await (
-        await create_subprocess_exec("7z", "a", "cfg.zip", "/JDownloader/cfg")
-    ).wait()
+    await cmd_exec(["7z", "a", "cfg.zip", "/JDownloader/cfg"])
     await database.update_private_file("cfg.zip")
 
 
@@ -1002,11 +1001,9 @@ async def update_private_file(_, message, pre_message, key, new_file=False):
                 Config.USE_SERVICE_ACCOUNTS = False
                 await database.update_config({"USE_SERVICE_ACCOUNTS": False})
             elif file_name in [".netrc", "netrc"]:
-                await (await create_subprocess_exec("touch", ".netrc")).wait()
-                await (await create_subprocess_exec("chmod", "600", ".netrc")).wait()
-                await (
-                    await create_subprocess_exec("cp", ".netrc", "/root/.netrc")
-                ).wait()
+                await cmd_exec(["touch", ".netrc"])
+                await cmd_exec(["chmod", "600", ".netrc"])
+                await cmd_exec(["cp", ".netrc", "/root/.netrc"])
         await delete_message(message)
     elif doc := message.document:
         file_name = doc.file_name
@@ -1019,20 +1016,16 @@ async def update_private_file(_, message, pre_message, key, new_file=False):
                 await rmtree("accounts", ignore_errors=True)
             if await aiopath.exists("rclone_sa"):
                 await rmtree("rclone_sa", ignore_errors=True)
-            await (
-                await create_subprocess_exec(
-                    "7z", "x", "-o.", "-aoa", "accounts.zip", "accounts/*.json"
-                )
-            ).wait()
-            await (
-                await create_subprocess_exec("chmod", "-R", "777", "accounts")
-            ).wait()
+            await cmd_exec(
+                ["7z", "x", "-o.", "-aoa", "accounts.zip", "accounts/*.json"]
+            )
+            await cmd_exec(["chmod", "-R", "777", "accounts"])
         elif file_name in [".netrc", "netrc"]:
             if file_name == "netrc":
                 await rename("netrc", ".netrc")
                 file_name = ".netrc"
-            await (await create_subprocess_exec("chmod", "600", ".netrc")).wait()
-            await (await create_subprocess_exec("cp", ".netrc", "/root/.netrc")).wait()
+            await cmd_exec(["chmod", "600", ".netrc"])
+            await cmd_exec(["cp", ".netrc", "/root/.netrc"])
         elif file_name == "config.py":
             await load_config()
         if "@github.com" in Config.UPSTREAM_REPO:
@@ -1474,6 +1467,11 @@ async def send_bot_settings(_, message):
 
 
 async def load_config():
+    import importlib
+    import sys
+
+    if "config" in sys.modules:
+        importlib.reload(sys.modules["config"])
     Config.load()
     drives_ids.clear()
     drives_names.clear()
@@ -1504,8 +1502,44 @@ async def load_config():
 
     if Config.DATABASE_URL:
         await database.connect()
-        config_dict = Config.get_all()
-        await database.update_config(config_dict)
+
+        from os import environ
+
+        settings = sys.modules.get("config")
+        config_file = {}
+        if settings:
+            config_file = {
+                k: v.strip() if isinstance(v, str) else v
+                for k, v in vars(settings).items()
+                if not k.startswith("__")
+            }
+        config_file.update({k: environ[k].strip() for k in var_list if k in environ})
+
+        part = db_partition_id((Config.BOT_TOKEN or "").split(":", 1)[0])
+        deploy_filter = {"_id": part}
+
+        old_config = await database.db.settings.deployConfig.find_one(
+            deploy_filter, {"_id": 0}
+        )
+        db_config = (
+            await database.db.settings.config.find_one(deploy_filter, {"_id": 0}) or {}
+        )
+
+        if old_config is None:
+            for k, v in config_file.items():
+                if v is not None:
+                    db_config.setdefault(k, v)
+        elif old_config != config_file:
+            for k, v in config_file.items():
+                if k not in old_config or old_config.get(k) != v:
+                    if v is not None:
+                        db_config[k] = v
+
+        Config.load_dict(db_config)
+        await database.db.settings.deployConfig.replace_one(
+            deploy_filter, config_file, upsert=True
+        )
+        await database.update_config(Config.get_all())
     else:
         await database.disconnect()
     await gather(initiate_search_tools(), start_from_queued(), rclone_serve_booter())

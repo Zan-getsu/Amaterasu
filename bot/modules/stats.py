@@ -25,7 +25,11 @@ from psutil import (
 from .. import LOGGER, bot_cache, bot_start_time, bot_loop
 from ..core.config_manager import Config, BinConfig
 from ..helper.ext_utils.bot_lock import get_system_resources_cached
-from ..helper.ext_utils.bot_utils import cmd_exec, compare_versions, new_task
+from ..helper.ext_utils.bot_utils import (
+    cmd_exec,
+    compare_versions,
+    new_task,
+)
 from ..helper.ext_utils.status_utils import (
     get_progress_bar_string,
     get_readable_file_size,
@@ -52,11 +56,11 @@ commands = {
     "yt-dlp": (["yt-dlp", "--version"], r"([\d.]+)"),
     "ffmpeg": (
         [BinConfig.FFMPEG_NAME, "-version"],
-        r"ffmpeg version ([\d.]+(-\w+)?).*",
+        r"ffmpeg version\s+([^\s]+)",
     ),
-    "7z": (["7z", "i"], r"7-Zip ([\d.]+)"),
+    "7z": (["7z", "i"], r"7-Zip(?:\s+\(z\))?\s+v?([\d.]+)"),
     "aiohttp": (["uv", "pip", "show", "aiohttp"], r"Version: ([\d.]+)"),
-    "pyrotgfork": (["uv", "pip", "show", "pyrotgfork"], r"Version: ([\d.]+)"),
+    "wzgram": (["uv", "pip", "show", "wzgram"], r"Version: ([\d.]+)"),
     "gapi": (["uv", "pip", "show", "google-api-python-client"], r"Version: ([\d.]+)"),
     "mega": (["mega-version"], r"version: ([\d.]+)"),
 }
@@ -193,7 +197,7 @@ async def get_stats(event, key="home"):
 ├─ {'FFmpeg':<11}: {ver.get("ffmpeg", "N/A")}
 ├─ {'7z':<11}: {ver.get("7z", "N/A")}
 ├─ {'Aiohttp':<11}: {ver.get("aiohttp", "N/A")}
-├─ {'PyroTgFork':<11}: {ver.get("pyrotgfork", "N/A")}
+├─ {'WZGram':<11}: {ver.get("wzgram", "N/A")}
 ├─ {'Google API':<11}: {ver.get("gapi", "N/A")}
 └─ {'MegaSDK':<11}: {ver.get("mega", "N/A")}
 </pre>"""
@@ -326,8 +330,9 @@ async def get_version_async(command, regex, timeout=5):
     try:
         out, err, code = await wait_for(cmd_exec(command), timeout=timeout)
         if code != 0:
-            return f"Error: {err}"
-        match = research(regex, out)
+            return f"Error: {err or out or f'exit {code}'}"
+        output = "\n".join(part for part in (out, err) if part)
+        match = research(regex, output)
         return match.group(1) if match else "-"
     except TimeoutError:
         return "Timeout"

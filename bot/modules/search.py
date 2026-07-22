@@ -1,4 +1,4 @@
-from httpx import AsyncClient
+from niquests import AsyncSession
 from html import escape
 from urllib.parse import quote
 from pyrogram.enums import ButtonStyle
@@ -32,7 +32,7 @@ async def initiate_search_tools():
     if Config.SEARCH_API_LINK:
         global SITES
         try:
-            async with AsyncClient() as client:
+            async with AsyncSession() as client:
                 response = await client.get(f"{Config.SEARCH_API_LINK}/api/v1/sites")
                 data = response.json()
             SITES = {
@@ -67,7 +67,7 @@ async def search(key, site, message, method):
             else:
                 api = f"{Config.SEARCH_API_LINK}/api/v1/recent?site={site}&limit={Config.SEARCH_LIMIT}"
         try:
-            async with AsyncClient() as client:
+            async with AsyncSession() as client:
                 response = await client.get(api)
                 search_results = response.json()
             if "error" in search_results or search_results["total"] == 0:

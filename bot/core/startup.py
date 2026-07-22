@@ -11,6 +11,7 @@ from aioshutil import rmtree
 
 from .. import (
     LOGGER,
+    bot_loop,
     aria2_options,
     auth_chats,
     categories_dict,
@@ -28,7 +29,7 @@ from .. import (
     sabnzbd_client,
     sudo_users,
 )
-from ..helper.ext_utils.bot_utils import derive_service_password
+from ..helper.ext_utils.bot_utils import cmd_exec, derive_service_password
 from ..helper.ext_utils.db_handler import database
 from .config_manager import Config, BinConfig
 from .cloudflare_tunnel import cloudflare_tunnel_booter
@@ -72,6 +73,7 @@ async def update_qb_options():
         if qbit_options.get("web_ui_password") in ("admin", "admin1", ""):
             qbit_options["web_ui_password"] = pwd
         await TorrentManager.qbittorrent.app.set_preferences(qbit_options)
+        await TorrentManager._auth_qbit()
 
 async def update_aria2_options():
     LOGGER.info("Get aria2 options from server")
@@ -373,21 +375,6 @@ async def update_variables():
             "index_link": Config.INDEX_URL,
         }
 
-    if not Config.IMDB_TEMPLATE:
-        Config.IMDB_TEMPLATE = """
-<b>Title: </b> {title} [{year}]
-<b>Also Known As:</b> {aka}
-<b>Rating Γ¡É∩╕Å:</b> <i>{rating}</i>
-<b>Release Info: </b> <a href="{url_releaseinfo}">{release_date}</a>
-<b>Genre: </b>{genres}
-<b>IMDb URL:</b> {url}
-<b>Language: </b>{languages}
-<b>Country of Origin : </b> {countries}
-
-<b>Story Line: </b><code>{plot}</code>
-
-<a href="{url_cast}">Read More ...</a>"""
-
     if await aiopath.exists("list_drives.txt"):
         async with aiopen("list_drives.txt", "r+") as f:
             lines = await f.readlines()
@@ -512,19 +499,13 @@ async def load_configurations():
     if await aiopath.exists("cfg.zip"):
         if await aiopath.exists("/JDownloader/cfg"):
             await rmtree("/JDownloader/cfg", ignore_errors=True)
-        await (
-            await create_subprocess_exec("7z", "x", "cfg.zip", "-o/JDownloader")
-        ).wait()
+        await cmd_exec(["7z", "x", "cfg.zip", "-o/JDownloader"])
 
     if await aiopath.exists("accounts.zip"):
         if await aiopath.exists("accounts"):
             await rmtree("accounts", ignore_errors=True)
-        await (
-            await create_subprocess_exec(
-                "7z", "x", "-o.", "-aoa", "accounts.zip", "accounts/*.json"
-            )
-        ).wait()
-        await (await create_subprocess_exec("chmod", "-R", "777", "accounts")).wait()
+        await cmd_exec(["7z", "x", "-o.", "-aoa", "accounts.zip", "accounts/*.json"])
+        await cmd_exec(["chmod", "-R", "777", "accounts"])
         await remove("accounts.zip")
 
     if not await aiopath.exists("accounts"):
@@ -539,6 +520,7 @@ async def load_configurations():
             await TorrentManager.qbittorrent.app.set_preferences(qbit_options)
         except Exception as e:
             LOGGER.error(f"Failed to configure qBittorrent: {e}")
+        await TorrentManager._auth_qbit()
 
     await start_web_server()
     await create_subprocess_shell("python3 cron_boot.py")

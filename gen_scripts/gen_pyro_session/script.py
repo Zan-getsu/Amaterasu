@@ -86,7 +86,7 @@ def main():
             phone_number=phone,
             app_version="@Amaterasu User Session",
             device_model="@Amaterasu Bot V3",
-            system_version="@Amaterasu Pyro Server",
+            system_version="@Amaterasu WZGram Server",
         ) as user:
             # Step 3: Send session to Saved Messages
             print("[INFO] Sending session string to your Saved Messages...")

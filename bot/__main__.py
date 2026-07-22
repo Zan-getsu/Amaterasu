@@ -1,5 +1,6 @@
 # ruff: noqa: E402
 
+import sys
 import faulthandler
 from sys import stderr
 from logging import FileHandler, getLogger
@@ -26,6 +27,12 @@ for _h in getLogger().handlers:
             pass
         break
 from .core.tg_client import TgClient
+from .helper.ext_utils.crash_reporter import (
+    send_unhandled_exception,
+    send_async_exception,
+)
+
+sys.excepthook = send_unhandled_exception
 
 _clean_task = None
 
@@ -167,7 +174,7 @@ async def main():
         update_nzb_options(),
     )
     from .core.jdownloader_booter import jdownloader
-    from .helper.ext_utils.bot_utils import create_tracked_task, search_images
+    from .helper.ext_utils.bot_utils import create_tracked_task, git_info, search_images
     from .helper.ext_utils.files_utils import clean_all
     from .helper.ext_utils.telegraph_helper import telegraph
     from .helper.mirror_leech_utils.rclone_utils.serve import rclone_serve_booter
@@ -177,6 +184,7 @@ async def main():
     )
 
     await save_settings()
+    await git_info.init()
     if not Config.DISABLE_JD:
         create_tracked_task(jdownloader.boot())
     global _clean_task
@@ -220,6 +228,7 @@ def _handle_asyncio_exception(loop, context):
         if "unknown constructor" in msg_lower or "server sent an unknown" in msg_lower:
             LOGGER.warning(f"Pyrogram schema mismatch (tg side): {msg}")
             return
+    send_async_exception(context)
     loop.default_exception_handler(context)
 
 
@@ -231,7 +240,7 @@ from .helper.listeners.aria2_listener import add_aria2_callbacks
 
 add_aria2_callbacks()
 create_help_buttons()
-add_handlers()
+bot_loop.run_until_complete(add_handlers())
 
 from .modules import restart_notification
 
@@ -240,7 +249,10 @@ if _clean_task is not None:
         bot_loop.run_until_complete(_clean_task)
     except Exception as e:
         LOGGER.error(f"clean_all error: {e}")
-bot_loop.run_until_complete(restart_notification())
+try:
+    bot_loop.run_until_complete(restart_notification())
+except Exception as e:
+    LOGGER.error(f"restart_notification error: {e}")
 
 from .core.plugin_manager import get_plugin_manager
 from .modules.plugin_manager import register_plugin_commands
@@ -271,7 +283,7 @@ async def restart_sessions_confirm(_, query):
         restart_message = await send_message(reply_to, "Restarting Session(s)...")
         await delete_message(message)
         await TgClient.reload()
-        add_handlers()
+        await add_handlers()
         TgClient.bot.add_handler(
             CallbackQueryHandler(
                 restart_sessions_confirm,

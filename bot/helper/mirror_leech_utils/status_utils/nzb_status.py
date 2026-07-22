@@ -37,17 +37,17 @@ async def get_download(nzo_id, old_info=None):
             if res := history["history"]["slots"]:
                 slot = res[0]
                 if slot["status"] == "Verifying":
-                    percentage = slot["action_line"].split("Verifying: ")[-1].split("/")
-                    percentage = round(
-                        (int(float(percentage[0])) / int(float(percentage[1]))) * 100, 2
-                    )
-                    old_info["percentage"] = percentage
+                    parts = slot["action_line"].split("Verifying: ")[-1].split("/")
+                    if len(parts) > 1:
+                        percentage = round(
+                            (int(float(parts[0])) / int(float(parts[1]))) * 100, 2
+                        )
+                        old_info["percentage"] = percentage
                 elif slot["status"] == "Repairing":
                     action = slot["action_line"].split("Repairing: ")[-1].split()
-                    percentage = action[0].strip("%")
-                    eta = action[2]
-                    old_info["percentage"] = percentage
-                    old_info["timeleft"] = eta
+                    if len(action) > 2:
+                        old_info["percentage"] = action[0].strip("%")
+                        old_info["timeleft"] = action[2]
                 elif slot["status"] == "Extracting":
                     if "Unpacking" in slot["action_line"]:
                         action = slot["action_line"].split("Unpacking: ")[-1].split()
@@ -55,13 +55,13 @@ async def get_download(nzo_id, old_info=None):
                         action = (
                             slot["action_line"].split("Direct Unpack: ")[-1].split()
                         )
-                    percentage = action[0].split("/")
-                    percentage = round(
-                        (int(float(percentage[0])) / int(float(percentage[1]))) * 100, 2
-                    )
-                    eta = action[2]
-                    old_info["percentage"] = percentage
-                    old_info["timeleft"] = eta
+                    if len(action) > 2:
+                        parts = action[0].split("/")
+                        if len(parts) > 1:
+                            old_info["percentage"] = round(
+                                (int(float(parts[0])) / int(float(parts[1]))) * 100, 2
+                            )
+                            old_info["timeleft"] = action[2]
                 old_info["status"] = slot["status"]
         return old_info
     except Exception as e:

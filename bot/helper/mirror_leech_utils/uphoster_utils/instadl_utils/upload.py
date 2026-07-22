@@ -39,10 +39,11 @@ class ProgressFileReader(BufferedReader):
 class InstaDLUpload:
     """Upload to InstaDL. Requires Config.INSTADL_API."""
 
-    def __init__(self, listener, path):
+    def __init__(self, listener, path, folder_name=""):
         self.listener = listener
         self._updater = None
         self._path = path
+        self.folder_name = folder_name
         self._is_errored = False
         self.api_url = "https://instadl.io/api/v1"
         self.__processed_bytes = 0

@@ -3,12 +3,14 @@ from random import choice
 from re import match as re_match, search as re_search, sub
 from time import time
 
-from pyrogram.types import Message, InputMediaPhoto
+from pyrogram.types import Message, InputMediaPhoto, ReplyParameters
 from pyrogram.enums import ButtonStyle, ParseMode
 from pyrogram.errors import (
     FloodWait,
     MessageNotModified,
     MessageEmpty,
+    MessageTooLong,
+    MessageDeleteForbidden,
     ReplyMarkupInvalid,
     PhotoInvalidDimensions,
     WebpageCurlFailed,
@@ -84,9 +86,8 @@ async def send_message(message, text, buttons=None, block=True, photo=None, **kw
                 if isinstance(message, Message):
                     return await message.reply_photo(
                         photo=photo,
-                        reply_to_message_id=message.id,
                         caption=text,
-                        quote=True,
+                        reply_parameters=ReplyParameters(message_id=message.id),
                         reply_markup=buttons,
                         disable_notification=True,
                         **kwargs,
@@ -144,6 +145,8 @@ async def send_message(message, text, buttons=None, block=True, photo=None, **kw
     except ReplyMarkupInvalid as rmi:
         LOGGER.warning(str(rmi))
         return await send_message(message, text, None)
+    except MessageTooLong:
+        return await send_message(message, text[:4096], buttons, block, photo)
     except (MessageEmpty, EntityBoundsInvalid):
         return await send_message(message, text, parse_mode=ParseMode.DISABLED)
     except PeerIdInvalid:
@@ -255,7 +258,7 @@ async def edit_message(message, text, buttons=None, block=True, photo=None):
             return str(f)
         await sleep(f.value * 1.2)
         return await edit_message(message, text, buttons, block, photo)
-    except ConnectionError:
+    except OSError:
         return
     except Exception as e:
         LOGGER.error(str(e), exc_info=True)
@@ -271,7 +274,7 @@ async def edit_reply_markup(message, buttons):
         LOGGER.warning(str(f))
         await sleep(f.value * 1.2)
         return await edit_reply_markup(message, buttons)
-    except ConnectionError:
+    except OSError:
         return
     except Exception as e:
         LOGGER.error(str(e), exc_info=True)
@@ -282,7 +285,7 @@ async def send_file(message, file, caption="", buttons=None):
     try:
         return await message.reply_document(
             document=file,
-            quote=True,
+            reply_parameters=ReplyParameters(message_id=message.id),
             caption=caption,
             disable_notification=True,
             reply_markup=buttons,
@@ -630,16 +633,17 @@ async def open_drive_clean(message):
         buttons.build_menu(3),
     )
     start_time = time()
-    bot_cache[msg_id] = [None, False, False, start_time]
+    bot_cache[msg_id] = [None, False, False, start_time, None]
     while time() - start_time <= 60:
         await sleep(0.5)
         if bot_cache[msg_id][1] or bot_cache[msg_id][2]:
             break
     drive_id = bot_cache[msg_id][0]
     is_cancelled = bot_cache[msg_id][1]
+    cat_name = bot_cache[msg_id][4]
     if not is_cancelled:
         await delete_message(prompt)
     else:
         await edit_message(prompt, "<b>Task Cancelled</b>")
     del bot_cache[msg_id]
-    return drive_id, is_cancelled
+    return drive_id, is_cancelled, cat_name

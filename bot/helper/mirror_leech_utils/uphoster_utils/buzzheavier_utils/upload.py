@@ -39,10 +39,11 @@ class ProgressFileReader(BufferedReader):
 
 
 class BuzzHeavierUpload:
-    def __init__(self, listener, path):
+    def __init__(self, listener, path, folder_name=""):
         self.listener = listener
         self._updater = None
         self._path = path
+        self.folder_name = folder_name
         self._is_errored = False
         self.api_url = "https://buzzheavier.com/api/"
         self.upload_url = "https://w.buzzheavier.com/"

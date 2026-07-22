@@ -68,13 +68,18 @@ async def _on_download_started(api, data):
 
 
 async def _on_download_complete(api, data):
+    gid = data["params"][0]["gid"]
     try:
-        gid = data["params"][0]["gid"]
         download, options = await api.tellStatus(gid), await api.getOption(gid)
         if options.get("follow-torrent", "") == "false":
             return
     except (TimeoutError, ClientError, Exception) as e:
-        LOGGER.error(f"onDownloadComplete: {e}")
+        if "not found" in str(e):
+            LOGGER.warning(
+                f"onDownloadComplete: GID {gid} not found (already processed)"
+            )
+        else:
+            LOGGER.error(f"onDownloadComplete: {e}")
         return
     if download.get("followedBy", []):
         new_gid = download.get("followedBy", [])[0]

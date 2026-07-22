@@ -94,15 +94,18 @@ async def add_nzb(listener, path):
         if not downloads["queue"]["slots"]:
             await sleep(1)
             history = await sabnzbd_client.get_history(nzo_ids=job_id)
-            if err := history["history"]["slots"][0]["fail_message"]:
-                if par2_lock_acquired:
-                    await sab_par2_lock.release()
-                await gather(
-                    listener.on_download_error(err),
-                    sabnzbd_client.delete_history(job_id, delete_files=True),
-                )
-                return
-            name = history["history"]["slots"][0]["name"]
+            if slots := history["history"]["slots"]:
+                if err := slots[0]["fail_message"]:
+                    if par2_lock_acquired:
+                        await sab_par2_lock.release()
+                    await gather(
+                        listener.on_download_error(err),
+                        sabnzbd_client.delete_history(job_id, delete_files=True),
+                    )
+                    return
+                name = slots[0]["name"]
+            else:
+                name = listener.name
         else:
             name = downloads["queue"]["slots"][0]["filename"]
 

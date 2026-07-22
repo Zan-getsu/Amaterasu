@@ -38,9 +38,10 @@ class ProgressFileReader(BufferedReader):
 
 
 class DevUploadsUpload:
-    def __init__(self, listener, path):
+    def __init__(self, listener, path, folder_name=""):
         self.listener = listener
         self._path = path
+        self.folder_name = folder_name
         self._updater = None
         self._is_errored = False
         self.server_api_url = "https://devuploads.com/api/upload/server"

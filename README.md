@@ -14,7 +14,7 @@
 **The Absolute Pinnacle of Telegram Mirroring and Leeching**
 
 <p align="center">
-  <a href="#"><img src="https://img.shields.io/badge/Version-1.6.3-orange?style=for-the-badge&logo=rocket"></a>
+  <a href="#"><img src="https://img.shields.io/badge/Version-1.6.4-orange?style=for-the-badge&logo=rocket"></a>
   <a href="#"><img src="https://img.shields.io/github/repo-size/Zan-getsu/Amaterasu?color=FF4500&label=Size&style=for-the-badge"></a>
   <a href="#"><img src="https://img.shields.io/github/license/Zan-getsu/Amaterasu?style=for-the-badge&color=FF8C00"></a>
   <br>
@@ -99,65 +99,6 @@ It converges five industrial download engines (Aria2c, qBittorrent, JDownloader,
 
 > [!IMPORTANT]
 > Amaterasu also ships with a built-in **FileToLink** streaming web server. Any file uploaded to a designated Telegram channel can be instantly converted into a direct HTTP stream link — seekable, resumable, and playable in VLC, MX Player, or any browser.
-
----
-
-## 🆕 What's New in v1.6.3
-
-A major upgrade focused on **features, robustness, and speed**. Security hardening from v1.5.0 is preserved but now every measure is configurable so it never blocks functionality.
-
-### New Features
-
-- **Debrid multi-provider**: Real-Debrid, AllDebrid, Premiumize, Debrid-Link via `DEBRID_LINK_API` prefix
-- **4 new DDL hosters**: StreamWish, FileLion, InstaDL, Protected.link
-- **Sequential torrent streaming**: `--stream` flag — stream while still downloading
-- **Cloud-to-cloud transfer**: `--c2c` flag — rclone copy between remotes, no local download
-- **Parallel multi-source download**: `--multi url1 url2 url3` — aria2 downloads from all sources
-- **Automatic subtitles**: `AUTO_SUBTITLES` — OpenSubtitles search by file hash
-- **Telegram Premium auto-detect**: 4 GB upload limit when bot is premium
-- **Interactive setup wizard**: `/setup` — 5-step owner-only guided setup
-- **Image search**: `/images <query>` — wallpaperflare/peapix/wallhaven with Mirror buttons
-- **Force-subscribe**: `FORCE_SUB_IDS` — require channel join before bot use
-- **Web UI login**: `LOGIN_PASS` — HMAC session cookie for admin routes
-- **Blacklist with TTL**: auto-expiring temporary bans via MongoDB TTL index
-
-### Performance
-
-- **FFmpeg hardware acceleration**: auto-detect NVENC/QSV/VAAPI/VideoToolbox (5-20× faster encoding)
-- **Upload queue parallelism**: `UPLOAD_PARALLELISM` (default 3 concurrent uploads)
-- **Adaptive status updates**: 5s for active tasks, 60s for idle
-- **Queue prioritization**: `priority` field — high-priority tasks jump the queue
-- **yt-dlp playlist parallelism**: `PLAYLIST_PARALLELISM`
-
-### Robustness
-
-- **Retry with exponential backoff**: 1→2→4→8→16s for transient failures
-- **Disk space pre-check**: fail fast with actionable error before download
-- **FloodWait manager**: per-chat state tracking + preemptive delay
-- **Engine health checks**: 5-min interval, owner DM on state transitions
-- **Actionable error messages**: every error says what went wrong AND what to do
-- **Shared HTTP client**: httpx.AsyncClient with HTTP/2 + connection pooling
-
-### Quality
-
-- **29 smoke tests** (HMAC tokens, path traversal, rate limiting, retry, etc.)
-- **CI workflow**: ruff + pytest + pip-audit on every PR
-- **11 critical dependencies pinned** for reproducible builds
-- **Dependabot** for automated dependency updates
-- **Structured logging**: `LOG_FORMAT=json` for log aggregation
-
-### Config Relaxations (security no longer blocks functionality)
-
-- `BIND_TO_LOOPBACK=False` — direct LAN access without reverse proxy
-- `UPSTREAM_ALLOWLIST` — add your own fork URL for auto-update
-- `SKIP_SABNZBD_INI_CHECK=True` — bypass ini validation for manual configs
-- `check-certificate=false` documented as a **compatibility feature** (FTP, self-signed HTTPS)
-
-### Multi-language (2 → 10)
-
-English, Bengali, Spanish, French, German, Arabic, Hindi, Japanese, Russian, Portuguese
-
-See [CHANGELOG.md](CHANGELOG.md) for the full list of changes.
 
 ---
 
@@ -248,7 +189,7 @@ graph TD
 | Component | Technology |
 |---|---|
 | Language | Python 3.11 |
-| Telegram Framework | Pyrogram (pyrotgfork 2.2.24) |
+| Telegram Framework | WZGram 3.0.23 (`pyrogram` API) |
 | Web Server | FastAPI + Uvicorn |
 | Database | MongoDB (Motor async driver) |
 | Containerization | Docker / Podman |

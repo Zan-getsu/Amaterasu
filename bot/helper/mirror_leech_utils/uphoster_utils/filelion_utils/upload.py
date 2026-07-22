@@ -49,10 +49,11 @@ class ProgressFileReader(BufferedReader):
 class FileLionUpload:
     """Upload to FileLion. Requires Config.FILELION_API."""
 
-    def __init__(self, listener, path):
+    def __init__(self, listener, path, folder_name=""):
         self.listener = listener
         self._updater = None
         self._path = path
+        self.folder_name = folder_name
         self._is_errored = False
         self.api_url = "https://filelion.xyz/api/v1"
         self.__processed_bytes = 0

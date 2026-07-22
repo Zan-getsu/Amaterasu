@@ -137,6 +137,7 @@ IMAGES = []
 IMG_SEARCH = ""
 IMG_PAGE = 1
 USE_IMAGES = False
+# Optional legacy HTML template. Leave empty to use Telegram Rich Messages.
 IMDB_TEMPLATE = ""
 INSTADL_API = ""
 # JioDrive (Indian cloud storage) bypass token.

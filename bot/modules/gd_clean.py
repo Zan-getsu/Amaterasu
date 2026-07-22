@@ -57,12 +57,12 @@ class GDClean(TaskListener):
         elif link:
             await obj.start(link=link)
         else:
-            drive_id, is_cancelled = await open_drive_clean(self.message)
+            drive_id, is_cancelled, cat_name = await open_drive_clean(self.message)
             if is_cancelled:
                 return
             if not drive_id:
                 return await send_message(self.message, "No drive ID selected")
-            await obj.start(drive_id=drive_id)
+            await obj.start(drive_id=drive_id, cat_name=cat_name)
 
 
 @new_task
@@ -83,6 +83,10 @@ async def confirm_drive_clean_cb(_, query):
     if cat_name == "ccancel":
         bot_cache[msg_id][1] = True
         return
+    if cat_name == "cstart":
+        if bot_cache[msg_id][0]:
+            bot_cache[msg_id][2] = True
+        return
     await query.answer()
     merged = {
         "Default": {
@@ -92,14 +96,21 @@ async def confirm_drive_clean_cb(_, query):
         **fetch_drive_cat(user_id),
         **categories_dict,
     }
-    bot_cache[msg_id][0] = merged.get(cat_name, {}).get("drive_id")
-    bot_cache[msg_id][2] = True
+    selected_id = merged.get(cat_name, {}).get("drive_id")
+    bot_cache[msg_id][0] = selected_id
+    bot_cache[msg_id][4] = cat_name
     buttons = ButtonMaker()
     for name in merged:
         selected = cat_name == name
         buttons.data_button(
             f'{"✓️" if selected else ""} {name}',
             f"gdccat {user_id} {msg_id} {name.replace(' ', '_')}",
+        )
+    if selected_id:
+        buttons.data_button(
+            "Start Cleaning",
+            f"gdccat {user_id} {msg_id} cstart",
+            style=ButtonStyle.DANGER,
         )
     buttons.data_button(
         "Cancel",

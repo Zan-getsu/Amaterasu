@@ -6,7 +6,7 @@ anytree
 apscheduler
 aioaria2
 aioqbt
-imdbinfo
+imdbio
 cloudscraper
 curl_cffi>=0.7.0
 dnspython
@@ -31,16 +31,15 @@ pycountry
 python-magic
 pytz
 qbittorrent-api
-requests
+niquests
 speedtest-cli
-telegraph
 tenacity
 tgcrypto
 urllib3
 uvloop
 xattr
 yt-dlp-ejs
-pyrotgfork==2.2.24
+wzgram==3.0.23
 yt-dlp[default,curl-cffi]==2026.6.9
 fastapi==0.115.0
 python-multipart>=0.0.9,<1

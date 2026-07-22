@@ -148,6 +148,7 @@ class GoogleDriveClean(GoogleDriveHelper):
         self.iter_start = 0
         self.page_step = 1
         self._pending_del = None
+        self._error_msg = None
         super().__init__()
 
     async def _event_handler(self):
@@ -237,7 +238,9 @@ class GoogleDriveClean(GoogleDriveHelper):
             if isinstance(err, RetryError):
                 LOGGER.info(f"Total Attempts: {err.last_attempt.attempt_number}")
                 err = err.last_attempt.exception()
-            self.id = str(err).replace(">", "").replace("<", "")
+            self._error_msg = str(err).replace(">", "").replace("<", "")
+            self.id = self._error_msg
+            self.listener.is_cancelled = True
             self.event.set()
             return
         self.items_list = natsorted(files)
@@ -249,7 +252,9 @@ class GoogleDriveClean(GoogleDriveHelper):
         try:
             result = self.service.drives().list(pageSize="100").execute()
         except Exception as e:
-            self.id = str(e)
+            self._error_msg = str(e)
+            self.id = self._error_msg
+            self.listener.is_cancelled = True
             self.event.set()
             return
         drives = result["drives"]
@@ -342,17 +347,31 @@ class GoogleDriveClean(GoogleDriveHelper):
         else:
             await self.list_drives()
 
-    async def start(self, link=None, drive_id=None):
+    async def start(self, link=None, drive_id=None, cat_name=None):
         if link:
             try:
                 file_id = self.get_id_from_url(link)
             except (KeyError, IndexError):
-                self.id = "Google Drive ID could not be found in the provided link"
+                self._error_msg = (
+                    "Google Drive ID could not be found in the provided link"
+                )
+                self.id = self._error_msg
+                self.listener.is_cancelled = True
+                self.event.set()
+                return
+            self.id = file_id
+            try:
+                meta = self.get_file_metadata(file_id)
+            except Exception as err:
+                if isinstance(err, RetryError):
+                    LOGGER.info(f"Total Attempts: {err.last_attempt.attempt_number}")
+                    err = err.last_attempt.exception()
+                self._error_msg = str(err).replace(">", "").replace("<", "")
+                self.id = self._error_msg
+                self.listener.is_cancelled = True
                 self.event.set()
                 await self._event_handler()
                 return
-            self.id = file_id
-            meta = self.get_file_metadata(file_id)
             name = meta.get("name", "root")
             self.parents = [{"id": file_id, "name": name}]
             if meta.get("mimeType") == self.G_DRIVE_DIR_MIME_TYPE:
@@ -373,7 +392,9 @@ class GoogleDriveClean(GoogleDriveHelper):
                 aiopath.exists("accounts"),
             )
             if not self._token_owner and not self._token_user and not self._sa_owner:
-                self.id = "token.pickle or service accounts are not Exists!"
+                self._error_msg = "token.pickle or service accounts are not Exists!"
+                self.id = self._error_msg
+                self.listener.is_cancelled = True
                 self.event.set()
                 return
             await self.choose_token()

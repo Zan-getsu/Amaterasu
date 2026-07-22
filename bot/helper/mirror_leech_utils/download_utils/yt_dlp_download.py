@@ -326,7 +326,9 @@ class YoutubeDLHelper:
                 for entry in result["entries"]:
                     if not entry:
                         continue
-                    elif "filesize_approx" in entry:
+                    if entry.get("ext") == "unknown_video":
+                        entry["ext"] = "mp4"
+                    if "filesize_approx" in entry:
                         self._listener.size += entry.get("filesize_approx", 0) or 0
                     elif "filesize" in entry:
                         self._listener.size += entry.get("filesize", 0) or 0
@@ -338,6 +340,8 @@ class YoutubeDLHelper:
                         if not self._ext:
                             self._ext = ext
             else:
+                if result.get("ext") == "unknown_video":
+                    result["ext"] = "mp4"
                 outtmpl_ = "%(title,fulltitle,alt_title)s%(season_number& |)s%(season_number&S|)s%(season_number|)02d%(episode_number&E|)s%(episode_number|)02d%(height& |)s%(height|)s%(height&p|)s%(fps|)s%(fps&fps|)s%(tbr& |)s%(tbr|)d.%(ext)s"
                 realName = ydl.prepare_filename(result, outtmpl=outtmpl_)
                 ext = ospath.splitext(realName)[-1]

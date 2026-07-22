@@ -15,7 +15,8 @@ async def get_download(tag, old_info=None):
         res = (await TorrentManager.qbittorrent.torrents.info(tag=tag))[0]
         return res or old_info
     except Exception as e:
-        LOGGER.error(f"{e}: Qbittorrent, while getting torrent info. Tag: {tag}")
+        LOGGER.warning(f"{e}: Qbittorrent, while getting torrent info. Tag: {tag}")
+        await TorrentManager.ensure_qbit()
         return old_info
 
 
@@ -97,7 +98,8 @@ class QbittorrentStatus:
     async def cancel_task(self):
         self.listener.is_cancelled = True
         await self.update()
-        await TorrentManager.qbittorrent.torrents.stop([self._info.hash])
+        if TorrentManager.qbittorrent is not None:
+            await TorrentManager.qbittorrent.torrents.stop([self._info.hash])
         if not self.seeding:
             if self.queued:
                 LOGGER.info(f"Cancelling QueueDL: {self.name()}")
@@ -106,13 +108,19 @@ class QbittorrentStatus:
                 LOGGER.info(f"Cancelling Download: {self._info.name}")
                 msg = "Stopped by user!"
             await sleep(0.3)
-            await gather(
-                self.listener.on_download_error(msg),
-                TorrentManager.qbittorrent.torrents.delete([self._info.hash], True),
-                TorrentManager.qbittorrent.torrents.delete_tags(
-                    tags=[self._info.tags[0]]
-                ),
-            )
+            tasks = [self.listener.on_download_error(msg)]
+            if TorrentManager.qbittorrent is not None:
+                tasks.extend(
+                    [
+                        TorrentManager.qbittorrent.torrents.delete(
+                            [self._info.hash], True
+                        ),
+                        TorrentManager.qbittorrent.torrents.delete_tags(
+                            tags=[self._info.tags[0]]
+                        ),
+                    ]
+                )
+            await gather(*tasks)
             async with qb_listener_lock:
                 if self._info.tags[0] in qb_torrents:
                     del qb_torrents[self._info.tags[0]]

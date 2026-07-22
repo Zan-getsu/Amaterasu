@@ -23,6 +23,13 @@ from ..telegram_helper.message_utils import update_status_message
 
 
 async def _remove_torrent(hash_, tag):
+    if TorrentManager.qbittorrent is None:
+        await TorrentManager.ensure_qbit()
+    if TorrentManager.qbittorrent is None:
+        async with qb_listener_lock:
+            if tag in qb_torrents:
+                del qb_torrents[tag]
+        return
     await TorrentManager.qbittorrent.torrents.delete([hash_], True)
     async with qb_listener_lock:
         if tag in qb_torrents:
@@ -122,6 +129,8 @@ async def _qb_listener():
     while True:
         async with qb_listener_lock:
             try:
+                if TorrentManager.qbittorrent is None:
+                    raise AttributeError("qbittorrent is None")
                 torrents = await TorrentManager.qbittorrent.torrents.info()
                 if len(torrents) == 0:
                     intervals["qb"] = ""
@@ -203,7 +212,11 @@ async def _qb_listener():
                         await _on_seed_finish(tor_info)
                         await sleep(0.5)
             except (ClientError, TimeoutError, Exception, AQError) as e:
-                LOGGER.error(str(e))
+                if "NoneType" in str(e) or "None" in str(e):
+                    LOGGER.warning(f"QBittorrent unavailable: {e}")
+                else:
+                    LOGGER.error(str(e))
+                await TorrentManager.ensure_qbit()
         await sleep(3)
 
 

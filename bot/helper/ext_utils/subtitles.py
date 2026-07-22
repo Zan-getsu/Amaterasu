@@ -22,6 +22,7 @@ from os import path as ospath
 from aiofiles.os import path as aiopath
 
 from bot.core.config_manager import Config
+from bot.version import get_version
 
 LOGGER = getLogger(__name__)
 
@@ -74,7 +75,7 @@ async def _search_opensubtitles(file_hash, size, filename, language, api_key):
         from bot.helper.ext_utils.http_client import http_client
         headers = {
             "Api-Key": api_key,
-            "User-Agent": "Amaterasu v1.6.3",
+            "User-Agent": f"Amaterasu {get_version()}",
             "Content-Type": "application/json",
         }
         params = {
@@ -121,7 +122,7 @@ async def _download_subtitle(file_id, api_key, output_path):
         from aiofiles import open as aiopen
         headers = {
             "Api-Key": api_key,
-            "User-Agent": "Amaterasu v1.6.3",
+            "User-Agent": f"Amaterasu {get_version()}",
             "Content-Type": "application/json",
         }
         # Step 1: request download link

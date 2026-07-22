@@ -3,7 +3,8 @@ import re
 from contextlib import suppress
 from fractions import Fraction
 from PIL import Image
-from hashlib import md5
+from hashlib import md5, sha256
+from aiofiles import open as aiopen
 from aiofiles.os import remove, path as aiopath, makedirs
 import json
 from asyncio import (
@@ -19,6 +20,7 @@ from shutil import which
 from time import time
 from aioshutil import rmtree
 from langcodes import Language
+from niquests import AsyncSession
 
 from ... import LOGGER, DOWNLOAD_DIR, threads, cores
 from ...core.config_manager import BinConfig
@@ -35,14 +37,23 @@ def get_md5_hash(up_path):
         return md5_hash.hexdigest()
 
 
+def _convert_image(src, dst):
+    with Image.open(src) as im:
+        im.convert("RGB").save(dst, "JPEG", quality=95)
+
+
 async def create_thumb(msg, _id=""):
     if not _id:
-        _id = time()
+        _id = int(time() * 1000)
         path = f"{DOWNLOAD_DIR}thumbnails"
     else:
         path = "thumbnails"
     await makedirs(path, exist_ok=True)
-    photo_dir = await msg.download()
+    try:
+        photo_dir = await msg.download()
+    except Exception as e:
+        LOGGER.error(f"Failed to download photo: {e}")
+        return ""
     output = ospath.join(path, f"{_id}.jpg")
     await sync_to_async(Image.open(photo_dir).convert("RGB").save, output, "JPEG")
     await remove(photo_dir)
@@ -55,8 +66,6 @@ async def download_image_thumb(url):
     Validates that the URL points to an image via Content-Type header check.
     Returns the path to the saved thumbnail, or empty string on failure.
     """
-    from httpx import AsyncClient
-
     # Content types that are definitely NOT images
     NON_IMAGE_TYPES = (
         "text/",
@@ -67,19 +76,13 @@ async def download_image_thumb(url):
         "audio/",
     )
     try:
-        async with AsyncClient(
-            follow_redirects=True, timeout=30
-        ) as client:
-            # HEAD request to check content type and size
+        async with AsyncSession(timeout=30) as client:
             try:
-                head_resp = await client.head(url)
-                content_type = head_resp.headers.get("content-type", "")
-                if content_type and any(
-                    content_type.startswith(t) for t in NON_IMAGE_TYPES
-                ):
-                    LOGGER.error(f"Thumb URL is not an image: {content_type}")
+                head_resp = await client.head(url, allow_redirects=True)
+                ct = head_resp.headers.get("content-type", "")
+                if ct and any(ct.startswith(t) for t in NON_IMAGE_TYPES):
+                    LOGGER.error(f"Thumb URL is not an image: {ct}")
                     return ""
-
             except Exception:
                 pass  # HEAD failed, will check during GET
 
@@ -357,16 +360,6 @@ def get_encode_output_path(input_path, codec):
 
 
 async def get_streams(file):
-    """
-    Gets media stream information using ffprobe.
-
-    Args:
-        file: Path to the media file.
-
-    Returns:
-        A list of stream objects (dictionaries) or None if an error occurs
-        or no streams are found.
-    """
     cmd = [
         "ffprobe",
         "-hide_banner",

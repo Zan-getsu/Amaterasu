@@ -1,10 +1,9 @@
 from asyncio import sleep
 from secrets import token_hex
-from telegraph.aio import Telegraph
-from telegraph.exceptions import RetryAfterError
 
 from bot import LOGGER
 from ...core.config_manager import Config
+from .telegraph_utils import Telegraph, RetryAfterError
 
 
 class TelegraphHelper:

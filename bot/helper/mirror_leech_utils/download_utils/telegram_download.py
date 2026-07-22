@@ -285,16 +285,22 @@ class TelegramDownloadHelper:
                 and self._listener.transmission_mode in ("user", "both")
                 and self._listener.is_super_chat
             ):
-                self.session = "user"
-                try:
-                    message = await TgClient.user.get_messages(
-                        chat_id=message.chat.id, message_ids=message.id
-                    )
-                except (PeerIdInvalid, ChannelInvalid):
+                if not TgClient.user:
                     LOGGER.warning(
-                        "User session is not in this chat!, Downloading with bot session"
+                        "User session not available, downloading with bot session"
                     )
                     self.session = "bot"
+                else:
+                    self.session = "user"
+                    try:
+                        message = await TgClient.user.get_messages(
+                            chat_id=message.chat.id, message_ids=message.id
+                        )
+                    except (PeerIdInvalid, ChannelInvalid):
+                        LOGGER.warning(
+                            "User session is not in this chat, downloading with bot session"
+                        )
+                        self.session = "bot"
             else:
                 self.session = "bot"
         media = getattr(message, message.media.value) if message.media else None
@@ -338,7 +344,7 @@ class TelegramDownloadHelper:
                         message = await self._listener.client.get_messages(
                             chat_id=message.chat.id, message_ids=message.id
                         )
-                    else:
+                    elif TgClient.user:
                         try:
                             message = await TgClient.user.get_messages(
                                 chat_id=message.chat.id, message_ids=message.id
@@ -347,6 +353,10 @@ class TelegramDownloadHelper:
                             message = await self._listener.client.get_messages(
                                 chat_id=message.chat.id, message_ids=message.id
                             )
+                    else:
+                        message = await self._listener.client.get_messages(
+                            chat_id=message.chat.id, message_ids=message.id
+                        )
                     if self._listener.is_cancelled:
                         async with global_lock:
                             if self._id in GLOBAL_GID:

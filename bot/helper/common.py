@@ -9,7 +9,7 @@ from shlex import split
 
 from aiofiles.os import listdir, makedirs, remove, path as aiopath
 from aioshutil import move, rmtree
-from pyrogram.enums import ChatAction
+from pyrogram.enums import ChatAction, ChatType
 
 from .. import (
     DOWNLOAD_DIR,
@@ -102,6 +102,7 @@ class TaskConfig:
         self.up_dest = ""
         self.drive_id = ""
         self.leech_dest = ""
+        self.cmd_up_dest = ""
         self.rc_flags = ""
         self.tag = ""
         self.name = ""
@@ -163,10 +164,10 @@ class TaskConfig:
         self.thumb = None
         self.excluded_extensions = []
         self.files_to_proceed = []
-        self.is_super_chat = self.message.chat.type.name in [
-            "SUPERGROUP",
-            "CHANNEL",
-            "FORUM",
+        self.is_super_chat = self.message.chat.type in [
+            ChatType.SUPERGROUP,
+            ChatType.CHANNEL,
+            ChatType.FORUM,
         ]
         self.source_url = None
         self.bot_pm = Config.BOT_PM or self.user_dict.get("BOT_PM")
@@ -528,8 +529,32 @@ class TaskConfig:
                 ) != self.get_config_path(self.up_dest):
                     raise ValueError("You must use the same config to clone!")
         else:
-            self.leech_dest = self.up_dest or self.user_dict.get("LEECH_DUMP_CHAT")
-            self.up_dest = self.leech_dest or Config.LEECH_DUMP_CHAT
+            self.leech_dest = self.user_dict.get("LEECH_DUMP_CHAT")
+
+            self.cmd_up_dest = self.up_dest
+            if self.cmd_up_dest:
+                if not isinstance(self.cmd_up_dest, int):
+                    if self.cmd_up_dest.startswith("b:"):
+                        self.cmd_up_dest = self.cmd_up_dest.replace("b:", "", 1)
+                        self.transmission_mode = "bot"
+                    elif self.cmd_up_dest.startswith("u:"):
+                        self.cmd_up_dest = self.cmd_up_dest.replace("u:", "", 1)
+                        self.transmission_mode = "user"
+                    elif self.cmd_up_dest.startswith("h:"):
+                        self.cmd_up_dest = self.cmd_up_dest.replace("h:", "", 1)
+                        self.transmission_mode = "both"
+                    if "|" in str(self.cmd_up_dest):
+                        self.cmd_up_dest, _ = list(
+                            map(
+                                lambda x: int(x) if x.lstrip("-").isdigit() else x,
+                                self.cmd_up_dest.split("|", 1),
+                            )
+                        )
+                    elif str(self.cmd_up_dest).lstrip("-").isdigit():
+                        self.cmd_up_dest = int(self.cmd_up_dest)
+                    elif str(self.cmd_up_dest).lower() == "pm":
+                        self.cmd_up_dest = self.user_id
+
             self.transmission_mode = Config.TRANSMISSION_MODE
             if self.bot_trans:
                 self.transmission_mode = "bot"
@@ -537,28 +562,19 @@ class TaskConfig:
                 self.transmission_mode = "user"
             if self.hybrid_leech:
                 self.transmission_mode = "both"
+
+            self.up_dest = Config.LEECH_DUMP_CHAT
             if self.up_dest:
                 if not isinstance(self.up_dest, int):
-                    if self.up_dest.startswith("b:"):
-                        self.up_dest = self.up_dest.replace("b:", "", 1)
-                        self.transmission_mode = "bot"
-                    elif self.up_dest.startswith("u:"):
-                        self.up_dest = self.up_dest.replace("u:", "", 1)
-                        self.transmission_mode = "user"
-                    elif self.up_dest.startswith("h:"):
-                        self.up_dest = self.up_dest.replace("h:", "", 1)
-                        self.transmission_mode = "both"
-                    if "|" in self.up_dest:
+                    if "|" in str(self.up_dest):
                         self.up_dest, self.chat_thread_id = list(
                             map(
                                 lambda x: int(x) if x.lstrip("-").isdigit() else x,
                                 self.up_dest.split("|", 1),
                             )
                         )
-                    elif self.up_dest.lstrip("-").isdigit():
+                    elif str(self.up_dest).lstrip("-").isdigit():
                         self.up_dest = int(self.up_dest)
-                    elif self.up_dest.lower() == "pm":
-                        self.up_dest = self.user_id
 
                 if self.transmission_mode in ("user", "both"):
                     if not TgClient.user:
@@ -572,11 +588,11 @@ class TaskConfig:
                             self.transmission_mode = "bot"
                         else:
                             uploader_id = TgClient.user.me.id
-                            if chat.type.name not in [
-                                "SUPERGROUP",
-                                "CHANNEL",
-                                "GROUP",
-                                "FORUM",
+                            if chat.type not in [
+                                ChatType.SUPERGROUP,
+                                ChatType.CHANNEL,
+                                ChatType.GROUP,
+                                ChatType.FORUM,
                             ]:
                                 self.transmission_mode = "bot"
                             else:
@@ -593,14 +609,16 @@ class TaskConfig:
                     chat = None
                 if chat is None:
                     if self.transmission_mode == "bot":
-                        raise ValueError("Chat not found!")
+                        raise ValueError(
+                            "Chat not found! Try adding the bot to the chat and try again!"
+                        )
                 else:
                     uploader_id = self.client.me.id
-                    if chat.type.name in [
-                        "SUPERGROUP",
-                        "CHANNEL",
-                        "GROUP",
-                        "FORUM",
+                    if chat.type in [
+                        ChatType.SUPERGROUP,
+                        ChatType.CHANNEL,
+                        ChatType.GROUP,
+                        ChatType.FORUM,
                     ]:
                         member = await chat.get_member(uploader_id)
                         if (
@@ -837,6 +855,7 @@ class TaskConfig:
         LOGGER.info(f"Extracting: {self.name}")
         async with task_dict_lock:
             task_dict[self.mid] = SevenZStatus(self, sevenz, gid, "Extract")
+        t_path = dl_path
         for dirpath, _, files in await sync_to_async(
             walk, self.up_dir or self.dir, topdown=False
         ):

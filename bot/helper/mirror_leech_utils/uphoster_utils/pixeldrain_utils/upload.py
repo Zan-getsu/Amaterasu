@@ -37,10 +37,11 @@ class ProgressFileReader(BufferedReader):
 
 
 class PixelDrainUpload:
-    def __init__(self, listener, path):
+    def __init__(self, listener, path, folder_name=""):
         self.listener = listener
         self._updater = None
         self._path = path
+        self.folder_name = folder_name
         self._is_errored = False
         self.api_url = "https://pixeldrain.com/api/"
         self.__processed_bytes = 0

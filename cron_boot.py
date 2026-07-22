@@ -1,5 +1,5 @@
 from time import sleep
-from requests import get as rget
+from niquests import get as rget
 from os import getenv
 from logging import error as logerror
 

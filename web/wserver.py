@@ -33,7 +33,7 @@ from web.security import (
     verify_signed_token,
 )
 
-getLogger("httpx").setLevel(WARNING)
+getLogger("niquests").setLevel(WARNING)
 getLogger("aiohttp").setLevel(WARNING)
 getLogger("uvicorn").setLevel(WARNING)
 getLogger("uvicorn.access").setLevel(WARNING)

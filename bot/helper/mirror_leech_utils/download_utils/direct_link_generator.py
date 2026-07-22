@@ -5,8 +5,8 @@ from json import loads
 from lxml.etree import HTML
 from os import path as ospath
 from re import findall, match, search
-from requests import Session, post, get
-from requests.adapters import HTTPAdapter
+from niquests import Session, post, get
+from niquests.adapters import HTTPAdapter
 from time import sleep, time
 from urllib.parse import parse_qs, urlparse, unquote
 from urllib3.util.retry import Retry
@@ -880,7 +880,7 @@ def mediafile(url):
         postid = postvalue[1].replace("(", "").replace(")", "")
         response = post(
             "https://mediafile.cc/account/ajax/file_details",
-            data={"u": postid},
+            data={"u": postid, "p": "true"},
             headers={"X-Requested-With": "XMLHttpRequest"},
         )
         html = response.json()["html"]
@@ -1267,7 +1267,6 @@ def uploadee(url):
 
 
 def terabox(url):
-
     if "/file/" in url:
         return url
 

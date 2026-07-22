@@ -49,10 +49,11 @@ class ProgressFileReader(BufferedReader):
 class StreamWishUpload:
     """Upload to StreamWish. Requires Config.STREAMWISH_API."""
 
-    def __init__(self, listener, path):
+    def __init__(self, listener, path, folder_name=""):
         self.listener = listener
         self._updater = None
         self._path = path
+        self.folder_name = folder_name
         self._is_errored = False
         self.api_url = "https://streamwish.com/api/v2"
         self.__processed_bytes = 0
