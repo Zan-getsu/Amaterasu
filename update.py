@@ -192,11 +192,11 @@ def _db_partition_id(bot_id):
     return f"p_{raw[:24]}"
 
 
-async def _fetch_db_config(database_url, db_part):
+async def _fetch_db_config(database_url, db_part, collection="config"):
     conn = AsyncMongoClient(database_url, server_api=ServerApi("1"))
     try:
         db = conn.amaterasu
-        return await db.settings.config.find_one({"_id": db_part}, {"_id": 0})
+        return await db.settings[collection].find_one({"_id": db_part}, {"_id": 0})
     except PyMongoError as e:
         _LOGGER.error(f"Database ERROR: {e}")
         return None
@@ -210,11 +210,7 @@ def _fetch_config_from_db(config_file, db_part):
         return
 
     db_config = run(_fetch_db_config(database_url, db_part))
-    if db_config is not None:
-        for key, value in db_config.items():
-            config_file[key] = value
-        _LOGGER.info("Config imported from MongoDB")
-    else:
+    if db_config is None:
         _LOGGER.warning("No saved config found in MongoDB, using defaults")
         return
 
