@@ -100,9 +100,12 @@ def _restart_target(restart_message, fallback_message):
     if chat_id and msg_id:
         return int(chat_id), int(msg_id)
 
-    fallback_chat_id = getattr(
-        getattr(fallback_message, "chat", None), "id", None
-    )
+    if isinstance(fallback_message, int):
+        fallback_chat_id = fallback_message
+    else:
+        fallback_chat_id = getattr(
+            getattr(fallback_message, "chat", None), "id", None
+        )
     if fallback_chat_id:
         LOGGER.warning(
             "Restarting-message delivery failed; the completion notice will "
@@ -807,7 +810,7 @@ async def confirm_restart(_, query):
     await query.answer()
     data = query.data.split()
     message = query.message
-    reply_to = message.reply_to_message
+    reply_to = message.reply_to_message or message.chat.id
     await delete_message(message)
     if data[1] == "confirm":
         intervals["stopAll"] = True
