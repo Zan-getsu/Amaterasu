@@ -495,6 +495,7 @@ class TelegramUploader:
                 continue
             chat_id = entry["chat_id"]
             msg_id = entry["msg_id"]
+            reply_markup = entry.get("reply_markup")
             copy_from_chat = chat_id
             copy_from_msg = msg_id
             in_dump = chat_id != src_chat.id and not self._listener.up_dest
@@ -505,6 +506,7 @@ class TelegramUploader:
                         chat_id=src_chat.id,
                         from_chat_id=chat_id,
                         message_id=msg_id,
+                        reply_markup=reply_markup,
                     )
                     copy_from_chat = src_chat.id
                     copy_from_msg = bot_copy.id
@@ -521,6 +523,7 @@ class TelegramUploader:
                         chat_id=src_chat.id,
                         from_chat_id=src_chat.id,
                         message_id=msg_id,
+                        reply_markup=reply_markup,
                     )
                     copy_from_chat = src_chat.id
                     copy_from_msg = bot_copy.id
@@ -552,6 +555,7 @@ class TelegramUploader:
                         reply_to_message_id=(
                             self._listener.pm_msg.id if self._listener.pm_msg else None
                         ),
+                        reply_markup=reply_markup,
                     )
                 except Exception as err:
                     if not self._listener.is_cancelled:
@@ -577,6 +581,7 @@ class TelegramUploader:
                         chat_id=dest,
                         from_chat_id=copy_from_chat,
                         message_id=copy_from_msg,
+                        reply_markup=reply_markup,
                     )
                 except Exception as e:
                     if not self._listener.is_cancelled:
@@ -741,7 +746,20 @@ class TelegramUploader:
         )
         return
 
-    async def _hyperul_upload(self, cap_mono, file, thumb, key, f_path=None, duration=0, width=0, height=0, artist="", title=""):
+    async def _hyperul_upload(
+        self,
+        cap_mono,
+        file,
+        thumb,
+        key,
+        f_path=None,
+        duration=0,
+        width=0,
+        height=0,
+        artist="",
+        title="",
+        reply_markup=None,
+    ):
         if self._listener.is_cancelled:
             raise StopTransmission()
         attr_base = [DocumentAttributeFilename(file_name=file)]
@@ -788,6 +806,7 @@ class TelegramUploader:
                         disable_notification=True,
                         reply_to_message_id=self._sent_msg.id,
                         progress=self._upload_progress,
+                        reply_markup=reply_markup,
                     )
                 elif key == "audios":
                     upload_factory = lambda: target_client.send_audio(
@@ -801,6 +820,7 @@ class TelegramUploader:
                         disable_notification=True,
                         reply_to_message_id=self._sent_msg.id,
                         progress=self._upload_progress,
+                        reply_markup=reply_markup,
                     )
                 elif key == "documents":
                     upload_factory = lambda: target_client.send_document(
@@ -812,6 +832,7 @@ class TelegramUploader:
                         disable_notification=True,
                         reply_to_message_id=self._sent_msg.id,
                         progress=self._upload_progress,
+                        reply_markup=reply_markup,
                     )
                 else:
                     upload_factory = lambda: target_client.send_photo(
@@ -821,6 +842,7 @@ class TelegramUploader:
                         disable_notification=True,
                         reply_to_message_id=self._sent_msg.id,
                         progress=self._upload_progress,
+                        reply_markup=reply_markup,
                     )
                 sent_msg = await self._run_normal_pyrogram_upload(upload_factory)
             else:
@@ -838,6 +860,7 @@ class TelegramUploader:
                     height=height,
                     artist=artist,
                     title=title,
+                    reply_markup=reply_markup,
                 )
             LOGGER.info(f"Telegram upload completed: {file}")
             return sent_msg
@@ -912,7 +935,7 @@ class TelegramUploader:
                 self._hu = HypertgUpload(self)
 
             LOGGER.info(f"Preparing Telegram upload metadata: {file}")
-            self._telegraph_url = None
+            telegraph_url = None
             media_info_task = None
             telegraph_task = None
             if not is_image:
@@ -948,7 +971,19 @@ class TelegramUploader:
                     )
 
             if telegraph_task is not None:
-                self._telegraph_url = await telegraph_task
+                telegraph_url = await telegraph_task
+
+            reply_markup = None
+            if telegraph_url:
+                buttons = ButtonMaker()
+                buttons.url_button("ℹ️ MediaInfo", telegraph_url)
+                reply_markup = buttons.build_menu(1)
+            LOGGER.info(
+                "Telegram upload assets: %s | thumbnail=%s | mediainfo=%s",
+                file,
+                "yes" if thumb and thumb != "none" else "no",
+                "yes" if telegraph_url else "no",
+            )
 
             if (
                 self._listener.as_doc
@@ -966,7 +1001,14 @@ class TelegramUploader:
                     return
                 if thumb == "none":
                     thumb = None
-                sent_msg = await self._hyperul_upload(cap_mono, file, thumb, key, f_path=o_path)
+                sent_msg = await self._hyperul_upload(
+                    cap_mono,
+                    file,
+                    thumb,
+                    key,
+                    f_path=o_path,
+                    reply_markup=reply_markup,
+                )
             elif is_video:
                 key = "videos"
                 duration = (await media_info_task)[0]
@@ -994,7 +1036,17 @@ class TelegramUploader:
                     return
                 if thumb == "none":
                     thumb = None
-                sent_msg = await self._hyperul_upload(cap_mono, file, thumb, key, f_path=o_path, duration=duration, width=width, height=height)
+                sent_msg = await self._hyperul_upload(
+                    cap_mono,
+                    file,
+                    thumb,
+                    key,
+                    f_path=o_path,
+                    duration=duration,
+                    width=width,
+                    height=height,
+                    reply_markup=reply_markup,
+                )
             elif is_audio:
                 key = "audios"
                 duration, artist, title = await media_info_task
@@ -1002,12 +1054,29 @@ class TelegramUploader:
                     return
                 if thumb == "none":
                     thumb = None
-                sent_msg = await self._hyperul_upload(cap_mono, file, thumb, key, f_path=o_path, duration=duration, artist=artist, title=title)
+                sent_msg = await self._hyperul_upload(
+                    cap_mono,
+                    file,
+                    thumb,
+                    key,
+                    f_path=o_path,
+                    duration=duration,
+                    artist=artist,
+                    title=title,
+                    reply_markup=reply_markup,
+                )
             else:
                 key = "photos"
                 if self._listener.is_cancelled:
                     return
-                sent_msg = await self._hyperul_upload(cap_mono, file, thumb, key, f_path=o_path)
+                sent_msg = await self._hyperul_upload(
+                    cap_mono,
+                    file,
+                    thumb,
+                    key,
+                    f_path=o_path,
+                    reply_markup=reply_markup,
+                )
 
             self._sent_msg = sent_msg
 
@@ -1016,6 +1085,7 @@ class TelegramUploader:
                 "msg_id": sent_msg.id,
                 "link": sent_msg.link,
                 "file_": file_,
+                "reply_markup": reply_markup,
             }
             self._msg_to_seq[(sent_msg.chat.id, sent_msg.id)] = seq_idx
 

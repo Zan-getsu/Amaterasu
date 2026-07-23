@@ -52,6 +52,7 @@ class HypertgUpload(HypertgTransfer):
         height=320,
         artist="",
         title="",
+        reply_markup=None,
     ):
         self._cancel.clear()
         self._up_file = ospath.basename(file_path)
@@ -148,6 +149,7 @@ class HypertgUpload(HypertgTransfer):
                     artist=artist,
                     title=title,
                     user_only=hyper_user_only,
+                    reply_markup=reply_markup,
                 )
             else:
                 direct_rply = (
@@ -168,6 +170,7 @@ class HypertgUpload(HypertgTransfer):
                     artist=artist,
                     title=title,
                     user_session=user_session,
+                    reply_markup=reply_markup,
                 )
 
             LOGGER.info(f"HypertgUL uploaded {self._up_file}")
@@ -205,6 +208,10 @@ class HypertgUpload(HypertgTransfer):
             else:
                 return await self._send_with_retry(client.send_document, **kwargs)
         except PhotoInvalidDimensions:
+            LOGGER.warning(
+                f"HypertgUL rejected thumbnail for {self._up_file}; "
+                "retrying without it"
+            )
             kwargs.pop("thumb", None)
             kwargs.pop("video_cover", None)
             if key == "videos":
@@ -230,6 +237,7 @@ class HypertgUpload(HypertgTransfer):
         artist="",
         title="",
         user_only=False,
+        reply_markup=None,
     ):
         if user_only:
             candidates = {k: self.work_loads[k] for k in self.clients if k < 0}
@@ -253,6 +261,8 @@ class HypertgUpload(HypertgTransfer):
                 kwargs["caption"] = cap_mono
             if reply_to_message_id:
                 kwargs["reply_to_message_id"] = reply_to_message_id
+            if reply_markup is not None:
+                kwargs["reply_markup"] = reply_markup
 
             if key == "videos":
                 if duration:
@@ -273,6 +283,8 @@ class HypertgUpload(HypertgTransfer):
                     kwargs["title"] = title
                 if thumb:
                     kwargs["thumb"] = thumb
+            elif key == "documents" and thumb:
+                kwargs["thumb"] = thumb
 
             if key == "videos":
                 kwargs["video"] = file_path
@@ -302,6 +314,7 @@ class HypertgUpload(HypertgTransfer):
         artist="",
         title="",
         user_session=False,
+        reply_markup=None,
     ):
         client = (
             TgClient.user if user_session and TgClient.user else self._listener.client
@@ -316,6 +329,8 @@ class HypertgUpload(HypertgTransfer):
             kwargs["caption"] = cap_mono
         if reply_to_message_id:
             kwargs["reply_to_message_id"] = reply_to_message_id
+        if reply_markup is not None:
+            kwargs["reply_markup"] = reply_markup
 
         if key == "videos":
             if thumb:

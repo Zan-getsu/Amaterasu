@@ -3,8 +3,7 @@ import re
 from contextlib import suppress
 from fractions import Fraction
 from PIL import Image
-from hashlib import md5, sha256
-from aiofiles import open as aiopen
+from hashlib import md5
 from aiofiles.os import remove, path as aiopath, makedirs
 import json
 from asyncio import (
@@ -42,6 +41,24 @@ def _convert_image(src, dst):
         im.convert("RGB").save(dst, "JPEG", quality=95)
 
 
+def _prepare_telegram_thumbnail(src, dst):
+    """Create a Telegram-compatible JPEG thumbnail.
+
+    Telegram document/audio thumbnails must be JPEG, fit within 320x320, and
+    remain below 200 KiB. Normalizing every custom/generated thumbnail here
+    prevents WZGram from retrying the upload without an invalid thumbnail.
+    """
+    with Image.open(src) as image:
+        thumb = image.convert("RGB")
+        thumb.thumbnail((320, 320), Image.Resampling.LANCZOS)
+
+    for quality in (90, 80, 70, 60, 50, 40):
+        thumb.save(dst, "JPEG", quality=quality, optimize=True)
+        if ospath.getsize(dst) < 200 * 1024:
+            break
+    return dst
+
+
 async def create_thumb(msg, _id=""):
     if not _id:
         _id = int(time() * 1000)
@@ -55,7 +72,7 @@ async def create_thumb(msg, _id=""):
         LOGGER.error(f"Failed to download photo: {e}")
         return ""
     output = ospath.join(path, f"{_id}.jpg")
-    await sync_to_async(Image.open(photo_dir).convert("RGB").save, output, "JPEG")
+    await sync_to_async(_prepare_telegram_thumbnail, photo_dir, output)
     await remove(photo_dir)
     return output
 
@@ -111,12 +128,8 @@ async def download_image_thumb(url):
                 f.write(data)
             output = ospath.join(path, f"{time()}.jpg")
 
-            def _process_thumb(src, dst):
-                with Image.open(src) as im:
-                    im.convert("RGB").save(dst, "JPEG")
-
             try:
-                await sync_to_async(_process_thumb, tmp_path, output)
+                await sync_to_async(_prepare_telegram_thumbnail, tmp_path, output)
             except Exception as e:
                 LOGGER.error(f"Failed to process thumb image: {e}")
                 with suppress(Exception):
@@ -143,11 +156,8 @@ async def download_custom_thumb(url):
                 await msg.download(file_name=tmp_path)
                 
                 output = ospath.join(path, f"{time()}.jpg")
-                def _process_thumb(src, dst):
-                    with Image.open(src) as im:
-                        im.convert("RGB").save(dst, "JPEG")
                 try:
-                    await sync_to_async(_process_thumb, tmp_path, output)
+                    await sync_to_async(_prepare_telegram_thumbnail, tmp_path, output)
                 except Exception as e:
                     LOGGER.error(f"Failed to process telegram thumb image: {e}")
                     with suppress(Exception):
@@ -473,6 +483,11 @@ async def get_audio_thumbnail(audio_file):
             f"Could not extract thumbnail from audio. Name: {audio_file}. Timeout or ffmpeg issue."
         )
         return None
+    try:
+        await sync_to_async(_prepare_telegram_thumbnail, output, output)
+    except Exception as e:
+        LOGGER.warning(f"Could not normalize audio thumbnail {output}: {e}")
+        return None
     return output
 
 
@@ -520,6 +535,11 @@ async def get_video_thumbnail(video_file, duration):
         LOGGER.warning(
             f"Error while extracting thumbnail from video. Name: {video_file}. Error: Timeout some issues with ffmpeg with specific arch!"
         )
+        return None
+    try:
+        await sync_to_async(_prepare_telegram_thumbnail, output, output)
+    except Exception as e:
+        LOGGER.warning(f"Could not normalize video thumbnail {output}: {e}")
         return None
     return output
 
@@ -579,6 +599,11 @@ async def get_multiple_frames_thumbnail(video_file, layout, keep_screenshots):
     finally:
         if not keep_screenshots:
             await rmtree(dirpath, ignore_errors=True)
+    try:
+        await sync_to_async(_prepare_telegram_thumbnail, output, output)
+    except Exception as e:
+        LOGGER.warning(f"Could not normalize thumbnail layout {output}: {e}")
+        return None
     return output
 
 
