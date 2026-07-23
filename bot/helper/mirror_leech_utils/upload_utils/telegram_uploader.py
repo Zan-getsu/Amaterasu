@@ -705,7 +705,7 @@ class TelegramUploader:
             for result in results:
                 if isinstance(result, Exception):
                     LOGGER.error(f"Upload task error: {result}")
-            if self._log_msg and Config.CLEAN_LOG_MSG:
+            if self._log_msg and getattr(Config, "CLEAN_LOG_MSG", False):
                 await delete_message(self._log_msg)
             await sleep(1)
         for key, value in list(self._media_dict.items()):

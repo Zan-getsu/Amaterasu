@@ -4,7 +4,7 @@ from json import loads as json_loads
 from json import JSONDecodeError
 from os import getenv
 from shutil import which
-from typing import Optional, Type
+from typing import Type
 
 
 def _try_parse_collection(value: str, kind: Type):
@@ -61,6 +61,7 @@ class Config:
     BOT_PM = False
     CMD_SUFFIX = ""
     COLORED_BTNS = True
+    CLEAN_LOG_MSG = False
     DEFAULT_LANG = "en"
     DATABASE_URL = ""
     DEFAULT_UPLOAD = "rc"
