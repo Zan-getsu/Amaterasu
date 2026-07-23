@@ -2,12 +2,70 @@ from ast import literal_eval
 from pyrogram import Client, enums
 from pyrogram.errors import FloodWait
 from pyrogram.types import ChatPrivileges
-from asyncio import Lock, gather, sleep
+from asyncio import Lock, gather, get_running_loop, sleep
 from hashlib import sha256
+from importlib import import_module
 from inspect import signature
 
 from .. import LOGGER, bot_loop
 from .config_manager import Config
+
+
+def _stabilize_wzgram_upload_pool():
+    """Route WZGram uploads through its proven standard media session.
+
+    WZGram 3.0.23 downloads create their first media connection through
+    Client.get_session(), while uploads use a separate pool constructor. A
+    failure in that constructor occurs before the first progress callback and
+    Session.start retries silently, leaving every upload at zero percent.
+
+    Keep one upload session with four chunk workers, but seed that pool through
+    the same Client.get_session() path used successfully by downloads. Calls
+    requesting larger pools (parallel downloads) retain WZGram's implementation.
+    """
+    try:
+        save_file_module = import_module("pyrogram.methods.advanced.save_file")
+    except (ImportError, AttributeError):
+        return
+
+    pool_size = getattr(save_file_module, "POOL_SIZE", None)
+    if isinstance(pool_size, int) and pool_size > 1:
+        save_file_module.POOL_SIZE = 1
+
+    if getattr(Client, "_amaterasu_upload_pool_stabilized", False):
+        return
+
+    original_get_pool = getattr(Client, "_get_media_session_pool", None)
+    if original_get_pool is None:
+        return
+
+    async def get_stable_media_session_pool(client, dc_id, requested_size):
+        if requested_size != 1:
+            return await original_get_pool(client, dc_id, requested_size)
+
+        lock = client._media_sessions_locks.setdefault(dc_id, Lock())
+        async with lock:
+            session = client.media_sessions.get(dc_id)
+            if session is None or not session.is_started.is_set():
+                if session is not None:
+                    try:
+                        await session.stop()
+                    except Exception:
+                        pass
+                    client.media_sessions.pop(dc_id, None)
+                session = await client.get_session(dc_id, is_media=True)
+            client.media_session_pools[dc_id] = [session]
+            return [session]
+
+    Client._get_media_session_pool = get_stable_media_session_pool
+    Client._amaterasu_upload_pool_stabilized = True
+    LOGGER.info(
+        "WZGram uploads stabilized: standard media session, %s chunk workers",
+        getattr(save_file_module, "WORKERS_PER_SESSION", 1),
+    )
+
+
+_stabilize_wzgram_upload_pool()
 
 # DB partition salt loaded from per-deployment secrets module.
 # Backward-compat: if neither env var nor .amaterasu_secrets is set,
@@ -52,7 +110,12 @@ class TgClient:
         kwargs["proxy"] = Config.TG_PROXY if proxy is None else proxy
         kwargs["parse_mode"] = enums.ParseMode.HTML
         kwargs["in_memory"] = True
+        try:
+            client_loop = get_running_loop()
+        except RuntimeError:
+            client_loop = bot_loop
         for param, value in {
+            "loop": client_loop,
             "max_concurrent_transmissions": 100,
             "skip_updates": False,
         }.items():

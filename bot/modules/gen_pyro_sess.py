@@ -1,4 +1,4 @@
-from asyncio import Event, TimeoutError as AsyncTimeout, wait_for
+from asyncio import Event, TimeoutError as AsyncTimeout, get_running_loop, wait_for
 from html import escape
 from os import getcwd
 from os.path import exists as path_exists, join as path_join
@@ -261,6 +261,7 @@ async def gen_pyro_string(_, message):
             app_version=f"Amaterasu {get_version()}",
             device_model="Amaterasu Bot",
             system_version="Amaterasu WZGram Server",
+            loop=get_running_loop(),
         )
     except Exception as e:
         return await edit_message(

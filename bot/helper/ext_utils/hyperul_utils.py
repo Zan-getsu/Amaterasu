@@ -119,6 +119,13 @@ class HypertgUpload(HypertgTransfer):
             if self._listener.up_dest
             else (Config.LEECH_DUMP_CHAT or reply_target.chat.id)
         )
+        LOGGER.info(
+            "Telegram upload route: %s | size=%s | mode=%s | client=%s",
+            self._up_file,
+            up_size,
+            "multi-client" if use_hyper else "direct",
+            "user" if user_session else "bot",
+        )
         try:
             if use_hyper:
                 hyper_rply = (

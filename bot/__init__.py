@@ -19,7 +19,6 @@ set_event_loop(bot_loop)
 
 from asyncio import Lock
 from logging import (
-    CRITICAL,
     ERROR,
     Filter,
     INFO,
@@ -41,7 +40,10 @@ from sabnzbdapi import SabnzbdClient
 
 getLogger("niquests").setLevel(WARNING)
 getLogger("pyrogram").setLevel(ERROR)
-getLogger("pyrogram.methods.advanced.save_file").setLevel(CRITICAL)
+# WZGram reports upload-part retries and terminal failures through this
+# logger. Suppressing it at CRITICAL made stalled Telegram uploads completely
+# silent, so retain warnings and errors for actionable diagnostics.
+getLogger("pyrogram.methods.advanced.save_file").setLevel(WARNING)
 getLogger("apscheduler").setLevel(ERROR)
 getLogger("pymongo").setLevel(WARNING)
 getLogger("aiohttp").setLevel(WARNING)
