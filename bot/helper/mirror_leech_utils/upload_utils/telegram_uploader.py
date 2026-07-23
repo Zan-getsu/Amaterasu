@@ -278,6 +278,8 @@ class TelegramUploader:
             self._sent_msg = self._listener.message
             self._is_private = self._sent_msg.chat.type == ChatType.PRIVATE
 
+        return True
+
     async def _prepare_file(self, pre_file_, dirpath):
         cap_file_ = file_ = pre_file_
         lprefix = self._lprefix
