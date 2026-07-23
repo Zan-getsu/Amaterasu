@@ -197,6 +197,7 @@ class Telegraph:
         self.access_token = access_token
         self.domain = domain
         self.session = AsyncSession(
+            timeout=15,
             headers={"Content-Type": "application/x-www-form-urlencoded"}
         )
 

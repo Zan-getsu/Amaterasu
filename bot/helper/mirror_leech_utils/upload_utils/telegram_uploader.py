@@ -1,4 +1,4 @@
-from asyncio import CancelledError, Lock, ensure_future, gather, sleep
+from asyncio import CancelledError, Lock, ensure_future, gather, sleep, wait_for
 from logging import getLogger
 from os import path as ospath, walk
 from re import match as re_match, sub as re_sub
@@ -888,9 +888,20 @@ class TelegramUploader:
             if not is_image:
                 try:
                     f_size = await aiopath.getsize(o_path)
-                    self._telegraph_url = await generate_telegraph_mediainfo(o_path, f_size)
+                    self._telegraph_url = await wait_for(
+                        generate_telegraph_mediainfo(o_path, f_size),
+                        timeout=15,
+                    )
+                except TimeoutError:
+                    LOGGER.warning(
+                        "Telegram MediaInfo publishing timed out after 15 seconds; "
+                        "continuing upload without it"
+                    )
                 except Exception as e:
-                    LOGGER.error(f"Failed to generate telegraph URL: {str(e) or repr(e)}")
+                    LOGGER.warning(
+                        f"Failed to generate Telegram MediaInfo; continuing upload: "
+                        f"{str(e) or repr(e)}"
+                    )
 
             if not is_image and thumb is None:
                 file_name = ospath.splitext(file)[0]

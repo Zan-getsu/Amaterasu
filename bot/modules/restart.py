@@ -2,7 +2,7 @@ from asyncio import gather, get_event_loop, sleep
 from datetime import datetime
 from html import escape
 from importlib import reload as reload_module
-from os import execl as osexecl
+from os import execl as osexecl, replace as os_replace
 from sys import executable
 
 from aiofiles import open as aiopen
@@ -13,7 +13,7 @@ from datetime import timezone as dt_timezone
 
 from bot.version import get_version
 
-from .. import LOGGER, intervals, sabnzbd_client, scheduler, user_data
+from .. import LOGGER, intervals, sabnzbd_client, scheduler
 from ..core.config_manager import Config, BinConfig
 from ..core.jdownloader_booter import jdownloader
 from ..core.tg_client import TgClient
@@ -36,6 +36,8 @@ from ..helper.telegram_helper.message_utils import (
 )
 
 RECOVERY_TASK_DELAY = 5
+_RESTART_MARKER = ".restartmsg"
+_RESTART_MARKER_TMP = ".restartmsg.tmp"
 
 
 @new_task
@@ -81,6 +83,50 @@ def _restart_header(now, is_restart_chat=False):
         f"┠ <b>Branch:</b> {Config.UPSTREAM_BRANCH}\n"
         f"┖ <b>Version:</b> {get_version()}"
     )
+
+
+def _restart_success_text(now):
+    return f"""<b>❖ RESTARTED SUCCESSFULLY!</b>
+<code>┌─ {'Date':<9}: {now.strftime("%d/%m/%y")}
+├─ {'Time':<9}: {now.strftime("%I:%M:%S %p")}
+├─ {'TimeZone':<9}: {Config.TIMEZONE}
+└─ {'Version':<9}: {get_version()}
+</code>"""
+
+
+def _restart_target(restart_message, fallback_message):
+    chat_id = getattr(getattr(restart_message, "chat", None), "id", None)
+    msg_id = getattr(restart_message, "id", None)
+    if chat_id and msg_id:
+        return int(chat_id), int(msg_id)
+
+    fallback_chat_id = getattr(
+        getattr(fallback_message, "chat", None), "id", None
+    )
+    if fallback_chat_id:
+        LOGGER.warning(
+            "Restarting-message delivery failed; the completion notice will "
+            "be sent as a new message"
+        )
+        return int(fallback_chat_id), 0
+    return 0, 0
+
+
+async def _write_restart_marker(chat_id, msg_id):
+    if not chat_id:
+        LOGGER.error("Restart notification disabled: no valid Telegram chat target")
+        return False
+    try:
+        async with aiopen(_RESTART_MARKER_TMP, "w") as marker:
+            await marker.write(f"{chat_id}\n{msg_id}\n")
+            await marker.flush()
+        os_replace(_RESTART_MARKER_TMP, _RESTART_MARKER)
+        return True
+    except Exception as e:
+        LOGGER.error(f"Failed to save restart notification target: {e}")
+        if await aiopath.isfile(_RESTART_MARKER_TMP):
+            await remove(_RESTART_MARKER_TMP)
+        return False
 
 
 async def send_incomplete_task_message(cid, msg_id, msg):
@@ -694,11 +740,20 @@ async def back_manage_tasks(_, query):
 
 
 async def restart_notification():
-    if await aiopath.isfile(".restartmsg"):
+    marker_exists = await aiopath.isfile(_RESTART_MARKER)
+    marker_valid = False
+    if marker_exists:
         try:
-            with open(".restartmsg") as f:
-                chat_id, msg_id = map(int, f)
-        except Exception:
+            async with aiopen(_RESTART_MARKER) as marker:
+                values = (await marker.read()).split()
+            if len(values) != 2:
+                raise ValueError("expected exactly two marker values")
+            chat_id, msg_id = map(int, values)
+            marker_valid = chat_id != 0 and msg_id >= 0
+            if not marker_valid:
+                raise ValueError(f"invalid target chat={chat_id}, message={msg_id}")
+        except Exception as e:
+            LOGGER.warning(f"Discarding invalid restart marker: {e}")
             chat_id, msg_id = 0, 0
     else:
         chat_id, msg_id = 0, 0
@@ -711,21 +766,31 @@ async def restart_notification():
         if Config.INCOMPLETE_TASK_NOTIFIER:
             await notify_incomplete_tasks()
 
-    if await aiopath.isfile(".restartmsg"):
+    if marker_valid:
+        text = _restart_success_text(now)
         try:
-            await TgClient.bot.edit_message_text(
-                chat_id=chat_id,
-                message_id=msg_id,
-                text=f"""<b>❖ RESTARTED SUCCESSFULLY!</b>
-<code>┌─ {'Date':<9}: {now.strftime("%d/%m/%y")}
-├─ {'Time':<9}: {now.strftime("%I:%M:%S %p")}
-├─ {'TimeZone':<9}: {Config.TIMEZONE}
-└─ {'Version':<9}: {get_version()}
-</code>""",
-            )
+            if msg_id:
+                await TgClient.bot.edit_message_text(
+                    chat_id=chat_id,
+                    message_id=msg_id,
+                    text=text,
+                )
+            else:
+                await TgClient.bot.send_message(chat_id=chat_id, text=text)
         except Exception as e:
-            LOGGER.error(e)
-        await remove(".restartmsg")
+            if msg_id:
+                try:
+                    await TgClient.bot.send_message(chat_id=chat_id, text=text)
+                except Exception as fallback_error:
+                    LOGGER.error(
+                        "Restart notification failed: edit=%s; send=%s",
+                        e,
+                        fallback_error,
+                    )
+            else:
+                LOGGER.error(f"Restart notification failed: {e}")
+    if marker_exists:
+        await remove(_RESTART_MARKER)
 
 
 # NOTE: _notify_tasks and _resume_tasks were previously defined here
@@ -762,6 +827,9 @@ async def confirm_restart(_, query):
             return
         else:
             restart_message = await send_message(reply_to, "<i>Restarting...</i>")
+            restart_chat_id, restart_msg_id = _restart_target(
+                restart_message, reply_to
+            )
 
             if qb := intervals["qb"]:
                 qb.cancel()
@@ -838,11 +906,7 @@ async def confirm_restart(_, query):
 
             await cmd_exec(["python3", "update.py"])
 
-            try:
-                async with aiopen(".restartmsg", "w") as f:
-                    await f.write(f"{restart_message.chat.id}\n{restart_message.id}\n")
-            except Exception:
-                pass
+            await _write_restart_marker(restart_chat_id, restart_msg_id)
 
             get_event_loop().create_task(_background_cleanup())
 

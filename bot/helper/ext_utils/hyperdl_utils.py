@@ -33,6 +33,7 @@ from pyrogram.errors import (
 from pyrogram.file_id import PHOTO_TYPES, FileId, FileType
 from pyrogram.session import Auth
 from pyrogram.session.internals import MsgId
+from pyrogram.session.internals.data_center import DataCenter
 from pyrogram.session import Session
 
 from ... import LOGGER
@@ -701,6 +702,20 @@ class HypertgDownload(HypertgTransfer):
             return None
 
         first_fid = fid_map[assigns[0]]
+        valid_dcs = set(DataCenter.PROD) | set(DataCenter.TEST)
+        invalid_dcs = {
+            getattr(fid, "dc_id", None)
+            for fid in fid_map.values()
+            if not isinstance(getattr(fid, "dc_id", None), int)
+            or fid.dc_id not in valid_dcs
+        }
+        if invalid_dcs:
+            LOGGER.warning(
+                "HypertgDL decoded invalid media DC id(s) %s; "
+                "falling back to the standard Telegram downloader",
+                sorted(invalid_dcs, key=lambda value: str(value)),
+            )
+            return None
         try:
             await self._warmup(unique_clients, first_fid.dc_id)
         except Exception as e:
