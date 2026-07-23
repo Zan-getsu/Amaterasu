@@ -213,7 +213,11 @@ class HypertgDownload(HypertgTransfer):
         try:
             r = await sess.invoke(
                 raw.functions.upload.GetFile(
-                    precise=True, cdn_supported=True,
+                    # The transfer pool does not have Telegram's dynamically
+                    # supplied CDN endpoint table. Advertising CDN support can
+                    # redirect media to CDN DCs such as 201, which WZGram's
+                    # static DataCenter table cannot resolve.
+                    precise=True, cdn_supported=False,
                     location=location, offset=off, limit=csz,
                 ),
                 sleep_threshold=client.sleep_threshold,

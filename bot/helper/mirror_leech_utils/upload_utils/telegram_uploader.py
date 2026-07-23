@@ -139,6 +139,25 @@ class TelegramUploader:
         self._processed_bytes = self._completed_bytes
         self._is_finalizing_upload = False
 
+    async def _optional_upload_metadata(
+        self, awaitable, label, default=None, timeout=15
+    ):
+        try:
+            return await wait_for(awaitable, timeout=timeout)
+        except TimeoutError:
+            LOGGER.warning(
+                "%s timed out after %s seconds; continuing Telegram upload",
+                label,
+                timeout,
+            )
+        except Exception as err:
+            LOGGER.warning(
+                "%s failed; continuing Telegram upload: %s",
+                label,
+                str(err) or repr(err),
+            )
+        return default
+
     async def _run_normal_pyrogram_upload(self, upload_factory):
         client_name = "user" if self._user_session else "bot"
         async with _NORMAL_PYROGRAM_UPLOAD_LOCKS[client_name]:
@@ -811,6 +830,12 @@ class TelegramUploader:
                     force_document=mtype == "document",
                     user_thumb=thumb if thumb and thumb != "none" else None,
                     user_session=self._user_session,
+                    media_type=key,
+                    duration=duration,
+                    width=width,
+                    height=height,
+                    artist=artist,
+                    title=title,
                 )
             LOGGER.info(f"Telegram upload completed: {file}")
             return sent_msg
@@ -884,24 +909,28 @@ class TelegramUploader:
             if self._hu is None:
                 self._hu = HypertgUpload(self)
 
+            LOGGER.info(f"Preparing Telegram upload metadata: {file}")
             self._telegraph_url = None
+            media_info_task = None
+            telegraph_task = None
             if not is_image:
-                try:
-                    f_size = await aiopath.getsize(o_path)
-                    self._telegraph_url = await wait_for(
+                f_size = await aiopath.getsize(o_path)
+                telegraph_task = ensure_future(
+                    self._optional_upload_metadata(
                         generate_telegraph_mediainfo(o_path, f_size),
-                        timeout=15,
+                        "Telegram MediaInfo publishing",
+                        timeout=10,
                     )
-                except TimeoutError:
-                    LOGGER.warning(
-                        "Telegram MediaInfo publishing timed out after 15 seconds; "
-                        "continuing upload without it"
+                )
+            if is_video or is_audio:
+                media_info_task = ensure_future(
+                    self._optional_upload_metadata(
+                        get_media_info(o_path),
+                        "Telegram media probing",
+                        default=(0, None, None),
+                        timeout=10,
                     )
-                except Exception as e:
-                    LOGGER.warning(
-                        f"Failed to generate Telegram MediaInfo; continuing upload: "
-                        f"{str(e) or repr(e)}"
-                    )
+                )
 
             if not is_image and thumb is None:
                 file_name = ospath.splitext(file)[0]
@@ -911,7 +940,13 @@ class TelegramUploader:
                 elif await aiopath.isfile(thumb_path.replace("/yt-dlp-thumb", "")):
                     thumb = thumb_path.replace("/yt-dlp-thumb", "")
                 elif is_audio and not is_video:
-                    thumb = await get_audio_thumbnail(o_path)
+                    thumb = await self._optional_upload_metadata(
+                        get_audio_thumbnail(o_path),
+                        "Telegram audio thumbnail extraction",
+                    )
+
+            if telegraph_task is not None:
+                self._telegraph_url = await telegraph_task
 
             if (
                 self._listener.as_doc
@@ -920,7 +955,10 @@ class TelegramUploader:
             ):
                 key = "documents"
                 if is_video and thumb is None:
-                    thumb = await get_video_thumbnail(o_path, None)
+                    thumb = await self._optional_upload_metadata(
+                        get_video_thumbnail(o_path, None),
+                        "Telegram video thumbnail extraction",
+                    )
 
                 if self._listener.is_cancelled:
                     return
@@ -929,15 +967,21 @@ class TelegramUploader:
                 sent_msg = await self._hyperul_upload(cap_mono, file, thumb, key, f_path=o_path)
             elif is_video:
                 key = "videos"
-                duration = (await get_media_info(o_path))[0]
+                duration = (await media_info_task)[0]
                 if thumb is None and self._listener.thumbnail_layout:
-                    thumb = await get_multiple_frames_thumbnail(
-                        o_path,
-                        self._listener.thumbnail_layout,
-                        self._listener.screen_shots,
+                    thumb = await self._optional_upload_metadata(
+                        get_multiple_frames_thumbnail(
+                            o_path,
+                            self._listener.thumbnail_layout,
+                            self._listener.screen_shots,
+                        ),
+                        "Telegram thumbnail layout generation",
                     )
                 if thumb is None:
-                    thumb = await get_video_thumbnail(o_path, duration)
+                    thumb = await self._optional_upload_metadata(
+                        get_video_thumbnail(o_path, duration),
+                        "Telegram video thumbnail extraction",
+                    )
                 if thumb is not None and thumb != "none":
                     with Image.open(thumb) as img:
                         width, height = img.size
@@ -951,7 +995,7 @@ class TelegramUploader:
                 sent_msg = await self._hyperul_upload(cap_mono, file, thumb, key, f_path=o_path, duration=duration, width=width, height=height)
             elif is_audio:
                 key = "audios"
-                duration, artist, title = await get_media_info(o_path)
+                duration, artist, title = await media_info_task
                 if self._listener.is_cancelled:
                     return
                 if thumb == "none":

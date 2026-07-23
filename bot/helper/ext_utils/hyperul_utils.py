@@ -46,58 +46,60 @@ class HypertgUpload(HypertgTransfer):
         force_document=False,
         user_thumb=None,
         user_session=False,
+        media_type=None,
+        duration=0,
+        width=480,
+        height=320,
+        artist="",
+        title="",
     ):
         self._cancel.clear()
         self._up_file = ospath.basename(file_path)
 
-        is_video, is_audio, is_image = await get_document_type(file_path)
-
         thumb = user_thumb if user_thumb and user_thumb != "none" else None
-
-        if not is_image and thumb is None:
-            file_name = ospath.splitext(self._up_file)[0]
-            base_path = getattr(self._obj, "_path", "")
-            thumb_path = f"{base_path}/yt-dlp-thumb/{file_name}.jpg"
-            if await aiopath.isfile(thumb_path):
-                thumb = thumb_path
-            elif await aiopath.isfile(thumb_path.replace("/yt-dlp-thumb", "")):
-                thumb = thumb_path.replace("/yt-dlp-thumb", "")
-            elif is_audio and not is_video:
-                thumb = await get_audio_thumbnail(file_path)
-
-        duration = 0
-        width = 480
-        height = 320
-        artist = ""
-        title = ""
-
-        if (
-            force_document
-            or self._listener.as_doc
-            or (not is_video and not is_audio and not is_image)
-        ):
-            key = "documents"
-            if is_video and thumb is None:
-                thumb = await get_video_thumbnail(file_path, None)
-        elif is_video:
-            key = "videos"
-            duration = (await get_media_info(file_path))[0]
-            if thumb is None and self._listener.thumbnail_layout:
-                thumb = await get_multiple_frames_thumbnail(
-                    file_path,
-                    self._listener.thumbnail_layout,
-                    self._listener.screen_shots,
-                )
-            if thumb is None:
-                thumb = await get_video_thumbnail(file_path, duration)
-            if thumb is not None and thumb != "none":
-                with Image.open(thumb) as img:
-                    width, height = img.size
-        elif is_audio:
-            key = "audios"
-            duration, artist, title = await get_media_info(file_path)
+        if media_type is not None:
+            key = media_type
         else:
-            key = "photos"
+            is_video, is_audio, is_image = await get_document_type(file_path)
+
+            if not is_image and thumb is None:
+                file_name = ospath.splitext(self._up_file)[0]
+                base_path = getattr(self._obj, "_path", "")
+                thumb_path = f"{base_path}/yt-dlp-thumb/{file_name}.jpg"
+                if await aiopath.isfile(thumb_path):
+                    thumb = thumb_path
+                elif await aiopath.isfile(thumb_path.replace("/yt-dlp-thumb", "")):
+                    thumb = thumb_path.replace("/yt-dlp-thumb", "")
+                elif is_audio and not is_video:
+                    thumb = await get_audio_thumbnail(file_path)
+
+            if (
+                force_document
+                or self._listener.as_doc
+                or (not is_video and not is_audio and not is_image)
+            ):
+                key = "documents"
+                if is_video and thumb is None:
+                    thumb = await get_video_thumbnail(file_path, None)
+            elif is_video:
+                key = "videos"
+                duration = (await get_media_info(file_path))[0]
+                if thumb is None and self._listener.thumbnail_layout:
+                    thumb = await get_multiple_frames_thumbnail(
+                        file_path,
+                        self._listener.thumbnail_layout,
+                        self._listener.screen_shots,
+                    )
+                if thumb is None:
+                    thumb = await get_video_thumbnail(file_path, duration)
+                if thumb is not None and thumb != "none":
+                    with Image.open(thumb) as img:
+                        width, height = img.size
+            elif is_audio:
+                key = "audios"
+                duration, artist, title = await get_media_info(file_path)
+            else:
+                key = "photos"
 
         if thumb == "none":
             thumb = None
