@@ -5,6 +5,7 @@ from re import search as research
 from time import time
 
 from aiofiles.os import path as aiopath
+from pyrogram.errors import QueryIdInvalid
 from psutil import (
     Process,
     boot_time,
@@ -64,6 +65,15 @@ commands = {
     "gapi": (["uv", "pip", "show", "google-api-python-client"], r"Version: ([\d.]+)"),
     "mega": (["mega-version"], r"version: ([\d.]+)"),
 }
+
+
+async def _answer_callback(query, *args, **kwargs):
+    """Answer a callback unless Telegram has already expired its query ID."""
+    try:
+        await query.answer(*args, **kwargs)
+        return True
+    except QueryIdInvalid:
+        return False
 
 
 async def get_stats(event, key="home"):
@@ -284,13 +294,17 @@ async def stats_pages(_, query):
     message = query.message
     user_id = query.from_user.id
     if user_id != int(data[1]):
-        await query.answer("Not Yours!", show_alert=True)
+        await _answer_callback(query, "Not Yours!", show_alert=True)
     elif data[2] == "close":
-        await query.answer()
+        await _answer_callback(query)
         await delete_message(message, message.reply_to_message)
     elif data[2] == "killproc":
         if not await CustomFilters.owner(_, query):
-            await query.answer("Sorry! You cannot Kill System Tasks!", show_alert=True)
+            await _answer_callback(
+                query,
+                "Sorry! You cannot Kill System Tasks!",
+                show_alert=True,
+            )
             return
         pid = int(data[3])
         try:
@@ -303,25 +317,39 @@ async def stats_pages(_, query):
                 status = "🔥 Force killed"
             else:
                 status = "✅ Terminated"
-            await query.answer(f"{status}: {proc_name} (PID: {pid})", show_alert=True)
+            await _answer_callback(
+                query,
+                f"{status}: {proc_name} (PID: {pid})",
+                show_alert=True,
+            )
         except NoSuchProcess:
-            await query.answer(
+            await _answer_callback(
+                query,
                 "❌ Process not found or already terminated!", show_alert=True
             )
         except AccessDenied:
-            await query.answer(
+            await _answer_callback(
+                query,
                 "❌ Access denied! Cannot kill this process.", show_alert=True
             )
         except Exception as e:
-            await query.answer(f"❌ Error: {str(e)}", show_alert=True)
+            await _answer_callback(
+                query,
+                f"❌ Error: {str(e)}",
+                show_alert=True,
+            )
 
         msg, btns = await get_stats(query, "systasks")
         await edit_message(message, msg, btns)
     else:
         if data[2] == "systasks" and not await CustomFilters.sudo(_, query):
-            await query.answer("Sorry! You cannot open System Tasks!", show_alert=True)
+            await _answer_callback(
+                query,
+                "Sorry! You cannot open System Tasks!",
+                show_alert=True,
+            )
             return
-        await query.answer()
+        await _answer_callback(query)
         msg, btns = await get_stats(query, data[2])
         await edit_message(message, msg, btns)
 

@@ -1,4 +1,10 @@
-from asyncio import TimeoutError, create_subprocess_exec, create_task, gather, wait_for
+from asyncio import (
+    create_subprocess_exec,
+    create_task,
+    gather,
+    sleep,
+    wait_for,
+)
 from asyncio.subprocess import PIPE, STDOUT
 from re import search
 from shutil import which
@@ -7,9 +13,9 @@ from .. import LOGGER
 from ..helper.ext_utils.db_handler import database
 from .config_manager import Config
 
-
 _proc = None
 _log_task = None
+_QUIC_FAILURE_LIMIT = 3
 
 
 def _auto_url_enabled():
@@ -22,7 +28,14 @@ def _target_url():
     return f"http://127.0.0.1:{Config.PORT or 8080}"
 
 
-async def _watch_logs(proc):
+async def _restart_with_http2(proc):
+    await sleep(0)
+    if _proc is proc:
+        await cloudflare_tunnel_booter(protocol="http2")
+
+
+async def _watch_logs(proc, protocol):
+    quic_failures = 0
     while True:
         line = await proc.stdout.readline()
         if not line:
@@ -31,6 +44,22 @@ async def _watch_logs(proc):
         if not text:
             continue
         LOGGER.info(f"Cloudflare Tunnel: {text}")
+
+        if "Registered tunnel connection" in text:
+            quic_failures = 0
+        elif (
+            protocol != "http2"
+            and "Failed to dial a quic connection" in text
+        ):
+            quic_failures += 1
+            if quic_failures >= _QUIC_FAILURE_LIMIT:
+                LOGGER.warning(
+                    "Cloudflare QUIC failed %s times; restarting tunnel with HTTP/2",
+                    quic_failures,
+                )
+                create_task(_restart_with_http2(proc))
+                return
+
         match = search(r"https://([a-zA-Z0-9-]+\.trycloudflare\.com)", text)
         if not match or not _auto_url_enabled():
             continue
@@ -78,7 +107,7 @@ async def stop_cloudflare_tunnel():
         await gather(log_task, return_exceptions=True)
 
 
-async def cloudflare_tunnel_booter():
+async def cloudflare_tunnel_booter(protocol="auto"):
     global _proc, _log_task
     await stop_cloudflare_tunnel()
     if not Config.CLOUDFLARE_TUNNEL_ENABLED:
@@ -90,8 +119,24 @@ async def cloudflare_tunnel_booter():
         )
         return
 
+    protocol = str(protocol or "auto").casefold()
+    if protocol not in {"auto", "quic", "http2"}:
+        LOGGER.warning(
+            "Invalid Cloudflare tunnel protocol %r; using auto",
+            protocol,
+        )
+        protocol = "auto"
+
     metrics = Config.CLOUDFLARE_TUNNEL_METRICS or "127.0.0.1:49312"
-    cmd = ["cloudflared", "tunnel", "--no-autoupdate", "--metrics", metrics]
+    cmd = [
+        "cloudflared",
+        "tunnel",
+        "--no-autoupdate",
+        "--protocol",
+        protocol,
+        "--metrics",
+        metrics,
+    ]
     if Config.CLOUDFLARE_TUNNEL_TOKEN:
         cmd.extend(["run", "--token", Config.CLOUDFLARE_TUNNEL_TOKEN])
     else:
@@ -104,7 +149,7 @@ async def cloudflare_tunnel_booter():
     LOGGER.info(f"Starting Cloudflare Tunnel: {safe_cmd}")
     try:
         _proc = await create_subprocess_exec(*cmd, stdout=PIPE, stderr=STDOUT)
-        _log_task = create_task(_watch_logs(_proc))
+        _log_task = create_task(_watch_logs(_proc, protocol))
     except Exception as e:
         LOGGER.error(f"Failed to start Cloudflare Tunnel: {e}")
         _proc = None
