@@ -44,6 +44,7 @@ from ..helper.ext_utils.bot_utils import (
     cmd_exec,
     new_task,
 )
+from ..core.auto_restart import schedule_auto_restart
 from ..core.config_manager import Config
 from ..core.tg_client import TgClient, db_partition_id
 from ..core.torrent_manager import TorrentManager
@@ -291,7 +292,7 @@ DEFAULT_DESP = {
     "VERIFY_TIMEOUT": "Verification timeout in seconds. 0 = disabled.",
     "LOGIN_PASS": "Password to skip token system. Leave empty to disable.",
     "TORRENT_TIMEOUT": "Dead torrent timeout in seconds. 0 = disabled.",
-    "TIMEZONE": "Timezone for messages. Default: Asia/Kolkata.",
+    "TIMEZONE": "Timezone for messages and the daily 06:00 auto restart. Default: Asia/Dhaka.",
     "USER_MAX_TASKS": "Max concurrent tasks per user. 0 = unlimited.",
     "USER_TIME_INTERVAL": "Cooldown between tasks per user in seconds. 0 = disabled.",
     "UPLOAD_PATHS": "Custom upload paths per extension. Dict format.",
@@ -731,6 +732,8 @@ async def edit_variable(_, message, pre_message, key):
         await jdownloader.boot()
     elif key == "RSS_DELAY":
         add_job()
+    elif key == "TIMEZONE":
+        schedule_auto_restart()
     elif key == "USENET_SERVERS":
         for s in value:
             await sabnzbd_client.set_special_config("servers", s)
@@ -1218,6 +1221,8 @@ async def edit_bot_settings(client, query):
             await start_web_server()
         elif data[2].startswith("CLOUDFLARE_TUNNEL_"):
             await cloudflare_tunnel_booter()
+        elif data[2] == "TIMEZONE":
+            schedule_auto_restart()
     elif data[1] == "resetnzb":
         await query.answer()
         res = await sabnzbd_client.set_config_default(data[2])
@@ -1544,3 +1549,4 @@ async def load_config():
         await database.disconnect()
     await gather(initiate_search_tools(), start_from_queued(), rclone_serve_booter())
     add_job()
+    schedule_auto_restart()

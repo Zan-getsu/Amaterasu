@@ -202,6 +202,10 @@ async def main():
     from .helper.ext_utils.hwaccel import init_hwaccel_detection
     create_tracked_task(init_hwaccel_detection())
 
+    from .core.auto_restart import schedule_auto_restart
+
+    schedule_auto_restart()
+
 
 try:
     bot_loop.run_until_complete(main())
@@ -301,11 +305,11 @@ LOGGER.info("Web UI: SABnzbd available at /nzb/")
 # Install signal handlers so SIGTERM/SIGINT trigger a clean shutdown
 # instead of being dropped (Pyrogram's run_forever ignores them by default).
 # The shutdown sequence:
-#   1. Stop accepting new Telegram updates (TgClient.stop)
-#   2. Cancel pending status-update intervals
-#   3. Persist Config to MongoDB (so next boot picks up where we left off)
-#   4. Close MongoDB connection
-#   5. Close httpx AsyncClient singletons (if any)
+#   1. Stop the daily auto-restart scheduler
+#   2. Stop accepting new Telegram updates (TgClient.stop)
+#   3. Stop the managed Cloudflare Tunnel child process
+#   4. Cancel pending status-update intervals
+#   5. Persist Config to MongoDB and close its connection
 # Download daemons (aria2, qBittorrent, SABnzbd, JD) are NOT paused —
 # they continue in their own processes and resume on next boot via
 # INCOMPLETE_TASK_NOTIFIER.
@@ -332,11 +336,27 @@ def _install_signal_handlers():
 
 
 async def _graceful_shutdown():
+    LOGGER.info("Shutdown: stopping daily auto-restart scheduler...")
+    try:
+        from .core.auto_restart import shutdown_auto_restart_scheduler
+
+        await shutdown_auto_restart_scheduler()
+    except Exception as e:
+        LOGGER.error(f"Shutdown: auto-restart scheduler stop error: {e}")
+
     LOGGER.info("Shutdown: stopping Telegram clients...")
     try:
         await TgClient.stop()
     except Exception as e:
         LOGGER.error(f"Shutdown: TgClient.stop error: {e}")
+
+    LOGGER.info("Shutdown: stopping Cloudflare Tunnel...")
+    try:
+        from .core.cloudflare_tunnel import stop_cloudflare_tunnel
+
+        await stop_cloudflare_tunnel()
+    except Exception as e:
+        LOGGER.error(f"Shutdown: Cloudflare Tunnel stop error: {e}")
 
     LOGGER.info("Shutdown: cancelling status intervals...")
     try:

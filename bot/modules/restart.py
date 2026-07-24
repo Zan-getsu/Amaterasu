@@ -1,4 +1,4 @@
-from asyncio import gather, get_event_loop, sleep
+from asyncio import Lock, gather, get_event_loop, sleep
 from datetime import datetime
 from html import escape
 from importlib import reload as reload_module
@@ -14,6 +14,7 @@ from datetime import timezone as dt_timezone
 from bot.version import get_version
 
 from .. import LOGGER, intervals, sabnzbd_client, scheduler
+from ..core.cloudflare_tunnel import stop_cloudflare_tunnel
 from ..core.config_manager import Config, BinConfig
 from ..core.jdownloader_booter import jdownloader
 from ..core.tg_client import TgClient
@@ -38,6 +39,7 @@ from ..helper.telegram_helper.message_utils import (
 RECOVERY_TASK_DELAY = 5
 _RESTART_MARKER = ".restartmsg"
 _RESTART_MARKER_TMP = ".restartmsg.tmp"
+_hard_restart_lock = Lock()
 
 
 @new_task
@@ -805,6 +807,121 @@ async def restart_notification():
 # bugs.
 
 
+async def hard_restart(restart_chat_id=0, restart_msg_id=0):
+    """Run the shared hard-restart sequence used by manual and scheduled jobs."""
+    async with _hard_restart_lock:
+        await _perform_hard_restart(restart_chat_id, restart_msg_id)
+
+
+async def _perform_hard_restart(restart_chat_id, restart_msg_id):
+    intervals["stopAll"] = True
+
+    if qb := intervals["qb"]:
+        qb.cancel()
+    if jd := intervals["jd"]:
+        jd.cancel()
+    if nzb := intervals["nzb"]:
+        nzb.cancel()
+    if st := intervals["status"]:
+        for intvl in list(st.values()):
+            intvl.cancel()
+
+    if scheduler.running:
+        scheduler.shutdown(wait=False)
+
+    await mega_cleanup()
+
+    sabnzbd_task = None
+    jd_task = None
+    if not Config.DISABLE_NZB and sabnzbd_client.LOGGED_IN:
+        sabnzbd_task = gather(
+            sabnzbd_client.pause_all(),
+            sabnzbd_client.delete_job("all", True),
+            sabnzbd_client.purge_all(True),
+            sabnzbd_client.delete_history("all", delete_files=True),
+        )
+    if not Config.DISABLE_JD and jdownloader.is_connected:
+        jd_task = gather(
+            jdownloader.device.downloadcontroller.stop_downloads(),
+            jdownloader.device.linkgrabber.clear_list(),
+            jdownloader.device.downloads.cleanup(
+                "DELETE_ALL",
+                "REMOVE_LINKS_AND_DELETE_FILES",
+                "ALL",
+            ),
+        )
+
+    try:
+        await TorrentManager.remove_all()
+    except Exception:
+        pass
+    await TorrentManager.close_all()
+
+    if sabnzbd_task is not None:
+        try:
+            await sabnzbd_task
+        except Exception:
+            pass
+        try:
+            await sabnzbd_client.close()
+        except Exception:
+            pass
+    if jd_task is not None:
+        try:
+            await jd_task
+        except Exception:
+            pass
+        try:
+            await jdownloader.close()
+        except Exception:
+            pass
+
+    try:
+        await stop_cloudflare_tunnel()
+    except Exception as e:
+        LOGGER.warning(f"Cloudflare Tunnel shutdown before restart failed: {e}")
+
+    await TgClient.stop()
+
+    THREAD_POOL.shutdown(wait=False)
+
+    await cmd_exec(
+        [
+            "pkill",
+            "-9",
+            "-f",
+            f"gunicorn|cloudflared|{BinConfig.ARIA2_NAME}|{BinConfig.QBIT_NAME}|{BinConfig.FFMPEG_NAME}|{BinConfig.RCLONE_NAME}|java|{BinConfig.SABNZBD_NAME}|7z|split",
+        ]
+    )
+
+    await cmd_exec(["python3", "update.py"])
+
+    if restart_chat_id:
+        await _write_restart_marker(restart_chat_id, restart_msg_id)
+
+    get_event_loop().create_task(_background_cleanup())
+    osexecl(executable, executable, "-m", "bot")
+
+
+async def scheduled_restart():
+    """Notify the owner and execute the daily 06:00 hard restart."""
+    LOGGER.info("Daily 06:00 auto restart triggered (%s)", Config.TIMEZONE)
+    restart_message = None
+    if Config.OWNER_ID:
+        try:
+            restart_message = await TgClient.bot.send_message(
+                chat_id=Config.OWNER_ID,
+                text="<i>Running scheduled daily restart...</i>",
+            )
+        except Exception as e:
+            LOGGER.warning(f"Scheduled restart owner notification failed: {e}")
+    restart_chat_id, restart_msg_id = _restart_target(
+        restart_message,
+        Config.OWNER_ID,
+    )
+    await hard_restart(restart_chat_id, restart_msg_id)
+
+
 @new_task
 async def confirm_restart(_, query):
     await query.answer()
@@ -813,8 +930,8 @@ async def confirm_restart(_, query):
     reply_to = message.reply_to_message or message.chat.id
     await delete_message(message)
     if data[1] == "confirm":
-        intervals["stopAll"] = True
         if data[2] == "soft":
+            intervals["stopAll"] = True
             restart_msg = await send_message(reply_to, "<i>Reloading...</i>")
             await _runtime_reload()
             intervals["stopAll"] = False
@@ -828,92 +945,13 @@ async def confirm_restart(_, query):
             except Exception as e:
                 LOGGER.error(e)
             return
-        else:
-            restart_message = await send_message(reply_to, "<i>Restarting...</i>")
-            restart_chat_id, restart_msg_id = _restart_target(
-                restart_message, reply_to
-            )
 
-            if qb := intervals["qb"]:
-                qb.cancel()
-            if jd := intervals["jd"]:
-                jd.cancel()
-            if nzb := intervals["nzb"]:
-                nzb.cancel()
-            if st := intervals["status"]:
-                for intvl in list(st.values()):
-                    intvl.cancel()
-
-            if scheduler.running:
-                scheduler.shutdown(wait=False)
-
-            await mega_cleanup()
-
-            sabnzbd_task = None
-            jd_task = None
-            if not Config.DISABLE_NZB and sabnzbd_client.LOGGED_IN:
-                sabnzbd_task = gather(
-                    sabnzbd_client.pause_all(),
-                    sabnzbd_client.delete_job("all", True),
-                    sabnzbd_client.purge_all(True),
-                    sabnzbd_client.delete_history("all", delete_files=True),
-                )
-            if not Config.DISABLE_JD and jdownloader.is_connected:
-                jd_task = gather(
-                    jdownloader.device.downloadcontroller.stop_downloads(),
-                    jdownloader.device.linkgrabber.clear_list(),
-                    jdownloader.device.downloads.cleanup(
-                        "DELETE_ALL",
-                        "REMOVE_LINKS_AND_DELETE_FILES",
-                        "ALL",
-                    ),
-                )
-
-            try:
-                await TorrentManager.remove_all()
-            except Exception:
-                pass
-            await TorrentManager.close_all()
-
-            if sabnzbd_task is not None:
-                try:
-                    await sabnzbd_task
-                except Exception:
-                    pass
-                try:
-                    await sabnzbd_client.close()
-                except Exception:
-                    pass
-            if jd_task is not None:
-                try:
-                    await jd_task
-                except Exception:
-                    pass
-                try:
-                    await jdownloader.close()
-                except Exception:
-                    pass
-
-            await TgClient.stop()
-
-            THREAD_POOL.shutdown(wait=False)
-
-            await cmd_exec(
-                [
-                    "pkill",
-                    "-9",
-                    "-f",
-                    f"gunicorn|{BinConfig.ARIA2_NAME}|{BinConfig.QBIT_NAME}|{BinConfig.FFMPEG_NAME}|{BinConfig.RCLONE_NAME}|java|{BinConfig.SABNZBD_NAME}|7z|split",
-                ]
-            )
-
-            await cmd_exec(["python3", "update.py"])
-
-            await _write_restart_marker(restart_chat_id, restart_msg_id)
-
-            get_event_loop().create_task(_background_cleanup())
-
-        osexecl(executable, executable, "-m", "bot")
+        restart_message = await send_message(reply_to, "<i>Restarting...</i>")
+        restart_chat_id, restart_msg_id = _restart_target(
+            restart_message,
+            reply_to,
+        )
+        await hard_restart(restart_chat_id, restart_msg_id)
     else:
         await delete_message(message, reply_to)
 

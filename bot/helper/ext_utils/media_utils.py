@@ -16,7 +16,7 @@ from asyncio.subprocess import PIPE
 from os import path as ospath
 from re import search as re_search, escape
 from shutil import which
-from time import time
+from time import time, time_ns
 from aioshutil import rmtree
 from langcodes import Language
 from niquests import AsyncSession
@@ -59,6 +59,29 @@ def _prepare_telegram_thumbnail(src, dst):
     return dst
 
 
+def _prepare_hd_thumbnail(src, dst):
+    """Create a high-resolution JPEG suitable for Telegram video covers."""
+    with Image.open(src) as image:
+        cover = image.convert("RGB")
+        cover.thumbnail((1280, 1280), Image.Resampling.LANCZOS)
+        cover.save(dst, "JPEG", quality=92, optimize=True)
+    return dst
+
+
+async def create_telegram_thumbnail(src):
+    """Create the small legacy thumbnail used alongside an HD video cover."""
+    output_dir = f"{DOWNLOAD_DIR}thumbnails"
+    await makedirs(output_dir, exist_ok=True)
+    output = ospath.join(output_dir, f"{time_ns()}_telegram.jpg")
+    try:
+        return await sync_to_async(_prepare_telegram_thumbnail, src, output)
+    except Exception as e:
+        LOGGER.warning(f"Could not prepare Telegram thumbnail from {src}: {e}")
+        with suppress(Exception):
+            await remove(output)
+        return None
+
+
 async def create_thumb(msg, _id=""):
     if not _id:
         _id = int(time() * 1000)
@@ -72,7 +95,7 @@ async def create_thumb(msg, _id=""):
         LOGGER.error(f"Failed to download photo: {e}")
         return ""
     output = ospath.join(path, f"{_id}.jpg")
-    await sync_to_async(_prepare_telegram_thumbnail, photo_dir, output)
+    await sync_to_async(_prepare_hd_thumbnail, photo_dir, output)
     await remove(photo_dir)
     return output
 
@@ -129,7 +152,7 @@ async def download_image_thumb(url):
             output = ospath.join(path, f"{time()}.jpg")
 
             try:
-                await sync_to_async(_prepare_telegram_thumbnail, tmp_path, output)
+                await sync_to_async(_prepare_hd_thumbnail, tmp_path, output)
             except Exception as e:
                 LOGGER.error(f"Failed to process thumb image: {e}")
                 with suppress(Exception):
@@ -157,7 +180,7 @@ async def download_custom_thumb(url):
                 
                 output = ospath.join(path, f"{time()}.jpg")
                 try:
-                    await sync_to_async(_prepare_telegram_thumbnail, tmp_path, output)
+                    await sync_to_async(_prepare_hd_thumbnail, tmp_path, output)
                 except Exception as e:
                     LOGGER.error(f"Failed to process telegram thumb image: {e}")
                     with suppress(Exception):
@@ -513,7 +536,7 @@ async def get_video_thumbnail(video_file, duration):
         "-i",
         video_file,
         "-vf",
-        "thumbnail,scale=320:-2:flags=lanczos,format=yuvj420p",
+        "thumbnail,format=yuvj420p",
         "-q:v",
         "1",
         "-frames:v",
@@ -537,7 +560,7 @@ async def get_video_thumbnail(video_file, duration):
         )
         return None
     try:
-        await sync_to_async(_prepare_telegram_thumbnail, output, output)
+        await sync_to_async(_prepare_hd_thumbnail, output, output)
     except Exception as e:
         LOGGER.warning(f"Could not normalize video thumbnail {output}: {e}")
         return None
@@ -600,7 +623,7 @@ async def get_multiple_frames_thumbnail(video_file, layout, keep_screenshots):
         if not keep_screenshots:
             await rmtree(dirpath, ignore_errors=True)
     try:
-        await sync_to_async(_prepare_telegram_thumbnail, output, output)
+        await sync_to_async(_prepare_hd_thumbnail, output, output)
     except Exception as e:
         LOGGER.warning(f"Could not normalize thumbnail layout {output}: {e}")
         return None

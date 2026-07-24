@@ -1,4 +1,4 @@
-from asyncio import TimeoutError, create_subprocess_exec, create_task, wait_for
+from asyncio import TimeoutError, create_subprocess_exec, create_task, gather, wait_for
 from asyncio.subprocess import PIPE, STDOUT
 from re import search
 from shutil import which
@@ -53,16 +53,29 @@ async def _watch_logs(proc):
 
 async def stop_cloudflare_tunnel():
     global _proc, _log_task
-    if _log_task and not _log_task.done():
-        _log_task.cancel()
-    _log_task = None
-    if _proc and _proc.returncode is None:
-        _proc.terminate()
-        try:
-            await wait_for(_proc.wait(), timeout=10)
-        except (Exception, TimeoutError):
-            _proc.kill()
+    proc = _proc
+    log_task = _log_task
     _proc = None
+    _log_task = None
+
+    if proc and proc.returncode is None:
+        try:
+            proc.terminate()
+        except ProcessLookupError:
+            pass
+        try:
+            await wait_for(proc.wait(), timeout=10)
+        except TimeoutError:
+            try:
+                proc.kill()
+            except ProcessLookupError:
+                pass
+            await proc.wait()
+
+    if log_task and not log_task.done():
+        log_task.cancel()
+    if log_task:
+        await gather(log_task, return_exceptions=True)
 
 
 async def cloudflare_tunnel_booter():

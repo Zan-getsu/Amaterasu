@@ -17,6 +17,7 @@ from ...core.config_manager import Config
 from ...core.tg_client import TgClient
 from ..telegram_helper.tg_transfer import HypertgTransfer
 from ..ext_utils.media_utils import (
+    create_telegram_thumbnail,
     get_audio_thumbnail,
     get_document_type,
     get_media_info,
@@ -104,6 +105,10 @@ class HypertgUpload(HypertgTransfer):
 
         if thumb == "none":
             thumb = None
+        video_cover = thumb if key == "videos" else None
+        legacy_thumb = (
+            await create_telegram_thumbnail(thumb) if thumb is not None else None
+        )
 
         up_size = ospath.getsize(file_path)
         hyper_user_only = False
@@ -139,7 +144,7 @@ class HypertgUpload(HypertgTransfer):
                 sent = await self._hyper_send(
                     file_path,
                     key,
-                    thumb,
+                    legacy_thumb,
                     cap_mono,
                     upload_chat_id,
                     hyper_rply,
@@ -150,6 +155,7 @@ class HypertgUpload(HypertgTransfer):
                     title=title,
                     user_only=hyper_user_only,
                     reply_markup=reply_markup,
+                    video_cover=video_cover,
                 )
             else:
                 direct_rply = (
@@ -160,7 +166,7 @@ class HypertgUpload(HypertgTransfer):
                 sent = await self._direct_send(
                     file_path,
                     key,
-                    thumb,
+                    legacy_thumb,
                     cap_mono,
                     upload_chat_id,
                     direct_rply,
@@ -171,6 +177,7 @@ class HypertgUpload(HypertgTransfer):
                     title=title,
                     user_session=user_session,
                     reply_markup=reply_markup,
+                    video_cover=video_cover,
                 )
 
             LOGGER.info(f"HypertgUL uploaded {self._up_file}")
@@ -183,6 +190,11 @@ class HypertgUpload(HypertgTransfer):
             LOGGER.error(f"HypertgUL fail {self._up_file}: {type(e).__name__}: {e}")
             raise
         finally:
+            if legacy_thumb is not None and await aiopath.exists(legacy_thumb):
+                try:
+                    await remove(legacy_thumb)
+                except Exception:
+                    pass
             if user_thumb is None and thumb is not None and await aiopath.exists(thumb):
                 try:
                     await remove(thumb)
@@ -198,30 +210,34 @@ class HypertgUpload(HypertgTransfer):
                 await sleep(f.value + 1)
 
     async def _try_send(self, key, client, kwargs):
+        async def send():
+            if key == "videos":
+                return await self._send_with_retry(client.send_video, **kwargs)
+            elif key == "audios":
+                return await self._send_with_retry(client.send_audio, **kwargs)
+            elif key == "photos":
+                return await self._send_with_retry(client.send_photo, **kwargs)
+            return await self._send_with_retry(client.send_document, **kwargs)
+
         try:
-            if key == "videos":
-                return await self._send_with_retry(client.send_video, **kwargs)
-            elif key == "audios":
-                return await self._send_with_retry(client.send_audio, **kwargs)
-            elif key == "photos":
-                return await self._send_with_retry(client.send_photo, **kwargs)
-            else:
-                return await self._send_with_retry(client.send_document, **kwargs)
+            return await send()
         except PhotoInvalidDimensions:
-            LOGGER.warning(
-                f"HypertgUL rejected thumbnail for {self._up_file}; "
-                "retrying without it"
-            )
-            kwargs.pop("thumb", None)
-            kwargs.pop("video_cover", None)
-            if key == "videos":
-                return await self._send_with_retry(client.send_video, **kwargs)
-            elif key == "audios":
-                return await self._send_with_retry(client.send_audio, **kwargs)
-            elif key == "photos":
-                return await self._send_with_retry(client.send_photo, **kwargs)
-            else:
-                return await self._send_with_retry(client.send_document, **kwargs)
+            if kwargs.pop("thumb", None) is not None:
+                LOGGER.warning(
+                    f"HypertgUL rejected legacy thumbnail for {self._up_file}; "
+                    "retrying with the HD cover only"
+                )
+                try:
+                    return await send()
+                except PhotoInvalidDimensions:
+                    pass
+            if kwargs.pop("video_cover", None) is not None:
+                LOGGER.warning(
+                    f"HypertgUL rejected HD cover for {self._up_file}; "
+                    "retrying without it"
+                )
+                return await send()
+            raise
 
     async def _hyper_send(
         self,
@@ -238,6 +254,7 @@ class HypertgUpload(HypertgTransfer):
         title="",
         user_only=False,
         reply_markup=None,
+        video_cover=None,
     ):
         if user_only:
             candidates = {k: self.work_loads[k] for k in self.clients if k < 0}
@@ -271,8 +288,9 @@ class HypertgUpload(HypertgTransfer):
                     kwargs["width"] = width
                 if height:
                     kwargs["height"] = height
+                if video_cover:
+                    kwargs["video_cover"] = video_cover
                 if thumb:
-                    kwargs["video_cover"] = thumb
                     kwargs["thumb"] = thumb
             elif key == "audios":
                 if duration:
@@ -315,6 +333,7 @@ class HypertgUpload(HypertgTransfer):
         title="",
         user_session=False,
         reply_markup=None,
+        video_cover=None,
     ):
         client = (
             TgClient.user if user_session and TgClient.user else self._listener.client
@@ -333,9 +352,10 @@ class HypertgUpload(HypertgTransfer):
             kwargs["reply_markup"] = reply_markup
 
         if key == "videos":
+            if video_cover:
+                kwargs["video_cover"] = video_cover
             if thumb:
                 kwargs["thumb"] = thumb
-                kwargs["video_cover"] = thumb
             if duration:
                 kwargs["duration"] = duration
             if width:

@@ -7,11 +7,12 @@ from re import match, compile as re_compile, IGNORECASE as re_IGNORECASE
 from aiofiles import open as aiopen
 from cloudscraper import create_scraper
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from requests.exceptions import RequestException
 
 from .. import LOGGER, user_data
 from ..core.config_manager import Config
 from ..core.tg_client import TgClient
-from ..helper.ext_utils.bot_utils import new_task, update_user_ldata
+from ..helper.ext_utils.bot_utils import new_task, sync_to_async, update_user_ldata
 from ..helper.ext_utils.links_utils import decode_slink
 from ..helper.ext_utils.status_utils import get_readable_time
 from ..helper.ext_utils.db_handler import database
@@ -26,6 +27,30 @@ from ..helper.telegram_helper.message_utils import (
     send_file,
     send_message,
 )
+
+_SPACEBIN_URL = "https://spaceb.in/"
+_SPACEBIN_TIMEOUT = (10, 30)
+
+
+def _upload_log_to_spacebin(headers, data):
+    """Upload redacted log content without blocking the asyncio event loop."""
+    with create_scraper() as scraper:
+        return scraper.request(
+            "POST",
+            _SPACEBIN_URL,
+            headers=headers,
+            data=data,
+            timeout=_SPACEBIN_TIMEOUT,
+        )
+
+
+async def _notify_web_paste_failure(message):
+    """Best-effort user notification after the callback was acknowledged."""
+    text = "Web Paste Failed! The paste service may be temporarily unavailable."
+    try:
+        await send_message(message, text)
+    except Exception as error:
+        LOGGER.warning(f"Unable to notify user about Web Paste failure: {error}")
 
 
 @new_task
@@ -293,6 +318,7 @@ async def log_cb(_, query):
         except Exception as err:
             LOGGER.error(f"TG Log Display : {str(err)}")
     elif data[2] == "web":
+        await query.answer("Generating Web Paste...")
         boundary = "R1eFDeaC554BUkLF"
         headers = {
             "Content-Type": f"multipart/form-data; boundary=----WebKitFormBoundary{boundary}",
@@ -320,12 +346,21 @@ async def log_cb(_, query):
             f"------WebKitFormBoundary{boundary}--\r\n"
         )
 
-        cget = create_scraper().request
-        resp = cget("POST", "https://spaceb.in/", headers=headers, data=data)
+        try:
+            resp = await sync_to_async(_upload_log_to_spacebin, headers, data)
+        except RequestException as err:
+            LOGGER.warning(f"Web Paste upload failed: {err}")
+            await _notify_web_paste_failure(message)
+            return
+        except Exception as err:
+            LOGGER.error(f"Unexpected Web Paste upload failure: {err}")
+            await _notify_web_paste_failure(message)
+            return
+
         if resp.status_code == 200:
-            await query.answer("Generating..")
             btn = ButtonMaker()
             btn.url_button("📨 Web Paste (SB)", resp.url, style=ButtonStyle.PRIMARY)
             await edit_reply_markup(message, btn.build_menu(1))
         else:
-            await query.answer("Web Paste Failed ! Check Logs", show_alert=True)
+            LOGGER.warning(f"Web Paste returned HTTP {resp.status_code}")
+            await _notify_web_paste_failure(message)
