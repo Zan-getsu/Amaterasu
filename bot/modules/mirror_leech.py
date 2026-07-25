@@ -323,11 +323,16 @@ class Mirror(TaskListener):
 
         arg_parser(input_list[1:], args)
 
+        try:
+            multi_count = int(args.get("-i", 0))
+        except (TypeError, ValueError):
+            multi_count = 0
+
         if Config.DISABLE_BULK and args.get("-b", False):
             await send_message(self.message, "Bulk downloads are currently disabled.")
             return
 
-        if Config.DISABLE_MULTI and int(args.get("-i", 1)) > 1:
+        if Config.DISABLE_MULTI and multi_count > 1:
             await send_message(
                 self.message,
                 "Multi-downloads are currently disabled. Please try without the -i flag.",
@@ -393,6 +398,8 @@ class Mirror(TaskListener):
         self.multi_urls = []
         if args.get("--multi"):
             self.multi_urls = [u.strip() for u in args["--multi"].split() if u.strip()]
+            if not self.link and self.multi_urls:
+                self.link = self.multi_urls[0]
         # Phase 4.1 — sequential torrent streaming flag
         self.is_stream = args.get("--stream", False)
         # Phase 4.3 — cloud-to-cloud transfer flag
@@ -422,10 +429,7 @@ class Mirror(TaskListener):
         ytdlp_fallback_error = ""
         ytdlp_fallback_name = ""
 
-        try:
-            self.multi = int(args["-i"])
-        except Exception:
-            self.multi = 0
+        self.multi = multi_count
 
         try:
             if args["-ff"]:

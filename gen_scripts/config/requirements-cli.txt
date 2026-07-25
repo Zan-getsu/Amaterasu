@@ -4,5 +4,5 @@ progress
 progressbar2
 httplib2shim
 google_auth_oauthlib
-wzgram==3.0.23
-tgcrypto
+wzgram[fast]==3.0.23
+warpcrypto>=2.0.4

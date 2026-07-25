@@ -11,9 +11,9 @@ import sys
 try:
     from pyrogram import Client
 except Exception:
-    print("\n[ERROR] Pyrogram not installed!")
+    print("\n[ERROR] WZGram not installed!")
     print("\nInstall required dependencies:")
-    print("  pip install pyrogram tgcrypto")
+    print("  pip install 'wzgram[fast]==3.0.23'")
     sys.exit(1)
 
 
@@ -87,6 +87,7 @@ def main():
             app_version="@Amaterasu User Session",
             device_model="@Amaterasu Bot V3",
             system_version="@Amaterasu WZGram Server",
+            max_concurrent_transmissions=8,
         ) as user:
             # Step 3: Send session to Saved Messages
             print("[INFO] Sending session string to your Saved Messages...")

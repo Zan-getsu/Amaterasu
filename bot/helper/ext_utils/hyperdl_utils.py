@@ -38,7 +38,7 @@ from pyrogram.session import Session
 
 from ... import LOGGER
 from ...core.config_manager import Config
-from ...core.tg_client import TgClient
+from ...core.tg_client import TgClient, resilient_tg_operation
 from ..telegram_helper.tg_transfer import MB, HypertgTransfer
 
 _load_lock = Lock()
@@ -211,7 +211,8 @@ class HypertgDownload(HypertgTransfer):
 
     async def _do_req(self, sess, client, location, off, csz, attempt=0):
         try:
-            r = await sess.invoke(
+            r = await resilient_tg_operation(
+                sess.invoke,
                 raw.functions.upload.GetFile(
                     # The transfer pool does not have Telegram's dynamically
                     # supplied CDN endpoint table. Advertising CDN support can
@@ -220,6 +221,7 @@ class HypertgDownload(HypertgTransfer):
                     precise=True, cdn_supported=False,
                     location=location, offset=off, limit=csz,
                 ),
+                operation_name="upload.GetFile",
                 sleep_threshold=client.sleep_threshold,
             )
             if isinstance(r, raw.types.upload.File):
@@ -264,10 +266,12 @@ class HypertgDownload(HypertgTransfer):
 
         for attempt in range(3):
             try:
-                r = await sess.invoke(
+                r = await resilient_tg_operation(
+                    sess.invoke,
                     raw.functions.upload.GetCdnFile(
                         file_token=file_token, offset=off, limit=csz,
                     ),
+                    operation_name="upload.GetCdnFile",
                     sleep_threshold=client.sleep_threshold,
                 )
                 if isinstance(r, raw.types.upload.CdnFile):

@@ -4,7 +4,7 @@ from os import getcwd
 from os.path import exists as path_exists, join as path_join
 
 from aiofiles.os import remove as aioremove
-from pyrogram import Client, __version__ as wzgram_version
+from pyrogram import __version__ as wzgram_version
 from ..version import get_version
 from pyrogram.enums import ChatType
 from pyrogram.errors import (
@@ -18,7 +18,11 @@ from pyrogram.errors import (
 from pyrogram.filters import create, private, text, user
 from pyrogram.handlers import CallbackQueryHandler, MessageHandler
 
-from ..core.tg_client import TgClient
+from ..core.tg_client import (
+    MAX_CONCURRENT_TRANSMISSIONS,
+    TelegramClient,
+    TgClient,
+)
 from ..core.config_manager import Config
 from ..helper.ext_utils.bot_utils import new_task
 from ..helper.ext_utils.status_utils import get_readable_time
@@ -252,7 +256,7 @@ async def gen_pyro_string(_, message):
     workdir = getcwd()
     session_name = f"Amaterasu-{user_id}"
     try:
-        pyro_client = Client(
+        pyro_client = TelegramClient.create(
             session_name,
             in_memory=True,
             api_id=api_id,
@@ -262,6 +266,7 @@ async def gen_pyro_string(_, message):
             device_model="Amaterasu Bot",
             system_version="Amaterasu WZGram Server",
             loop=get_running_loop(),
+            max_concurrent_transmissions=MAX_CONCURRENT_TRANSMISSIONS,
         )
     except Exception as e:
         return await edit_message(

@@ -108,7 +108,21 @@ async def add_aria2_download(
         if notify_error:
             await listener.on_download_error(f"{e}")
         return False
-    download = await TorrentManager.aria2.tellStatus(gid)
+    try:
+        download = await TorrentManager.aria2.tellStatus(gid)
+    except Exception as e:
+        # A very fast HTTP failure can emit onDownloadError and remove the GID
+        # before addUri's caller gets its first status snapshot.
+        LOGGER.debug(f"Aria2 GID {gid} disappeared before initial status: {e}")
+        if not getattr(listener, "aria2_fallback_error", ""):
+            listener.aria2_fallback_error = (
+                "Aria2 removed the failed download before its error details "
+                "could be read."
+            )
+        listener.aria2_fallback_completed = 0
+        if notify_error:
+            await listener.on_download_error(listener.aria2_fallback_error)
+        return False
     if download.get("errorMessage"):
         error = str(download["errorMessage"]).replace("<", " ").replace(">", " ")
         LOGGER.info(f"Aria2c Download Error: {error}")

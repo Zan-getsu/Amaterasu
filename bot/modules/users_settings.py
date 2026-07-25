@@ -30,6 +30,7 @@ from ..helper.ext_utils.mega_utils import get_mega_account_info
 from ..helper.ext_utils.media_utils import create_thumb
 from ..helper.ext_utils.status_utils import get_readable_file_size
 from ..helper.telegram_helper.button_build import ButtonMaker
+from ..helper.telegram_helper.compat import get_user_mention
 from ..helper.telegram_helper.message_utils import (
     delete_message,
     edit_message,
@@ -365,7 +366,7 @@ Here I will explain how to use mltb.* which is reference to files you want to wo
 
 async def get_user_settings(from_user, stype="main"):
     user_id = from_user.id
-    user_name = from_user.mention(style="html")
+    user_name = get_user_mention(from_user)
     buttons = ButtonMaker()
     rclone_conf = f"rclone/{user_id}.conf"
     token_pickle = f"tokens/{user_id}.pickle"

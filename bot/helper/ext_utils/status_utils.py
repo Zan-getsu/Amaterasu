@@ -16,6 +16,7 @@ from ... import (
 )
 from ...core.config_manager import Config
 from ..telegram_helper.button_build import ButtonMaker
+from ..telegram_helper.compat import get_user_mention
 
 SIZE_UNITS = ["B", "KB", "MB", "GB", "TB", "PB"]
 
@@ -257,7 +258,7 @@ async def get_readable_message(sid, is_user, page_no=1, status="All", page_step=
         elapsed = time() - task.listener.message.date.timestamp()
 
         _user = task.listener.message.from_user or task.listener.message.sender_chat
-        _user_mention = _user.mention(style='html') if hasattr(_user, 'mention') else _user.title
+        _user_mention = get_user_mention(_user)
         _user_id = _user.id
 
         if (

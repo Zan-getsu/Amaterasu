@@ -264,108 +264,139 @@ def handleIndex(index, lst):
     return index % len(lst)
 
 
+_SWITCH_ARGS = {
+    "-s",
+    "-j",
+    "-f",
+    "-fd",
+    "-fu",
+    "-sync",
+    "-hl",
+    "-doc",
+    "-med",
+    "-ut",
+    "-bt",
+    "-yt",
+    "-yf",
+    "-ytdlp-fallback",
+    "--stream",
+    "--c2c",
+}
+
+_OPTIONAL_VALUE_ARGS = {
+    "-b",
+    "-e",
+    "-z",
+    "-d",
+    "-sv",
+    "-ss",
+    "-en",
+}
+
+_SINGLE_VALUE_ARGS = {"-i"}
+
+_RCLONE_PATH = re_compile(r"^(?:mrcc:)?[A-Za-z_][^:\s]*:.+")
+
+
+def _looks_like_download_input(value):
+    lowered = value.lower()
+    return (
+        lowered.startswith(
+            (
+                "http://",
+                "https://",
+                "ftp://",
+                "magnet:",
+                "tg://",
+                "www.",
+            )
+        )
+        or lowered.endswith((".torrent", ".nzb"))
+        or bool(_RCLONE_PATH.match(value))
+    )
+
+
 def arg_parser(items, arg_base):
     if not items:
         return
 
-    arg_start = -1
+    consumed = [False] * len(items)
     i = 0
     total = len(items)
 
-    bool_arg_set = {
-        "-b",
-        "-e",
-        "-z",
-        "-s",
-        "-j",
-        "-d",
-        "-sv",
-        "-ss",
-        "-f",
-        "-fd",
-        "-fu",
-        "-sync",
-        "-hl",
-        "-doc",
-        "-med",
-        "-ut",
-        "-bt",
-        "-yt",
-        "-yf",
-        "-ytdlp-fallback",
-        "-en",
-        # Phase 4.1/4.3 — boolean flags using --word syntax
-        "--stream",
-        "--c2c",
-    }
-    if Config.DISABLE_BULK and "-b" in items:
-        arg_base["-b"] = False
-
-    if Config.DISABLE_MULTI and "-i" in items:
-        arg_base["-i"] = 0
-
-    if Config.DISABLE_SEED and "-d" in items:
-        arg_base["-d"] = False
-
     while i < total:
         part = items[i]
+        if part not in arg_base:
+            i += 1
+            continue
 
-        if part in arg_base:
-            if arg_start == -1:
-                arg_start = i
+        consumed[i] = True
+        if part in _SWITCH_ARGS:
+            arg_base[part] = True
+            i += 1
+            continue
 
+        if part in _OPTIONAL_VALUE_ARGS:
+            next_index = i + 1
             if (
-                i + 1 == total
-                and part in bool_arg_set
-                or part
-                in [
-                    "-s",
-                    "-j",
-                    "-f",
-                    "-fd",
-                    "-fu",
-                    "-sync",
-                    "-hl",
-                    "-doc",
-                    "-med",
-                    "-ut",
-                    "-bt",
-                    "-yt",
-                    "-yf",
-                    "-ytdlp-fallback",
-                ]
+                next_index < total
+                and items[next_index] not in arg_base
+                and not _looks_like_download_input(items[next_index])
             ):
-                arg_base[part] = True
+                arg_base[part] = items[next_index]
+                consumed[next_index] = True
+                i += 2
             else:
-                sub_list = []
-                for j in range(i + 1, total):
-                    if items[j] in arg_base:
-                        if (part == "-c" and items[j] == "-c") or (part == "-gc" and items[j] == "-gc"):
-                            sub_list.append(items[j])
-                            continue
-                        if part in bool_arg_set and not sub_list:
-                            arg_base[part] = True
-                            break
-                        if not sub_list:
-                            break
-                        check = " ".join(sub_list).strip()
-                        if check.startswith("[") and check.endswith("]"):
-                            break
-                        elif not check.startswith("["):
-                            break
-                    sub_list.append(items[j])
-                if sub_list:
-                    value = " ".join(sub_list)
-                    if part == "-ff" and not value.strip().startswith("["):
-                        arg_base[part].add(value)
-                    else:
-                        arg_base[part] = value
-                    i += len(sub_list)
+                arg_base[part] = True
+                i += 1
+            continue
 
-        i += 1
+        if part in _SINGLE_VALUE_ARGS:
+            next_index = i + 1
+            if next_index < total and items[next_index] not in arg_base:
+                arg_base[part] = items[next_index]
+                consumed[next_index] = True
+                i += 2
+            else:
+                i += 1
+            continue
+
+        sub_list = []
+        j = i + 1
+        while j < total:
+            next_part = items[j]
+            if next_part in arg_base:
+                if part in ("-c", "-gc") and next_part == part:
+                    sub_list.append(next_part)
+                    consumed[j] = True
+                    j += 1
+                    continue
+                check = " ".join(sub_list).strip()
+                if not (
+                    check.startswith("[")
+                    and not check.endswith("]")
+                ):
+                    break
+            sub_list.append(next_part)
+            consumed[j] = True
+            j += 1
+
+        if sub_list:
+            value = " ".join(sub_list)
+            if (
+                part == "-ff"
+                and isinstance(arg_base[part], set)
+                and not value.strip().startswith("[")
+            ):
+                arg_base[part].add(value)
+            else:
+                arg_base[part] = value
+        i = j
 
     if "link" in arg_base:
-        link_items = items[:arg_start] if arg_start != -1 else items
+        link_items = [
+            item for index, item in enumerate(items) if not consumed[index]
+        ]
         if link_items:
             arg_base["link"] = " ".join(link_items)
 

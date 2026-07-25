@@ -14,7 +14,7 @@ from pyrogram.session import Auth, Session
 from pyrogram.session.internals import DataCenter
 
 from ... import LOGGER
-from ...core.tg_client import TgClient
+from ...core.tg_client import TgClient, resilient_tg_operation
 
 pyrogram.crypto_executor = ThreadPoolExecutor(
     max_workers=min(16, (cpu_count() or 4) * 2), thread_name_prefix="crypto"
@@ -134,10 +134,12 @@ class MtprotoPool:
                         e = await client.invoke(
                             raw.functions.auth.ExportAuthorization(dc_id=dc_id)
                         )
-                        await s.invoke(
+                        await resilient_tg_operation(
+                            s.invoke,
                             raw.functions.auth.ImportAuthorization(
                                 id=e.id, bytes=e.bytes
-                            )
+                            ),
+                            operation_name="auth.ImportAuthorization",
                         )
                         break
                     except AuthBytesInvalid:
@@ -213,9 +215,15 @@ class HypertgTransfer:
             try:
                 await s.connection.connect()
                 s.network_task = s.client.loop.create_task(s.network_worker())
-                await s.send(raw.functions.Ping(ping_id=0), timeout=Session.START_TIMEOUT)
+                await resilient_tg_operation(
+                    s.send,
+                    raw.functions.Ping(ping_id=0),
+                    operation_name="Ping",
+                    timeout=Session.START_TIMEOUT,
+                )
                 if not s.is_cdn:
-                    await s.send(
+                    await resilient_tg_operation(
+                        s.send,
                         raw.functions.InvokeWithLayer(
                             layer=layer,
                             query=raw.functions.InitConnection(
@@ -229,7 +237,8 @@ class HypertgTransfer:
                                 query=raw.functions.help.GetConfig(),
                             )
                         ),
-                        timeout=Session.START_TIMEOUT
+                        operation_name="InvokeWithLayer.InitConnection",
+                        timeout=Session.START_TIMEOUT,
                     )
                 s.ping_task = s.client.loop.create_task(s.ping_worker())
             except AuthKeyDuplicated as e:
@@ -262,8 +271,10 @@ class HypertgTransfer:
                     e = await client.invoke(
                         raw.functions.auth.ExportAuthorization(dc_id=dc_id)
                     )
-                    await s.invoke(
-                        raw.functions.auth.ImportAuthorization(id=e.id, bytes=e.bytes)
+                    await resilient_tg_operation(
+                        s.invoke,
+                        raw.functions.auth.ImportAuthorization(id=e.id, bytes=e.bytes),
+                        operation_name="auth.ImportAuthorization",
                     )
                     break
                 except AuthBytesInvalid:

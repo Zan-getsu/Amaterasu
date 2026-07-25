@@ -227,7 +227,7 @@ class TelegramUploader:
                         message_ids=self._sent_msg.id,
                     )
                 else:
-                    self._is_private = self._sent_msg.chat.type.name == "PRIVATE"
+                    self._is_private = self._sent_msg.chat.type == ChatType.PRIVATE
                 if self._listener.leech_dest:
                     try:
                         leech_dest = self._listener.leech_dest
@@ -740,6 +740,17 @@ class TelegramUploader:
                 f"Files Corrupted or unable to upload. {self._error or 'Check logs!'}"
             )
             return
+        elapsed = max(time() - self._start_time, 0.001)
+        LOGGER.info(
+            "Telegram upload task performance: name=%s files=%s corrupted=%s "
+            "bytes=%s elapsed=%.2fs speed=%.2fMiB/s",
+            self._listener.name,
+            self._total_files,
+            self._corrupted,
+            self._completed_bytes,
+            elapsed,
+            self._completed_bytes / elapsed / (1024 * 1024),
+        )
         LOGGER.info(f"Leech Completed: {self._listener.name}")
         await self._listener.on_upload_complete(
             None, self._msgs_dict, self._total_files, self._corrupted
@@ -787,6 +798,11 @@ class TelegramUploader:
             attrs = None
         target_client = TgClient.user if self._user_session else self._listener.client
         upload_path = f_path or self._up_path
+        transfer_started = monotonic()
+        try:
+            transfer_size = await aiopath.getsize(upload_path)
+        except OSError:
+            transfer_size = 0
         LOGGER.info(
             f"Telegram upload started: {file} as {mtype} "
             f"via {'HyperTG' if self._hu else 'Pyrogram'}"
@@ -862,12 +878,39 @@ class TelegramUploader:
                     title=title,
                     reply_markup=reply_markup,
                 )
-            LOGGER.info(f"Telegram upload completed: {file}")
+            elapsed = max(monotonic() - transfer_started, 0.001)
+            backend = (
+                getattr(self._hu, "last_backend", "HyperUP")
+                if self._hu
+                else "WZGram"
+            )
+            LOGGER.info(
+                "Telegram upload performance: name=%s outcome=completed "
+                "engine=%s bytes=%s elapsed=%.2fs speed=%.2fMiB/s",
+                file,
+                backend,
+                transfer_size,
+                elapsed,
+                transfer_size / elapsed / (1024 * 1024),
+            )
             return sent_msg
         except Exception as err:
             if not self._listener.is_cancelled:
+                elapsed = max(monotonic() - transfer_started, 0.001)
+                backend = (
+                    getattr(self._hu, "last_backend", "HyperUP")
+                    if self._hu
+                    else "WZGram"
+                )
                 LOGGER.warning(
-                    f"Telegram upload attempt failed: {file} | {type(err).__name__}: {str(err) or repr(err)}"
+                    "Telegram upload performance: name=%s outcome=failed "
+                    "engine=%s bytes=%s elapsed=%.2fs error=%s: %s",
+                    file,
+                    backend,
+                    min(self._last_uploaded, transfer_size),
+                    elapsed,
+                    type(err).__name__,
+                    str(err) or repr(err),
                 )
             raise
 

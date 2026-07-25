@@ -31,6 +31,7 @@ class HypertgUpload(HypertgTransfer):
         super().__init__(obj)
         self._up_file = ""
         self._file_progress = {}
+        self.last_backend = "WZGram"
 
     async def _progress(self, current, total, file_path):
         if self._listener.is_cancelled:
@@ -122,6 +123,7 @@ class HypertgUpload(HypertgTransfer):
                 user_session = False
         else:
             use_hyper = Config.USE_HYPER and self.clients and up_size > 10 * 1024 * 1024
+        self.last_backend = "HyperUP" if use_hyper else "WZGram"
         upload_chat_id = (
             self._listener.up_dest
             if self._listener.up_dest

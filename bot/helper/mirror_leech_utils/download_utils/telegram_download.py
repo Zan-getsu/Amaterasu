@@ -36,7 +36,24 @@ class TelegramDownloadHelper:
         self._listener = listener
         self._id = ""
         self.session = ""
-        self._hyper_dl = Config.USE_HYPER and len(TgClient.helper_bots) != 0 and Config.LEECH_DUMP_CHAT
+        transmission_mode = self._listener.transmission_mode
+        self._hyper_dl = (
+            Config.USE_HYPER
+            and Config.LEECH_DUMP_CHAT
+            and (
+                (
+                    transmission_mode in ("bot", "both")
+                    and len(TgClient.helper_bots) != 0
+                )
+                or (
+                    transmission_mode in ("user", "both")
+                    and (
+                        len(TgClient.helper_users) != 0
+                        or TgClient.user is not None
+                    )
+                )
+            )
+        )
         self._hyper_dl_instance = None
 
     @property
@@ -46,6 +63,23 @@ class TelegramDownloadHelper:
     @property
     def processed_bytes(self):
         return self._processed_bytes
+
+    def _log_performance(self, outcome):
+        if self._start_time <= 1:
+            return
+        elapsed = max(time() - self._start_time, 0.001)
+        transferred = self._processed_bytes or self._listener.size or 0
+        speed_mib = transferred / elapsed / (1024 * 1024)
+        LOGGER.info(
+            "Telegram download performance: name=%s outcome=%s engine=%s "
+            "bytes=%s elapsed=%.2fs speed=%.2fMiB/s",
+            self._listener.name,
+            outcome,
+            "HyperDL" if self._hyper_dl else "WZGram",
+            transferred,
+            elapsed,
+            speed_mib,
+        )
 
     async def _on_download_start(self, file_id, gid, from_queue):
         async with global_lock:
@@ -78,9 +112,11 @@ class TelegramDownloadHelper:
         async with global_lock:
             if self._id in GLOBAL_GID:
                 GLOBAL_GID.pop(self._id)
+        self._log_performance("failed")
         await self._listener.on_download_error(error)
 
     async def _on_download_complete(self):
+        self._log_performance("completed")
         await self._listener.on_download_complete()
         async with global_lock:
             GLOBAL_GID.pop(self._id)
@@ -158,7 +194,7 @@ class TelegramDownloadHelper:
             candidates.append(("hyper-dump", fallback_message))
         candidates.append(("current", message))
 
-        if Config.TRANSMISSION_MODE in ("user", "both") and TgClient.user:
+        if self._listener.transmission_mode in ("user", "both") and TgClient.user:
             try:
                 user_message = await TgClient.user.get_messages(
                     chat_id=message.chat.id,

@@ -2,6 +2,7 @@ from aiofiles.os import remove, path as aiopath
 from asyncio import sleep, TimeoutError
 from time import time
 from contextlib import suppress
+from functools import wraps
 from aiohttp.client_exceptions import ClientError
 
 from ... import task_dict_lock, task_dict, LOGGER, intervals
@@ -19,12 +20,36 @@ from ..telegram_helper.message_utils import (
 )
 
 
+def _aria2_event_guard(callback):
+    """Keep stale aria2 events from escaping aioaria2's background task."""
+
+    @wraps(callback)
+    async def guarded(api, data):
+        try:
+            return await callback(api, data)
+        except Exception as error:
+            gid = ""
+            with suppress(Exception):
+                gid = data["params"][0]["gid"]
+            if "not found" in str(error).lower():
+                LOGGER.debug(
+                    f"{callback.__name__}: ignoring stale aria2 event for GID {gid}"
+                )
+            else:
+                LOGGER.exception(
+                    f"{callback.__name__}: unexpected aria2 event error for GID {gid}"
+                )
+            return None
+
+    return guarded
+
+
+@_aria2_event_guard
 async def _on_download_started(api, data):
     gid = data["params"][0]["gid"]
-    with suppress(TimeoutError, ClientError, Exception):
-        download, options = await api.tellStatus(gid), await api.getOption(gid)
-        if options.get("follow-torrent", "") == "false":
-            return
+    download, options = await api.tellStatus(gid), await api.getOption(gid)
+    if options.get("follow-torrent", "") == "false":
+        return
     if is_metadata(download):
         LOGGER.info(f"onDownloadStarted: {gid} METADATA")
         await sleep(1)
@@ -47,8 +72,11 @@ async def _on_download_started(api, data):
         await sleep(1)
 
     await sleep(2)
+    # The error callback can remove a fast-failing GID during the sleeps above.
+    # Query aria2 before looking up/updating the task so a stale event exits
+    # quietly instead of raising from tellStatus or logging a false engine error.
+    download = await api.tellStatus(gid)
     if task := await get_task_by_gid(gid):
-        download = await api.tellStatus(gid)
         if "bittorrent" in download:
             task.listener.is_torrent = True
 
@@ -67,6 +95,7 @@ async def _on_download_started(api, data):
             return
 
 
+@_aria2_event_guard
 async def _on_download_complete(api, data):
     gid = data["params"][0]["gid"]
     try:
@@ -112,6 +141,7 @@ async def _on_download_complete(api, data):
             await TorrentManager.aria2_remove(download)
 
 
+@_aria2_event_guard
 async def _on_bt_download_complete(api, data):
     gid = data["params"][0]["gid"]
     await sleep(1)
@@ -174,6 +204,7 @@ async def _on_bt_download_complete(api, data):
             await TorrentManager.aria2_remove(download)
 
 
+@_aria2_event_guard
 async def _on_download_stopped(_, data):
     gid = data["params"][0]["gid"]
     await sleep(4)
@@ -181,19 +212,25 @@ async def _on_download_stopped(_, data):
         await task.listener.on_download_error("Dead torrent!")
 
 
+@_aria2_event_guard
 async def _on_download_error(api, data):
     gid = data["params"][0]["gid"]
     await sleep(1)
     LOGGER.info(f"onDownloadError: {gid}")
-    error = "None"
-    with suppress(TimeoutError, ClientError, Exception):
-        download, options = await api.tellStatus(gid), await api.getOption(gid)
-        error = download.get("errorMessage", "")
-        LOGGER.info(f"Download Error: {error}")
-        if options.get("follow-torrent", "") == "false":
-            return
+    download, options = await api.tellStatus(gid), await api.getOption(gid)
+    error = download.get("errorMessage", "") or "Aria2 download failed."
+    LOGGER.info(f"Download Error: {error}")
+    if options.get("follow-torrent", "") == "false":
+        return
     if task := await get_task_by_gid(gid):
         listener = task.listener
+        handled_gids = getattr(listener, "_aria2_handled_error_gids", None)
+        if handled_gids is None:
+            handled_gids = listener._aria2_handled_error_gids = set()
+        if gid in handled_gids:
+            LOGGER.debug(f"Ignoring duplicate aria2 error event for GID {gid}")
+            return
+        handled_gids.add(gid)
         if (
             getattr(listener, "allow_ytdlp_fallback", False)
             and not listener.is_cancelled

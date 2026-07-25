@@ -9,6 +9,7 @@ from urllib.parse import quote
 from pyrogram import ContinuePropagation
 from pyrogram.enums import ButtonStyle
 from pyrogram.errors import FloodWait
+from pyrogram.types import ReplyParameters
 
 from bot import LOGGER
 from bot.core.config_manager import Config
@@ -16,6 +17,7 @@ from bot.helper.ext_utils.bot_utils import arg_parser, get_web_secret
 from bot.helper.ext_utils.status_utils import get_readable_file_size
 from bot.helper.ext_utils.shortener_utils import short_url
 from bot.helper.telegram_helper.button_build import ButtonMaker
+from bot.helper.telegram_helper.compat import get_user_mention
 from bot.helper.telegram_helper.message_utils import edit_message, send_message
 from web.security import make_route_token
 # Phase 2.12 — import canonical media helpers from tg_utils (deduplication)
@@ -189,7 +191,7 @@ async def prepare_stored_media(message):
         media = get_media(copied) or media
         
         user = message.from_user or message.sender_chat
-        user_mention = user.mention(style="html") if hasattr(user, "mention") else getattr(user, "title", "Unknown")
+        user_mention = get_user_mention(user)
             
         user_id = user.id
         file_id = getattr(media, "file_unique_id", "Unknown")
@@ -202,7 +204,10 @@ async def prepare_stored_media(message):
         )
         
         try:
-            await copied.reply(reply_text, quote=True)
+            await copied.reply(
+                reply_text,
+                reply_parameters=ReplyParameters(message_id=copied.id),
+            )
         except Exception as e:
             LOGGER.error(f"Failed to reply to copied message in BIN_CHANNEL: {e}")
             

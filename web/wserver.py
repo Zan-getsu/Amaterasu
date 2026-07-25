@@ -413,6 +413,19 @@ async def healthz():
     })
 
 
+@app.get("/health")
+async def telegram_health():
+    """Detailed WZGram, crypto, Hyper, and FileToLink readiness report."""
+    from bot.helper.health import get_health_report
+
+    report = get_health_report()
+    return JSONResponse(
+        report,
+        status_code=200 if report["status"] == "ok" else 503,
+        headers={"Cache-Control": "no-store"},
+    )
+
+
 @app.get("/metrics")
 async def metrics():
     """Prometheus-format metrics endpoint.
@@ -1198,7 +1211,7 @@ async def homepage(request: Request):
 # Phase 1.3 — Web UI login password (LOGIN_PASS)
 # ────────────────────────────────────────────────────────────────────
 # When Config.LOGIN_PASS is set, all admin routes require a session_token
-# cookie obtained via /login. Public routes (/, /healthz, /metrics,
+# cookie obtained via /login. Public routes (/, /health, /healthz, /metrics,
 # /stream/*, /dl/*, /watch/*, /login) are exempt. The session token is
 # an HMAC signature of "amaterasu_session" with the web secret — stateless,
 # no server-side session storage needed. Cookie expires in 7 days.
@@ -1247,7 +1260,9 @@ _SIGNED_USER_TOOL_PATH_PREFIXES = (
     "/google-token/callback",
 )
 # Public routes that never require login
-_PUBLIC_PATHS = frozenset({"/", "/api/status", "/healthz", "/metrics", "/login"})
+_PUBLIC_PATHS = frozenset(
+    {"/", "/api/status", "/health", "/healthz", "/metrics", "/login"}
+)
 
 
 def _make_session_cookie() -> str:
@@ -1327,7 +1342,8 @@ async def login_submit(request: Request):
 async def login_gate(request: Request, call_next):
     """Middleware that enforces LOGIN_PASS on admin routes.
 
-    Public routes (/, /api/status, /healthz, /metrics, /stream/*, /dl/*, /watch/*,
+    Public routes (/, /api/status, /health, /healthz, /metrics, /stream/*,
+    /dl/*, /watch/*,
     /login) are always allowed. Admin routes (/app/*, /api/profiles*,
     /qbit/*, /nzb/*) require a valid session cookie when LOGIN_PASS is
     set. When LOGIN_PASS is not set, all routes are public (v1.5.0).
@@ -1446,7 +1462,8 @@ async def qbittorrent_proxy(path: str = "", request: Request = None):
     return await protected_proxy("qbit", path, request, password)
 
 
-# FileToLink dynamic load-balanced streaming endpoints
+# FileToLink dynamic load-balanced streaming endpoints. WZGram decrypts with
+# WarpCrypto and a 1 MiB boundary avoids extra slicing/copying in range seeks.
 CHUNK_SIZE = 1024 * 1024
 MAX_CONCURRENT_PER_CLIENT = 8
 STREAM_CLIENT_COOLDOWN_SECONDS = 45
@@ -2241,6 +2258,7 @@ async def stream_media(chat_id: str, message_id: int, request: Request, filename
         async def stream_generator():
             try:
                 bytes_sent = 0
+                stream_started = monotonic()
                 
                 import asyncio
                 from pyrogram.errors import FloodWait
@@ -2318,6 +2336,17 @@ async def stream_media(chat_id: str, message_id: int, request: Request, filename
                         raise HTTPException(status_code=404, detail="Failed to stream media") from e
                 if bytes_sent >= content_length:
                     _record_stream_success(client_id)
+                    elapsed = max(monotonic() - stream_started, 0.001)
+                    LOGGER.info(
+                        "FileToLink performance: name=%s client=%s bytes=%s "
+                        "elapsed=%.2fs speed=%.2fMiB/s chunk=%s",
+                        filename,
+                        client_id,
+                        bytes_sent,
+                        elapsed,
+                        bytes_sent / elapsed / (1024 * 1024),
+                        CHUNK_SIZE,
+                    )
                     if not range_header:
                         _schedule_cache_warm(
                             client_id,

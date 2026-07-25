@@ -5,7 +5,7 @@ from secrets import token_hex
 from aiofiles.os import remove
 
 from .. import LOGGER, bot_loop, task_dict, task_dict_lock
-from ..core.config_manager import BinConfig
+from ..core.config_manager import BinConfig, Config
 from ..helper.ext_utils.bot_utils import (
     COMMAND_USAGE,
     arg_parser,
@@ -93,9 +93,22 @@ class Clone(TaskListener):
         arg_parser(input_list[1:], args)
 
         try:
-            self.multi = int(args["-i"])
-        except Exception:
-            self.multi = 0
+            multi_count = int(args.get("-i", 0))
+        except (TypeError, ValueError):
+            multi_count = 0
+
+        if Config.DISABLE_BULK and args.get("-b", False):
+            await send_message(self.message, "Bulk downloads are currently disabled.")
+            return
+
+        if Config.DISABLE_MULTI and multi_count > 1:
+            await send_message(
+                self.message,
+                "Multi-downloads are currently disabled. Please try without the -i flag.",
+            )
+            return
+
+        self.multi = multi_count
 
         self.up_dest = args["-up"]
         self.category = args["-gc"]
@@ -369,4 +382,3 @@ class Clone(TaskListener):
 
 async def clone_node(client, message):
     bot_loop.create_task(Clone(client, message).new_event())
-

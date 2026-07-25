@@ -336,6 +336,22 @@ class YtDlp(TaskListener):
 
         arg_parser(input_list[1:], args)
 
+        try:
+            multi_count = int(args.get("-i", 0))
+        except (TypeError, ValueError):
+            multi_count = 0
+
+        if Config.DISABLE_BULK and args.get("-b", False):
+            await send_message(self.message, "Bulk downloads are currently disabled.")
+            return
+
+        if Config.DISABLE_MULTI and multi_count > 1:
+            await send_message(
+                self.message,
+                "Multi-downloads are currently disabled. Please try without the -i flag.",
+            )
+            return
+
         if Config.DISABLE_FF_MODE and args.get("-ff"):
             await send_message(self.message, "FFmpeg commands are currently disabled.")
             return
@@ -351,10 +367,7 @@ class YtDlp(TaskListener):
             await send_message(self.message, "Encoding is restricted to sudo users only.")
             return
 
-        try:
-            self.multi = int(args["-i"])
-        except Exception:
-            self.multi = 0
+        self.multi = multi_count
 
         try:
             if args["-ff"]:

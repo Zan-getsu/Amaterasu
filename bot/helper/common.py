@@ -63,6 +63,7 @@ from .mirror_leech_utils.rclone_utils.list import RcloneList
 from .mirror_leech_utils.status_utils.ffmpeg_status import FFmpegStatus
 from .mirror_leech_utils.status_utils.sevenz_status import SevenZStatus
 from .telegram_helper.bot_commands import BotCommands
+from .telegram_helper.compat import get_user_mention
 from .telegram_helper.message_utils import (
     get_tg_link_message,
     open_category_btns,
@@ -707,10 +708,70 @@ class TaskConfig:
             with suppress(Exception):
                 await self.message.unpin()
         if self.user:
-            if hasattr(self.user, "mention"):
-                self.tag = self.user.mention(style="html")
-            else:
-                self.tag = getattr(self.user, "title", "Unknown")
+            self.tag = get_user_mention(self.user)
+
+    @staticmethod
+    def _multi_sender_id(message):
+        sender = getattr(message, "from_user", None) or getattr(
+            message, "sender_chat", None
+        )
+        return getattr(sender, "id", None)
+
+    @staticmethod
+    def _is_multi_source(message):
+        if not isinstance(message, Message) or getattr(message, "empty", False):
+            return False
+        text = (getattr(message, "text", None) or "").lstrip()
+        if text.startswith("/"):
+            return False
+        return bool(
+            getattr(message, "media", None)
+            or text
+            or getattr(message, "caption", None)
+        )
+
+    async def _get_next_multi_source(self):
+        reply_id = self.message.reply_to_message_id
+        if reply_id is None:
+            return None
+
+        current_source = self.message.reply_to_message
+        if not isinstance(current_source, Message):
+            current_source = await self.client.get_messages(
+                chat_id=self.message.chat.id,
+                message_ids=reply_id,
+            )
+        sender_id = self._multi_sender_id(current_source)
+        thread_id = getattr(current_source, "message_thread_id", None)
+
+        # Telegram message IDs are not guaranteed to be consecutive. Search
+        # forward through messages that existed before the command and select
+        # the next usable item from the same sender as the replied source.
+        last_id = min(self.message.id - 1, reply_id + 1000)
+        for start_id in range(reply_id + 1, last_id + 1, 100):
+            message_ids = list(range(start_id, min(start_id + 100, last_id + 1)))
+            messages = await self.client.get_messages(
+                chat_id=self.message.chat.id,
+                message_ids=message_ids,
+            )
+            if isinstance(messages, Message):
+                messages = [messages]
+            elif not isinstance(messages, list):
+                messages = []
+            for candidate in sorted(
+                (msg for msg in messages if isinstance(msg, Message)),
+                key=lambda msg: msg.id,
+            ):
+                if not self._is_multi_source(candidate):
+                    continue
+                if (
+                    thread_id is not None
+                    and getattr(candidate, "message_thread_id", None) != thread_id
+                ):
+                    continue
+                if sender_id is None or self._multi_sender_id(candidate) == sender_id:
+                    return candidate
+        return None
 
     @new_task
     async def run_multi(self, input_list, obj):
@@ -742,20 +803,19 @@ class TaskConfig:
             msg = [s.strip() for s in input_list]
             index = msg.index("-i")
             msg[index + 1] = f"{self.multi - 1}"
-            reply_id = self.message.reply_to_message_id
-            if reply_id is not None:
-                nextmsg = await self.client.get_messages(
-                    chat_id=self.message.chat.id,
-                    message_ids=reply_id + 1,
+            next_source = await self._get_next_multi_source()
+            if not isinstance(next_source, Message):
+                multi_tags.discard(self.multi_tag)
+                await send_message(
+                    self.message,
+                    "Multi Task stopped: I could not find the next file/link after "
+                    "the replied message.",
                 )
-            else:
-                nextmsg = self.message
-            if not isinstance(nextmsg, Message):
-                nextmsg = self.message
+                return
             msgts = " ".join(msg)
             if self.multi > 2:
                 msgts += f"\n• <b>Cancel Multi:</b> <i>/{BotCommands.CancelTaskCommand[1]}_{self.multi_tag}</i>"
-            nextmsg = await send_message(nextmsg, msgts)
+            nextmsg = await send_message(next_source, msgts)
         if not isinstance(nextmsg, Message):
             return
         nextmsg = await self.client.get_messages(

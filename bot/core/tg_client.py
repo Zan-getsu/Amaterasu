@@ -1,14 +1,184 @@
 from ast import literal_eval
-from pyrogram import Client, enums
-from pyrogram.errors import FloodWait
-from pyrogram.types import ChatPrivileges
-from asyncio import Lock, gather, get_running_loop, sleep
+from asyncio import CancelledError, Lock, gather, get_running_loop, sleep
 from hashlib import sha256
 from importlib import import_module
 from inspect import signature
+from time import monotonic_ns
+
+from pyrogram import Client, enums, raw
+from pyrogram import __version__ as WZGRAM_VERSION
+from pyrogram.errors import FloodWait
+from pyrogram.types import ChatPrivileges
 
 from .. import LOGGER, bot_loop
 from .config_manager import Config
+
+MAX_CONCURRENT_TRANSMISSIONS = 8
+WARP_ALIGNED_CHUNK_SIZE = 1024 * 1024
+_TRANSIENT_RPC_ERRORS = frozenset(
+    {
+        "InternalServerError",
+        "InterDcCallError",
+        "InterDcCallRichError",
+        "RpcCallFail",
+        "ServiceUnavailable",
+    }
+)
+
+try:
+    from pyrogram.errors import FloodPremiumWait
+except ImportError:  # WZGram/Pyrogram compatibility
+    FloodPremiumWait = FloodWait
+
+
+def get_crypto_backend():
+    """Return the crypto adapter WZGram is actually bound to at runtime."""
+    try:
+        aes = import_module("pyrogram.crypto.aes")
+    except (AttributeError, ImportError, OSError):
+        return "Unavailable"
+    try:
+        warpcrypto = import_module("warpcrypto")
+    except (ImportError, OSError):
+        warpcrypto = None
+    if warpcrypto is not None and getattr(aes, "warpcrypto", None) is warpcrypto:
+        return "WarpCrypto"
+
+    # Report the adapter bound into AES, not a package that merely happens to
+    # be installed in the environment.
+    encrypt_module = getattr(
+        getattr(aes, "ige256_encrypt", None),
+        "__module__",
+        "",
+    ).lower()
+    if getattr(aes, "tgcrypto", None) is not None or "tgcrypto" in encrypt_module:
+        return "TgCrypto"
+    return "Python"
+
+
+def _query_name(query):
+    """Get a stable raw API operation name, unwrapping invoke containers."""
+    inner = query
+    for _ in range(4):
+        wrapped = getattr(inner, "query", None)
+        if wrapped is None or wrapped is inner:
+            break
+        inner = wrapped
+    return getattr(inner, "QUALNAME", type(inner).__name__)
+
+
+def _query_is_idempotent(query):
+    """Avoid replaying ambiguous send/admin calls after transport failures."""
+    name = _query_name(query).split(".")[-1]
+    return (
+        name.startswith(("Get", "Search", "Check", "Read", "Ping"))
+        or name
+        in {
+            "GetFile",
+            "GetWebFile",
+            "ReuploadCdnFile",
+            "SaveFilePart",
+            "SaveBigFilePart",
+        }
+    )
+
+
+async def resilient_tg_operation(
+    operation,
+    *args,
+    operation_name=None,
+    max_attempts=3,
+    idempotent=True,
+    **kwargs,
+):
+    """Run one Telegram operation with bounded, flood-aware retries.
+
+    Every client created by :class:`TelegramClient` routes raw API calls
+    through this boundary. Flood waits are safe to retry because Telegram
+    rejected the request. Ambiguous mutating requests are not replayed after
+    transport/server errors, preventing duplicate messages and admin actions.
+    """
+    name = operation_name or getattr(operation, "__name__", "telegram_operation")
+    attempt = 0
+    while True:
+        attempt += 1
+        try:
+            return await operation(*args, **kwargs)
+        except CancelledError:
+            raise
+        except (FloodWait, FloodPremiumWait) as error:
+            if attempt >= max_attempts:
+                raise
+            delay = max(float(getattr(error, "value", 1)), 1.0) + 1.0
+            LOGGER.warning(
+                "Telegram %s hit FloodWait; retry %s/%s in %.1fs",
+                name,
+                attempt + 1,
+                max_attempts,
+                delay,
+            )
+            await sleep(delay)
+        except Exception as error:
+            transient = isinstance(error, (ConnectionError, OSError, TimeoutError)) or (
+                type(error).__name__ in _TRANSIENT_RPC_ERRORS
+            )
+            if not transient or not idempotent or attempt >= max_attempts:
+                raise
+            delay = min(2 ** (attempt - 1), 8)
+            LOGGER.warning(
+                "Transient Telegram %s failure (%s); retry %s/%s in %ss",
+                name,
+                type(error).__name__,
+                attempt + 1,
+                max_attempts,
+                delay,
+            )
+            await sleep(delay)
+
+
+class WzgramClient(Client):
+    """WZGram implementation behind Amaterasu's framework-neutral boundary."""
+
+    async def invoke(self, query, *args, **kwargs):
+        return await resilient_tg_operation(
+            super().invoke,
+            query,
+            *args,
+            operation_name=_query_name(query),
+            idempotent=_query_is_idempotent(query),
+            **kwargs,
+        )
+
+
+class TelegramClient:
+    """Small construction/runtime facade for future MTProto framework swaps."""
+
+    framework = "WZGram"
+
+    @staticmethod
+    def create(*args, **kwargs):
+        backend = get_crypto_backend()
+        if backend != "WarpCrypto":
+            raise RuntimeError(
+                f"WZGram requires active WarpCrypto; detected {backend}"
+            )
+        return WzgramClient(*args, **kwargs)
+
+    @staticmethod
+    def is_connected(client):
+        if client is None:
+            return False
+        state = getattr(client, "is_connected", False)
+        return bool(state() if callable(state) else state)
+
+    @staticmethod
+    def runtime():
+        return {
+            "framework": TelegramClient.framework,
+            "version": WZGRAM_VERSION,
+            "crypto": get_crypto_backend(),
+            "max_concurrent_transmissions": MAX_CONCURRENT_TRANSMISSIONS,
+        }
 
 
 def _stabilize_wzgram_upload_pool():
@@ -116,12 +286,12 @@ class TgClient:
             client_loop = bot_loop
         for param, value in {
             "loop": client_loop,
-            "max_concurrent_transmissions": 100,
+            "max_concurrent_transmissions": MAX_CONCURRENT_TRANSMISSIONS,
             "skip_updates": False,
         }.items():
             if param in signature(Client.__init__).parameters:
                 kwargs[param] = value
-        return Client(*args, **kwargs)
+        return TelegramClient.create(*args, **kwargs)
 
     tgClient = AmaterasutgClient
 
@@ -312,13 +482,13 @@ class TgClient:
             if is_premium:
                 cls.MAX_SPLIT_SIZE = 4 * 1024 * 1024 * 1024  # 4 GB
                 LOGGER.info(
-                    f"Telegram Premium: enabled on bot account. "
-                    f"File size limit: 4 GB"
+                    "Telegram Premium: enabled on bot account. "
+                    "File size limit: 4 GB"
                 )
             else:
                 LOGGER.info(
-                    f"Telegram Premium: disabled on bot account. "
-                    f"File size limit: 2 GB"
+                    "Telegram Premium: disabled on bot account. "
+                    "File size limit: 2 GB"
                 )
         except Exception as e:
             LOGGER.warning(f"Could not detect bot premium status: {e}")
@@ -387,6 +557,7 @@ class TgClient:
             if token and token != Config.BOT_TOKEN
         ]
         if not tokens:
+            await cls.prewarm_stream_clients()
             return
 
         def token_sort(item):
@@ -407,6 +578,77 @@ class TgClient:
                 LOGGER.info(f"Stream Bot [{key}] [@{client.me.username}] Started!")
             except Exception as e:
                 LOGGER.error(f"Failed to start stream bot from {key}. {e}")
+        await cls.prewarm_stream_clients()
+
+    @classmethod
+    async def prewarm_stream_clients(cls):
+        """Verify every stream bot has a live API connection before serving."""
+
+        async def warm(client_id, client):
+            if client is None:
+                return False
+            media_dc_id = None
+            try:
+                await resilient_tg_operation(
+                    client.get_me,
+                    operation_name=f"stream_client_{client_id}.get_me",
+                    max_attempts=2,
+                )
+                await client.invoke(
+                    raw.functions.Ping(
+                        ping_id=monotonic_ns() & ((1 << 63) - 1)
+                    )
+                )
+                # Client.start() only opens the main MTProto session. Streaming
+                # uses a separate media session, so establish the home media
+                # DC now to avoid first-request connection/auth latency.
+                media_dc_id = await client.storage.dc_id()
+                media_session = await client.get_session(
+                    media_dc_id,
+                    is_media=True,
+                )
+                if not media_session.is_started.is_set():
+                    raise ConnectionError("media session did not start")
+                LOGGER.info(
+                    "Pre-warmed FileToLink stream client %s (control + media DC%s)",
+                    client_id,
+                    media_dc_id,
+                )
+                return True
+            except Exception as error:
+                if media_dc_id is not None:
+                    stale_session = client.media_sessions.get(media_dc_id)
+                    if (
+                        stale_session is not None
+                        and not stale_session.is_started.is_set()
+                    ):
+                        client.media_sessions.pop(media_dc_id, None)
+                        try:
+                            await stale_session.stop()
+                        except Exception as stop_error:
+                            LOGGER.debug(
+                                "Could not stop stale media session for stream "
+                                "client %s: %s",
+                                client_id,
+                                stop_error,
+                            )
+                LOGGER.warning(
+                    "FileToLink stream client %s pre-warm failed: %s",
+                    client_id,
+                    error,
+                )
+                return False
+
+        if not cls.stream_clients:
+            return
+        results = await gather(
+            *(warm(client_id, client) for client_id, client in cls.stream_clients.items())
+        )
+        LOGGER.info(
+            "FileToLink stream pool ready: %s/%s connections pre-warmed",
+            sum(results),
+            len(results),
+        )
 
     @classmethod
     async def provision_stream_bots(cls):
