@@ -3,9 +3,8 @@ from asyncio import CancelledError, Lock, gather, get_running_loop, sleep
 from hashlib import sha256
 from importlib import import_module
 from inspect import signature
-from time import monotonic_ns
 
-from pyrogram import Client, enums, raw
+from pyrogram import Client, enums
 from pyrogram import __version__ as WZGRAM_VERSION
 from pyrogram.errors import FloodWait
 from pyrogram.types import ChatPrivileges
@@ -593,11 +592,6 @@ class TgClient:
                     client.get_me,
                     operation_name=f"stream_client_{client_id}.get_me",
                     max_attempts=2,
-                )
-                await client.invoke(
-                    raw.functions.Ping(
-                        ping_id=monotonic_ns() & ((1 << 63) - 1)
-                    )
                 )
                 # Client.start() only opens the main MTProto session. Streaming
                 # uses a separate media session, so establish the home media
