@@ -1,18 +1,20 @@
 from asyncio import gather
+from contextlib import suppress
 from time import time
 from uuid import uuid4
 
-from pyrogram.enums import ChatAction
 from pyrogram.errors import ChannelInvalid, PeerIdInvalid, RPCError, UserNotParticipant
-
-from ..ext_utils.links_utils import encode_slink
 
 from ... import LOGGER, user_data
 from ...core.config_manager import Config
 from ...core.tg_client import TgClient
+from ..ext_utils.links_utils import encode_slink
 from ..ext_utils.shortener_utils import short_url
 from ..ext_utils.status_utils import get_readable_time
 from .button_build import ButtonMaker
+
+_BOT_PM_VERIFIED_TTL = 300
+_bot_pm_verified = {}
 
 
 async def chat_info(channel_id):
@@ -80,10 +82,27 @@ async def user_info(user_id):
 async def check_botpm(message, button=None):
     if message.from_user is None:
         return None, button
+    user_id = message.from_user.id
+    now = time()
+    if _bot_pm_verified.get(user_id, 0) > now:
+        return None, button
     try:
-        await TgClient.bot.send_chat_action(message.from_user.id, ChatAction.TYPING)
+        # ``send_chat_action`` is not an authoritative PM permission check:
+        # Telegram can accept it for a peer learned from a group even though
+        # that user has never started (or has blocked) the bot.  A silent
+        # message is the only reliable probe.  Delete it immediately and cache
+        # the success briefly so normal users do not receive a probe per task.
+        probe = await TgClient.bot.send_message(
+            user_id,
+            "<i>Checking private-message access…</i>",
+            disable_notification=True,
+        )
+        _bot_pm_verified[user_id] = now + _BOT_PM_VERIFIED_TTL
+        with suppress(Exception):
+            await probe.delete()
         return None, button
     except Exception:
+        _bot_pm_verified.pop(user_id, None)
         if button is None:
             button = ButtonMaker()
         _msg = "┠ <i>Bot isn't Started in PM or Inbox (Private)</i>"

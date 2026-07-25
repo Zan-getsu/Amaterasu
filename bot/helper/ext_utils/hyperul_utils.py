@@ -10,12 +10,13 @@ except ImportError:
     FloodPremiumWait = FloodWait
 
 from os import path as ospath
-from aiofiles.os import path as aiopath, remove
+
+from aiofiles.os import path as aiopath
+from aiofiles.os import remove
 
 from ... import LOGGER
 from ...core.config_manager import Config
 from ...core.tg_client import TgClient
-from ..telegram_helper.tg_transfer import HypertgTransfer
 from ..ext_utils.media_utils import (
     create_telegram_thumbnail,
     get_audio_thumbnail,
@@ -24,6 +25,23 @@ from ..ext_utils.media_utils import (
     get_multiple_frames_thumbnail,
     get_video_thumbnail,
 )
+from ..telegram_helper.tg_transfer import HypertgTransfer
+
+_primary_upload_active = 0
+
+
+def _claim_primary_upload():
+    """Reserve the fast primary WZGram lane; never wait for it."""
+    global _primary_upload_active
+    if _primary_upload_active:
+        return False
+    _primary_upload_active = 1
+    return True
+
+
+def _release_primary_upload():
+    global _primary_upload_active
+    _primary_upload_active = max(0, _primary_upload_active - 1)
 
 
 class HypertgUpload(HypertgTransfer):
@@ -113,6 +131,7 @@ class HypertgUpload(HypertgTransfer):
 
         up_size = ospath.getsize(file_path)
         hyper_user_only = False
+        primary_claimed = False
         if up_size > 2097152000 and (TgClient.user or any(k < 0 for k in self.clients)):
             if TgClient.user:
                 use_hyper = False
@@ -122,7 +141,16 @@ class HypertgUpload(HypertgTransfer):
                 hyper_user_only = True
                 user_session = False
         else:
-            use_hyper = Config.USE_HYPER and self.clients and up_size > 10 * 1024 * 1024
+            hyper_eligible = (
+                Config.USE_HYPER
+                and bool(self.clients)
+                and up_size > 10 * 1024 * 1024
+            )
+            if hyper_eligible:
+                primary_claimed = _claim_primary_upload()
+                use_hyper = not primary_claimed
+            else:
+                use_hyper = False
         self.last_backend = "HyperUP" if use_hyper else "WZGram"
         upload_chat_id = (
             self._listener.up_dest
@@ -133,7 +161,7 @@ class HypertgUpload(HypertgTransfer):
             "Telegram upload route: %s | size=%s | mode=%s | client=%s",
             self._up_file,
             up_size,
-            "multi-client" if use_hyper else "direct",
+            "helper-overflow" if use_hyper else "primary-wzgram",
             "user" if user_session else "bot",
         )
         try:
@@ -192,6 +220,8 @@ class HypertgUpload(HypertgTransfer):
             LOGGER.error(f"HypertgUL fail {self._up_file}: {type(e).__name__}: {e}")
             raise
         finally:
+            if primary_claimed:
+                _release_primary_upload()
             if legacy_thumb is not None and await aiopath.exists(legacy_thumb):
                 try:
                     await remove(legacy_thumb)
@@ -259,7 +289,11 @@ class HypertgUpload(HypertgTransfer):
         video_cover=None,
     ):
         if user_only:
-            candidates = {k: self.work_loads[k] for k in self.clients if k < 0}
+            candidates = {
+                key: self.work_loads.get(key, 0)
+                for key in self.clients
+                if key < 0
+            }
             if not candidates:
                 idx = self._pick_client()
             else:
@@ -267,7 +301,7 @@ class HypertgUpload(HypertgTransfer):
         else:
             idx = self._pick_client()
         client = self.clients[idx]
-        self.work_loads[idx] += 1
+        self.work_loads[idx] = self.work_loads.get(idx, 0) + 1
 
         try:
             kwargs = {
@@ -318,7 +352,7 @@ class HypertgUpload(HypertgTransfer):
             sent = await self._try_send(key, client, kwargs)
             return sent
         finally:
-            self.work_loads[idx] -= 1
+            self.work_loads[idx] = max(0, self.work_loads.get(idx, 0) - 1)
 
     async def _direct_send(
         self,

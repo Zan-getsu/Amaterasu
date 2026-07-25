@@ -1,9 +1,11 @@
 from asyncio import Lock, sleep
 from contextlib import suppress
-from time import time
 from secrets import token_hex
-from aiofiles.os import path as aiopath, remove as aioremove
-from pyrogram.errors import FloodWait, PeerIdInvalid, ChannelInvalid
+from time import time
+
+from aiofiles.os import path as aiopath
+from aiofiles.os import remove as aioremove
+from pyrogram.errors import ChannelInvalid, FloodWait, PeerIdInvalid
 
 from bot.helper.ext_utils.hyperdl_utils import HypertgDownload
 
@@ -17,8 +19,8 @@ from .... import (
     task_dict,
     task_dict_lock,
 )
-from ....core.tg_client import TgClient
 from ....core.config_manager import Config
+from ....core.tg_client import TgClient
 from ...ext_utils.task_manager import check_running_tasks, stop_duplicate_check
 from ...mirror_leech_utils.status_utils.queue_status import QueueStatus
 from ...mirror_leech_utils.status_utils.telegram_status import TelegramStatus
@@ -27,6 +29,21 @@ from ...telegram_helper.message_utils import send_status_message
 global_lock = Lock()
 standard_download_lock = Lock()
 GLOBAL_GID = dict()
+_primary_download_active = 0
+
+
+def _claim_primary_download():
+    """Reserve the fast WZGram lane without blocking overflow transfers."""
+    global _primary_download_active
+    if _primary_download_active:
+        return False
+    _primary_download_active = 1
+    return True
+
+
+def _release_primary_download():
+    global _primary_download_active
+    _primary_download_active = max(0, _primary_download_active - 1)
 
 
 class TelegramDownloadHelper:
@@ -37,7 +54,7 @@ class TelegramDownloadHelper:
         self._id = ""
         self.session = ""
         transmission_mode = self._listener.transmission_mode
-        self._hyper_dl = (
+        self._hyper_available = (
             Config.USE_HYPER
             and Config.LEECH_DUMP_CHAT
             and (
@@ -54,6 +71,11 @@ class TelegramDownloadHelper:
                 )
             )
         )
+        # Route selection is deferred until the task actually leaves the queue.
+        # The first active transfer uses WZGram; HyperDL supplies overflow
+        # capacity instead of slowing every individual transfer.
+        self._hyper_dl = False
+        self._primary_download_claimed = False
         self._hyper_dl_instance = None
 
     @property
@@ -399,8 +421,31 @@ class TelegramDownloadHelper:
                                 GLOBAL_GID.pop(self._id)
                         return
                 self._start_time = time()
-                await self._on_download_start(media.file_unique_id, gid, add_to_queue)
-                await self._download(message, path)
+                if self._hyper_available:
+                    if _claim_primary_download():
+                        self._primary_download_claimed = True
+                        self._hyper_dl = False
+                        LOGGER.info(
+                            "Telegram download route: WZGram primary lane "
+                            "(HyperDL remains available for overflow)"
+                        )
+                    else:
+                        self._hyper_dl = True
+                        self.session = "hyper"
+                        LOGGER.info(
+                            "Telegram download route: HyperDL overflow lane"
+                        )
+                try:
+                    await self._on_download_start(
+                        media.file_unique_id,
+                        gid,
+                        add_to_queue,
+                    )
+                    await self._download(message, path)
+                finally:
+                    if self._primary_download_claimed:
+                        _release_primary_download()
+                        self._primary_download_claimed = False
             else:
                 await self._on_download_error("File already being downloaded!")
         else:
@@ -410,6 +455,8 @@ class TelegramDownloadHelper:
 
     async def cancel_task(self):
         self._listener.is_cancelled = True
+        if self._hyper_dl_instance is not None:
+            await self._hyper_dl_instance.cancel()
         LOGGER.info(
             f"Cancelling download on user request: name: {self._listener.name} id: {self._id}"
         )

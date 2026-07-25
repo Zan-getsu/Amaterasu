@@ -51,7 +51,7 @@ def get_health_report():
     active_user_sessions = sum(
         client_state(client) == "connected"
         for client in TgClient.helper_users.values()
-    ) + int(client_state(TgClient.user) == "connected")
+    )
 
     bot_state = client_state(TgClient.bot)
     user_state = client_state(TgClient.user)
@@ -65,12 +65,20 @@ def get_health_report():
     active_stream_clients = sum(
         state == "connected" for state in stream_states.values()
     )
+    stream_prewarm_states = {
+        str(client_id): bool(ready)
+        for client_id, ready in getattr(TgClient, "stream_prewarm", {}).items()
+    }
+    prewarmed_stream_clients = sum(stream_prewarm_states.values())
 
     crypto_active = runtime["crypto"] == "WarpCrypto"
     bot_connected = bot_state == "connected"
     stream_pool_ready = (
         configured_stream_clients == 0
-        or active_stream_clients >= configured_stream_clients
+        or (
+            active_stream_clients >= configured_stream_clients
+            and prewarmed_stream_clients >= configured_stream_clients
+        )
     )
     healthy = crypto_active and bot_connected and stream_pool_ready
 
@@ -94,6 +102,7 @@ def get_health_report():
             "active_bot_token_count": active_bot_tokens,
             "configured_user_session_count": configured_user_sessions,
             "active_user_session_count": active_user_sessions,
+            "primary_user_session_active": user_state == "connected",
         },
         "clients": {
             "bot": bot_state,
@@ -101,6 +110,9 @@ def get_health_report():
             "stream": {
                 "configured_count": configured_stream_clients,
                 "active_count": active_stream_clients,
+                "prewarmed_count": prewarmed_stream_clients,
+                "prewarm_ready": stream_pool_ready,
+                "prewarm_states": stream_prewarm_states,
                 "states": stream_states,
             },
         },

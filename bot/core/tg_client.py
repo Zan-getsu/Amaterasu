@@ -148,6 +148,13 @@ class WzgramClient(Client):
             **kwargs,
         )
 
+    async def _get_media_session_pool(self, dc_id, requested_size):
+        return await _get_stable_media_session_pool(
+            self,
+            dc_id,
+            requested_size,
+        )
+
 
 class TelegramClient:
     """Small construction/runtime facade for future MTProto framework swaps."""
@@ -180,61 +187,79 @@ class TelegramClient:
         }
 
 
-def _stabilize_wzgram_upload_pool():
-    """Route WZGram uploads through its proven standard media session.
+async def _get_stable_media_session_pool(client, dc_id, requested_size):
+    lock = client._media_sessions_locks.setdefault(dc_id, Lock())
+    async with lock:
+        requested_size = max(1, int(requested_size))
+        pool = [
+            session
+            for session in client.media_session_pools.get(dc_id, [])
+            if session.is_started.is_set()
+        ]
+        session = client.media_sessions.get(dc_id)
+        if session is None or not session.is_started.is_set():
+            if session is not None:
+                try:
+                    await session.stop()
+                except Exception:
+                    pass
+                client.media_sessions.pop(dc_id, None)
+            session = await client.get_session(dc_id, is_media=True)
+        if session not in pool:
+            pool.insert(0, session)
+
+        while len(pool) < requested_size:
+            try:
+                pool.append(
+                    await client.get_session(
+                        dc_id,
+                        is_media=True,
+                        temporary=True,
+                    )
+                )
+            except Exception as error:
+                # The first standard session is a known-good fallback.
+                # Returning the available pool keeps uploads operational
+                # even if Telegram temporarily rejects an extra session.
+                LOGGER.warning(
+                    "WZGram media pool started %s/%s sessions for DC%s: %s",
+                    len(pool),
+                    requested_size,
+                    dc_id,
+                    error,
+                )
+                break
+
+        client.media_session_pools[dc_id] = pool
+        return list(pool)
+
+
+def _report_wzgram_upload_pool():
+    """Build WZGram pools through its reliable media-endpoint resolver.
 
     WZGram 3.0.23 downloads create their first media connection through
     Client.get_session(), while uploads use a separate pool constructor. A
     failure in that constructor occurs before the first progress callback and
     Session.start retries silently, leaving every upload at zero percent.
 
-    Keep one upload session with four chunk workers, but seed that pool through
-    the same Client.get_session() path used successfully by downloads. Calls
-    requesting larger pools (parallel downloads) retain WZGram's implementation.
+    Seed the pool with the proven cached media session and create additional
+    sessions through ``get_session(..., temporary=True)``.  That path resolves
+    WZGram's dynamic media-only endpoint while preserving its native four
+    upload sessions and four workers per session.
     """
     try:
         save_file_module = import_module("pyrogram.methods.advanced.save_file")
     except (ImportError, AttributeError):
         return
 
-    pool_size = getattr(save_file_module, "POOL_SIZE", None)
-    if isinstance(pool_size, int) and pool_size > 1:
-        save_file_module.POOL_SIZE = 1
-
-    if getattr(Client, "_amaterasu_upload_pool_stabilized", False):
-        return
-
-    original_get_pool = getattr(Client, "_get_media_session_pool", None)
-    if original_get_pool is None:
-        return
-
-    async def get_stable_media_session_pool(client, dc_id, requested_size):
-        if requested_size != 1:
-            return await original_get_pool(client, dc_id, requested_size)
-
-        lock = client._media_sessions_locks.setdefault(dc_id, Lock())
-        async with lock:
-            session = client.media_sessions.get(dc_id)
-            if session is None or not session.is_started.is_set():
-                if session is not None:
-                    try:
-                        await session.stop()
-                    except Exception:
-                        pass
-                    client.media_sessions.pop(dc_id, None)
-                session = await client.get_session(dc_id, is_media=True)
-            client.media_session_pools[dc_id] = [session]
-            return [session]
-
-    Client._get_media_session_pool = get_stable_media_session_pool
-    Client._amaterasu_upload_pool_stabilized = True
     LOGGER.info(
-        "WZGram uploads stabilized: standard media session, %s chunk workers",
+        "WZGram media pools stabilized: %s sessions x %s chunk workers",
+        getattr(save_file_module, "POOL_SIZE", 1),
         getattr(save_file_module, "WORKERS_PER_SESSION", 1),
     )
 
 
-_stabilize_wzgram_upload_pool()
+_report_wzgram_upload_pool()
 
 # DB partition salt loaded from per-deployment secrets module.
 # Backward-compat: if neither env var nor .amaterasu_secrets is set,
@@ -263,6 +288,7 @@ class TgClient:
     helper_loads = {}
     stream_clients = {}
     stream_loads = {}
+    stream_prewarm = {}
     helper_users = {}
     helper_user_loads = {}
 
@@ -547,6 +573,7 @@ class TgClient:
 
     @classmethod
     async def start_stream_clients(cls):
+        cls.stream_prewarm = {}
         cls.stream_clients[0] = cls.bot
         cls.stream_loads[0] = 0
 
@@ -634,10 +661,20 @@ class TgClient:
                 return False
 
         if not cls.stream_clients:
+            cls.stream_prewarm = {}
             return
+        clients = list(cls.stream_clients.items())
         results = await gather(
-            *(warm(client_id, client) for client_id, client in cls.stream_clients.items())
+            *(warm(client_id, client) for client_id, client in clients)
         )
+        cls.stream_prewarm = {
+            client_id: bool(result)
+            for (client_id, _), result in zip(
+                clients,
+                results,
+                strict=True,
+            )
+        }
         LOGGER.info(
             "FileToLink stream pool ready: %s/%s connections pre-warmed",
             sum(results),
@@ -771,6 +808,7 @@ class TgClient:
             if cls.helper_bots:
                 clients.extend(h_bot.stop() for h_bot in cls.helper_bots.values())
                 cls.helper_bots = {}
+            cls.helper_loads = {}
             if cls.stream_clients:
                 stop_tasks = [
                     client.stop()
@@ -780,10 +818,12 @@ class TgClient:
                 if stop_tasks:
                     await gather(*stop_tasks)
                 cls.stream_clients = {}
-                cls.stream_loads = {}
+            cls.stream_loads = {}
+            cls.stream_prewarm = {}
             if cls.helper_users:
                 clients.extend(h_user.stop() for h_user in cls.helper_users.values())
                 cls.helper_users = {}
+            cls.helper_user_loads = {}
             if clients:
                 await gather(*clients, return_exceptions=True)
             LOGGER.info("All Client(s) stopped")

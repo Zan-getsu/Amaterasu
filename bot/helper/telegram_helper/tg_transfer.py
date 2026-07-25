@@ -1,26 +1,19 @@
-from asyncio import Event, Lock, gather, sleep
-from concurrent.futures import ThreadPoolExecutor
-from os import cpu_count
 import socket
+from asyncio import Event, Lock, gather
 
-import pyrogram
 from pyrogram import raw, utils
-from pyrogram.connection import Connection
 from pyrogram.connection.transport.tcp.tcp import TCP
-from pyrogram.errors import AuthBytesInvalid, AuthKeyDuplicated, RPCError
 from pyrogram.file_id import FileType, ThumbnailSource
-from pyrogram.raw.all import layer
-from pyrogram.session import Auth, Session
-from pyrogram.session.internals import DataCenter
 
 from ... import LOGGER
-from ...core.tg_client import TgClient, resilient_tg_operation
+from ...core.tg_client import TgClient
 
-pyrogram.crypto_executor = ThreadPoolExecutor(
-    max_workers=min(16, (cpu_count() or 4) * 2), thread_name_prefix="crypto"
+_current_tcp_connect = TCP.connect
+_orig_tcp_connect = getattr(
+    _current_tcp_connect,
+    "_amaterasu_original",
+    _current_tcp_connect,
 )
-
-_orig_tcp_connect = TCP.connect
 
 
 async def _tcp_tuned_connect(self, address):
@@ -32,47 +25,32 @@ async def _tcp_tuned_connect(self, address):
         except Exception as e:
             LOGGER.info(f"HypertgTCP get socket err: {e}")
     if sock:
-        try:
-            sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-            sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
-            sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPIDLE, 60)
-            sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPINTVL, 10)
-            sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPCNT, 3)
-            sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_QUICKACK, 1)
-        except OSError as e:
-            LOGGER.info(f"HypertgTCP socket tune failed: {e}")
+        options = (
+            (socket.IPPROTO_TCP, "TCP_NODELAY", 1),
+            (socket.SOL_SOCKET, "SO_KEEPALIVE", 1),
+            (socket.IPPROTO_TCP, "TCP_KEEPIDLE", 60),
+            (socket.IPPROTO_TCP, "TCP_KEEPINTVL", 10),
+            (socket.IPPROTO_TCP, "TCP_KEEPCNT", 3),
+            (socket.IPPROTO_TCP, "TCP_QUICKACK", 1),
+        )
+        for level, option_name, value in options:
+            option = getattr(socket, option_name, None)
+            if option is None:
+                continue
+            try:
+                sock.setsockopt(level, option, value)
+            except (AttributeError, OSError, ValueError) as error:
+                LOGGER.debug(
+                    "HypertgTCP %s tune failed: %s",
+                    option_name,
+                    error,
+                )
 
 
-_orig_dc_new = DataCenter.__new__
-
-
-def _dc_alt_port(cls, dc_id, test_mode, ipv6, media):
-    ip, port = _orig_dc_new(cls, dc_id, test_mode, ipv6, media)
-    if media and not test_mode:
-        port = 5222
-    return ip, port
-
-
-TCP.connect = _tcp_tuned_connect
-_hyper_patches_applied = False
-
-
-def _apply_hyper_patches():
-    """Enable the alternate Telegram media port only for Hyper transfers.
-
-    This module is imported by the ordinary uploader too.  Applying the
-    DataCenter override at import time therefore routed normal Pyrogram
-    uploads through the Hyper port even when USE_HYPER=False.
-    """
-    global _hyper_patches_applied
-    if _hyper_patches_applied:
-        return
-    try:
-        DataCenter.__new__ = staticmethod(_dc_alt_port)
-        _hyper_patches_applied = True
-        LOGGER.info("Applied Hyper DC media port 5222")
-    except Exception as e:
-        LOGGER.warning(f"Failed to apply Hyper DC port patch: {e}")
+_tcp_tuned_connect._amaterasu_original = _orig_tcp_connect
+_tcp_tuned_connect._amaterasu_tuned = True
+if not getattr(_current_tcp_connect, "_amaterasu_tuned", False):
+    TCP.connect = _tcp_tuned_connect
 
 MB = 1024 * 1024
 
@@ -97,14 +75,6 @@ class MtprotoPool:
             return self._client_order[client_key % len(self._client_order)]
         raise KeyError(f"Client key {client_key} not found")
 
-    async def _get_auth_key(self, client, dc_id):
-        test_mode = await client.storage.test_mode()
-        main_dc = await client.storage.dc_id()
-        if dc_id == main_dc:
-            return await client.storage.auth_key(), False
-        ak = await Auth(client, dc_id, test_mode).create()
-        return ak, True
-
     async def get_session(self, client_key, dc_id, is_media=True):
         ck = self._resolve_key(client_key)
         cache_key = (ck, dc_id)
@@ -112,7 +82,7 @@ class MtprotoPool:
         if s and s.is_started.is_set():
             return s
         if cache_key not in self._locks:
-            self._locks[cache_key] = __import__("asyncio").Lock()
+            self._locks[cache_key] = Lock()
         async with self._locks[cache_key]:
             s = self._sessions.get(cache_key)
             if s and s.is_started.is_set():
@@ -123,30 +93,14 @@ class MtprotoPool:
                 except Exception:
                     pass
             client = self._client_map[ck]
-            ak, is_cross = await self._get_auth_key(client, dc_id)
-            s = Session(
-                client, dc_id, ak, await client.storage.test_mode(), is_media=is_media
+            # Use WZGram's public session path so media-only DC endpoints,
+            # cross-DC authorization, proxy settings, and WarpCrypto's
+            # executor are configured exactly like standard transfers.
+            s = await client.get_session(
+                dc_id,
+                is_media=is_media,
+                temporary=True,
             )
-            await s.start()
-            if is_cross:
-                for attempt in range(6):
-                    try:
-                        e = await client.invoke(
-                            raw.functions.auth.ExportAuthorization(dc_id=dc_id)
-                        )
-                        await resilient_tg_operation(
-                            s.invoke,
-                            raw.functions.auth.ImportAuthorization(
-                                id=e.id, bytes=e.bytes
-                            ),
-                            operation_name="auth.ImportAuthorization",
-                        )
-                        break
-                    except AuthBytesInvalid:
-                        await sleep(1)
-                else:
-                    await s.stop()
-                    raise RuntimeError(f"Auth export/import failed for DC {dc_id}")
             self._sessions[cache_key] = s
         return s
 
@@ -175,24 +129,33 @@ class HypertgTransfer:
         self._obj = obj
         self._listener = obj._listener
         self.clients = dict(TgClient.helper_bots)
-        if _global_work_loads is None:
-            _global_work_loads = dict(TgClient.helper_loads)
-            if TgClient.helper_users:
-                for no, load in TgClient.helper_user_loads.items():
-                    _global_work_loads[-no] = load
-            if TgClient.user:
-                key = -(len(TgClient.helper_users) + 1)
-                _global_work_loads[key] = 0
-        self.work_loads = _global_work_loads
         self.client_ids = list(self.clients.keys())
         if TgClient.helper_users:
             for no, client in TgClient.helper_users.items():
                 self.clients[-no] = client
                 self.client_ids.append(-no)
         if TgClient.user and all(c is not TgClient.user for c in self.clients.values()):
-            key = -(len(TgClient.helper_users) + 1)
+            key = -(max(TgClient.helper_users, default=0) + 1)
+            while key in self.clients:
+                key -= 1
             self.clients[key] = TgClient.user
             self.client_ids.append(key)
+
+        # Helper clients start in the background and can appear after the
+        # first transfer object is constructed.  Reconcile the shared load
+        # map on every construction instead of freezing the first snapshot.
+        if _global_work_loads is None:
+            _global_work_loads = {}
+        initial_loads = dict(TgClient.helper_loads)
+        initial_loads.update(
+            {-no: load for no, load in TgClient.helper_user_loads.items()}
+        )
+        for key in self.clients:
+            _global_work_loads.setdefault(key, initial_loads.get(key, 0))
+        for key in list(_global_work_loads):
+            if key not in self.clients and _global_work_loads[key] <= 0:
+                _global_work_loads.pop(key, None)
+        self.work_loads = _global_work_loads
         self.num_clients = len(self.clients)
         self._pool = MtprotoPool(self.clients)
         self._cancel = Event()
@@ -203,92 +166,12 @@ class HypertgTransfer:
         )
 
     def _pick_client(self):
-        return min(self.work_loads, key=self.work_loads.get)
-
-    @staticmethod
-    async def start_session(s, mode=3):
-        while True:
-            s.connection = Connection(
-                s.dc_id, s.test_mode, s.client.ipv6,
-                s.client.proxy, s.is_media, mode=mode
-            )
-            try:
-                await s.connection.connect()
-                s.network_task = s.client.loop.create_task(s.network_worker())
-                await resilient_tg_operation(
-                    s.send,
-                    raw.functions.Ping(ping_id=0),
-                    operation_name="Ping",
-                    timeout=Session.START_TIMEOUT,
-                )
-                if not s.is_cdn:
-                    await resilient_tg_operation(
-                        s.send,
-                        raw.functions.InvokeWithLayer(
-                            layer=layer,
-                            query=raw.functions.InitConnection(
-                                api_id=await s.client.storage.api_id(),
-                                app_version=s.client.app_version,
-                                device_model=s.client.device_model,
-                                system_version=s.client.system_version,
-                                system_lang_code=s.client.lang_code,
-                                lang_code=s.client.lang_code,
-                                lang_pack="",
-                                query=raw.functions.help.GetConfig(),
-                            )
-                        ),
-                        operation_name="InvokeWithLayer.InitConnection",
-                        timeout=Session.START_TIMEOUT,
-                    )
-                s.ping_task = s.client.loop.create_task(s.ping_worker())
-            except AuthKeyDuplicated as e:
-                await s.stop()
-                raise e
-            except (OSError, TimeoutError, RPCError):
-                await s.stop()
-                continue
-            except Exception as e:
-                await s.stop()
-                raise e
-            else:
-                break
-        s.is_connected.set()
-
-    def _get_lock(self, client_id, dc_id):
-        key = (client_id, dc_id)
-        if key not in self._session_locks:
-            self._session_locks[key] = Lock()
-        return self._session_locks[key]
-
-    async def _mk_session(self, client, dc_id, mode=3):
-        tm = await client.storage.test_mode()
-        ak, is_cross = await self.create_auth(client, dc_id, tm)
-        s = Session(client, dc_id, ak, tm, is_media=True)
-        await self.start_session(s, mode=mode)
-        if is_cross:
-            for attempt in range(6):
-                try:
-                    e = await client.invoke(
-                        raw.functions.auth.ExportAuthorization(dc_id=dc_id)
-                    )
-                    await resilient_tg_operation(
-                        s.invoke,
-                        raw.functions.auth.ImportAuthorization(id=e.id, bytes=e.bytes),
-                        operation_name="auth.ImportAuthorization",
-                    )
-                    break
-                except AuthBytesInvalid:
-                    LOGGER.warning(
-                        f"HypertgTransfer AuthBytesInvalid attempt {attempt + 1}/6 "
-                        f"client={client.me.username} dc={dc_id}"
-                    )
-                    await sleep(1)
-            else:
-                await s.stop()
-                LOGGER.error(f"HypertgTransfer mk_session dc={dc_id} auth failed")
-                raise AuthBytesInvalid
-        client.media_sessions[dc_id] = s
-        return s
+        if not self.clients:
+            raise RuntimeError("No active HyperTG helper clients")
+        return min(
+            self.clients,
+            key=lambda client_id: self.work_loads.get(client_id, 0),
+        )
 
     async def _get_session(self, idx, dc_id, force=False):
         if force:

@@ -159,6 +159,7 @@ async def main():
                     pass
         TgClient.stream_clients = {}
         TgClient.stream_loads = {}
+        TgClient.stream_prewarm = {}
     await gather(load_configurations(), update_variables())
 
     await gather(
