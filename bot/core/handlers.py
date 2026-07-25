@@ -2,11 +2,11 @@
 
 from pyrogram.filters import channel, command, regex, private
 from pyrogram.handlers import CallbackQueryHandler, EditedMessageHandler, MessageHandler
-from pyrogram.types import BotCommand
 
+from .. import LOGGER
 from ..core.config_manager import Config
-from ..helper.ext_utils.help_messages import BOT_COMMANDS  # noqa: F401
 from ..helper.telegram_helper.bot_commands import BotCommands
+from ..helper.telegram_helper.command_sync import sync_bot_commands
 from ..helper.telegram_helper.filters import CustomFilters
 # Phase 3.9 — Lazy module loading deferred. The eager `from ..modules
 # import *` imports all 36 command modules at startup (~30-50% of boot
@@ -21,7 +21,6 @@ from .tg_client import TgClient
 
 
 async def add_handlers():
-    global BOT_COMMANDS
     TgClient.bot.add_handler(
         MessageHandler(
             authorize,
@@ -560,52 +559,16 @@ async def add_handlers():
         CallbackQueryHandler(setup_callback, filters=regex("^setup"))
     )
     if Config.SET_COMMANDS:
-        global BOT_COMMANDS
-
-        def insert_at(d, k, v, i):
-            return dict(list(d.items())[:i] + [(k, v)] + list(d.items())[i:])
-
-        if Config.JD_EMAIL and Config.JD_PASS:
-            BOT_COMMANDS = insert_at(
-                BOT_COMMANDS,
-                "JdMirror",
-                "[link/file] Mirror to Upload Destination using JDownloader",
-                2,
+        try:
+            await sync_bot_commands()
+        except Exception:
+            # Command-menu registration is useful but must never prevent the
+            # bot and its handlers from starting. The dedicated sync helper
+            # logs validation details and verifies Telegram's read-back.
+            LOGGER.exception(
+                "Failed to register Telegram command menu; bot startup will continue"
             )
-            BOT_COMMANDS = insert_at(
-                BOT_COMMANDS,
-                "JdLeech",
-                "[link/file] Leech files to Upload to Telegram using JDownloader",
-                6,
-            )
-
-        if len(Config.USENET_SERVERS) != 0:
-            BOT_COMMANDS = insert_at(
-                BOT_COMMANDS,
-                "NzbMirror",
-                "[nzb] Mirror to Upload Destination using Sabnzbd",
-                2,
-            )
-            BOT_COMMANDS = insert_at(
-                BOT_COMMANDS,
-                "NzbLeech",
-                "[nzb] Leech files to Upload to Telegram using Sabnzbd",
-                6,
-            )
-
-        if Config.LOGIN_PASS:
-            BOT_COMMANDS = insert_at(
-                BOT_COMMANDS, "Login", "[password] Login to Bot", 14
-            )
-
-        await TgClient.bot.set_bot_commands(
-            [
-                BotCommand(
-                    cmds[0] if isinstance(cmds, list) else cmds,
-                    description,
-                )
-                for cmd, description in BOT_COMMANDS.items()
-                for cmds in [getattr(BotCommands, f"{cmd}Command", None)]
-                if cmds is not None
-            ]
+    else:
+        LOGGER.info(
+            "Telegram command menu registration skipped: SET_COMMANDS=False"
         )

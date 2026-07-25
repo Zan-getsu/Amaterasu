@@ -23,7 +23,7 @@ USER_MAX_TASKS = 3
 USER_TIME_INTERVAL = 0
 VERIFY_TIMEOUT = 0
 LOGIN_PASS = ""
-SET_COMMANDS = False
+SET_COMMANDS = True
 TIMEZONE = ""
 
 # ==========================================

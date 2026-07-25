@@ -575,7 +575,7 @@ All variables go inside `config.py`. Copy `config_sample.py` as your starting te
 | `USER_TIME_INTERVAL` | `int` | `0` | Minimum seconds between user commands (anti-spam) |
 | `VERIFY_TIMEOUT` | `int` | `0` | Verification timeout in seconds |
 | `LOGIN_PASS` | `str` | `""` | Password for `/login` command (restricts unauthorized access) |
-| `SET_COMMANDS` | `bool` | `False` | If `True`, registers bot commands in Telegram's command menu |
+| `SET_COMMANDS` | `bool` | `True` | If `True`, registers bot commands in Telegram's command menu |
 | `TIMEZONE` | `str` | `""` | Timezone for messages and the daily 06:00 automatic restart (e.g., `Asia/Dhaka`) |
 
 ### 3. Chat & Permissions

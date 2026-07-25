@@ -94,6 +94,7 @@ def _config_update_payload(key, value):
 
 DEFAULT_VALUES = {
     "AUTO_PROVISION_STREAM_BOTS": False,
+    "SET_COMMANDS": True,
     "LEECH_SPLIT_SIZE": TgClient.MAX_SPLIT_SIZE,
     "RSS_DELAY": 600,
     "STATUS_UPDATE_INTERVAL": 15,
@@ -712,6 +713,22 @@ async def edit_variable(_, message, pre_message, key):
     await update_buttons(pre_message, key, "editvar", False)
     await delete_message(message)
     await database.update_config(_config_update_payload(key, value))
+    if key == "CMD_SUFFIX" and Config.SET_COMMANDS:
+        from ..helper.telegram_helper.command_sync import sync_bot_commands
+
+        try:
+            count = await sync_bot_commands()
+        except Exception as error:
+            LOGGER.exception("Failed to refresh commands after CMD_SUFFIX change")
+            await send_message(
+                pre_message,
+                f"Command registration failed after CMD_SUFFIX change: {error}",
+            )
+        else:
+            await send_message(
+                pre_message,
+                f"Registered and verified {count} commands with the new suffix.",
+            )
     if key in ["SEARCH_PLUGINS", "SEARCH_API_LINK"]:
         await initiate_search_tools()
     elif key in ["QUEUE_ALL", "QUEUE_DOWNLOAD", "QUEUE_UPLOAD"]:
@@ -746,7 +763,43 @@ async def toggle_bool_var(_, query, pre_message, key, value):
     Config.set(key, bool_value)
     await update_buttons(pre_message, key, "editvar", False)
     await database.update_config(_config_update_payload(key, bool_value))
-    if key in ("INCOMPLETE_TASK_NOTIFIER", "INC_TASK_RESUME") and not bool_value and Config.DATABASE_URL:
+    if key == "SET_COMMANDS":
+
+        async def report_result(text):
+            try:
+                await query.answer(text, show_alert=True)
+            except Exception as error:
+                # Callback queries expire quickly if Telegram imposed a long
+                # retry delay. Preserve the result as a normal bot message.
+                LOGGER.warning(
+                    "SET_COMMANDS callback expired before result delivery: %s",
+                    error,
+                )
+                await send_message(pre_message, text)
+
+        if not bool_value:
+            await report_result("Automatic command registration disabled")
+            return
+        from ..helper.telegram_helper.command_sync import sync_bot_commands
+
+        try:
+            count = await sync_bot_commands()
+        except Exception as error:
+            LOGGER.exception("Failed to apply SET_COMMANDS immediately")
+            await report_result(f"Command registration failed: {error}")
+        else:
+            persistence_note = (
+                ""
+                if Config.DATABASE_URL
+                else (
+                    " This runtime has no DATABASE_URL; keep "
+                    "SET_COMMANDS=True in config/environment for restarts."
+                )
+            )
+            await report_result(
+                f"Registered and verified {count} commands.{persistence_note}"
+            )
+    elif key in ("INCOMPLETE_TASK_NOTIFIER", "INC_TASK_RESUME") and not bool_value and Config.DATABASE_URL:
         await database.trunc_table("tasks")
     elif key in ["QUEUE_ALL", "QUEUE_DOWNLOAD", "QUEUE_UPLOAD"]:
         await start_from_queued()
@@ -1206,7 +1259,23 @@ async def edit_bot_settings(client, query):
         if data[2] == "DATABASE_URL":
             await database.disconnect()
         await database.update_config(_config_update_payload(data[2], value))
-        if data[2] in ("SEARCH_PLUGINS", "SEARCH_API_LINK"):
+        if data[2] == "SET_COMMANDS" and value:
+            from ..helper.telegram_helper.command_sync import sync_bot_commands
+
+            try:
+                count = await sync_bot_commands()
+            except Exception as error:
+                LOGGER.exception("Failed to apply reset SET_COMMANDS value")
+                await send_message(
+                    message,
+                    f"Command registration failed after reset: {error}",
+                )
+            else:
+                await send_message(
+                    message,
+                    f"Registered and verified {count} commands.",
+                )
+        elif data[2] in ("SEARCH_PLUGINS", "SEARCH_API_LINK"):
             await initiate_search_tools()
         elif data[2] in ("QUEUE_ALL", "QUEUE_DOWNLOAD", "QUEUE_UPLOAD"):
             await start_from_queued()
@@ -1326,9 +1395,10 @@ async def edit_bot_settings(client, query):
         else:
             await update_buttons(message, key, "editvar", False)
     elif data[1] == "boolvar":
-        await query.answer()
         key = data[2]
         value = data[3]
+        if key != "SET_COMMANDS":
+            await query.answer()
         await toggle_bool_var(client, query, message, key, value)
     elif data[1] == "toggleonoff":
         await query.answer()
