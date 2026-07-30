@@ -423,11 +423,11 @@ async def get_user_settings(from_user, stype="main"):
         buttons.data_button("✕ CLOSE", f"userset {user_id} close", position="footer", style=ButtonStyle.DANGER)
 
         text = f"""<b>✦ USER SETTINGS</b>
-<code>├─ Name     : </code>{user_name}
-<code>├─ UserID   : #ID{user_id}</code>
-<code>├─ Username : @{from_user.username}</code>
-<code>├─ Tele DC  : {from_user.dc_id}</code>
-<code>└─ Tele Lang: {Language.get(lc).display_name() if (lc := from_user.language_code) else "N/A"}</code>
+ • <b>Name:</b> {user_name}
+ • <b>User ID:</b> <code>#ID{user_id}</code>
+ • <b>Username:</b> <code>@{from_user.username}</code>
+ • <b>Telegram DC:</b> <code>{from_user.dc_id}</code>
+ • <b>Language:</b> <code>{Language.get(lc).display_name() if (lc := from_user.language_code) else "N/A"}</code>
 """
 
         btns = buttons.build_menu(2)
@@ -467,10 +467,10 @@ async def get_user_settings(from_user, stype="main"):
         btns = buttons.build_menu(2)
 
         text = f"""<b>✦ GENERAL SETTINGS</b>
-<code>├─ Name      : </code>{user_name}
-<code>├─ Upload Pkg: {du}</code>
-<code>├─ Usage Mode: {tr}'s token/config</code>
-<code>└─ YT Cookies: {cookie_mode}</code>
+ • <b>Name:</b> {user_name}
+ • <b>Upload package:</b> <code>{du}</code>
+ • <b>Usage mode:</b> <code>{tr}'s token/config</code>
+ • <b>YT cookies:</b> <code>{cookie_mode}</code>
 """
 
     elif stype == "leech":
