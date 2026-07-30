@@ -222,6 +222,11 @@ class DbManager:
     async def update_qbittorrent(self, key, value):
         if self._return:
             return
+        if key == "web_ui_password":
+            from bot.core.startup import _qbit_password
+
+            value = _qbit_password()
+            qbit_options[key] = value
         await self.db.settings.qbittorrent.update_one(
             {"_id": _part()}, {"$set": {key: value}}, upsert=True
         )
@@ -229,6 +234,9 @@ class DbManager:
     async def save_qbit_settings(self):
         if self._return:
             return
+        from bot.core.startup import _qbit_password
+
+        qbit_options["web_ui_password"] = _qbit_password()
         await self.db.settings.qbittorrent.update_one(
             {"_id": _part()}, {"$set": qbit_options}, upsert=True
         )

@@ -318,10 +318,6 @@ class BuzzHeavierUpload:
         finally:
             if self._updater:
                 self._updater.cancel()
-            if (
-                self.listener.is_cancelled and not self._is_errored
-            ) or self._is_errored:
-                return
 
     async def _upload_process(self):
         if not await self.is_buzzapi(self.token):

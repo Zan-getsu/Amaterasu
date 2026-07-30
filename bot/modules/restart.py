@@ -88,7 +88,7 @@ def _restart_header(now, is_restart_chat=False):
 
 
 def _restart_success_text(now):
-    return f"""<b>❖ RESTARTED SUCCESSFULLY!</b>
+    return f"""<b>✦ RESTARTED SUCCESSFULLY!</b>
 <code>┌─ {'Date':<9}: {now.strftime("%d/%m/%y")}
 ├─ {'Time':<9}: {now.strftime("%I:%M:%S %p")}
 ├─ {'TimeZone':<9}: {Config.TIMEZONE}

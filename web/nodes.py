@@ -158,6 +158,89 @@ def make_tree(res, tool, root_path=""):
     return {"files": result, "engine": tool}
 
 
+def make_terabox_tree(file_list):
+    parent = TorNode("TERABOX")
+    folder_id = 0
+    path_to_node = {"": parent}
+
+    for item in sorted(file_list, key=lambda value: value.get("path", "")):
+        full_path = (item.get("path") or "").strip("/")
+        if not full_path:
+            continue
+        parts = full_path.split("/")
+        current = parent
+        current_path = ""
+        folder_parts = parts if item.get("is_dir") else parts[:-1]
+        for component in folder_parts:
+            current_path = (
+                f"{current_path}/{component}" if current_path else component
+            )
+            node = path_to_node.get(current_path)
+            if node is None:
+                node = TorNode(
+                    component,
+                    is_folder=True,
+                    parent=current,
+                    file_id=folder_id,
+                )
+                folder_id += 1
+                path_to_node[current_path] = node
+            current = node
+        if item.get("is_dir"):
+            continue
+        TorNode(
+            item.get("name") or parts[-1],
+            is_file=True,
+            parent=current,
+            size=item.get("size", 0),
+            priority=1,
+            file_id=item.get("id", full_path),
+            progress=0,
+        )
+
+    return {"files": create_list(parent), "engine": "terabox"}
+
+
+def make_rclone_tree(file_list):
+    parent = TorNode("RCLONE")
+    folder_id = 0
+    path_to_node = {"": parent}
+
+    for item in sorted(file_list, key=lambda value: value.get("path", "")):
+        full_path = (item.get("path") or "").strip("/")
+        if not full_path:
+            continue
+        parts = full_path.split("/")
+        current = parent
+        current_path = ""
+        for component in parts[:-1]:
+            current_path = (
+                f"{current_path}/{component}" if current_path else component
+            )
+            node = path_to_node.get(current_path)
+            if node is None:
+                node = TorNode(
+                    component,
+                    is_folder=True,
+                    parent=current,
+                    file_id=folder_id,
+                )
+                folder_id += 1
+                path_to_node[current_path] = node
+            current = node
+        TorNode(
+            parts[-1],
+            is_file=True,
+            parent=current,
+            size=item.get("size", 0),
+            priority=1,
+            file_id=item.get("id", full_path),
+            progress=0,
+        )
+
+    return {"files": create_list(parent), "engine": "rclone"}
+
+
 """
 def print_tree(parent):
     for pre, _, node in RenderTree(parent):
@@ -196,14 +279,25 @@ def create_list(parent, contents=None):
 
 
 def extract_file_ids(data):
+    if isinstance(data, dict) and (
+        "selected_ids" in data or "unselected_ids" in data
+    ):
+        return (
+            [str(value) for value in data.get("selected_ids", []) or []],
+            [str(value) for value in data.get("unselected_ids", []) or []],
+        )
     selected_files = []
     unselected_files = []
+    if not isinstance(data, list):
+        return selected_files, unselected_files
     for item in data:
+        if not isinstance(item, dict):
+            continue
         if item.get("type") == "file":
-            if item.get("selected"):
-                selected_files.append(str(item["id"]))
-            else:
-                unselected_files.append(str(item["id"]))
+            file_id = item.get("id")
+            if file_id is not None:
+                target = selected_files if item.get("selected") else unselected_files
+                target.append(str(file_id))
         if item.get("children"):
             child_selected, child_unselected = extract_file_ids(item["children"])
             selected_files.extend(child_selected)

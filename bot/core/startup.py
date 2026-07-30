@@ -44,10 +44,28 @@ def _qbit_password():
     )
 
 
+async def _ensure_qbit_web_password():
+    pwd = _qbit_password()
+    if qbit_options.get("web_ui_password") == pwd:
+        return pwd
+    qbit_options["web_ui_password"] = pwd
+    if database.db is not None:
+        partition = TgClient.PARTITION or db_partition_id(
+            (Config.BOT_TOKEN or "0").split(":", 1)[0]
+        )
+        await database.db.settings.qbittorrent.update_one(
+            {"_id": str(partition)},
+            {"$set": {"web_ui_password": pwd}},
+            upsert=True,
+        )
+    return pwd
+
+
 async def update_qb_options():
     LOGGER.info("Get qBittorrent options from server")
-    pwd = _qbit_password()
-    if not qbit_options:
+    options_were_empty = not qbit_options
+    pwd = await _ensure_qbit_web_password()
+    if options_were_empty:
         if not TorrentManager.qbittorrent:
             LOGGER.warning(
                 "qBittorrent is not initialized. Skipping qBittorrent options update."
@@ -70,8 +88,7 @@ async def update_qb_options():
             {"web_ui_password": pwd}
         )
     else:
-        if qbit_options.get("web_ui_password") in ("admin", "admin1", ""):
-            qbit_options["web_ui_password"] = pwd
+        await _ensure_qbit_web_password()
         await TorrentManager.qbittorrent.app.set_preferences(qbit_options)
         await TorrentManager._auth_qbit()
 
@@ -195,6 +212,7 @@ async def load_settings():
 
         if qbit_opt:
             qbit_options.update(qbit_opt)
+            await _ensure_qbit_web_password()
 
         if nzb_opt:
             if await aiopath.exists("configs/sabnzbd/SABnzbd.ini.bak"):
@@ -216,6 +234,7 @@ async def load_settings():
                     "RCLONE_CONFIG": f"rclone/{uid}.conf",
                     "TOKEN_PICKLE": f"tokens/{uid}.pickle",
                     "USER_COOKIE_FILE": f"cookies/{uid}/cookies.txt",
+                    "TERABOX_COOKIE": f"terabox_cookies/{uid}.txt",
                 }
 
                 async def save_file(file_path, content):
@@ -517,6 +536,7 @@ async def load_configurations():
         LOGGER.info("Torrents are disabled. Skipping qBittorrent initialization.")
     else:
         try:
+            await _ensure_qbit_web_password()
             await TorrentManager.qbittorrent.app.set_preferences(qbit_options)
         except Exception as e:
             LOGGER.error(f"Failed to configure qBittorrent: {e}")

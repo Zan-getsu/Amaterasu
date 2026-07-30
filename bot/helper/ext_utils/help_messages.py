@@ -69,6 +69,9 @@ upload = """<b>Upload Destination</b>: -up
 You can directly add the upload path: -up remote:dir/subdir or -up Gdrive_id or -up id/username (telegram) or -up id/username|topic_id (telegram)
 If DEFAULT_UPLOAD is `rc` then you can pass up: `gd` to upload using gdrive tools to GDRIVE_ID.
 If DEFAULT_UPLOAD is `gd` then you can pass up: `rc` to upload to RCLONE_PATH.
+Use <code>-up tbx</code> for your TeraBox root or
+<code>-up tbx:/Folder</code> for a specific folder. This requires a private
+TeraBox cookies.txt file in User Settings or the owner's private files.
 
 If you want to add path or gdrive manually from your config/token (UPLOADED FROM USETTING) add mrcc: for rclone and mtp: before the path/gdrive_id without space.
 /cmd link -up mrcc:main:dump or -up mtp:gdrive_id <strong>or you can simply edit upload using owner/user token/config from usetting without adding mtp: or mrcc: before the upload path/id</strong>
@@ -124,6 +127,15 @@ Users can add their own rclone from user settings
 If you want to add path manually from your config add mrcc: before the path without space
 /cmd mrcc:main:dump/ubuntu.iso
 You can simply edit using owner/user config from usetting without adding mrcc: before the path"""
+
+terabox_dl = """<b>TeraBox</b>:
+
+Use a public TeraBox share link like any other mirror/leech source.
+Use <code>/mirror tbx</code> or <code>/leech tbx</code> to browse your account.
+Add <code>-s</code> to folders to select files in the signed web selector.
+
+Requires a private TeraBox cookies.txt file in User Settings or the owner's
+<code>terabox.txt</code> private file. Never post this cookie in a public chat."""
 
 extract_zip = """<b>Extract/Zip</b>: -e -z
 
@@ -347,6 +359,7 @@ MIRROR_HELP_DICT = {
     "Bulk": bulk,
     "Join": join,
     "Rclone-DL": rlone_dl,
+    "TeraBox": terabox_dl,
     "Tg-Links": tg_links,
     "Sample-Video": sample_video,
     "Screenshot": screenshot,

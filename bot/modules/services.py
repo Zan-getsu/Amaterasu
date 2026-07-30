@@ -155,7 +155,7 @@ async def start_cb(_, query):
         0,
         [
             InlineKeyboardButton(
-                "✅️ Activated ✅", callback_data="start pass activated"
+                "✓ ACTIVATED", callback_data="start pass activated"
             )
         ],
     )

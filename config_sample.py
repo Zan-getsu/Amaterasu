@@ -38,7 +38,7 @@ BANNED_CHANNELS = ""
 # ==========================================
 # 4. LEECH & UPLOADS
 # ==========================================
-DEFAULT_UPLOAD = ""
+DEFAULT_UPLOAD = ""  # gd, rc, tbx, or mega
 LEECH_SPLIT_SIZE = 0
 AS_DOCUMENT = False
 EQUAL_SPLITS = False
@@ -92,6 +92,9 @@ RCLONE_SERVE_PASS = ""
 # ==========================================
 DIRECT_LIMIT = 0
 MEGA_LIMIT = 0
+TERABOX_ENABLED = True
+TERABOX_LIMIT = 0
+TERABOX_UPLOAD_PATH = ""  # e.g. /Amaterasu; empty means root
 TORRENT_LIMIT = 0
 GD_DL_LIMIT = 0
 RC_DL_LIMIT = 0

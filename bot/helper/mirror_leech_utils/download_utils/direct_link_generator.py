@@ -567,6 +567,8 @@ def direct_link_generator(link):
             "terabox.club",
         ]
     ):
+        # Native mirror/uphoster routing intercepts these first. Keep this
+        # resolver fallback for compatibility and the source-based SDK adapter.
         return terabox(link)
     elif any(
         x in domain
@@ -1266,7 +1268,7 @@ def uploadee(url):
         raise DirectDownloadLinkException("ERROR: Direct Link not found")
 
 
-def terabox(url):
+def terabox(url, cookie_file="cookies.txt"):
     if "/file/" in url:
         return url
 
@@ -1294,11 +1296,11 @@ def terabox(url):
     }
 
     def __load_cookies():
-        if not ospath.isfile("cookies.txt"):
+        if not ospath.isfile(cookie_file):
             return None
         cookies = {}
         try:
-            with open("cookies.txt") as f:
+            with open(cookie_file) as f:
                 for line in f:
                     line = line.rstrip("\r\n")
                     if line.startswith("#HttpOnly_"):
@@ -1512,6 +1514,7 @@ def terabox(url):
                             "path": ospath.dirname(it.get("path", "")).lstrip("/"),
                             "filename": it["server_filename"],
                             "url": it.get("dlink", ""),
+                            "size": int(it.get("size") or 0),
                         }
                         details["contents"].append(entry)
                         details["total_size"] += int(it.get("size") or 0)
@@ -1590,6 +1593,7 @@ def terabox(url):
             "path": data.get("path", ""),
             "filename": data["server_filename"],
             "url": data["direct_link"],
+            "size": int(data.get("size") or 0),
         }
         details["contents"].append(item)
         details["total_size"] += data.get("size", 0)

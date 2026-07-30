@@ -20,6 +20,7 @@ from ..helper.ext_utils.links_utils import (
     is_mega_folder_link,
     is_rclone_path,
     is_share_link,
+    is_terabox_link,
 )
 from ..helper.ext_utils.task_manager import (
     pre_task_check,
@@ -147,18 +148,24 @@ class Clone(TaskListener):
             return
         if is_mega_link(self.link) and self.up_dest not in ("mega", "mega:"):
             self.up_dest = "mega:"
-        LOGGER.info(self.link)
+        if not is_terabox_link(self.link):
+            LOGGER.info(self.link)
+        await self.send_processing()
         try:
             await self.before_start()
         except Exception as e:
             await send_message(self.message, e)
             await delete_links(self.message)
+            await self.remove_processing()
             return
 
         self._set_mode_engine()
         await delete_links(self.message)
 
-        await self._proceed_to_clone(sync)
+        try:
+            await self._proceed_to_clone(sync)
+        finally:
+            await self.remove_processing()
 
     async def _proceed_to_clone(self, sync):
         if is_share_link(self.link):
@@ -184,7 +191,7 @@ class Clone(TaskListener):
             if limit_exceeded := await limit_checker(self):
                 await send_message(
                     self.message,
-                    f"""<b>❖ LIMIT BREACHED</b>
+                    f"""<b>✦ LIMIT BREACHED</b>
 <code>┌─ {'Task Size':<9}: {get_readable_file_size(self.size)}
 ├─ {'In Mode':<9}: {self.mode[0]}
 ├─ {'Out Mode':<9}: {self.mode[1]}

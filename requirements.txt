@@ -1,5 +1,6 @@
 asyncio
 aiofiles
+aioterabox==0.2.3
 aiohttp
 aioshutil
 anytree
