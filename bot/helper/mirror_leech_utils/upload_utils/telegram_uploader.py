@@ -43,6 +43,7 @@ from ....core.config_manager import Config
 from ....core.tg_client import TgClient
 from ...ext_utils.bot_utils import sync_to_async
 from ...ext_utils.files_utils import get_base_name, is_archive
+from ...ext_utils.leech_font import apply_leech_font, resolve_leech_font
 from ...ext_utils.status_utils import get_readable_file_size, get_readable_time
 from ...telegram_helper.message_utils import send_message
 from ...ext_utils.media_utils import (
@@ -189,7 +190,6 @@ class TelegramUploader:
             "LEECH_PREFIX": ("_lprefix", ""),
             "LEECH_SUFFIX": ("_lsuffix", ""),
             "LEECH_CAPTION": ("_lcaption", ""),
-            "LEECH_FONT": ("_lfont", ""),
         }
 
         for key, (attr, default) in settings_map.items():
@@ -198,6 +198,10 @@ class TelegramUploader:
                 attr,
                 self._listener.user_dict.get(key) or getattr(Config, key, default),
             )
+        self._lfont = resolve_leech_font(
+            self._listener.user_dict,
+            Config.LEECH_FONT,
+        )
 
         if self._thumb != "none" and not await aiopath.exists(self._thumb):
             self._thumb = None
@@ -299,11 +303,7 @@ class TelegramUploader:
             cap_file_ = name + lsuffix.replace(r"\s", " ") + ext
             lsuffix = re_sub(r"<.*?>", "", lsuffix).replace(r"\s", " ")
 
-        cap_mono = (
-            f"<{Config.LEECH_FONT}>{cap_file_}</{Config.LEECH_FONT}>"
-            if Config.LEECH_FONT
-            else cap_file_
-        )
+        cap_mono = apply_leech_font(cap_file_, self._lfont)
         if lcaption:
             lcaption = re_sub(
                 r"(\\\||\\\{|\\\}|\\s)",

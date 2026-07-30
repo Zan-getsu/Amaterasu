@@ -16,6 +16,7 @@ from ....core.torrent_manager import TorrentManager
 from ...ext_utils.bot_utils import bt_selection_buttons
 from ...ext_utils.task_manager import check_running_tasks
 from ...listeners.qbit_listener import on_download_start
+from ..qbit_compat import PAUSED_STATES, is_metadata_state
 from ...mirror_leech_utils.status_utils.qbit_status import QbittorrentStatus
 from ...telegram_helper.message_utils import (
     send_message,
@@ -74,7 +75,7 @@ async def add_qb_torrent(listener, path, ratio, seed_time):
             return
         tor_info = await TorrentManager.qbittorrent.torrents.info(tag=f"{listener.mid}")
         if len(tor_info) == 0:
-            while True:
+            for _ in range(60):
                 if add_to_queue and event.is_set():
                     add_to_queue = False
                 tor_info = await TorrentManager.qbittorrent.torrents.info(
@@ -83,6 +84,11 @@ async def add_qb_torrent(listener, path, ratio, seed_time):
                 if len(tor_info) > 0:
                     break
                 await sleep(1)
+            else:
+                await listener.on_download_error(
+                    "qBittorrent did not register the torrent within 60 seconds."
+                )
+                return
         tor_info = tor_info[0]
         listener.name = tor_info.name
         ext_hash = tor_info.hash
@@ -132,16 +138,16 @@ async def add_qb_torrent(listener, path, ratio, seed_time):
                         return
                     try:
                         tor_info = tor_info[0]
-                        if tor_info.state not in [
-                            "metaDL",
-                            "checkingResumeData",
-                            "stoppedDL",
-                        ]:
+                        if not (
+                            is_metadata_state(tor_info.state)
+                            or tor_info.state in PAUSED_STATES
+                        ):
                             await delete_message(meta)
                             break
                     except Exception:
                         await delete_message(meta)
                         return
+                    await sleep(1)
 
             ext_hash = tor_info.hash
             if not add_to_queue:
@@ -171,4 +177,3 @@ async def add_qb_torrent(listener, path, ratio, seed_time):
     finally:
         if await aiopath.exists(listener.link):
             await remove(listener.link)
-

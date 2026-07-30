@@ -34,7 +34,7 @@ from ..ext_utils.bot_utils import SetInterval, download_image_url, fetch_drive_c
 from ..ext_utils.exceptions import TgLinkException
 from ..ext_utils.status_utils import get_readable_message
 from .button_build import ButtonMaker
-from .ui_style import style_panel_text
+from .inline_ui import style_inline_text
 
 
 def _resolve_photo(photo):
@@ -78,7 +78,7 @@ async def _send_text(message, text, buttons=None, **kwargs):
 
 
 async def send_message(message, text, buttons=None, block=True, photo=None, **kwargs):
-    text = style_panel_text(text)
+    text = style_inline_text(text, has_buttons=buttons is not None)
     try:
         if photo:
             try:
@@ -168,7 +168,7 @@ async def send_message(message, text, buttons=None, block=True, photo=None, **kw
 
 
 async def edit_message(message, text, buttons=None, block=True, photo=None):
-    text = style_panel_text(text)
+    text = style_inline_text(text, has_buttons=buttons is not None)
     try:
         photo = _resolve_photo(photo)
         if message.media:
@@ -285,7 +285,7 @@ async def edit_reply_markup(message, buttons):
 
 
 async def send_file(message, file, caption="", buttons=None):
-    caption = style_panel_text(caption)
+    caption = style_inline_text(caption, has_buttons=buttons is not None)
     try:
         return await message.reply_document(
             document=file,

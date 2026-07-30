@@ -21,6 +21,7 @@ from ..helper.ext_utils.links_utils import (
     is_pixeldrain_link,
     is_rclone_path,
     is_telegram_link,
+    is_terabox_link,
     is_url,
 )
 from ..helper.ext_utils.task_manager import pre_task_check
@@ -44,6 +45,9 @@ from ..helper.mirror_leech_utils.download_utils.rclone_download import (
 )
 from ..helper.mirror_leech_utils.download_utils.telegram_download import (
     TelegramDownloadHelper,
+)
+from ..helper.mirror_leech_utils.download_utils.terabox_download import (
+    add_terabox_download,
 )
 from ..helper.telegram_helper.message_utils import (
     auto_delete_message,
@@ -344,6 +348,7 @@ class Uphoster(TaskListener):
             and not is_gdrive_id(self.link)
             and not is_gdrive_link(self.link)
             and not is_mega_link(self.link)
+            and not is_terabox_link(self.link)
         ):
             await send_message(
                 self.message, COMMAND_USAGE["mirror"][0], COMMAND_USAGE["mirror"][1]
@@ -352,15 +357,17 @@ class Uphoster(TaskListener):
             await delete_links(self.message)
             return
 
-        if len(self.link) > 0:
+        if len(self.link) > 0 and not is_terabox_link(self.link):
             LOGGER.info(self.link)
 
+        await self.send_processing()
         try:
             await self.before_start()
         except Exception as e:
             await send_message(self.message, e)
             await self.remove_from_same_dir()
             await delete_links(self.message)
+            await self.remove_processing()
             return
 
         self._set_mode_engine()
@@ -376,6 +383,7 @@ class Uphoster(TaskListener):
             and file_ is None
             and not is_gdrive_id(self.link)
             and not is_mega_link(self.link)
+            and not is_terabox_link(self.link)
         ):
             content_type = await get_content_type(self.link)
             if (
@@ -424,6 +432,8 @@ class Uphoster(TaskListener):
             await add_gd_download(self, path)
         elif is_mega_link(self.link):
             await add_mega_download(self, f"{path}/")
+        elif is_terabox_link(self.link):
+            await add_terabox_download(self, f"{path}/")
         else:
             ussr = args["-au"]
             pssw = args["-ap"]

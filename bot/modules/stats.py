@@ -67,6 +67,16 @@ commands = {
 }
 
 
+def get_terabox_version():
+    try:
+        from terabox import __version__
+
+        return __version__
+    except Exception as error:
+        LOGGER.warning(f"Failed to fetch TeraBox SDK version: {error}")
+        return "N/A"
+
+
 async def _answer_callback(query, *args, **kwargs):
     """Answer a callback unless Telegram has already expired its query ID."""
     try:
@@ -215,7 +225,8 @@ async def get_stats(event, key="home"):
 ├─ {'Aiohttp':<11}: {ver.get("aiohttp", "N/A")}
 ├─ {'WZGram':<11}: {ver.get("wzgram", "N/A")}
 ├─ {'Google API':<11}: {ver.get("gapi", "N/A")}
-└─ {'MegaSDK':<11}: {ver.get("mega", "N/A")}
+├─ {'MegaSDK':<11}: {ver.get("mega", "N/A")}
+└─ {'TeraBoxSDK':<11}: {ver.get("terabox", "N/A")}
 </pre>"""
     elif key == "tlimits":
         msg = f"""<b>✦ TASK LIMITS</b>
@@ -229,6 +240,7 @@ async def get_stats(event, key="home"):
 ├─ {'YT-DLP':<11}: {Config.YTDLP_LIMIT or "∞"} GB
 ├─ {'Playlist':<11}: {Config.PLAYLIST_LIMIT or "∞"}
 ├─ {'Mega':<11}: {Config.MEGA_LIMIT or "∞"} GB
+├─ {'TeraBox':<11}: {Config.TERABOX_LIMIT or "∞"} GB
 ├─ {'Leech':<11}: {Config.LEECH_LIMIT or "∞"} GB
 ├─ {'Archive':<11}: {Config.ARCHIVE_LIMIT or "∞"} GB
 ├─ {'Extract':<11}: {Config.EXTRACT_LIMIT or "∞"} GB
@@ -392,6 +404,7 @@ async def get_packages_version():
     bot_cache["eng_versions"] = {}
     for tool, ver in zip(commands.keys(), versions):
         bot_cache["eng_versions"][tool] = ver
+    bot_cache["eng_versions"]["terabox"] = get_terabox_version()
     if await aiopath.exists(".git"):
         last_commit = await cmd_exec(
             "git log -1 --date=short --pretty=format:'%cd <b>From</b> %cr'", True

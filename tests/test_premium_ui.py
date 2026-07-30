@@ -81,7 +81,7 @@ def test_status_card_keeps_clickable_commands_and_all_core_fields():
     ).read_text(encoding="utf-8")
 
     assert 'msg = "<b>✦ DOWNLOAD TELEMETRY</b>\\n\\n"' in source
-    assert "ACTIVE {status_name}" in source
+    assert 'f" : <b>{task_name}</b>\\n"' in source
     for label in (
         "Status",
         "Progress",
@@ -136,8 +136,7 @@ def test_every_message_entry_point_uses_header_only_styling():
         BOT / "helper" / "telegram_helper" / "message_utils.py"
     ).read_text(encoding="utf-8")
 
-    assert source.count("style_panel_text(") == 3
-    assert "style_inline_text" not in source
+    assert source.count("style_inline_text(") == 3
 
 
 def test_legacy_diamond_is_not_rendered_by_bot_sources():

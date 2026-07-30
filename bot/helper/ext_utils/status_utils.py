@@ -15,6 +15,7 @@ from ... import (
     task_dict_lock,
 )
 from ...core.config_manager import Config
+from .network_utils import system_network_rate
 from ..telegram_helper.button_build import ButtonMaker
 from ..telegram_helper.compat import get_user_mention
 
@@ -50,6 +51,7 @@ class EngineStatus:
         self.STATUS_QBIT = f"qBit v{ver.get('qBittorrent', 'N/A')}"
         self.STATUS_TGRAM = f"WzPyro v{ver.get('wzgram', 'N/A')}"
         self.STATUS_MEGA = f"MegaSDK v{ver.get('mega', 'N/A')}"
+        self.STATUS_TERABOX = f"teraboxSDK v{ver.get('terabox', 'N/A')}"
         self.STATUS_YTDLP = f"yt-dlp v{ver.get('yt-dlp', 'N/A')}"
         self.STATUS_FFMPEG = f"ffmpeg v{ver.get('ffmpeg', 'N/A')}"
         self.STATUS_7Z = f"7z v{ver.get('7z', 'N/A')}"
@@ -252,17 +254,6 @@ def _transfer_arrow(status):
     return "⇅"
 
 
-def _activity_label(status):
-    status_name = escape(str(status)).upper()
-    if status in (
-        MirrorStatus.STATUS_QUEUEDL,
-        MirrorStatus.STATUS_QUEUEUP,
-        MirrorStatus.STATUS_PAUSED,
-    ):
-        return status_name
-    return f"ACTIVE {status_name}"
-
-
 def _premium_field(label, value, *, code=True, branch="├─"):
     rendered = f"<code>{value}</code>" if code else str(value)
     return f"{branch} <b>{label}</b> : {rendered}\n"
@@ -300,8 +291,8 @@ async def get_readable_message(sid, is_user, page_no=1, status="All", page_step=
         task_name = escape(task.name())
         status_name = escape(str(tstatus))
         msg += (
-            f"╭─ <b>TASK {index:02d}</b> : <i>{_activity_label(tstatus)}</i>\n"
-            f"│ {_status_icon(tstatus)} <b>{task_name}</b>\n"
+            f"╭─ {_status_icon(tstatus)} <b>TASK {index:02d}</b>"
+            f" : <b>{task_name}</b>\n"
         )
 
         if getattr(task.listener, "subname", False):
@@ -339,7 +330,6 @@ async def get_readable_message(sid, is_user, page_no=1, status="All", page_step=
                 "Speed", f"{_transfer_arrow(tstatus)} {task.speed()}"
             )
             msg += _premium_field("ETA", f"⏳ {task.eta()}")
-
             if tstatus == MirrorStatus.STATUS_DOWNLOAD and (
                 task.listener.is_torrent or task.listener.is_qbit
             ):
@@ -371,6 +361,7 @@ async def get_readable_message(sid, is_user, page_no=1, status="All", page_step=
         )
         from ..telegram_helper.bot_commands import BotCommands
 
+        select_action = ""
         if tstatus in [
             MirrorStatus.STATUS_DOWNLOAD,
             MirrorStatus.STATUS_PAUSED,
@@ -443,8 +434,15 @@ async def get_readable_message(sid, is_user, page_no=1, status="All", page_step=
         metrics.append(f"{'Page':<9}: {page_no} / {pages}")
         metrics.append(f"{'Step':<9}: {page_step}")
 
+    download_rate, upload_rate = system_network_rate.sample()
     metrics.append(f"{'CPU':<9}: {cpu_percent()}%")
     metrics.append(f"{'RAM':<9}: {virtual_memory().percent}%")
+    metrics.append(
+        f"{'DL':<9}: ↓ {get_readable_file_size(download_rate)}/s"
+    )
+    metrics.append(
+        f"{'UP':<9}: ↑ {get_readable_file_size(upload_rate)}/s"
+    )
     metrics.append(f"{'Storage':<9}: 💾 {get_readable_file_size(disk_usage(DOWNLOAD_DIR).free)} Free")
     metrics.append(f"{'Uptime':<9}: ◷ {get_readable_time(time() - bot_start_time)}")
 
