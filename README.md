@@ -149,7 +149,7 @@ It converges five industrial download engines (Aria2c, qBittorrent, JDownloader,
 | **Search** | Torrent search via qBittorrent plugins, Google Drive search, Usenet/NZBHydra search, IMDB lookup |
 | **Automation** | RSS feed monitoring with include/exclude filters, bulk download from text files, multi-link batch processing |
 | **Streaming** | Built-in FileToLink web server with token-based access control, URL shortening, rate limiting, and multi-bot load balancing |
-| **Telegram UX** | Unified `✦` menu identity, consistent navigation/action labels, and preserved monospace task and system-metric panels |
+| **Telegram UX** | NEO-inspired `✦` panel cards, compact information-preserving task rows, consistent navigation/action labels, and an unchanged monospace System Metrics block |
 | **Admin Tools** | Shell access, async/sync Python exec, log retrieval, broadcast messaging, session restart, user management |
 | **Runtime** | Python Telegram bot + web UI |
 | **Deployment** | Docker & Docker Compose (buildx) |

@@ -221,6 +221,28 @@ def _get_progress_bar_icons():
     return escape(filled, quote=False), escape(empty, quote=False)
 
 
+def _get_status_icon(status):
+    status_text = str(status).casefold()
+    status_icons = (
+        ("download", "📥"),
+        ("upload", "📤"),
+        ("seed", "🌱"),
+        ("queue", "⏳"),
+        ("pause", "⏸"),
+        ("archive", "🗜"),
+        ("extract", "📦"),
+        ("split", "✂"),
+        ("clone", "♻"),
+        ("check", "🔎"),
+        ("encode", "🎞"),
+        ("ffmpeg", "🎬"),
+    )
+    return next(
+        (icon for keyword, icon in status_icons if keyword in status_text),
+        "⚙",
+    )
+
+
 async def get_readable_message(sid, is_user, page_no=1, status="All", page_step=1):
     msg = ""
     button = None
@@ -238,7 +260,7 @@ async def get_readable_message(sid, is_user, page_no=1, status="All", page_step=
         status_dict[sid]["page_no"] = page_no
     start_position = (page_no - 1) * STATUS_LIMIT
 
-    msg = "<b>✦ DOWNLOAD TELEMETRY</b>\n\n"
+    msg = "<b>✦ ACTIVE TASKS</b>\n\n"
 
     for index, task in enumerate(
         tasks[start_position : STATUS_LIMIT + start_position], start=1
@@ -251,11 +273,15 @@ async def get_readable_message(sid, is_user, page_no=1, status="All", page_step=
             tstatus = task.status()
             
         task_name = escape(task.name())
-        msg += f"<code>┌─ {index:02d}. [ {task_name} ]"
+        task_number = index + start_position
+        msg += (
+            f"<b>{_get_status_icon(tstatus)} {task_number:02d}. "
+            f"<i>{task_name}</i></b>"
+        )
         
         if getattr(task.listener, "subname", False):
             sub_name = escape(task.listener.subname)
-            msg += f"\n├─ {'Subname':<9}: {sub_name}"
+            msg += f"\n • <b>Subtask:</b> <code>{sub_name}</code>"
 
         elapsed = time() - task.listener.message.date.timestamp()
 
@@ -276,34 +302,69 @@ async def get_readable_message(sid, is_user, page_no=1, status="All", page_step=
                 subsize = ""
                 count = ""
             
-            msg += f"\n├─ {'Status':<9}: {tstatus}"
-            msg += f"\n├─ {'Progress':<9}: {get_progress_bar_string(progress)} {progress}"
-            msg += f"\n├─ {'Processed':<9}: {task.processed_bytes()}{subsize} / {task.size()}"
+            msg += f"\n • <b>Status:</b> <code>{escape(str(tstatus))}</code>"
+            msg += (
+                f"\n • <b>Progress:</b> {get_progress_bar_string(progress)} "
+                f"<code>{escape(str(progress))}</code>"
+            )
+            msg += (
+                f"\n • <b>Processed:</b> "
+                f"<code>{escape(str(task.processed_bytes()))}{subsize} "
+                f"of {escape(str(task.size()))}</code>"
+            )
             if count:
-                msg += f"\n├─ {'Count':<9}: {count}"
-            msg += f"\n├─ {'Speed':<9}: ⇅ {task.speed()}"
-            msg += f"\n├─ {'ETA':<9}: ⏳ {task.eta()}"
+                msg += f"\n • <b>Files:</b> <code>{count}</code>"
+            msg += (
+                f"\n • <b>Speed:</b> <code>{escape(str(task.speed()))}</code>"
+                f"  •  <b>ETA:</b> <code>{escape(str(task.eta()))}</code>"
+            )
+            msg += (
+                f"\n • <b>Elapsed:</b> "
+                f"<code>{get_readable_time(elapsed)}</code>"
+            )
             
             if tstatus == MirrorStatus.STATUS_DOWNLOAD and (
                 task.listener.is_torrent or task.listener.is_qbit
             ):
                 try:
-                    msg += f"\n├─ {'Peers':<9}: {task.seeders_num()}s / {task.leechers_num()}l"
+                    msg += (
+                        f"\n • <b>Peers:</b> "
+                        f"<code>{task.seeders_num()} seeders · "
+                        f"{task.leechers_num()} leechers</code>"
+                    )
                 except Exception:
                     pass
         elif tstatus == MirrorStatus.STATUS_SEED:
-            msg += f"\n├─ {'Status':<9}: {tstatus}"
-            msg += f"\n├─ {'Size':<9}: {task.size()}"
-            msg += f"\n├─ {'Uploaded':<9}: {task.uploaded_bytes()}"
-            msg += f"\n├─ {'Speed':<9}: ⇅ {task.seed_speed()}"
-            msg += f"\n├─ {'Ratio':<9}: {task.ratio()}"
-            msg += f"\n├─ {'Time':<9}: ◷ {task.seeding_time()}"
+            msg += f"\n • <b>Status:</b> <code>{escape(str(tstatus))}</code>"
+            msg += f"\n • <b>Size:</b> <code>{escape(str(task.size()))}</code>"
+            msg += (
+                f"\n • <b>Uploaded:</b> "
+                f"<code>{escape(str(task.uploaded_bytes()))}</code>"
+            )
+            msg += (
+                f"\n • <b>Speed:</b> "
+                f"<code>{escape(str(task.seed_speed()))}</code>"
+                f"  •  <b>Ratio:</b> "
+                f"<code>{escape(str(task.ratio()))}</code>"
+            )
+            msg += (
+                f"\n • <b>Seed time:</b> "
+                f"<code>{escape(str(task.seeding_time()))}</code>"
+            )
         else:
-            msg += f"\n├─ {'Size':<9}: {task.size()}"
-        msg += f"\n├─ {'Engine':<9}: {task.engine}"
-        msg += f"\n├─ {'Mode':<9}: {task.listener.mode[0]} / {task.listener.mode[1]}"
+            msg += f"\n • <b>Status:</b> <code>{escape(str(tstatus))}</code>"
+            msg += f"\n • <b>Size:</b> <code>{escape(str(task.size()))}</code>"
+        msg += (
+            f"\n • <b>Engine:</b> <code>{escape(str(task.engine))}</code>"
+        )
+        msg += (
+            f"\n • <b>Mode:</b> "
+            f"<code>{escape(str(task.listener.mode[0]))} → "
+            f"{escape(str(task.listener.mode[1]))}</code>"
+        )
         from ..telegram_helper.bot_commands import BotCommands
 
+        select_action = ""
         if tstatus in [
             MirrorStatus.STATUS_DOWNLOAD,
             MirrorStatus.STATUS_PAUSED,
@@ -314,10 +375,20 @@ async def get_readable_message(sid, is_user, page_no=1, status="All", page_step=
                 or task.listener.is_qbit
                 or task.listener.is_nzb
             ):
-                msg += f"\n├─ {'Select':<9}: </code>/{BotCommands.SelectCommand[1]}_{task.gid()[:8]}<code>"
+                select_action = (
+                    f"/{BotCommands.SelectCommand[1]}_{task.gid()[:8]}"
+                )
 
-        msg += f"\n├─ {'User':<9}: </code>{_user_mention}<code>"
-        msg += f"\n└─ {'Stop':<9}: </code>/{BotCommands.CancelTaskCommand[1]}_{task.gid()[:8]}\n\n"
+        msg += (
+            f"\n • <b>User:</b> {_user_mention} "
+            f"<code>{_user_id}</code>"
+        )
+        if select_action:
+            msg += f"\n • <b>Select:</b> {select_action}"
+        msg += (
+            f"\n • <b>Stop:</b> "
+            f"/{BotCommands.CancelTaskCommand[1]}_{task.gid()[:8]}\n\n"
+        )
 
     if len(msg) == 0:
         if status == "All":

@@ -88,7 +88,10 @@ async def send_filetolink_status(message):
         username = getattr(getattr(client, "me", None), "username", None)
         name = f"@{username}" if username else ("main bot" if client_id == 0 else "stream bot")
         load = stream_loads.get(client_id, 0)
-        client_lines.append(f"├─ #{client_id}: {escape(str(name))} | load {load}")
+        client_lines.append(
+            f" • <code>#{client_id}</code> <b>{escape(str(name))}</b>"
+            f"  •  load <code>{load}</code>"
+        )
 
     cache_dir, cache_files, cache_size = _cache_usage()
     cache_max_mb = environ.get("FILETOLINK_CACHE_MAX_MB", "256")
@@ -97,22 +100,25 @@ async def send_filetolink_status(message):
     bin_channel = Config.BIN_CHANNEL or "Disabled"
     leech_dump = Config.LEECH_DUMP_CHAT or "Disabled"
     stream_count = len(stream_clients) or 1
-    client_block = "\n".join(client_lines) if client_lines else "└─ #0: main bot | load 0"
+    client_block = (
+        "\n".join(client_lines)
+        if client_lines
+        else " • <code>#0</code> <b>main bot</b>  •  load <code>0</code>"
+    )
 
     text = (
         "<b>✦ FILETOLINK STATUS</b>\n"
-        "<code>"
-        f"┌─ {'Base URL':<12}: {escape(str(base_url))}\n"
-        f"├─ {'BIN_CHANNEL':<12}: {escape(str(bin_channel))}\n"
-        f"├─ {'Dump Chat':<12}: {escape(str(leech_dump))}\n"
-        f"├─ {'Stream Bots':<12}: {stream_count}\n"
-        f"├─ {'Cache Files':<12}: {cache_files}\n"
-        f"├─ {'Cache Size':<12}: {get_readable_file_size(cache_size)}\n"
-        f"├─ {'File Cap':<12}: {cache_max_mb} MB\n"
-        f"├─ {'Total Cap':<12}: {cache_total_mb} MB\n"
-        f"└─ {'Cache Dir':<12}: {escape(str(cache_dir))}\n\n"
-        f"{client_block}"
-        "</code>"
+        f" • <b>Base URL:</b> <code>{escape(str(base_url))}</code>\n"
+        f" • <b>BIN_CHANNEL:</b> <code>{escape(str(bin_channel))}</code>\n"
+        f" • <b>Dump chat:</b> <code>{escape(str(leech_dump))}</code>\n"
+        f" • <b>Stream bots:</b> <code>{stream_count}</code>\n"
+        f" • <b>Cache files:</b> <code>{cache_files}</code>\n"
+        f" • <b>Cache size:</b> "
+        f"<code>{get_readable_file_size(cache_size)}</code>\n"
+        f" • <b>File cap:</b> <code>{cache_max_mb} MB</code>\n"
+        f" • <b>Total cap:</b> <code>{cache_total_mb} MB</code>\n"
+        f" • <b>Cache directory:</b> <code>{escape(str(cache_dir))}</code>\n\n"
+        f"<b>✦ STREAM CLIENTS</b>\n{client_block}"
     )
     await send_message(message, text)
 
@@ -197,10 +203,10 @@ async def prepare_stored_media(message):
         file_id = getattr(media, "file_unique_id", "Unknown")
         
         reply_text = (
-            f"<b>✦ FILETOLINK LOGGER</b>\n<code>"
-            f"┌─ {'Requested':<10}: </code>{user_mention}<code>\n"
-            f"├─ {'User ID':<10}: {user_id}\n"
-            f"└─ {'File ID':<10}: {file_id}</code>"
+            "<blockquote><b>✦ FILETOLINK LOGGER</b></blockquote>\n"
+            f" • <b>Requested by:</b> {user_mention}\n"
+            f" • <b>User ID:</b> <code>{user_id}</code>\n"
+            f" • <b>File ID:</b> <code>{file_id}</code>"
         )
         
         try:
@@ -219,10 +225,10 @@ def build_caption(title, filename, readable_size, stream_link, download_link):
     title = title.replace("✦ ", "").strip()
     caption = (
         f"<b>✦ {title}</b>\n"
-        f"<code>┌─ {'Name':<6} : {filename}\n"
-        f"└─ {'Size':<6} : {readable_size}</code>\n\n"
-        f"<b>⋗ Download Link:</b>\n<code>{download_link}</code>\n\n"
-        f"<b>⋗ Stream Link:</b>\n<code>{stream_link}</code>"
+        f" • <b>Name:</b> <code>{filename}</code>\n"
+        f" • <b>Size:</b> <code>{readable_size}</code>\n\n"
+        f"<b>⬇ Download link</b>\n<code>{download_link}</code>\n\n"
+        f"<b>▶ Stream link</b>\n<code>{stream_link}</code>"
     )
     return caption
 
