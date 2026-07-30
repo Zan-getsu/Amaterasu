@@ -32,7 +32,8 @@ COPY . .
 
 # Setup permissions and convert Windows line endings to Unix just in case
 RUN sed -i 's/\r$//' *.sh \
-    && chmod +x start.sh
+    && chmod +x start.sh \
+    && /amaterasuvenv/bin/python -c "from terabox import TeraboxClient; import aioterabox; print('Verified Amaterasu TeraBox SDK')"
 
 # Start the bot
 CMD ["bash", "start.sh"]

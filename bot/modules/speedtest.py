@@ -26,7 +26,7 @@ async def speedtest(_, message):
         return
 
     result = speed_results.results.dict()
-    string_speed = f"""<b>❖ SPEEDTEST INFO</b>
+    string_speed = f"""<b>✦ SPEEDTEST INFO</b>
 <code>┌─ {'Upload':<9}: {get_readable_file_size(result['upload'] / 8)}/s
 ├─ {'Download':<9}: {get_readable_file_size(result['download'] / 8)}/s
 ├─ {'Ping':<9}: {result['ping']} ms

@@ -14,7 +14,7 @@
 **The Absolute Pinnacle of Telegram Mirroring and Leeching**
 
 <p align="center">
-  <a href="#"><img src="https://img.shields.io/badge/Version-1.6.4-orange?style=for-the-badge&logo=rocket"></a>
+  <a href="#"><img src="https://img.shields.io/badge/Version-1.6.5-orange?style=for-the-badge&logo=rocket"></a>
   <a href="#"><img src="https://img.shields.io/github/repo-size/Zan-getsu/Amaterasu?color=FF4500&label=Size&style=for-the-badge"></a>
   <a href="#"><img src="https://img.shields.io/github/license/Zan-getsu/Amaterasu?style=for-the-badge&color=FF8C00"></a>
   <br>
@@ -52,6 +52,7 @@
   - [HyperDL / HyperUP Setup](#hyperdl--hyperup-setup)
   - [5. Google Drive](#5-google-drive)
   - [6. Rclone](#6-rclone)
+  - [TeraBox](#terabox)
   - [7. Download Size Limits](#7-download-size-limits)
   - [8. Torrent / Aria2c / qBittorrent](#8-torrent--aria2c--qbittorrent)
   - [9. JDownloader & Usenet](#9-jdownloader--usenet)
@@ -61,6 +62,13 @@
   - [13. FileToLink Streaming](#13-filetolink-streaming)
   - [14. Web Server](#14-web-server)
   - [15. Miscellaneous](#15-miscellaneous)
+- [🆕 Native TeraBox & Selector Update](#native-terabox-selector-update)
+  - [TeraBox Setup & Cookies](#terabox-setup--cookies)
+  - [TeraBox Command Recipes](#terabox-command-recipes)
+  - [Secure Web Selectors](#secure-web-selectors)
+  - [Compatibility & Reliability](#compatibility--reliability)
+  - [Docker Image Architecture](#docker-image-architecture)
+  - [Verification](#verification)
 - [📖 Command Reference](#command-reference)
   - [Mirror Commands](#mirror-commands)
   - [Leech Commands](#leech-commands)
@@ -95,7 +103,7 @@
 
 **Amaterasu** is a feature-dense, production-ready Telegram bot designed for power users who need a single interface to download from virtually any source on the internet, and then upload the result to a cloud drive or back to Telegram — all from a chat window.
 
-It converges five industrial download engines (Aria2c, qBittorrent, JDownloader, Sabnzbd, yt-dlp) and multiple storage backends (Google Drive, Rclone remotes, Telegram, DDL hosters) into one cohesive, self-hosted system.
+It converges five industrial download engines (Aria2c, qBittorrent, JDownloader, Sabnzbd, yt-dlp) and multiple storage backends (Google Drive, Rclone remotes, TeraBox, Telegram, DDL hosters) into one cohesive, self-hosted system.
 
 > [!IMPORTANT]
 > Amaterasu also ships with a built-in **FileToLink** streaming web server. Any file uploaded to a designated Telegram channel can be instantly converted into a direct HTTP stream link — seekable, resumable, and playable in VLC, MX Player, or any browser.
@@ -120,7 +128,7 @@ It converges five industrial download engines (Aria2c, qBittorrent, JDownloader,
   <tr>
     <td align="center" width="50%">
       <h3>🌩️ Multi-Engine Downloads</h3>
-      <p>Pull from Torrents (Aria2c + qBittorrent), Direct Links, Usenet (Sabnzbd), Mega, JDownloader, and 1800+ sites via yt-dlp. Every engine has its own size limits and queue management.</p>
+      <p>Pull from Torrents (Aria2c + qBittorrent), Direct Links, Usenet (Sabnzbd), Mega, TeraBox, JDownloader, and 1800+ sites via yt-dlp. Every engine has its own size limits and queue management.</p>
     </td>
     <td align="center" width="50%">
       <h3>🛡️ Enterprise Resilience</h3>
@@ -133,14 +141,15 @@ It converges five industrial download engines (Aria2c, qBittorrent, JDownloader,
 
 | Category | Features |
 |---|---|
-| **Download Sources** | Direct links, Torrents (magnet & .torrent), Mega, Google Drive, Rclone remotes, Usenet (NZB), JDownloader, YouTube & 1800+ yt-dlp sites, Telegram files & links |
-| **Upload Destinations** | Google Drive, Rclone remotes (OneDrive, Dropbox, S3, etc.), Telegram (as document or media), DDL hosters (GoFile, BuzzHeavier, PixelDrain, DevUploads, VikingFile) |
+| **Download Sources** | Direct links, Torrents (magnet & .torrent), Mega, TeraBox, Google Drive, Rclone remotes, Usenet (NZB), JDownloader, YouTube & 1800+ yt-dlp sites, Telegram files & links |
+| **Upload Destinations** | Google Drive, Rclone remotes (OneDrive, Dropbox, S3, etc.), TeraBox, Telegram (as document or media), DDL hosters (GoFile, BuzzHeavier, PixelDrain, DevUploads, VikingFile) |
 | **Leech Features** | Custom prefixes & suffixes, captions, auto-split for large files, hybrid leech (bot + user session), equal splits, media grouping, thumbnail layouts |
 | **Media Processing** | FFmpeg integration, audio/video conversion (`-ca`, `-cv`), custom metadata injection (`-meta`), sample video generation (`-sv`), screenshot extraction (`-ss`), MediaInfo reports |
 | **File Management** | Extract (`.zip`, `.rar`, `.7z`, `.tar`), archive with password, join split files, rename, auto-rename templates, name substitution via regex |
 | **Search** | Torrent search via qBittorrent plugins, Google Drive search, Usenet/NZBHydra search, IMDB lookup |
 | **Automation** | RSS feed monitoring with include/exclude filters, bulk download from text files, multi-link batch processing |
 | **Streaming** | Built-in FileToLink web server with token-based access control, URL shortening, rate limiting, and multi-bot load balancing |
+| **Telegram UX** | Unified `✦` menu identity, consistent navigation/action labels, and preserved monospace task and system-metric panels |
 | **Admin Tools** | Shell access, async/sync Python exec, log retrieval, broadcast messaging, session restart, user management |
 | **Runtime** | Python Telegram bot + web UI |
 | **Deployment** | Docker & Docker Compose (buildx) |
@@ -162,7 +171,7 @@ graph TD
     C -->|Torrents| D[qBittorrent & Aria2c]
     C -->|Usenet| E[Sabnzbd]
     C -->|Direct/Links| F[JDownloader & yt-dlp]
-    C -->|Cloud| M[Mega CMD]
+    C -->|Cloud| M[Mega & TeraBox]
     
     B -.->|Telegram Files| N
     C -->|Downloaded Files| N{Media Processing}
@@ -172,7 +181,7 @@ graph TD
 
     N --> G{Storage & Distribution}
     
-    G -->|Cloud Drives| H[Google Drive & Rclone]
+    G -->|Cloud Drives| H[Google Drive, Rclone & TeraBox]
     G -->|Direct Download| I[FileToLink Server]
     G -->|Telegram| J[Leech Uploader]
     G -->|DDL Hosters| K[GoFile / BuzzHeavier / PixelDrain / DevUploads / VikingFile]
@@ -195,7 +204,7 @@ graph TD
 | Containerization | Docker / Podman |
 | Torrent Client | qBittorrent-nox + Aria2c |
 | Usenet Client | Sabnzbd |
-| Cloud Sync | Rclone |
+| Cloud Sync | Google Drive, Rclone, TeraBox (`aioterabox`) |
 | Media Toolkit | FFmpeg, yt-dlp, MediaInfo |
 
 ---
@@ -307,6 +316,7 @@ These files are **not required** but unlock additional functionality. Place them
 | `accounts.zip` | Service Account keys for GDrive (bypasses quota limits) | Create multiple Service Accounts in GCP → download JSON keys → zip all `.json` files into `accounts.zip` |
 | `rclone.conf` | Rclone remote configurations for cloud storage | Run `rclone config` on your local machine → copy `~/.config/rclone/rclone.conf` to the project |
 | `cookies.txt` | Browser cookies for authenticated site downloads | Export cookies from your browser using a "Get cookies.txt" extension (Netscape format) |
+| `terabox.txt` | Owner/global TeraBox account cookie | Export a logged-in Netscape cookie file containing `ndus`; install through `/bsetting` → Private Files |
 | `.netrc` | Machine-level login credentials for FTP/HTTP sites | Create manually: `machine host login user password pass` |
 | `list_drives.txt` | Multiple GDrive destinations with labels | Format: `Drive Name gdrive_folder_id index_url` (one per line) |
 | `shortener.txt` | URL shortener configuration | Format per line: `domain shortener_api_url shortener_api_key` |
@@ -592,7 +602,7 @@ All variables go inside `config.py`. Copy `config_sample.py` as your starting te
 
 | Variable | Type | Default | Description |
 |---|---|---|---|
-| `DEFAULT_UPLOAD` | `str` | `""` | Default upload mode: `gd` (Google Drive), `rc` (Rclone), or leave empty for Telegram |
+| `DEFAULT_UPLOAD` | `str` | `""` | Default upload mode: `gd` (Google Drive), `rc` (Rclone), `tbx` (TeraBox), or `mega` |
 | `LEECH_SPLIT_SIZE` | `int` | `0` | Max file size per split in bytes (0 = Telegram default: 2 GB for premium, 4 GB for bots) |
 | `AS_DOCUMENT` | `bool` | `False` | Upload files as documents instead of media (preserves original filename) |
 | `EQUAL_SPLITS` | `bool` | `False` | Split files into equal-sized parts instead of Telegram's default |
@@ -604,7 +614,7 @@ All variables go inside `config.py`. Copy `config_sample.py` as your starting te
 | `HYPER_CHUNK` | `int` | `524288` | HyperDL chunk size in bytes. Default is 512 KiB |
 | `LEECH_PREFIX` | `str` | `""` | Text prepended to every uploaded filename |
 | `LEECH_SUFFIX` | `str` | `""` | Text appended to every uploaded filename |
-| `LEECH_FONT` | `str` | `""` | Font style for leech filenames |
+| `LEECH_FONT` | `str` | `""` | Caption font style: `b`, `i`, `u`, `s`, `code`, or `spoiler`; each user can override it from `/usetting` → Leech Settings |
 | `LEECH_CAPTION` | `str` | `""` | Custom caption template for uploaded files |
 | `THUMBNAIL_LAYOUT` | `str` | `""` | Default thumbnail layout (e.g., `3x3`) |
 | `EXCLUDED_EXTENSIONS` | `str` | `""` | Space-separated file extensions to skip during upload |
@@ -696,6 +706,19 @@ Troubleshooting:
 | `RCLONE_SERVE_USER` | `str` | `""` | Basic auth username for Rclone serve |
 | `RCLONE_SERVE_PASS` | `str` | `""` | Basic auth password for Rclone serve |
 
+### TeraBox
+
+| Variable | Type | Default | Description |
+|---|---|---|---|
+| `TERABOX_ENABLED` | `bool` | `True` | Enables native TeraBox public-share downloads, account browsing, and uploads |
+| `TERABOX_UPLOAD_PATH` | `str` | `""` | Default TeraBox upload folder, for example `/Amaterasu`; empty means account root |
+| `TERABOX_LIMIT` | `int` | `0` | Maximum TeraBox download size in GB; `0` means unlimited |
+
+`DEFAULT_UPLOAD` accepts `tbx` for TeraBox (`tb` is normalized to `tbx`) and
+continues to accept `gd`, `rc`, and `mega`. See
+[Native TeraBox & Selector Update](#native-terabox-selector-update) for cookie
+setup, selection behavior, commands, and deployment details.
+
 ### 7. Download Size Limits
 
 All limits are in **GB**. Set `0` to disable the limit.
@@ -704,6 +727,7 @@ All limits are in **GB**. Set `0` to disable the limit.
 |---|---|
 | `DIRECT_LIMIT` | Max size for direct link downloads |
 | `MEGA_LIMIT` | Max size for Mega downloads |
+| `TERABOX_LIMIT` | Max size for TeraBox downloads in GB (`0` = unlimited) |
 | `TORRENT_LIMIT` | Max size for torrent downloads |
 | `GD_DL_LIMIT` | Max size for GDrive downloads |
 | `RC_DL_LIMIT` | Max size for Rclone downloads |
@@ -883,6 +907,171 @@ Each pattern is a Python regex. Invalid patterns are skipped with a warning. If 
 
 ---
 
+<a id="native-terabox-selector-update"></a>
+
+## 🆕 Native TeraBox & Selector Update
+
+Amaterasu now handles TeraBox as a native download source and upload
+destination. The same update also adds signed web file selection for TeraBox
+and Rclone, improves qBittorrent compatibility, and fixes completion handling
+across several uploaders.
+
+### TeraBox Setup & Cookies
+
+Public TeraBox shares can use the cookie-free fallback. A valid logged-in cookie
+is still preferred when available because it is more reliable and is required
+for account browsing and uploads.
+
+1. Sign in to TeraBox in a browser.
+2. Export the cookies in **Netscape `cookies.txt` format**.
+3. Confirm the export contains the `ndus` authentication cookie. Amaterasu
+   refreshes the required `jsToken` and `csrfToken` through the SDK.
+4. Install the cookie using one of these private paths:
+
+| Scope | Install location | Stored as |
+|---|---|---|
+| Current Telegram user | `/usetting` → TeraBox cookie upload | `terabox_cookies/<user_id>.txt` |
+| Bot owner/global fallback | `/bsetting` → Private Files | `terabox.txt` |
+
+When both files exist, Amaterasu asks which account to use. User cookies take no
+implicit precedence over the owner account.
+
+> [!CAUTION]
+> A TeraBox cookie grants account access. Never commit it, paste its contents
+> into Telegram, include it in logs, or expose it from a public web directory.
+
+### TeraBox Command Recipes
+
+| Goal | Command | Cookie requirement | Result |
+|---|---|---|---|
+| Download a public share to Telegram | `/leech <terabox-share-link>` | Optional for supported public shares | Files are downloaded, processed, and leeched normally |
+| Download a public share then mirror it | `/mirror <terabox-share-link>` | Optional for supported public shares | Uses the normal configured cloud destination |
+| Download a public share then send it to a DDL hoster | `/uphoster <terabox-share-link>` | Optional for supported public shares | Native TeraBox download followed by the selected hoster |
+| Browse an account and leech selected files | `/leech tbx` | Required | Selected account items are sent to Telegram |
+| Browse an account and mirror selected files | `/mirror tbx` | Required | Selected account items use the normal mirror destination |
+| Upload to the configured TeraBox root/folder | `/mirror <link> -up tbx` | Required | Uploads to `TERABOX_UPLOAD_PATH`, or account root when empty |
+| Upload to a specific TeraBox folder | `/mirror <link> -up tbx:/Folder/Subfolder` | Required | Missing remote folders are created automatically |
+
+The user settings upload-destination button cycles through Rclone, Google Drive,
+and TeraBox. TeraBox uploads report the private remote account path when
+complete. They do **not** currently guarantee creation of a public TeraBox share
+URL.
+
+TeraBox tasks use Amaterasu's normal download limits, queue handoff, status, and
+cancellation flow. The current upload SDK does not expose a byte-progress
+callback, so upload status may stay at its active state until the completion
+result arrives instead of advancing byte by byte.
+
+Supported TeraBox hostnames are detected by parsed hostname rather than unsafe
+substring matching. This includes the common TeraBox, 1024tera, FreeTeraBox,
+Nephobox, and Dubox share domains.
+
+### Secure Web Selectors
+
+Set a valid, public HTTP(S) `BASE_URL` to enable the browser-based selectors.
+`AMATERASU_WEB_SECRET` should be a long, stable random value so signed selector
+links remain valid across restarts. `WEB_PINCODE` remains available for the
+existing torrent selector.
+
+#### TeraBox selection
+
+- A public TeraBox folder uses the web selector when the command includes `-s`,
+  the share contains multiple files, and `BASE_URL` is valid.
+- Public-share selection has no Telegram-button fallback: configure `BASE_URL`
+  before using `-s`, or omit `-s` to process the share without web selection.
+- `/mirror tbx` and `/leech tbx` use the web selector when `BASE_URL` is valid.
+- Account browsing falls back to Telegram inline buttons when no valid
+  `BASE_URL` is configured.
+- The selector supports folder navigation, select all, invert selection,
+  selection counts, and nested items.
+
+#### Rclone selection
+
+- `/mirror rcl` uses the web selector for interactive Rclone downloads when
+  `BASE_URL` is valid.
+- Only the selected files are passed to Rclone through `--files-from`.
+- Personal `mrcc:` configurations continue to work.
+- Clone operations keep their existing behavior; the new selector targets
+  Rclone downloads.
+- Without a valid `BASE_URL`, Amaterasu falls back to the existing Telegram
+  selection flow.
+
+Each selector uses a separate HMAC scope (`terabox-select`, `rclone-select`, or
+the existing `torrent-select`), verifies the task GID and Telegram owner, stores
+short-lived state outside public static files, and rejects item IDs that were
+not present in the displayed listing. Selector filenames are escaped before
+rendering to prevent HTML/script injection.
+
+### Compatibility & Reliability
+
+This port includes the following runtime fixes in addition to TeraBox:
+
+- Immediate **Processing...** acknowledgement while mirror, clone, and hoster
+  tasks prepare their download; it is removed when the task starts, fails, or
+  opens a selector.
+- qBittorrent state compatibility for metadata, forced download, queued,
+  checking, paused/stopped download and upload, seeding, and terminal states.
+- qBittorrent tags accept lists or comma-separated strings; time values accept
+  numbers, timedeltas, and datetimes; status getters tolerate missing values.
+- qBittorrent registration has a 60-second timeout and metadata polling yields
+  between checks instead of busy-looping.
+- The generated qBittorrent service password is enforced consistently; the
+  insecure `adminadmin` default and stale database overrides are not accepted.
+- Media probing skips known non-media files such as PDF, EPUB, DOCX, RTF, JSON,
+  text files, and fonts.
+- Google Drive, GoFile, BuzzHeavier, and PixelDrain completion/finally paths no
+  longer report false failures after a successful upload.
+- `/stats` exposes the installed TeraBox SDK version, and bot/user settings
+  describe the new TeraBox values and private cookie files.
+
+### Docker Image Architecture
+
+TeraBox is installed **inside the Amaterasu image**. The final `Dockerfile`:
+
+1. Starts from `nbots/amaterasu:v1` by default.
+2. Installs `aioterabox==0.2.3` from `requirements.txt` into Amaterasu's virtual
+   environment.
+3. Copies Amaterasu's own `terabox` compatibility package with the rest of the
+   repository.
+4. Runs an import check for both `TeraboxClient` and `aioterabox` during the
+   image build.
+
+There is no neo-wzml image stage or runtime dependency, and TeraBox does not
+need to be added to `Dockerfile.base`. Build the complete Amaterasu image with:
+
+```bash
+docker build --pull \
+  --build-arg BASE_IMAGE=nbots/amaterasu:v1 \
+  -t amaterasu:test .
+```
+
+The build fails immediately if the native TeraBox adapter cannot be imported.
+Rebuild the image whenever `Dockerfile` or `requirements.txt` changes.
+
+### Verification
+
+Use the following checks before deployment:
+
+```bash
+python -m compileall -q bot web terabox
+python -m pytest -q tests
+docker build --pull -t amaterasu:test .
+```
+
+The automated suite covers native TeraBox adapter flows, selector
+security/state checks, direct-link detection, qBittorrent compatibility,
+inline Telegram UI consistency, system metrics, per-user leech fonts, and
+uploader regressions. The web selector was also checked at desktop and mobile
+widths for navigation, selection submission, overflow, and console errors.
+
+The development machine used for that handoff did not have Docker/Podman/WSL or
+live TeraBox account credentials, so the final container build and a real
+account upload must still be run on a Docker-capable host with your private
+cookie. The Dockerfile import check and mocked SDK tests cover those paths
+without exposing credentials.
+
+---
+
 <a id="command-reference"></a>
 
 ## 📖 Command Reference
@@ -893,7 +1082,7 @@ Each pattern is a Python regex. Invalid patterns are skipped with a warning. If 
 
 | Command | Shortcut | Description |
 |---|---|---|
-| `/mirror` | `/m` | Download a link, torrent file, or magnet → upload to cloud drive (GDrive/Rclone) |
+| `/mirror` | `/m` | Download a link, torrent file, or magnet → upload to cloud drive (GDrive/Rclone/TeraBox) |
 | `/qbmirror` | `/qm` | Same as mirror but forces qBittorrent engine (best for torrents) |
 | `/jdmirror` | `/jm` | Same as mirror but forces JDownloader engine |
 | `/nzbmirror` | `/nm` | Download a `.nzb` file via Sabnzbd → upload to cloud |
@@ -918,7 +1107,7 @@ Each pattern is a Python regex. Invalid patterns are skipped with a warning. If 
 
 | Command | Shortcut | Description |
 |---|---|---|
-| `/uphoster` | `/up` | Download a link → upload to DDL servers (GoFile, BuzzHeavier, PixelDrain, DevUploads, VikingFile) |
+| `/uphoster` | `/up` | Download a link, including a TeraBox share → upload to DDL servers (GoFile, BuzzHeavier, PixelDrain, DevUploads, VikingFile) |
 
 <a id="search--info-commands"></a>
 
@@ -939,7 +1128,7 @@ Each pattern is a Python regex. Invalid patterns are skipped with a warning. If 
 
 | Command | Shortcut | Description |
 |---|---|---|
-| `/status` | `/s` | View live dashboard of all active downloads/uploads |
+| `/status` | `/s` | View active tasks plus live CPU, RAM, storage, uptime, and real-time system DL/UP rates |
 | `/cancel` | `/c` | Cancel a specific task (by GID or reply) |
 | `/cancelall` | `/call` | Cancel all active tasks (with confirmation) |
 | `/forcestart` | `/fs` | Force a queued task to start immediately |
@@ -1482,7 +1671,7 @@ Every mirror/leech command supports powerful inline arguments. Combine them free
 | `-e [password]` | Extract archive (optional password) | `/leech link -e secretpass` |
 | `-z [password]` | Compress into ZIP (optional password) | `/mirror link -z mypassword` |
 | `-up [dest]` | Override upload destination | `/mirror link -up gdl` or `-up rc` or `-up @channel` |
-| `-s` | Show quality/file selection buttons | `/ytdl link -s` |
+| `-s` | Show quality/file selection, including supported multi-file TeraBox shares | `/ytdl link -s` or `/leech terabox-link -s` |
 | `-i [count]` | Multi-link: process N consecutive messages | `/mirror -i 5` |
 | `-b` | Bulk: process links from a text file/message | `/leech -b` |
 | `-m [folder]` | Move all downloads into a single folder | `/mirror -i 3 -m MyFolder` |
@@ -1528,7 +1717,7 @@ Use Rclone paths exactly like links:
 
 ```
 /mirror remote:path/to/file.iso               # Download from Rclone remote
-/mirror rcl                                    # Interactive remote/path selection
+/mirror rcl                                    # Interactive remote/path selection (web UI when BASE_URL is valid)
 /mirror mrcc:myremote:path                     # Use your personal Rclone config (from /usetting)
 ```
 
@@ -1540,6 +1729,7 @@ Use Rclone paths exactly like links:
 | `gd` | Upload to default `GDRIVE_ID` |
 | `rc` | Upload to default `RCLONE_PATH` |
 | `rcl` | Upload using Rclone (interactive remote picker) |
+| `tbx` | Upload to TeraBox (or `tbx:/Folder` for a destination folder) |
 | `tp:id` | Upload to GDrive ID using token.pickle |
 | `sa:id` | Upload to GDrive ID using Service Accounts |
 | `mtp:id` | Upload using your personal token.pickle (from /usetting) |
@@ -1682,6 +1872,40 @@ This auto-leeches new anime releases in 1080p (mkv or mp4), excluding batch pack
 
   - Verify `JD_EMAIL` and `JD_PASS` match your MyJDownloader account.
   - The JDownloader headless instance takes ~30 seconds to boot inside Docker. Check logs for "JDownloader connected" message.
+</details>
+
+<details>
+  <summary><b>TeraBox account browsing or upload says a cookie is required</b></summary>
+  <br>
+
+  - Export cookies while signed in to TeraBox using Netscape `cookies.txt`
+    format.
+  - Confirm the file contains the `ndus` cookie.
+  - Upload it through `/usetting`, or install the owner fallback as
+    `terabox.txt` through `/bsetting` → Private Files.
+  - Re-export the cookie if TeraBox invalidated the session. Never post the
+    cookie contents in chat or logs.
+</details>
+
+<details>
+  <summary><b>The TeraBox or Rclone web selector does not open</b></summary>
+  <br>
+
+  - Set `BASE_URL` to a reachable public `http://` or `https://` address for
+    Amaterasu's web server.
+  - Keep `AMATERASU_WEB_SECRET` stable across restarts.
+  - For public TeraBox folders, include `-s`; account browsing can fall back to
+    Telegram buttons when `BASE_URL` is unavailable.
+  - Verify the reverse proxy forwards requests to the configured `PORT`.
+</details>
+
+<details>
+  <summary><b>TeraBox upload completed but there is no public share link</b></summary>
+  <br>
+
+  - This is expected. Amaterasu currently reports the private TeraBox account
+    path and does not guarantee automatic public-link creation.
+  - Open TeraBox and create a public share manually if one is required.
 </details>
 
 <details>

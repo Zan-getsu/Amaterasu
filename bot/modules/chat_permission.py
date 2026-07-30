@@ -185,7 +185,7 @@ async def add_blacklist(_, message):
         id_ = (message.reply_to_message.from_user or message.reply_to_message.sender_chat).id
 
     if id_ is None:
-        help_msg = f"""<b>❖ BLACKLIST USAGE</b>
+        help_msg = f"""<b>✦ BLACKLIST USAGE</b>
 <code>├─ Permanent   : /bl {{user_id}}
 ├─ Temporary   : /bl {{user_id}} -t 1d
 ├─ Reply       : /bl -t 2h (reply to user)
@@ -209,7 +209,7 @@ async def add_blacklist(_, message):
         await database.update_user_data(id_)
         expires_at = datetime.now(timezone.utc) + timedelta(seconds=seconds)
         await database.add_blacklist(id_, added_by, expires_at=expires_at)
-        msg = f"""<b>❖ BLACKLIST APPLIED</b>
+        msg = f"""<b>✦ BLACKLIST APPLIED</b>
 <code>┌─ {'User':<9}: {id_}
 ├─ {'Type':<9}: Temporary
 ├─ {'Duration':<9}: {remaining}
@@ -221,7 +221,7 @@ async def add_blacklist(_, message):
         update_user_ldata(id_, "BLACKLIST", True)
         await database.update_user_data(id_)
         await database.add_blacklist(id_, added_by, expires_at=None)
-        msg = f"""<b>❖ BLACKLIST APPLIED</b>
+        msg = f"""<b>✦ BLACKLIST APPLIED</b>
 <code>┌─ {'User':<9}: {id_}
 ├─ {'Type':<9}: Permanent
 └─ {'Status':<9}: Restricted from Bot
@@ -263,7 +263,7 @@ async def remove_blacklist(_, message):
     update_user_ldata(id_, "BLACKLIST", False)
     await database.update_user_data(id_)
     await database.remove_blacklist(id_)
-    await send_message(message, f"""<b>❖ BLACKLIST REMOVED</b>
+    await send_message(message, f"""<b>✦ BLACKLIST REMOVED</b>
 <code>┌─ {'User':<9}: {id_}
 └─ {'Status':<9}: User Set Free!
 </code>""")
@@ -334,7 +334,7 @@ async def check_force_sub(client, message):
     buttons.data_button("Check Again", f"forcesub check {uid}")
     await send_message(
         message,
-        "<b>❖ Join Required</b>\nPlease join the channel(s) above to use this bot.",
+        "<b>✦ Join Required</b>\nPlease join the channel(s) above to use this bot.",
         buttons.build_menu(1),
     )
     return False

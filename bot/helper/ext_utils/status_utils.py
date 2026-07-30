@@ -15,6 +15,7 @@ from ... import (
     task_dict_lock,
 )
 from ...core.config_manager import Config
+from .network_utils import system_network_rate
 from ..telegram_helper.button_build import ButtonMaker
 from ..telegram_helper.compat import get_user_mention
 
@@ -50,6 +51,7 @@ class EngineStatus:
         self.STATUS_QBIT = f"qBit v{ver.get('qBittorrent', 'N/A')}"
         self.STATUS_TGRAM = f"WzPyro v{ver.get('wzgram', 'N/A')}"
         self.STATUS_MEGA = f"MegaSDK v{ver.get('mega', 'N/A')}"
+        self.STATUS_TERABOX = f"teraboxSDK v{ver.get('terabox', 'N/A')}"
         self.STATUS_YTDLP = f"yt-dlp v{ver.get('yt-dlp', 'N/A')}"
         self.STATUS_FFMPEG = f"ffmpeg v{ver.get('ffmpeg', 'N/A')}"
         self.STATUS_7Z = f"7z v{ver.get('7z', 'N/A')}"
@@ -236,7 +238,7 @@ async def get_readable_message(sid, is_user, page_no=1, status="All", page_step=
         status_dict[sid]["page_no"] = page_no
     start_position = (page_no - 1) * STATUS_LIMIT
 
-    msg = "<b>❖ DOWNLOAD TELEMETRY</b>\n\n"
+    msg = "<b>✦ DOWNLOAD TELEMETRY</b>\n\n"
 
     for index, task in enumerate(
         tasks[start_position : STATUS_LIMIT + start_position], start=1
@@ -323,7 +325,7 @@ async def get_readable_message(sid, is_user, page_no=1, status="All", page_step=
         else:
             msg += f"<code>No Active {status} Tasks!</code>\n\n"
 
-    msg += "<b>❖ SYSTEM METRICS</b>\n<pre>\n"
+    msg += "<b>✦ SYSTEM METRICS</b>\n<pre>\n"
     
     buttons = ButtonMaker()
     if not is_user:
@@ -347,8 +349,15 @@ async def get_readable_message(sid, is_user, page_no=1, status="All", page_step=
         metrics.append(f"{'Page':<9}: {page_no} / {pages}")
         metrics.append(f"{'Step':<9}: {page_step}")
 
+    download_rate, upload_rate = system_network_rate.sample()
     metrics.append(f"{'CPU':<9}: {cpu_percent()}%")
     metrics.append(f"{'RAM':<9}: {virtual_memory().percent}%")
+    metrics.append(
+        f"{'DL':<9}: ↓ {get_readable_file_size(download_rate)}/s"
+    )
+    metrics.append(
+        f"{'UP':<9}: ↑ {get_readable_file_size(upload_rate)}/s"
+    )
     metrics.append(f"{'Storage':<9}: 💾 {get_readable_file_size(disk_usage(DOWNLOAD_DIR).free)} Free")
     metrics.append(f"{'Uptime':<9}: ◷ {get_readable_time(time() - bot_start_time)}")
 

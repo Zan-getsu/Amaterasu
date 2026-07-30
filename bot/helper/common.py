@@ -28,6 +28,7 @@ from ..core.tg_client import TgClient
 from ..helper.ext_utils.bot_lock import ff_lock
 from .ext_utils.bot_utils import (
     fetch_drive_cat,
+    get_valid_base_url,
     get_size_bytes,
     new_task,
     sync_to_async,
@@ -48,6 +49,7 @@ from .ext_utils.links_utils import (
     is_rclone_path,
     is_telegram_link,
     is_mega_link,
+    is_terabox_link,
 )
 from .ext_utils.media_utils import (
     FFMpeg,
@@ -60,6 +62,7 @@ from .ext_utils.autorename_utils import apply_autorename_template
 from .ext_utils.metadata_utils import MetadataProcessor
 from .mirror_leech_utils.gdrive_utils.list import GoogleDriveList
 from .mirror_leech_utils.rclone_utils.list import RcloneList
+from .mirror_leech_utils.terabox_utils.list import TeraboxCookieSelector, TeraboxList
 from .mirror_leech_utils.status_utils.ffmpeg_status import FFmpegStatus
 from .mirror_leech_utils.status_utils.sevenz_status import SevenZStatus
 from .telegram_helper.bot_commands import BotCommands
@@ -124,6 +127,9 @@ class TaskConfig:
         self.is_yt = False
         self.is_qbit = False
         self.is_mega = False
+        self.is_terabox = False
+        self.is_terabox_upload = False
+        self.is_terabox_account = False
         self.is_nzb = False
         self.is_jd = False
         self.is_clone = False
@@ -173,6 +179,14 @@ class TaskConfig:
         self.source_url = None
         self.bot_pm = Config.BOT_PM or self.user_dict.get("BOT_PM")
         self.pm_msg = None
+        self.processing_msg = None
+        self._tbx_web = False
+        self._tbx_selection = []
+        self._rcl_web = False
+        self.terabox_cookie = ""
+        self.terabox_cookie_source = ""
+        self.terabox_cookie_error = ""
+        self.terabox_upload_path = ""
         self.file_details = {}
         self.mode = tuple()
 
@@ -187,14 +201,17 @@ class TaskConfig:
             )
         )
 
-        out_mode = f"#{'Leech' if self.is_leech else 'UphosterUpload' if self.is_uphoster else 'Clone' if self.is_clone else 'Mega' if self.up_dest in ('mega', 'mega:') else 'RClone' if self.up_dest.startswith('mrcc:') or is_rclone_path(self.up_dest) else 'GDrive' if self.up_dest.startswith(('mtp:', 'tp:', 'sa:')) or is_gdrive_id(self.up_dest) else 'UpHosters'}"
+        out_mode = f"#{'Leech' if self.is_leech else 'UphosterUpload' if self.is_uphoster else 'Clone' if self.is_clone else 'TeraBox' if self.is_terabox_upload else 'Mega' if self.up_dest in ('mega', 'mega:') else 'RClone' if self.up_dest.startswith('mrcc:') or is_rclone_path(self.up_dest) else 'GDrive' if self.up_dest.startswith(('mtp:', 'tp:', 'sa:')) or is_gdrive_id(self.up_dest) else 'UpHosters'}"
         out_mode += " (Zip)" if self.compress else " (Unzip)" if self.extract else ""
 
         self.is_rclone = is_rclone_path(self.link)
         self.is_gdrive = is_gdrive_link(self.source_url) if self.source_url else False
         self.is_mega = is_mega_link(self.link) if self.source_url else False
+        self.is_terabox = self.is_terabox_account or (
+            is_terabox_link(self.link) if self.source_url else False
+        )
 
-        in_mode = f"#{'Mega' if self.is_mega else 'qBit' if self.is_qbit else 'SABnzbd' if self.is_nzb else 'JDown' if self.is_jd else 'RCloneDL' if self.is_rclone else 'ytdlp' if self.is_ytdlp else 'GDrive' if (self.is_clone or self.is_gdrive) else 'Aria2' if (self.source_url and self.source_url != self.message.link) else 'TgMedia'}"
+        in_mode = f"#{'TeraBox' if self.is_terabox else 'Mega' if self.is_mega else 'qBit' if self.is_qbit else 'SABnzbd' if self.is_nzb else 'JDown' if self.is_jd else 'RCloneDL' if self.is_rclone else 'ytdlp' if self.is_ytdlp else 'GDrive' if (self.is_clone or self.is_gdrive) else 'Aria2' if (self.source_url and self.source_url != self.message.link) else 'TgMedia'}"
 
         self.mode = (in_mode, out_mode)
 
@@ -250,6 +267,14 @@ class TaskConfig:
                     "Ask the bot owner to provide one, or upload your own via /userset."
                 )
 
+    async def _terabox_cookie_path(self, purpose="Transfer"):
+        selector = TeraboxCookieSelector(self, purpose=purpose)
+        cookie = await selector.select()
+        self.terabox_cookie_error = selector.error
+        if cookie:
+            self.terabox_cookie_source = selector.cookie_label
+        return cookie
+
     async def before_start(self):
         self.name_swap = (
             self.name_swap
@@ -271,7 +296,7 @@ class TaskConfig:
                 self.rc_flags = self.user_dict["RCLONE_FLAGS"]
             elif "RCLONE_FLAGS" not in self.user_dict and Config.RCLONE_FLAGS:
                 self.rc_flags = Config.RCLONE_FLAGS
-        if self.link not in ["rcl", "gdl"]:
+        if self.link not in ["rcl", "gdl", "tbx"]:
             if not self.is_jd:
                 if is_rclone_path(self.link):
                     if not self.link.startswith("mrcc:") and (
@@ -307,11 +332,28 @@ class TaskConfig:
                 self.link = await RcloneList(self).get_rclone_path("rcd")
                 if not is_rclone_path(self.link):
                     raise ValueError(self.link)
+                if not self.is_clone and get_valid_base_url():
+                    self._rcl_web = True
         elif self.link == "gdl":
             if not self.is_ytdlp and not self.is_jd:
                 self.link = await GoogleDriveList(self).get_target_id("gdd")
                 if not is_gdrive_id(self.link):
                     raise ValueError(self.link)
+        elif self.link == "tbx":
+            if not self.is_ytdlp and not self.is_jd and not self.is_clone:
+                self.terabox_cookie = await self._terabox_cookie_path("Download")
+                if not self.terabox_cookie:
+                    raise ValueError(
+                        self.terabox_cookie_error or "No TeraBox cookie found."
+                    )
+                self.is_terabox_account = True
+                if get_valid_base_url():
+                    self._tbx_web = True
+                else:
+                    browser = TeraboxList(self)
+                    self._tbx_selection = await browser.get_terabox_path()
+                    if not self._tbx_selection:
+                        raise ValueError(browser.error or "No TeraBox selection made.")
 
         self.transmission_mode = Config.TRANSMISSION_MODE
 
@@ -389,7 +431,29 @@ class TaskConfig:
                 default_upload = (
                     self.user_dict.get("DEFAULT_UPLOAD", "") or Config.DEFAULT_UPLOAD
                 )
+                up_dest_text = self.up_dest if isinstance(self.up_dest, str) else ""
                 if not self.is_uphoster and (
+                    (not self.up_dest and default_upload in ("tb", "tbx"))
+                    or up_dest_text in ("tb", "tbx")
+                    or up_dest_text.startswith(("tb:", "tbx:"))
+                ):
+                    self.is_terabox_upload = True
+                    folder = (
+                        up_dest_text.split(":", 1)[1]
+                        if ":" in up_dest_text
+                        else ""
+                    )
+                    self.terabox_upload_path = (
+                        folder or Config.TERABOX_UPLOAD_PATH or "/"
+                    )
+                    self.terabox_cookie = await self._terabox_cookie_path("Upload")
+                    if not self.terabox_cookie:
+                        raise ValueError(
+                            self.terabox_cookie_error
+                            or "No TeraBox cookie found for upload."
+                        )
+                    self.up_dest = "tbx"
+                elif not self.is_uphoster and (
                     (not self.up_dest and default_upload == "rc") or self.up_dest == "rc"
                 ):
                     self.up_dest = self.user_dict.get("RCLONE_PATH") or Config.RCLONE_PATH
@@ -438,7 +502,9 @@ class TaskConfig:
                     "or set a default via /userset."
                 )
 
-            if is_gdrive_id(self.up_dest):
+            if self.is_terabox_upload:
+                pass
+            elif is_gdrive_id(self.up_dest):
                 if not self.up_dest.startswith(
                     ("mtp:", "tp:", "sa:")
                 ) and (
@@ -489,7 +555,12 @@ class TaskConfig:
                     "or 'mega:'. Run /help mirror for details."
                 )
 
-            if self.up_dest not in ["rcl", "gdl"] and not self.is_uphoster and self.up_dest != "mega:":
+            if (
+                self.up_dest not in ["rcl", "gdl"]
+                and not self.is_uphoster
+                and self.up_dest != "mega:"
+                and not self.is_terabox_upload
+            ):
                 await self.is_token_exists(self.up_dest, "up")
 
             if self.up_dest == "rcl":

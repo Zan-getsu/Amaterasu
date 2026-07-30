@@ -56,6 +56,8 @@ class GoogleDriveUpload(GoogleDriveHelper):
         LOGGER.info(f"Uploading: {self._path}")
         self._updater = SetInterval(self.update_interval, self.progress)
         dir_id = None
+        link = ""
+        mime_type = ""
         try:
             if ospath.isfile(self._path):
                 mime_type = get_mime_type(self._path)
@@ -94,35 +96,32 @@ class GoogleDriveUpload(GoogleDriveHelper):
             self._is_errored = True
         finally:
             self._updater.cancel()
-            if self.listener.is_cancelled and not self._is_errored:
-                if mime_type == "Folder" and dir_id:
-                    LOGGER.info("Deleting uploaded data from Drive...")
-                    self.service.files().delete(
-                        fileId=dir_id, supportsAllDrives=True
-                    ).execute()
-                return
-            elif self._is_errored:
-                return
-            if (
-                Config.DRIVE_CATEGORY_SA
-                and self.listener.up_dest != Config.GDRIVE_ID
-            ):
-                target_id = dir_id if mime_type == "Folder" else self.get_id_from_url(link)
-                if target_id:
-                    try:
-                        self.add_permission_user(target_id, Config.DRIVE_CATEGORY_SA)
-                        LOGGER.info(f"Added DRIVE_CATEGORY_SA permission on {target_id}")
-                    except Exception as e:
-                        LOGGER.error(f"Failed to add DRIVE_CATEGORY_SA permission: {e}")
-            async_to_sync(
-                self.listener.on_upload_complete,
-                link,
-                self.total_files,
-                self.total_folders,
-                mime_type,
-                dir_id=self.get_id_from_url(link),
-            )
+
+        if self.listener.is_cancelled and not self._is_errored:
+            if mime_type == "Folder" and dir_id:
+                LOGGER.info("Deleting uploaded data from Drive...")
+                self.service.files().delete(
+                    fileId=dir_id, supportsAllDrives=True
+                ).execute()
             return
+        if self._is_errored:
+            return
+        if Config.DRIVE_CATEGORY_SA and self.listener.up_dest != Config.GDRIVE_ID:
+            target_id = dir_id if mime_type == "Folder" else self.get_id_from_url(link)
+            if target_id:
+                try:
+                    self.add_permission_user(target_id, Config.DRIVE_CATEGORY_SA)
+                    LOGGER.info(f"Added DRIVE_CATEGORY_SA permission on {target_id}")
+                except Exception as e:
+                    LOGGER.error(f"Failed to add DRIVE_CATEGORY_SA permission: {e}")
+        async_to_sync(
+            self.listener.on_upload_complete,
+            link,
+            self.total_files,
+            self.total_folders,
+            mime_type,
+            dir_id=self.get_id_from_url(link),
+        )
 
     def _upload_dir(self, input_directory, dest_id):
         list_dirs = listdir(input_directory)

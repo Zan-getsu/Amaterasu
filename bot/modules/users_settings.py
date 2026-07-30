@@ -26,6 +26,7 @@ from ..helper.ext_utils.bot_utils import (
     update_user_ldata,
 )
 from ..helper.ext_utils.db_handler import database
+from ..helper.ext_utils.leech_font import LEECH_FONT_STYLES, normalize_leech_font
 from ..helper.ext_utils.mega_utils import get_mega_account_info
 from ..helper.ext_utils.media_utils import create_thumb
 from ..helper.ext_utils.status_utils import get_readable_file_size
@@ -64,6 +65,7 @@ leech_options = [
     "LEECH_DUMP_CHAT",
     "LEECH_PREFIX",
     "LEECH_SUFFIX",
+    "LEECH_FONT",
     "LEECH_CAPTION",
     "THUMBNAIL_LAYOUT",
 ]
@@ -109,6 +111,12 @@ user_settings_text = {
         "",
         "<i>Send your <code>rclone.conf</code> file to use as your Upload Dest to RClone.</i> \n┖ <b>Time Left :</b> <code>60 sec</code>",
     ),
+    "TERABOX_COOKIE": (
+        "File",
+        "Your private TeraBox session cookie for account browsing, downloads, and uploads.",
+        "<i>Send a cookies.txt export from a logged-in TeraBox browser session.</i> "
+        "\n┖ <b>Time Left :</b> <code>60 sec</code>",
+    ),
     "TOKEN_PICKLE": (
         "",
         "",
@@ -138,6 +146,13 @@ user_settings_text = {
         "",
         "",
         "Send Leech Filename Suffix. You can add HTML tags. Example: <code>@mychannel</code>.</i> \n┖ <b>Time Left :</b> <code>60 sec</code>",
+    ),
+    "LEECH_FONT": (
+        "String",
+        "Font style applied to the generated leech caption.",
+        "Send one font style: <code>b</code>, <code>i</code>, <code>u</code>, "
+        "<code>s</code>, <code>code</code>, or <code>spoiler</code>."
+        "\n┖ <b>Time Left :</b> <code>60 sec</code>",
     ),
     "LEECH_CAPTION": (
         "",
@@ -407,7 +422,7 @@ async def get_user_settings(from_user, stype="main"):
             )
         buttons.data_button("✕ CLOSE", f"userset {user_id} close", position="footer", style=ButtonStyle.DANGER)
 
-        text = f"""<b>❖ USER SETTINGS</b>
+        text = f"""<b>✦ USER SETTINGS</b>
 <code>├─ Name     : </code>{user_name}
 <code>├─ UserID   : #ID{user_id}</code>
 <code>├─ Username : @{from_user.username}</code>
@@ -422,17 +437,21 @@ async def get_user_settings(from_user, stype="main"):
             default_upload = user_dict["DEFAULT_UPLOAD"]
         elif "DEFAULT_UPLOAD" not in user_dict:
             default_upload = Config.DEFAULT_UPLOAD
-        du = "GDRIVE API" if default_upload == "gd" else "RCLONE"
-        dur = "GDRIVE API" if default_upload != "gd" else "RCLONE"
+        _du_names = {"gd": "GDRIVE API", "rc": "RCLONE", "tbx": "TERABOX"}
+        du = _du_names.get(default_upload, "RCLONE")
+        next_upload = {"rc": "gd", "gd": "tbx", "tbx": "rc"}.get(
+            default_upload, "rc"
+        )
+        dur = _du_names[next_upload]
         buttons.data_button(
-            f"❖ Swap to {dur} Mode", f"userset {user_id} {default_upload}"
+            f"✦ Swap to {dur} Mode", f"userset {user_id} {default_upload}"
         )
 
         user_tokens = user_dict.get("USER_TOKENS", False)
         tr = "USER" if user_tokens else "OWNER"
         trr = "OWNER" if user_tokens else "USER"
         buttons.data_button(
-            f"❖ Swap to {trr} token/config",
+            f"✦ Swap to {trr} token/config",
             f"userset {user_id} tog USER_TOKENS {'f' if user_tokens else 't'}",
         )
 
@@ -442,12 +461,12 @@ async def get_user_settings(from_user, stype="main"):
         def_cookies = user_dict.get("USE_DEFAULT_COOKIE", False)
         cookie_mode = "Owner's Cookie" if def_cookies else "User's Cookie"
         buttons.data_button(
-            f"❖ Swap to {'OWNER' if not def_cookies else 'USER'}'s Cookie File",
+            f"✦ Swap to {'OWNER' if not def_cookies else 'USER'}'s Cookie File",
             f"userset {user_id} tog USE_DEFAULT_COOKIE {'f' if def_cookies else 't'}",
         )
         btns = buttons.build_menu(2)
 
-        text = f"""<b>❖ GENERAL SETTINGS</b>
+        text = f"""<b>✦ GENERAL SETTINGS</b>
 <code>├─ Name      : </code>{user_name}
 <code>├─ Upload Pkg: {du}</code>
 <code>├─ Usage Mode: {tr}'s token/config</code>
@@ -456,28 +475,28 @@ async def get_user_settings(from_user, stype="main"):
 
     elif stype == "leech":
         thumbpath = f"thumbnails/{user_id}.jpg"
-        buttons.data_button("❖ THUMBNAIL", f"userset {user_id} menu THUMBNAIL")
+        buttons.data_button("✦ THUMBNAIL", f"userset {user_id} menu THUMBNAIL")
         thumbmsg = "Exists" if await aiopath.exists(thumbpath) else "Not Exists"
-        buttons.data_button("❖ Leech Split Size", f"userset {user_id} menu LEECH_SPLIT_SIZE")
+        buttons.data_button("✦ Leech Split Size", f"userset {user_id} menu LEECH_SPLIT_SIZE")
         if user_dict.get("LEECH_SPLIT_SIZE", False):
             split_size = user_dict["LEECH_SPLIT_SIZE"]
         else:
             split_size = Config.LEECH_SPLIT_SIZE
-        buttons.data_button("❖ Leech Destination", f"userset {user_id} menu LEECH_DUMP_CHAT")
+        buttons.data_button("✦ Leech Destination", f"userset {user_id} menu LEECH_DUMP_CHAT")
         if user_dict.get("LEECH_DUMP_CHAT", False):
             leech_dest = user_dict["LEECH_DUMP_CHAT"]
         elif "LEECH_DUMP_CHAT" not in user_dict and Config.LEECH_DUMP_CHAT:
             leech_dest = Config.LEECH_DUMP_CHAT
         else:
             leech_dest = "None"
-        buttons.data_button("❖ LEECH PREFIX", f"userset {user_id} menu LEECH_PREFIX")
+        buttons.data_button("✦ LEECH PREFIX", f"userset {user_id} menu LEECH_PREFIX")
         if user_dict.get("LEECH_PREFIX", False):
             lprefix = user_dict["LEECH_PREFIX"]
         elif "LEECH_PREFIX" not in user_dict and Config.LEECH_PREFIX:
             lprefix = Config.LEECH_PREFIX
         else:
             lprefix = "Not Exists"
-        buttons.data_button("❖ LEECH SUFFIX", f"userset {user_id} menu LEECH_SUFFIX")
+        buttons.data_button("✦ LEECH SUFFIX", f"userset {user_id} menu LEECH_SUFFIX")
         if user_dict.get("LEECH_SUFFIX", False):
             lsuffix = user_dict["LEECH_SUFFIX"]
         elif "LEECH_SUFFIX" not in user_dict and Config.LEECH_SUFFIX:
@@ -485,7 +504,15 @@ async def get_user_settings(from_user, stype="main"):
         else:
             lsuffix = "Not Exists"
 
-        buttons.data_button("❖ LEECH CAPTION", f"userset {user_id} menu LEECH_CAPTION")
+        buttons.data_button("✦ LEECH FONT", f"userset {user_id} menu LEECH_FONT")
+        if user_dict.get("LEECH_FONT", False):
+            lfont = user_dict["LEECH_FONT"]
+        elif "LEECH_FONT" not in user_dict and Config.LEECH_FONT:
+            lfont = Config.LEECH_FONT
+        else:
+            lfont = "None"
+
+        buttons.data_button("✦ LEECH CAPTION", f"userset {user_id} menu LEECH_CAPTION")
         if user_dict.get("LEECH_CAPTION", False):
             lcap = user_dict["LEECH_CAPTION"]
         elif "LEECH_CAPTION" not in user_dict and Config.LEECH_CAPTION:
@@ -499,10 +526,10 @@ async def get_user_settings(from_user, stype="main"):
             and Config.AS_DOCUMENT
         ):
             ltype = "DOCUMENT"
-            buttons.data_button("❖ SEND AS MEDIA", f"userset {user_id} tog AS_DOCUMENT f")
+            buttons.data_button("✦ SEND AS MEDIA", f"userset {user_id} tog AS_DOCUMENT f")
         else:
             ltype = "MEDIA"
-            buttons.data_button("❖ Send As Document", f"userset {user_id} tog AS_DOCUMENT t")
+            buttons.data_button("✦ Send As Document", f"userset {user_id} tog AS_DOCUMENT t")
         if (
             user_dict.get("EQUAL_SPLITS", False)
             or "EQUAL_SPLITS" not in user_dict
@@ -547,7 +574,7 @@ async def get_user_settings(from_user, stype="main"):
         buttons.data_button("✕ CLOSE", f"userset {user_id} close", "footer", style=ButtonStyle.DANGER)
         btns = buttons.build_menu(2)
 
-        text = f"""<b>❖ LEECH SETTINGS</b>
+        text = f"""<b>✦ LEECH SETTINGS</b>
 <code>┌─ {'Name':<15}: {user_name}
 ├─ {'Type':<15}: {ltype}
 ├─ {'Thumbnail':<15}: {thumbmsg}
@@ -556,6 +583,7 @@ async def get_user_settings(from_user, stype="main"):
 ├─ {'Media Group':<15}: {media_group}
 ├─ {'Prefix':<15}: {escape(lprefix)}
 ├─ {'Suffix':<15}: {escape(lsuffix)}
+├─ {'Font':<15}: {escape(lfont)}
 ├─ {'Caption':<15}: {escape(lcap)}
 ├─ {'Destination':<15}: {leech_dest}
 └─ {'Thumb Layout':<15}: {thumb_layout}
@@ -579,14 +607,14 @@ async def get_user_settings(from_user, stype="main"):
         btns = buttons.build_menu(1)
 
         destinations = [_display_value(s.capitalize()) for s in uphoster_service.split(",")]
-        text = f"""<b>❖ UPHOSTER SETTINGS</b>
+        text = f"""<b>✦ UPHOSTER SETTINGS</b>
 <code>┌─ {'Name':<11}: {user_name}
 └─ {'Destination':<11}: {', '.join(destinations)}
 </code>
 """
 
     elif stype == "pixeldrain":
-        buttons.data_button("❖ PIXELDRAIN KEY", f"userset {user_id} menu PIXELDRAIN_KEY")
+        buttons.data_button("✦ PIXELDRAIN KEY", f"userset {user_id} menu PIXELDRAIN_KEY")
         buttons.data_button("↩ BACK", f"userset {user_id} back uphoster", "footer")
         buttons.data_button("✕ CLOSE", f"userset {user_id} close", "footer", style=ButtonStyle.DANGER)
         btns = buttons.build_menu(1)
@@ -599,7 +627,7 @@ async def get_user_settings(from_user, stype="main"):
             pdtoken = "None"
         pdtoken = _display_value(pdtoken)
 
-        text = f"""<b>❖ PIXELDRAIN SETTINGS</b>
+        text = f"""<b>✦ PIXELDRAIN SETTINGS</b>
 <code>┌─ {'Name':<9}: {user_name}
 └─ {'API Key':<9}: {pdtoken}
 </code>
@@ -621,7 +649,7 @@ async def get_user_settings(from_user, stype="main"):
             user_dict.get("DEVUPLOADS_FOLDER") or Config.DEVUPLOADS_FOLDER
         )
 
-        text = f"""<b>❖ DEVUPLOADS SETTINGS</b>
+        text = f"""<b>✦ DEVUPLOADS SETTINGS</b>
 <code>┌─ {'Name':<11}: {user_name}
 ├─ {'API Key':<11}: {dukey}
 └─ {'Folder ID':<11}: {dufolder}
@@ -644,7 +672,7 @@ async def get_user_settings(from_user, stype="main"):
             user_dict.get("VIKINGFILE_FOLDER") or Config.VIKINGFILE_FOLDER
         )
 
-        text = f"""<b>❖ VIKINGFILE SETTINGS</b>
+        text = f"""<b>✦ VIKINGFILE SETTINGS</b>
 <code>┌─ {'Name':<9}: {user_name}
 ├─ {'Hash':<9}: {vfhash}
 └─ {'Folder':<9}: {vffolder}
@@ -676,7 +704,7 @@ async def get_user_settings(from_user, stype="main"):
         bztoken = _display_value(bztoken)
         bzfolder = _display_value(bzfolder)
 
-        text = f"""<b>❖ BUZZHEAVIER SETTINGS</b>
+        text = f"""<b>✦ BUZZHEAVIER SETTINGS</b>
 <code>┌─ {'Name':<11}: {user_name}
 ├─ {'Token':<11}: {bztoken}
 └─ {'Folder ID':<11}: {bzfolder}
@@ -684,7 +712,7 @@ async def get_user_settings(from_user, stype="main"):
 """
 
     elif stype == "gofile":
-        buttons.data_button("❖ GOFILE TOKEN", f"userset {user_id} menu GOFILE_TOKEN")
+        buttons.data_button("✦ GOFILE TOKEN", f"userset {user_id} menu GOFILE_TOKEN")
         buttons.data_button(
             "Gofile Folder ID", f"userset {user_id} menu GOFILE_FOLDER_ID"
         )
@@ -718,7 +746,7 @@ async def get_user_settings(from_user, stype="main"):
         gftoken = _display_value(gftoken)
         gffolder = _display_value(gffolder)
 
-        text = f"""<b>❖ GOFILE SETTINGS</b>
+        text = f"""<b>✦ GOFILE SETTINGS</b>
 <code>┌─ {'Name':<11}: {user_name}
 ├─ {'Token':<11}: {gftoken}
 ├─ {'Folder ID':<11}: {gffolder}
@@ -727,11 +755,11 @@ async def get_user_settings(from_user, stype="main"):
 """
 
     elif stype == "rclone":
-        buttons.data_button("❖ RCLONE CONFIG", f"userset {user_id} menu RCLONE_CONFIG")
+        buttons.data_button("✦ RCLONE CONFIG", f"userset {user_id} menu RCLONE_CONFIG")
         buttons.data_button(
             "Default Rclone Path", f"userset {user_id} menu RCLONE_PATH"
         )
-        buttons.data_button("❖ RCLONE FLAGS", f"userset {user_id} menu RCLONE_FLAGS")
+        buttons.data_button("✦ RCLONE FLAGS", f"userset {user_id} menu RCLONE_FLAGS")
 
         buttons.data_button("↩ BACK", f"userset {user_id} back mirror", "footer")
         buttons.data_button("✕ CLOSE", f"userset {user_id} close", "footer", style=ButtonStyle.DANGER)
@@ -754,7 +782,7 @@ async def get_user_settings(from_user, stype="main"):
         rccpath = _display_value(rccpath)
         rcflags = _display_value(rcflags)
 
-        text = f"""<b>❖ RCLONE SETTINGS</b>
+        text = f"""<b>✦ RCLONE SETTINGS</b>
 <code>┌─ {'Name':<9}: {user_name}
 ├─ {'Config':<9}: {rccmsg}
 ├─ {'Flags':<9}: {rcflags}
@@ -763,9 +791,9 @@ async def get_user_settings(from_user, stype="main"):
 """
 
     elif stype == "gdrive":
-        buttons.data_button("❖ TOKEN.PICKLE", f"userset {user_id} menu TOKEN_PICKLE")
-        buttons.data_button("❖ DEFAULT GDRIVE ID", f"userset {user_id} menu GDRIVE_ID")
-        buttons.data_button("❖ INDEX URL", f"userset {user_id} menu INDEX_URL")
+        buttons.data_button("✦ TOKEN.PICKLE", f"userset {user_id} menu TOKEN_PICKLE")
+        buttons.data_button("✦ DEFAULT GDRIVE ID", f"userset {user_id} menu GDRIVE_ID")
+        buttons.data_button("✦ INDEX URL", f"userset {user_id} menu INDEX_URL")
         if (
             user_dict.get("STOP_DUPLICATE", False)
             or "STOP_DUPLICATE" not in user_dict
@@ -782,7 +810,7 @@ async def get_user_settings(from_user, stype="main"):
                 "l_body",
             )
             sd_msg = "Disabled"
-        buttons.data_button("❖ User Drive Categories", f"userset {user_id} menu DRIVE_CAT", "header")
+        buttons.data_button("✦ User Drive Categories", f"userset {user_id} menu DRIVE_CAT", "header")
         buttons.data_button("↩ BACK", f"userset {user_id} back mirror", "footer")
         buttons.data_button("✕ CLOSE", f"userset {user_id} close", "footer", style=ButtonStyle.DANGER)
 
@@ -819,7 +847,7 @@ async def get_user_settings(from_user, stype="main"):
         drive_cat_display = "\n".join(lines)
         btns = buttons.build_menu(2)
 
-        text = f"""<b>❖ GDRIVE SETTINGS</b>
+        text = f"""<b>✦ GDRIVE SETTINGS</b>
 <code>┌─ {'Name':<11}: {user_name}
 ├─ {'Token':<11}: {tokenmsg}
 ├─ {'GDrive ID':<11}: {gdrive_id}
@@ -833,6 +861,14 @@ async def get_user_settings(from_user, stype="main"):
 """
     elif stype == "mirror":
         buttons.data_button("⚙ RClone Tools", f"userset {user_id} rclone")
+        buttons.data_button(
+            "⚙ TeraBox Cookie", f"userset {user_id} menu TERABOX_COOKIE"
+        )
+        tbx_cookie = (
+            "Exists"
+            if await aiopath.exists(f"terabox_cookies/{user_id}.txt")
+            else "Not Exists"
+        )
         rccmsg = "Exists" if await aiopath.exists(rclone_conf) else "Not Exists"
         if user_dict.get("RCLONE_PATH", False):
             rccpath = user_dict["RCLONE_PATH"]
@@ -877,10 +913,11 @@ async def get_user_settings(from_user, stype="main"):
         buttons.data_button("✕ CLOSE", f"userset {user_id} close", "footer", style=ButtonStyle.DANGER)
         btns = buttons.build_menu(1)
 
-        text = f"""<b>❖ MIRROR SETTINGS</b>
+        text = f"""<b>✦ MIRROR SETTINGS</b>
 <code>┌─ {'Name':<11}: {user_name}
 ├─ {'Rclone Conf':<11}: {rccmsg}
 ├─ {'Rclone Path':<11}: {rccpath}
+├─ {'TeraBox':<11}: {tbx_cookie}
 ├─ {'Gdrive Tok':<11}: {tokenmsg}
 ├─ {'Gdrive ID':<11}: {gdrive_id}
 ├─ {'Index Link':<11}: {index}
@@ -920,7 +957,7 @@ async def get_user_settings(from_user, stype="main"):
         email_display = _display_value(mega_email, "Not Set")
         pass_display = _display_value(masked_pass if mega_password else None, "Not Set")
         account_status = "✅ Configured" if has_creds else "❌ Not Configured"
-        text = f"""<b>❖ MEGA SETTINGS</b>
+        text = f"""<b>✦ MEGA SETTINGS</b>
 <code>┌─ {'Name':<9}: {user_name}
 ├─ {'Account':<9}: {account_status}
 ├─ {'Email':<9}: {email_display}
@@ -950,7 +987,7 @@ async def get_user_settings(from_user, stype="main"):
             ffc = "Not Exists"
         ffc = _display_value(ffc)
 
-        buttons.data_button("❖ METADATA", f"userset {user_id} menu METADATA")
+        buttons.data_button("✦ METADATA", f"userset {user_id} menu METADATA")
         metadata_setting = user_dict.get("METADATA")
         display_meta_val = "Not Set"
         if isinstance(metadata_setting, dict) and metadata_setting:
@@ -961,7 +998,7 @@ async def get_user_settings(from_user, stype="main"):
             display_meta_val = f"{metadata_setting} [Legacy, needs re-set]"
         display_meta_val = _display_value(display_meta_val)
 
-        buttons.data_button("❖ AUDIO METADATA", f"userset {user_id} menu AUDIO_METADATA")
+        buttons.data_button("✦ AUDIO METADATA", f"userset {user_id} menu AUDIO_METADATA")
         audio_meta_setting = user_dict.get("AUDIO_METADATA")
         display_audio_meta = "Not Set"
         if isinstance(audio_meta_setting, dict) and audio_meta_setting:
@@ -970,7 +1007,7 @@ async def get_user_settings(from_user, stype="main"):
             )
         display_audio_meta = _display_value(display_audio_meta)
 
-        buttons.data_button("❖ VIDEO METADATA", f"userset {user_id} menu VIDEO_METADATA")
+        buttons.data_button("✦ VIDEO METADATA", f"userset {user_id} menu VIDEO_METADATA")
         video_meta_setting = user_dict.get("VIDEO_METADATA")
         display_video_meta = "Not Set"
         if isinstance(video_meta_setting, dict) and video_meta_setting:
@@ -994,7 +1031,7 @@ async def get_user_settings(from_user, stype="main"):
         buttons.data_button("✕ CLOSE", f"userset {user_id} close", "footer", style=ButtonStyle.DANGER)
         btns = buttons.build_menu(2)
 
-        text = f"""<b>❖ FF SETTINGS</b>
+        text = f"""<b>✦ FF SETTINGS</b>
 <code>┌─ {'Name':<11}: {user_name}
 ├─ {'FFmpeg CMDs':<11}: {ffc}
 ├─ {'Def Meta':<11}: {display_meta_val}
@@ -1023,16 +1060,16 @@ async def get_user_settings(from_user, stype="main"):
             if (swap := user_dict.get("NAME_SWAP", False))
             else "Not Exists"
         )
-        buttons.data_button("❖ NAME SWAP", f"userset {user_id} menu NAME_SWAP")
+        buttons.data_button("✦ NAME SWAP", f"userset {user_id} menu NAME_SWAP")
 
         ar_msg = (
             _display_value(ar)
             if (ar := user_dict.get("AUTORENAME_TEMPLATE", False))
             else "Not Exists"
         )
-        buttons.data_button("❖ AUTO-RENAME", f"userset {user_id} menu AUTORENAME_TEMPLATE")
+        buttons.data_button("✦ AUTO-RENAME", f"userset {user_id} menu AUTORENAME_TEMPLATE")
 
-        buttons.data_button("❖ YT-DLP OPTIONS", f"userset {user_id} menu YT_DLP_OPTIONS")
+        buttons.data_button("✦ YT-DLP OPTIONS", f"userset {user_id} menu YT_DLP_OPTIONS")
         if user_dict.get("YT_DLP_OPTIONS", False):
             ytopt = user_dict["YT_DLP_OPTIONS"]
         elif "YT_DLP_OPTIONS" not in user_dict and Config.YT_DLP_OPTIONS:
@@ -1045,7 +1082,7 @@ async def get_user_settings(from_user, stype="main"):
             upload_paths = Config.UPLOAD_PATHS
         else:
             upload_paths = "None"
-        buttons.data_button("❖ UPLOAD PATHS", f"userset {user_id} menu UPLOAD_PATHS")
+        buttons.data_button("✦ UPLOAD PATHS", f"userset {user_id} menu UPLOAD_PATHS")
         ex_ex = _display_value(ex_ex)
         upload_paths = _display_value(upload_paths)
         ytopt = _display_value(ytopt)
@@ -1069,7 +1106,7 @@ async def get_user_settings(from_user, stype="main"):
         buttons.data_button("✕ CLOSE", f"userset {user_id} close", "footer", style=ButtonStyle.DANGER)
         btns = buttons.build_menu(1)
 
-        text = f"""<b>❖ ADVANCED SETTINGS</b>
+        text = f"""<b>✦ ADVANCED SETTINGS</b>
 <code>┌─ {'Name':<11}: {user_name}
 ├─ {'Name Swap':<11}: {ns_msg}
 ├─ {'Auto-Rename':<11}: {ar_msg}
@@ -1081,13 +1118,13 @@ async def get_user_settings(from_user, stype="main"):
 </code>
 """
     elif stype == "yttools":
-        buttons.data_button("❖ YT DESCRIPTION", f"userset {user_id} menu YT_DESP")
+        buttons.data_button("✦ YT DESCRIPTION", f"userset {user_id} menu YT_DESP")
         yt_desp_val = user_dict.get(
             "YT_DESP",
             Config.YT_DESP if hasattr(Config, "YT_DESP") else "Not Set (Uses Default)",
         )
 
-        buttons.data_button("❖ YT TAGS", f"userset {user_id} menu YT_TAGS")
+        buttons.data_button("✦ YT TAGS", f"userset {user_id} menu YT_TAGS")
         yt_tags_val = user_dict.get(
             "YT_TAGS",
             Config.YT_TAGS if hasattr(Config, "YT_TAGS") else "Not Set (Uses Default)",
@@ -1095,7 +1132,7 @@ async def get_user_settings(from_user, stype="main"):
         if isinstance(yt_tags_val, list):
             yt_tags_val = ",".join(yt_tags_val)
 
-        buttons.data_button("❖ YT CATEGORY ID", f"userset {user_id} menu YT_CATEGORY_ID")
+        buttons.data_button("✦ YT CATEGORY ID", f"userset {user_id} menu YT_CATEGORY_ID")
         yt_cat_id_val = user_dict.get(
             "YT_CATEGORY_ID",
             (
@@ -1121,7 +1158,7 @@ async def get_user_settings(from_user, stype="main"):
         buttons.data_button("✕ CLOSE", f"userset {user_id} close", "footer", style=ButtonStyle.DANGER)
         btns = buttons.build_menu(2)
 
-        text = f"""<b>❖ YOUTUBE TOOLS</b>
+        text = f"""<b>✦ YOUTUBE TOOLS</b>
 <code>┌─ {'Name':<13}: {user_name}
 ├─ {'Description':<13}: {escape(str(yt_desp_val))}
 ├─ {'Tags':<13}: {escape(str(yt_tags_val))}
@@ -1134,7 +1171,7 @@ async def get_user_settings(from_user, stype="main"):
         
         buttons.data_button("➕ Create Profile", f"userset {user_id} enc_create", position="header")
         
-        text = "<b>❖ ENCODE PROFILES</b>\n<code>"
+        text = "<b>✦ ENCODE PROFILES</b>\n<code>"
         if not profiles or len(profiles) <= 1:
             text += "└─ No custom profiles found.\n</code>"
         else:
@@ -1188,6 +1225,11 @@ async def add_file(_, message, ftype, rfunc):
         cpath = f"{getcwd()}/cookies/{user_id}"
         await makedirs(cpath, exist_ok=True)
         des_dir = f"{cpath}/cookies.txt"
+        await message.download(file_name=des_dir)
+    elif ftype == "TERABOX_COOKIE":
+        tbpath = f"{getcwd()}/terabox_cookies/"
+        await makedirs(tbpath, exist_ok=True)
+        des_dir = f"{tbpath}{user_id}.txt"
         await message.download(file_name=des_dir)
     await delete_message(message)
     update_user_ldata(user_id, ftype, des_dir)
@@ -1261,6 +1303,14 @@ async def set_option(_, message, option, rfunc):
         for x in fx:
             x = x.lstrip(".")
             value.append(x.strip().lower())
+    elif option == "LEECH_FONT":
+        value = normalize_leech_font(value)
+        if not value:
+            await send_message(
+                message,
+                f"Leech Font must be one of: {', '.join(LEECH_FONT_STYLES)}.",
+            )
+            return
     elif option == "YT_TAGS":
         if isinstance(value, str):
             value = [tag.strip() for tag in value.split(",") if tag.strip()]
@@ -1361,14 +1411,21 @@ async def get_menu(option, message, user_id):
         "RCLONE_CONFIG": f"rclone/{user_id}.conf",
         "TOKEN_PICKLE": f"tokens/{user_id}.pickle",
         "USER_COOKIE_FILE": f"cookies/{user_id}/cookies.txt",
+        "TERABOX_COOKIE": f"terabox_cookies/{user_id}.txt",
     }
 
     buttons = ButtonMaker()
-    if option in ["THUMBNAIL", "RCLONE_CONFIG", "TOKEN_PICKLE", "USER_COOKIE_FILE"]:
+    if option in [
+        "THUMBNAIL",
+        "RCLONE_CONFIG",
+        "TOKEN_PICKLE",
+        "USER_COOKIE_FILE",
+        "TERABOX_COOKIE",
+    ]:
         key = "file"
     else:
         key = "set"
-    buttons.data_button("❖ CHANGE" if user_dict.get(option, False) else "❖ SET",
+    buttons.data_button("✦ CHANGE" if user_dict.get(option, False) else "✦ SET",
         f"userset {user_id} {key} {option}",
     )
     if user_dict.get(option, False):
@@ -1387,7 +1444,7 @@ async def get_menu(option, message, user_id):
         if key != "file":  # TODO: option default val check
             buttons.data_button("↻ Reset", f"userset {user_id} reset {option}")
         elif await aiopath.exists(file_dict[option]):
-            buttons.data_button("❖ REMOVE", f"userset {user_id} remove {option}")
+            buttons.data_button("✦ REMOVE", f"userset {user_id} remove {option}")
     if option in leech_options:
         back_to = "leech"
     elif option in rclone_options:
@@ -1450,13 +1507,13 @@ async def get_menu(option, message, user_id):
 
     if option == "METADATA":
         value_display = val if val else "<code>Not Exists</code>"
-        text = f"""<b>❖ MENU SETTINGS</b>
+        text = f"""<b>✦ MENU SETTINGS</b>
 <b>Option:</b> <code>{option_display}</code>
 <b>Value:</b> {value_display}
 <b>Input Type:</b> <code>{input_type_display}</code>
 <b>Description:</b> {description_display}
 
-<b>❖ DYNAMIC VARIABLES</b>
+<b>✦ DYNAMIC VARIABLES</b>
 <code>{{filename}}</code> : Full filename
 <code>{{basename}}</code> : Name without extension
 <code>{{extension}}</code>: File extension
@@ -1465,7 +1522,7 @@ async def get_menu(option, message, user_id):
 """
     else:
         value_display = f"<code>{escape(str(val))}</code>" if val else "<code>Not Exists</code>"
-        text = f"""<b>❖ MENU SETTINGS</b>
+        text = f"""<b>✦ MENU SETTINGS</b>
 <b>Option:</b> <code>{option_display}</code>
 <b>Value:</b> {value_display}
 <b>Input Type:</b> <code>{input_type_display}</code>
@@ -1542,6 +1599,7 @@ async def edit_user_settings(client, query):
     rclone_conf = f"rclone/{user_id}.conf"
     token_pickle = f"tokens/{user_id}.pickle"
     yt_cookie_path = f"cookies/{user_id}/cookies.txt"
+    terabox_cookie_path = f"terabox_cookies/{user_id}.txt"
 
     user_dict = user_data.get(user_id, {})
     if user_id != int(data[1]):
@@ -1593,7 +1651,7 @@ async def edit_user_settings(client, query):
         buttons.data_button("↩ BACK", f"userset {user_id} back encode", "footer")
         buttons.data_button("✕ CLOSE", f"userset {user_id} close", "footer", style=ButtonStyle.DANGER)
         
-        text = f"<b>❖ ENCODE PROFILE: {pdata.get('name', pid)}</b>\n<code>"
+        text = f"<b>✦ ENCODE PROFILE: {pdata.get('name', pid)}</b>\n<code>"
         text += f"<b>Video Codec:</b> {pdata.get('video_codec', 'libsvtav1')}\n"
         text += f"<b>Audio Codec:</b> {pdata.get('audio_codec', 'libopus')}\n"
         text += f"<b>Video Params:</b> {pdata.get('video_params', {})}\n"
@@ -1667,7 +1725,7 @@ async def edit_user_settings(client, query):
         buttons.data_button("↩ BACK", f"userset {user_id} back uphoster", "footer")
         buttons.data_button("✕ CLOSE", f"userset {user_id} close", "footer", style=ButtonStyle.DANGER)
 
-        text = "<b>❖ SELECT UPHOSTER DESTINATIONS</b>\n<code>"
+        text = "<b>✦ SELECT UPHOSTER DESTINATIONS</b>\n<code>"
         await edit_message(message, text, buttons.build_menu(1))
     elif data[2] == "menu":
         await query.answer()
@@ -1697,7 +1755,7 @@ async def edit_user_settings(client, query):
         buttons.data_button("↩ BACK", f"userset {user_id} menu {data[3]}", "footer")
         buttons.data_button("✕ CLOSE", f"userset {user_id} close", "footer", style=ButtonStyle.DANGER)
         prompt_title = data[3].replace("_", " ").title()
-        new_message_text = f"<b>❖ SET {prompt_title.upper()}</b>\n<code>{text}"
+        new_message_text = f"<b>✦ SET {prompt_title.upper()}</b>\n<code>{text}"
         await edit_message(message, new_message_text, buttons.build_menu(1))
         rfunc = partial(get_menu, data[3], message, user_id)
         pfunc = partial(add_file, ftype=data[3], rfunc=rfunc)
@@ -1726,7 +1784,7 @@ async def edit_user_settings(client, query):
         buttons.data_button("✕ CLOSE", f"userset {user_id} close", "footer", style=ButtonStyle.DANGER)
         prompt_title = data[3].replace("_", " ").title()
         prompt_text = (
-            f"<b>❖ SET {prompt_title.upper()}</b>\n"
+            f"<b>✦ SET {prompt_title.upper()}</b>\n"
             "┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄\n"
             f"{text}"
         )
@@ -1741,6 +1799,7 @@ async def edit_user_settings(client, query):
             "RCLONE_CONFIG",
             "TOKEN_PICKLE",
             "USER_COOKIE_FILE",
+            "TERABOX_COOKIE",
         ]:
             if data[3] == "THUMBNAIL":
                 fpath = thumb_path
@@ -1748,6 +1807,8 @@ async def edit_user_settings(client, query):
                 fpath = rclone_conf
             elif data[3] == "USER_COOKIE_FILE":
                 fpath = yt_cookie_path
+            elif data[3] == "TERABOX_COOKIE":
+                fpath = terabox_cookie_path
             else:
                 fpath = token_pickle
             if await aiopath.exists(fpath):
@@ -1768,7 +1829,7 @@ async def edit_user_settings(client, query):
     elif data[2] == "confirm_reset_all":
         await query.answer()
         buttons = ButtonMaker()
-        buttons.data_button("❖ YES", f"userset {user_id} do_reset_all yes")
+        buttons.data_button("✦ YES", f"userset {user_id} do_reset_all yes")
         buttons.data_button("✕ No", f"userset {user_id} do_reset_all no")
         buttons.data_button("✕ CLOSE", f"userset {user_id} close", "footer", style=ButtonStyle.DANGER)
         text = "<i>⚑ Are you sure you want to reset all your user settings?</i>"
@@ -1780,7 +1841,13 @@ async def edit_user_settings(client, query):
             for k in list(user_dict.keys()):
                 if k not in ("SUDO", "AUTH", "VERIFY_TOKEN", "VERIFY_TIME"):
                     del user_dict[k]
-            for fpath in [thumb_path, rclone_conf, token_pickle, yt_cookie_path]:
+            for fpath in [
+                thumb_path,
+                rclone_conf,
+                token_pickle,
+                yt_cookie_path,
+                terabox_cookie_path,
+            ]:
                 if await aiopath.exists(fpath):
                     await remove(fpath)
             await update_user_settings(query)
@@ -1791,9 +1858,9 @@ async def edit_user_settings(client, query):
     elif data[2] == "view":
         await query.answer()
         await send_file(message, thumb_path, name)
-    elif data[2] in ["gd", "rc"]:
+    elif data[2] in ["gd", "rc", "tbx"]:
         await query.answer()
-        du = "rc" if data[2] == "gd" else "gd"
+        du = {"rc": "gd", "gd": "tbx", "tbx": "rc"}.get(data[2], "rc")
         update_user_ldata(user_id, "DEFAULT_UPLOAD", du)
         await update_user_settings(query, stype="general")
         await database.update_user_data(user_id)

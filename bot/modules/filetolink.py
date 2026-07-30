@@ -100,7 +100,7 @@ async def send_filetolink_status(message):
     client_block = "\n".join(client_lines) if client_lines else "└─ #0: main bot | load 0"
 
     text = (
-        "<b>❖ FILETOLINK STATUS</b>\n"
+        "<b>✦ FILETOLINK STATUS</b>\n"
         "<code>"
         f"┌─ {'Base URL':<12}: {escape(str(base_url))}\n"
         f"├─ {'BIN_CHANNEL':<12}: {escape(str(bin_channel))}\n"
@@ -197,7 +197,7 @@ async def prepare_stored_media(message):
         file_id = getattr(media, "file_unique_id", "Unknown")
         
         reply_text = (
-            f"<b>❖ FILETOLINK LOGGER</b>\n<code>"
+            f"<b>✦ FILETOLINK LOGGER</b>\n<code>"
             f"┌─ {'Requested':<10}: </code>{user_mention}<code>\n"
             f"├─ {'User ID':<10}: {user_id}\n"
             f"└─ {'File ID':<10}: {file_id}</code>"
@@ -216,9 +216,9 @@ async def prepare_stored_media(message):
 
 
 def build_caption(title, filename, readable_size, stream_link, download_link):
-    title = title.replace("❖ ", "").strip()
+    title = title.replace("✦ ", "").strip()
     caption = (
-        f"<b>❖ {title}</b>\n"
+        f"<b>✦ {title}</b>\n"
         f"<code>┌─ {'Name':<6} : {filename}\n"
         f"└─ {'Size':<6} : {readable_size}</code>\n\n"
         f"<b>⋗ Download Link:</b>\n<code>{download_link}</code>\n\n"
@@ -326,7 +326,7 @@ async def link_command_handler(client, message):
                 LOGGER.error(f"Failed to process batch message {msg_id}: {e}")
                 failed += 1
                 
-        await edit_message(status_msg, f"<b>❖ BATCH COMPLETED</b>\n\n<code>┌─ {'Processed':<9} : {processed}\n└─ {'Failed':<9} : {failed}</code>")
+        await edit_message(status_msg, f"<b>✦ BATCH COMPLETED</b>\n\n<code>┌─ {'Processed':<9} : {processed}\n└─ {'Failed':<9} : {failed}</code>")
     else:
         await process_media_message(client, message, message.reply_to_message)
 

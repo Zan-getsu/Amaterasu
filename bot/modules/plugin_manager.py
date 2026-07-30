@@ -33,7 +33,7 @@ async def get_plugins_menu(user_id: int, stype: str = "main"):
         buttons.data_button("Plugin Info", f"plugins {user_id} info")
         buttons.data_button("✕ CLOSE", f"plugins {user_id} close", position="footer", style=ButtonStyle.DANGER)
 
-        text = f"""<b>❖ PLUGIN MANAGEMENT</b>
+        text = f"""<b>✦ PLUGIN MANAGEMENT</b>
 <code>┌─ {'Loaded Plugins':<17}: {len(loaded_plugins)}
 ├─ {'Available Plugins':<17}: {len(available_plugins)}
 └─ {'Total Plugins':<17}: {total_plugins}
@@ -53,7 +53,7 @@ async def get_plugins_menu(user_id: int, stype: str = "main"):
         buttons.data_button("↩ BACK", f"plugins {user_id} main", position="footer")
         buttons.data_button("✕ CLOSE", f"plugins {user_id} close", position="footer", style=ButtonStyle.DANGER)
 
-        text = f"""<b>❖ LOADED PLUGINS</b>
+        text = f"""<b>✦ LOADED PLUGINS</b>
 <code>└─ {'Total Loaded':<12}: {len(loaded_plugins)}
 </code>"""
 
@@ -71,7 +71,7 @@ async def get_plugins_menu(user_id: int, stype: str = "main"):
         buttons.data_button("✕ CLOSE", f"plugins {user_id} close", position="footer", style=ButtonStyle.DANGER)
 
         unloaded_count = len([p for p in available_plugins if p not in loaded_plugins])
-        text = f"""<b>❖ AVAILABLE PLUGINS</b>
+        text = f"""<b>✦ AVAILABLE PLUGINS</b>
 <code>└─ {'Unloaded Plugins':<16}: {unloaded_count}
 </code>"""
 
@@ -80,7 +80,7 @@ async def get_plugins_menu(user_id: int, stype: str = "main"):
     elif stype == "info":
         loaded_plugins = plugin_manager.list_plugins()
 
-        text = "<b>❖ PLUGIN INFORMATION</b>\n<code>"
+        text = "<b>✦ PLUGIN INFORMATION</b>\n<code>"
         for i, plugin in enumerate(loaded_plugins):
             status = "✅ Enabled" if plugin.enabled else "❌ Disabled"
             prefix1 = "┌─"
@@ -113,7 +113,7 @@ async def get_plugins_menu(user_id: int, stype: str = "main"):
             buttons.data_button("↩ BACK", f"plugins {user_id} loaded", position="footer")
             buttons.data_button("✕ CLOSE", f"plugins {user_id} close", position="footer", style=ButtonStyle.DANGER)
 
-            text = f"""<b>❖ PLUGIN: {plugin_name}</b>
+            text = f"""<b>✦ PLUGIN: {plugin_name}</b>
 <code>┌─ {'Version':<11}: {plugin_info.version}
 ├─ {'Author':<11}: {plugin_info.author}
 ├─ {'Status':<11}: {status}

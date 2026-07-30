@@ -268,6 +268,23 @@
     const urlParams = new Proxy(new URLSearchParams(window.location.search), {
         get: (searchParams, prop) => searchParams.get(prop),
     });
+    const selectorType = (urlParams.type || 'torrent').toLowerCase();
+    const selectorEndpoint = ['terabox', 'rclone'].includes(selectorType)
+        ? selectorType
+        : 'torrent';
+    const selectorLabel = selectorEndpoint === 'torrent'
+        ? 'Torrent'
+        : selectorEndpoint.charAt(0).toUpperCase() + selectorEndpoint.slice(1);
+    document.title = `Amaterasu | ${selectorLabel} File Selector`;
+    document.querySelector('.selector-kicker').innerHTML =
+        `<i class="fa-solid fa-layer-group"></i> ${selectorLabel} Selector`;
+    document.querySelector('.selector-subtitle').textContent =
+        `Browse the ${selectorLabel} directory, select what you need, and submit the final file list.`;
+
+    function filesApiUrl(mode) {
+        const base = `/app/files/${selectorEndpoint}?gid=${encodeURIComponent(urlParams.gid)}&pin=${encodeURIComponent(pinInput.value)}`;
+        return selectorEndpoint === 'torrent' ? `${base}&mode=${mode}` : base;
+    }
     if (urlParams.pin) {
         pinInput.value = urlParams.pin;
         setTimeout(() => submitPin.click(), 0);
@@ -563,7 +580,13 @@
 
     function openEditFileNameModal(node) {
         modalTitle.textContent = `Edit ${node.type === 'folder' ? 'Folder' : 'File'} Name`;
-        modalBody.innerHTML = `<input type="text" id="editNameInput" class="bs-input" value="${node.name}">`;
+        modalBody.innerHTML = '';
+        const safeNameInput = document.createElement('input');
+        safeNameInput.type = 'text';
+        safeNameInput.id = 'editNameInput';
+        safeNameInput.className = 'bs-input';
+        safeNameInput.value = node.name;
+        modalBody.appendChild(safeNameInput);
         modalFooter.innerHTML = `
             <button class="bs-btn bs-btn--ghost" onClick="closeModal()">Cancel</button>
             <button id="saveNameBtn" class="bs-btn bs-btn--primary">Save</button>
@@ -577,7 +600,7 @@
             const newName = editNameInput.value.trim();
             if (newName && newName !== node.name) {
                 const fullPath = getFullPath(node);
-                const requestUrl = `/app/files/torrent?gid=${urlParams.gid}&pin=${pinInput.value}&mode=rename`;
+                const requestUrl = filesApiUrl('rename');
                 const body = {
                     old_path: fullPath ? `${fullPath}/${node.name}` : node.name,
                     new_path: fullPath ? `${fullPath}/${newName}` : newName,
@@ -615,7 +638,7 @@
         modalFooter.innerHTML = '';
         openModal();
         
-        const requestUrl = `/app/files/torrent?gid=${urlParams.gid}&pin=${pinInput.value}&mode=selection`;
+        const requestUrl = filesApiUrl('selection');
         fetch(requestUrl, { 'method': 'POST', 'body': JSON.stringify(files) }).then(response => {
             closeModal();
             if (response.ok) {
@@ -633,7 +656,7 @@
         if (pinInput.value === '') { showToast('The PIN is missing.', 'error'); return; }
         if (!urlParams.gid) { showToast('The GID parameter is missing.', 'error'); return; }
         
-        const requestUrl = `/app/files/torrent?gid=${urlParams.gid}&pin=${pinInput.value}&mode=get`;
+        const requestUrl = filesApiUrl('get');
         fetch(requestUrl).then(response => {
             if (response.ok) {
                 return response.json().then(data => {

@@ -2,6 +2,7 @@ from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from pyrogram.enums import ButtonStyle
 
 from ...core.config_manager import Config
+from .inline_ui import style_inline_button
 
 
 def _btn_style(style=None):
@@ -22,12 +23,18 @@ class ButtonMaker:
 
     def url_button(self, key, link, position=None, style=None):
         self.buttons[position if position in self.buttons else "default"].append(
-            InlineKeyboardButton(text=key, url=link, style=_btn_style(style))
+            InlineKeyboardButton(
+                text=style_inline_button(key), url=link, style=_btn_style(style)
+            )
         )
 
     def data_button(self, key, data, position=None, style=None):
         self.buttons[position if position in self.buttons else "default"].append(
-            InlineKeyboardButton(text=key, callback_data=data, style=_btn_style(style))
+            InlineKeyboardButton(
+                text=style_inline_button(key),
+                callback_data=data,
+                style=_btn_style(style),
+            )
         )
 
     def build_menu(self, b_cols=1, h_cols=8, fb_cols=2, lb_cols=2, f_cols=8):

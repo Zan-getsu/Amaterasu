@@ -131,7 +131,7 @@ async def sort_command(client, message):
         sort_cmd = _sort_command_text()
         await send_message(
             message,
-            "<b>❖ SORT MODE ENABLED</b>\n"
+            "<b>✦ SORT MODE ENABLED</b>\n"
             f"Send files now. Send <code>{sort_cmd}</code> again when you want them returned alphabetically.",
         )
         return
@@ -140,7 +140,7 @@ async def sort_command(client, message):
     if not files:
         await send_message(
             message,
-            "<b>❖ SORT MODE DISABLED</b>\n"
+            "<b>✦ SORT MODE DISABLED</b>\n"
             "No files were cached for sorting.",
         )
         return
@@ -166,7 +166,7 @@ async def sort_command(client, message):
 
     await edit_message(
         status_msg,
-        "<b>❖ SORT MODE DISABLED</b>\n"
+        "<b>✦ SORT MODE DISABLED</b>\n"
         "Cached files were sorted by file name and resent using Telegram file IDs.\n"
         f"├ Sent   : <code>{sent}</code>\n"
         f"└ Failed : <code>{failed}</code>",
@@ -191,7 +191,7 @@ async def sort_media_handler(client, message):
         sort_cmd = _sort_command_text()
         await send_message(
             message,
-            f"<b>❖ SORT CACHE</b>\n"
+            f"<b>✦ SORT CACHE</b>\n"
             f"Cached <code>{count}</code> file(s). Send <code>{sort_cmd}</code> again to deliver.",
         )
 

@@ -1,6 +1,6 @@
 import mimetypes
 import re
-from asyncio import create_task, sleep
+from asyncio import create_task, sleep, to_thread
 from contextlib import asynccontextmanager, suppress
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
@@ -25,7 +25,15 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from sabnzbdapi import SabnzbdClient
-from web.nodes import extract_file_ids, make_tree
+from web.nodes import extract_file_ids, make_rclone_tree, make_terabox_tree, make_tree
+from web.rclone_selection_store import (
+    get_file_list as get_rclone_file_list,
+    update_selected_ids as set_rclone_selected_ids,
+)
+from web.terabox_selection_store import (
+    get_file_list as get_terabox_file_list,
+    update_selected_ids as set_terabox_selected_ids,
+)
 from web.security import (
     make_route_token,
     verify_route_token,
@@ -1149,6 +1157,118 @@ async def handle_torrent(request: Request):
     return JSONResponse(content)
 
 
+async def _handle_stored_selection(
+    request,
+    selector_type,
+    prefix,
+    get_file_list,
+    set_selected_ids,
+    make_tree,
+):
+    gid_raw = request.query_params.get("gid", "")
+    pin = request.query_params.get("pin", "")
+    rate_key = f"{selector_type}:{gid_raw}"
+    if (
+        not gid_raw
+        or not gid_raw.startswith(prefix)
+        or not _SAFE_GID.fullmatch(gid_raw)
+    ):
+        return JSONResponse(
+            {
+                "files": [],
+                "engine": "",
+                "error": "Invalid GID",
+                "message": "GID is missing or invalid",
+            },
+            status_code=400,
+        )
+    if _pin_rate_limited(rate_key):
+        return JSONResponse(
+            {
+                "files": [],
+                "engine": "",
+                "error": "Too many attempts",
+                "message": f"Too many PIN attempts. Try again in {_PIN_RATE_WINDOW}s.",
+            },
+            status_code=429,
+        )
+    purpose = f"{selector_type}-select"
+    if not verify_short_token(pin, _web_secret(), purpose, gid_raw):
+        _record_pin_attempt(rate_key)
+        return JSONResponse(
+            {
+                "files": [],
+                "engine": "",
+                "error": "Invalid pin",
+                "message": "The PIN you entered is incorrect.",
+            },
+            status_code=403,
+        )
+    _pin_attempts.pop(rate_key, None)
+
+    gid = gid_raw[len(prefix) :]
+    if request.method == "POST":
+        try:
+            data = await request.json()
+        except Exception:
+            return JSONResponse(
+                {"files": [], "engine": "", "error": "Invalid JSON", "message": "Invalid request body"},
+                status_code=400,
+            )
+        selected_files, _ = extract_file_ids(data)
+        ok = await to_thread(set_selected_ids, gid, set(selected_files))
+        return JSONResponse(
+            {
+                "files": [],
+                "engine": "",
+                "error": "" if ok else "GID not found",
+                "message": "Selection submitted" if ok else "Task not found or expired",
+            },
+            status_code=200 if ok else 404,
+        )
+
+    file_list = await to_thread(get_file_list, gid)
+    if file_list is None:
+        return JSONResponse(
+            {
+                "files": [],
+                "engine": "",
+                "error": "Not found",
+                "message": "Task not found or expired",
+            },
+            status_code=404,
+        )
+    return JSONResponse(make_tree(file_list))
+
+
+@app.api_route(
+    "/app/files/terabox", methods=["GET", "POST"], response_class=HTMLResponse
+)
+async def handle_terabox(request: Request):
+    return await _handle_stored_selection(
+        request,
+        "terabox",
+        "terabox_",
+        get_terabox_file_list,
+        set_terabox_selected_ids,
+        make_terabox_tree,
+    )
+
+
+@app.api_route(
+    "/app/files/rclone", methods=["GET", "POST"], response_class=HTMLResponse
+)
+async def handle_rclone(request: Request):
+    return await _handle_stored_selection(
+        request,
+        "rclone",
+        "rclone_",
+        get_rclone_file_list,
+        set_rclone_selected_ids,
+        make_rclone_tree,
+    )
+
+
 async def handle_rename(gid, data):
     try:
         _type = data["type"]
@@ -1255,6 +1375,7 @@ _ADMIN_PATH_PREFIXES = ("/app/", "/api/profiles", "/qbit/", "/nzb/")
 # These user tools carry their own short-lived, per-user signed links and must
 # remain reachable from Telegram even when the owner-only web login is enabled.
 _SIGNED_USER_TOOL_PATH_PREFIXES = (
+    "/app/files",
     "/app/token-generator",
     "/api/token-generator",
     "/google-token/callback",

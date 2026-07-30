@@ -23,6 +23,7 @@ from ..helper.ext_utils.links_utils import (
     is_rclone_path,
     is_pixeldrain_link,
     is_telegram_link,
+    is_terabox_link,
     is_url,
 )
 from ..helper.ext_utils.task_manager import pre_task_check
@@ -43,6 +44,11 @@ from ..helper.mirror_leech_utils.download_utils.nzb_downloader import add_nzb
 from ..helper.mirror_leech_utils.download_utils.qbit_download import add_qb_torrent
 from ..helper.mirror_leech_utils.download_utils.rclone_download import (
     add_rclone_download,
+    add_rclone_web_selection,
+)
+from ..helper.mirror_leech_utils.download_utils.terabox_download import (
+    add_terabox_account_download,
+    add_terabox_download,
 )
 from ..helper.mirror_leech_utils.download_utils.telegram_download import (
     TelegramDownloadHelper,
@@ -578,6 +584,8 @@ class Mirror(TaskListener):
             and not is_gdrive_id(self.link)
             and not is_gdrive_link(self.link)
             and not is_mega_link(self.link)
+            and not is_terabox_link(self.link)
+            and self.link != "tbx"
         ):
             await send_message(
                 self.message, COMMAND_USAGE["mirror"][0], COMMAND_USAGE["mirror"][1]
@@ -586,7 +594,7 @@ class Mirror(TaskListener):
             await delete_links(self.message)
             return
 
-        if len(self.link) > 0:
+        if len(self.link) > 0 and not is_terabox_link(self.link):
             LOGGER.info(self.link)
 
         try:
@@ -598,6 +606,7 @@ class Mirror(TaskListener):
             return
 
         self._set_mode_engine()
+        await self.send_processing()
 
         # Phase 3.3 — Smart engine selection is already handled by the
         # existing URL pattern checks below (is_magnet, is_rclone_path,
@@ -617,6 +626,8 @@ class Mirror(TaskListener):
             and file_ is None
             and not is_gdrive_id(self.link)
             and not is_mega_link(self.link)
+            and not is_terabox_link(self.link)
+            and not self.is_terabox_account
         ):
             content_type, content_filename = await get_content_info(self.link)
             is_text_response = bool(
@@ -714,11 +725,18 @@ class Mirror(TaskListener):
         elif self.is_nzb:
             await add_nzb(self, path)
         elif is_rclone_path(self.link):
-            await add_rclone_download(self, f"{path}/")
+            if self._rcl_web:
+                await add_rclone_web_selection(self, f"{path}/")
+            else:
+                await add_rclone_download(self, f"{path}/")
         elif is_gdrive_link(self.link) or is_gdrive_id(self.link):
             await add_gd_download(self, path)
         elif is_mega_link(self.link):
             await add_mega_download(self, f"{path}/")
+        elif self.is_terabox_account:
+            await add_terabox_account_download(self, f"{path}/")
+        elif is_terabox_link(self.link):
+            await add_terabox_download(self, f"{path}/")
         elif getattr(self, "is_c2c", False):
             # Phase 4.3 — cloud-to-cloud transfer. Both source and dest
             # are rclone remotes — no local download. The link is the
@@ -745,6 +763,7 @@ class Mirror(TaskListener):
             await self._add_aria2_download_with_fallback(
                 path, headers, ratio, seed_time
             )
+        await self.remove_processing()
 
 
 async def mirror(client, message):

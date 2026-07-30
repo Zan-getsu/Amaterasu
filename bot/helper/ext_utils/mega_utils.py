@@ -228,7 +228,7 @@ def _get_mega_account_info_sync(email: str, password: str) -> str:
         pro_name = pro_names.get(pro_level, f"Level {pro_level}")
 
         text = (
-            f"<b>❖ MEGA ACCOUNT INFO</b>\n<pre>\n"
+            f"<b>✦ MEGA ACCOUNT INFO</b>\n<pre>\n"
             f"├─ {'Email':<15}: {email}\n"
             f"├─ {'Account Type':<15}: {pro_name}\n"
         )
