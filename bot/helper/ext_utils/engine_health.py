@@ -148,10 +148,11 @@ async def _check_all_engines():
 async def _notify_owner(message):
     """Send a DM to the owner about engine state change."""
     try:
-        from ...core.tg_client import TgClient
         from ...core.config_manager import Config
-        if TgClient.bot and Config.OWNER_ID:
-            await TgClient.bot.send_message(Config.OWNER_ID, message)
+        from ...helper.telegram_helper.message_utils import send_message
+
+        if Config.OWNER_ID:
+            await send_message(Config.OWNER_ID, message)
     except Exception as e:
         LOGGER.warning(f"Failed to notify owner of engine state change: {e}")
 

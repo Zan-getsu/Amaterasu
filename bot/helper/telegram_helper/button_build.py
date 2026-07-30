@@ -1,5 +1,5 @@
-from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from pyrogram.enums import ButtonStyle
+from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 from ...core.config_manager import Config
 from .inline_ui import style_inline_button
@@ -9,6 +9,11 @@ def _btn_style(style=None):
     if Config.COLORED_BTNS and style:
         return style
     return ButtonStyle.DEFAULT
+
+def _premium_label(label):
+    """Compatibility wrapper for the shared inline-button styler."""
+    return style_inline_button(label)
+
 
 class ButtonMaker:
     def __init__(self):

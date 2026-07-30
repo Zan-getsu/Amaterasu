@@ -109,9 +109,9 @@ async def start(_, message):
             msg = f"""<b>✦ ACCESS TOKEN</b>
 <i>Temporary access is ready for activation.</i>
 
-╭─ <b>Status</b> · <code>Generated</code>
-├─ <b>Token</b> · <code>{input_token}</code>
-╰─ <b>Validity</b> · <code>{get_readable_time(int(Config.VERIFY_TIMEOUT))}</code>"""
+╭─ <b>Status</b> : <code>Generated</code>
+├─ <b>Token</b> : <code>{input_token}</code>
+╰─ <b>Validity</b> : <code>{get_readable_time(int(Config.VERIFY_TIMEOUT))}</code>"""
             return await send_message(message, msg, reply_markup)
 
     if await CustomFilters.authorized(_, message):
@@ -217,7 +217,7 @@ async def ping(_, message):
     await edit_message(
         reply,
         "<b>✦ CONNECTION READY</b>\n"
-        f"<b>Latency</b> · <code>{int((end_time - start_time) * 1000)} ms</code>",
+        f"<b>Latency</b> : <code>{int((end_time - start_time) * 1000)} ms</code>",
     )
 
 

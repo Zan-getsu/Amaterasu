@@ -256,7 +256,7 @@ def _transfer_arrow(status):
 
 def _premium_field(label, value, *, code=True, branch="├─"):
     rendered = f"<code>{value}</code>" if code else str(value)
-    return f"{branch} <b>{label}</b> · {rendered}\n"
+    return f"{branch} <b>{label}</b> : {rendered}\n"
 
 
 async def get_readable_message(sid, is_user, page_no=1, status="All", page_step=1):
@@ -291,8 +291,8 @@ async def get_readable_message(sid, is_user, page_no=1, status="All", page_step=
         task_name = escape(task.name())
         status_name = escape(str(tstatus))
         msg += (
-            f"╭─ <b>TASK {index:02d}</b> · <i>{status_name.upper()}</i>\n"
-            f"│ {_status_icon(tstatus)} <b>{task_name}</b>\n"
+            f"╭─ {_status_icon(tstatus)} <b>TASK {index:02d}</b>"
+            f" : <b>{task_name}</b>\n"
         )
 
         if getattr(task.listener, "subname", False):
@@ -336,7 +336,7 @@ async def get_readable_message(sid, is_user, page_no=1, status="All", page_step=
                 try:
                     msg += _premium_field(
                         "Peers",
-                        f"{task.seeders_num()} seeders · {task.leechers_num()} leechers",
+                        f"{task.seeders_num()} seeders : {task.leechers_num()} leechers",
                     )
                 except Exception:
                     pass
@@ -379,7 +379,7 @@ async def get_readable_message(sid, is_user, page_no=1, status="All", page_step=
                 )
 
         msg += _premium_field(
-            "User", f"{_user_mention} · <code>{_user_id}</code>", code=False
+            "User", f"{_user_mention} : <code>{_user_id}</code>", code=False
         )
         msg += _premium_field(
             "Stop",
@@ -396,23 +396,29 @@ async def get_readable_message(sid, is_user, page_no=1, status="All", page_step=
             msg += f"<code>No Active {status} Tasks!</code>\n\n"
 
     msg += "<b>✦ SYSTEM METRICS</b>\n<pre>\n"
-    
+
     buttons = ButtonMaker()
     if not is_user:
         buttons.data_button(
-            "◉ OVERVIEW",
+            "📊 TASK STATS",
             f"status {sid} ov",
             position="header",
             style=ButtonStyle.PRIMARY,
         )
+    buttons.data_button(
+        "↻ REFRESH",
+        f"status {sid} ref",
+        position="header",
+        style=ButtonStyle.PRIMARY,
+    )
     if len(tasks) > STATUS_LIMIT:
-        buttons.data_button("❮ PREV", f"status {sid} pre", position="header")
+        buttons.data_button("❮ PREV", f"status {sid} pre", position="f_body")
         buttons.data_button(
             f"{page_no:02d} / {pages:02d}",
             f"status {sid} ref",
-            position="header",
+            position="f_body",
         )
-        buttons.data_button("NEXT ❯", f"status {sid} nex", position="header")
+        buttons.data_button("NEXT ❯", f"status {sid} nex", position="f_body")
         if tasks_no > 30:
             for i in [1, 2, 4, 6, 8, 10, 15]:
                 buttons.data_button(str(i), f"status {sid} ps {i}", position="footer")
@@ -420,8 +426,7 @@ async def get_readable_message(sid, is_user, page_no=1, status="All", page_step=
         for label, status_value in list(STATUSES.items()):
             if status_value != status:
                 buttons.data_button(f"▸ {label.upper()}", f"status {sid} st {status_value}")
-    buttons.data_button("↻ REFRESH", f"status {sid} ref", position="header", style=ButtonStyle.PRIMARY)
-    button = buttons.build_menu(8)
+    button = buttons.build_menu(2, h_cols=2, fb_cols=3)
 
     metrics = []
     if len(tasks) > STATUS_LIMIT:

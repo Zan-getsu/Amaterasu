@@ -74,8 +74,8 @@ async def search(key, site, message, method):
                 await edit_message(
                     message,
                     "<b>✦ NO RESULTS FOUND</b>\n"
-                    f"<i>Query</i> · <code>{escape(str(key))}</code>\n"
-                    f"<i>Source</i> · <code>{escape(str(SITES.get(site)))}</code>",
+                    f"<i>Query</i> : <code>{escape(str(key))}</code>\n"
+                    f"<i>Source</i> : <code>{escape(str(SITES.get(site)))}</code>",
                 )
                 return
             msg = (
@@ -114,8 +114,8 @@ async def search(key, site, message, method):
             await edit_message(
                 message,
                 "<b>✦ NO RESULTS FOUND</b>\n"
-                f"<i>Query</i> · <code>{escape(str(key))}</code>\n"
-                f"<i>Source</i> · <code>{escape(site.capitalize())}</code>",
+                f"<i>Query</i> : <code>{escape(str(key))}</code>\n"
+                f"<i>Source</i> : <code>{escape(site.capitalize())}</code>",
             )
             return
         msg = (

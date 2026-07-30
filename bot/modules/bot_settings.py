@@ -347,15 +347,15 @@ ONOFF_VARS = [
 async def get_buttons(key=None, edit_type=None, edit_mode=False):
     buttons = ButtonMaker()
     if key is None:
-        buttons.data_button("⚙ CONFIG VARIABLES", "botset var")
-        buttons.data_button("◉ MODULE SETTINGS", "botset setonoff")
-        buttons.data_button("▣ PRIVATE FILES", "botset private open")
-        buttons.data_button("◈ QBITTORRENT", "botset qbit")
-        buttons.data_button("◈ ARIA2C", "botset aria")
-        buttons.data_button("◈ SABNZBD", "botset nzb")
+        buttons.data_button("✦ CONFIG VARIABLES", "botset var")
+        buttons.data_button("✦ MODULE SETTINGS", "botset setonoff")
+        buttons.data_button("✦ PRIVATE FILES", "botset private open")
+        buttons.data_button("✦ QBITTORRENT", "botset qbit")
+        buttons.data_button("✦ ARIA2C", "botset aria")
+        buttons.data_button("✦ SABNZBD", "botset nzb")
         buttons.data_button("↻ SYNC JDOWNLOADER", "botset syncjd")
         buttons.data_button(
-            "◆ ENCODE PRESET", "botset botvar_edit DEFAULT_ENCODE_PRESET"
+            "✦ ENCODE PRESET", "botset botvar_edit DEFAULT_ENCODE_PRESET"
         )
         buttons.data_button("✕ CLOSE", "botset close", style=ButtonStyle.DANGER)
         msg = (
@@ -421,10 +421,10 @@ async def get_buttons(key=None, edit_type=None, edit_mode=False):
             key_display = escape(str(key))
             msg = (
                 "<b>✦ VARIABLE DETAILS</b>\n\n"
-                f"<b>Name</b> · <code>{key_display}</code>\n"
+                f"<b>Name</b> : <code>{key_display}</code>\n"
             )
             msg += (
-                f"<b>Description</b> · "
+                f"<b>Description</b> : "
                 f"<i>{escape(DEFAULT_DESP.get(key, 'No description provided'))}</i>"
                 "\n\n"
             )
@@ -434,7 +434,7 @@ async def get_buttons(key=None, edit_type=None, edit_mode=False):
             elif key in PROTECTED_VARS:
                 value = "<hidden>"
             msg += (
-                f"<b>Current value</b> · "
+                f"<b>Current value</b> : "
                 f"<code>{escape(str(value))}</code>\n\n"
             )
             buttons.data_button(
@@ -478,7 +478,7 @@ async def get_buttons(key=None, edit_type=None, edit_mode=False):
             )
         msg = (
             "<b>✦ CONFIG VARIABLES</b>\n"
-            f"<i>Page {int(start / 10) + 1} · {state.upper()} mode</i>"
+            f"<i>Page {int(start / 10) + 1} : {state.upper()} mode</i>"
         )
     elif key == "setonoff":
         for k in ONOFF_VARS:
@@ -546,7 +546,7 @@ async def get_buttons(key=None, edit_type=None, edit_mode=False):
             )
         msg = (
             "<b>✦ ARIA2C SETTINGS</b>\n"
-            f"<i>Page {int(start / 10) + 1} · {state.upper()} mode</i>"
+            f"<i>Page {int(start / 10) + 1} : {state.upper()} mode</i>"
         )
     elif key == "qbit":
         for k in list(qbit_options.keys())[start : 10 + start]:
@@ -564,7 +564,7 @@ async def get_buttons(key=None, edit_type=None, edit_mode=False):
             )
         msg = (
             "<b>✦ QBITTORRENT SETTINGS</b>\n"
-            f"<i>Page {int(start / 10) + 1} · {state.upper()} mode</i>"
+            f"<i>Page {int(start / 10) + 1} : {state.upper()} mode</i>"
         )
     elif key == "nzb":
         for k in list(nzb_options.keys())[start : 10 + start]:
@@ -583,7 +583,7 @@ async def get_buttons(key=None, edit_type=None, edit_mode=False):
             )
         msg = (
             "<b>✦ SABNZBD SETTINGS</b>\n"
-            f"<i>Page {int(start / 10) + 1} · {state.upper()} mode</i>"
+            f"<i>Page {int(start / 10) + 1} : {state.upper()} mode</i>"
         )
     elif key == "nzbserver":
         servers = Config.USENET_SERVERS if isinstance(Config.USENET_SERVERS, list) else []
@@ -600,7 +600,7 @@ async def get_buttons(key=None, edit_type=None, edit_mode=False):
                 )
         msg = (
             "<b>✦ USENET SERVERS</b>\n"
-            f"<i>Page {int(start / 10) + 1} · {state.upper()} mode</i>"
+            f"<i>Page {int(start / 10) + 1} : {state.upper()} mode</i>"
         )
     elif key.startswith("nzbser"):
         servers = Config.USENET_SERVERS if isinstance(Config.USENET_SERVERS, list) else []
@@ -623,7 +623,7 @@ async def get_buttons(key=None, edit_type=None, edit_mode=False):
                 )
         msg = (
             "<b>✦ SERVER DETAILS</b>\n"
-            f"<i>Page {int(start / 10) + 1} · {state.upper()} mode</i>"
+            f"<i>Page {int(start / 10) + 1} : {state.upper()} mode</i>"
         )
     else:
         msg = "<b>✦ UNKNOWN OPTION</b>\n<i>This settings page is unavailable.</i>"

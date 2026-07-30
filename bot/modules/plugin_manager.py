@@ -146,7 +146,7 @@ async def plugins_command(client: Client, message: Message):
 
     except Exception as e:
         LOGGER.error(f"Error in plugins_command: {e}", exc_info=True)
-        await message.reply_text("Error loading plugin menu")
+        await message.reply_text("<b>✦ PLUGIN MENU ERROR</b>")
 
 
 @new_task

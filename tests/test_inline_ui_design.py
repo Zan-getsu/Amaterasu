@@ -26,16 +26,17 @@ def test_inline_button_labels_use_the_amaterasu_design_language():
 
     expected = {
         "❖ OPTION": "✦ OPTION",
-        "Back": "‹ BACK",
-        "↩ BACK": "‹ BACK",
-        "Next Page": "NEXT ›",
+        "Back": "↩ BACK",
+        "↩ BACK": "↩ BACK",
+        "Next Page": "NEXT ❯",
         "Close": "✕ CLOSE",
         "❌ Cancel": "✕ CANCEL",
         "Yes!": "✓ CONFIRM",
         "Done Selecting": "✓ DONE",
-        "Edit": "✎ EDIT",
-        "View": "◉ VIEW",
+        "Edit": "✦ EDIT",
+        "View": "✦ VIEW",
         "Reset": "↻ RESET",
+        "⚙ Packages": "✦ PACKAGES",
     }
 
     for original, styled in expected.items():
@@ -52,7 +53,7 @@ def test_all_buttonmaker_buttons_pass_through_the_shared_styler():
     assert source.count("text=style_inline_button(key)") == 2
 
 
-def test_panel_renderer_upgrades_headers_and_tree_rows():
+def test_panel_renderer_upgrades_header_without_rewriting_code_rows():
     inline_ui = _load_inline_ui()
     legacy = (
         "<b>✦ SAMPLE PANEL</b>\n"
@@ -63,15 +64,12 @@ def test_panel_renderer_upgrades_headers_and_tree_rows():
 
     styled = inline_ui.style_inline_text(legacy, has_buttons=True)
 
-    assert styled.startswith(
-        "<blockquote><b>✦ SAMPLE PANEL</b></blockquote>"
-    )
-    assert "┌─" not in styled
-    assert "├─" not in styled
-    assert "└─" not in styled
-    assert " • <b>Name:</b> <code>example.mkv</code>" in styled
-    assert " • <b>Size:</b> <code>1.4 GB</code>" in styled
-    assert " • <b>State:</b> <code>Ready</code>" in styled
+    assert styled.startswith("<b>✦ SAMPLE PANEL</b>")
+    assert (
+        "<code>┌─ Name: example.mkv\n"
+        "├─ Size: 1.4 GB\n"
+        "└─ State: Ready</code>"
+    ) in styled
 
 
 def test_button_driven_plain_titles_receive_a_panel_header():
@@ -80,9 +78,7 @@ def test_button_driven_plain_titles_receive_a_panel_header():
         "<b>Select a destination</b>\nChoose one below.",
         has_buttons=True,
     )
-    assert styled.startswith(
-        "<blockquote><b>✦ Select a destination</b></blockquote>"
-    )
+    assert styled.startswith("<b>✦ SELECT A DESTINATION</b>")
 
 
 def test_message_entry_points_use_the_shared_panel_renderer():
@@ -127,8 +123,11 @@ def test_system_metrics_suffix_is_byte_for_byte_protected():
     styled = inline_ui.style_inline_text(message, has_buttons=True)
 
     assert styled.endswith(metrics)
-    assert "<blockquote><b>✦ ACTIVE TASKS</b></blockquote>" in styled
-    assert " • <b>Status:</b> <code>Download</code>" in styled
+    assert "<b>✦ ACTIVE TASKS</b>" in styled
+    assert (
+        "<code>┌─ Status: Download\n└─ Speed: 1.19MB/s</code>"
+        in styled
+    )
 
 
 def test_task_card_redesign_retains_all_existing_information():
@@ -240,9 +239,8 @@ async def test_rendered_task_card_preserves_fields_and_metrics(monkeypatch):
     inline_ui = _load_inline_ui()
     styled = inline_ui.style_inline_text(raw, has_buttons=True)
 
-    assert styled.startswith(
-        "<blockquote><b>✦ DOWNLOAD TELEMETRY</b></blockquote>"
-    )
+    assert styled.startswith("<b>✦ DOWNLOAD TELEMETRY</b>")
+    assert "📥 <b>TASK 01</b> : <b>Example Movie</b>" in styled
     for value in (
         "Example Movie",
         "Download",
@@ -251,7 +249,7 @@ async def test_rendered_task_card_preserves_fields_and_metrics(monkeypatch):
         "1.40GB",
         "1.19MB/s",
         "17m30s",
-        "1 seeders · 1 leechers",
+        "1 seeders : 1 leechers",
         "qBit v4.5.2",
         "#qBit → #Leech",
         "Example User",
