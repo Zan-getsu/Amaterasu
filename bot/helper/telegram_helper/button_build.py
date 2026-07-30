@@ -2,18 +2,13 @@ from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from pyrogram.enums import ButtonStyle
 
 from ...core.config_manager import Config
+from .inline_ui import style_inline_button
 
 
 def _btn_style(style=None):
     if Config.COLORED_BTNS and style:
         return style
     return ButtonStyle.DEFAULT
-
-
-def _premium_label(label):
-    """Keep inline-keyboard typography consistent across every bot surface."""
-    return str(label).replace("\u2756", "✦").strip()
-
 
 class ButtonMaker:
     def __init__(self):
@@ -28,14 +23,14 @@ class ButtonMaker:
     def url_button(self, key, link, position=None, style=None):
         self.buttons[position if position in self.buttons else "default"].append(
             InlineKeyboardButton(
-                text=_premium_label(key), url=link, style=_btn_style(style)
+                text=style_inline_button(key), url=link, style=_btn_style(style)
             )
         )
 
     def data_button(self, key, data, position=None, style=None):
         self.buttons[position if position in self.buttons else "default"].append(
             InlineKeyboardButton(
-                text=_premium_label(key),
+                text=style_inline_button(key),
                 callback_data=data,
                 style=_btn_style(style),
             )

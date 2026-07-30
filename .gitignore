@@ -37,3 +37,9 @@ __pycache__/
 htmlcov/
 .ruff_cache/
 tests/
+!tests/
+tests/*
+!tests/test_native_terabox_port.py
+!tests/test_user_leech_font.py
+!tests/test_status_network_metrics.py
+!tests/test_inline_ui_design.py

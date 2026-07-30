@@ -340,7 +340,18 @@ async def get_document_type(path):
     mime_type = await sync_to_async(get_mime_type, path)
     if mime_type.startswith("image"):
         return False, False, True
-    if mime_type.startswith("text"):
+    non_media_mimes = (
+        "application/pdf",
+        "application/epub",
+        "application/msword",
+        "application/vnd.openxmlformats",
+        "application/vnd.ms-",
+        "application/rtf",
+        "application/json",
+        "text/",
+        "font/",
+    )
+    if mime_type.startswith(non_media_mimes):
         return False, False, False
     try:
         result = await cmd_exec(

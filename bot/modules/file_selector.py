@@ -111,9 +111,77 @@ async def select(_, message):
 
 @new_task
 async def confirm_selection(_, query):
-    user_id = query.from_user.id
+    sender = query.from_user or getattr(query, "sender_chat", None)
+    if sender is None:
+        await query.answer("Could not identify sender.", show_alert=True)
+        return
+    user_id = sender.id
     data = query.data.split()
     message = query.message
+    if len(data) < 3:
+        await query.answer("Invalid selection action.", show_alert=True)
+        return
+
+    if data[2].startswith("terabox_"):
+        from ..helper.mirror_leech_utils.download_utils.terabox_download import (
+            cancel_terabox_selection,
+            get_terabox_selection_owner_id,
+            resume_terabox_with_selection,
+        )
+
+        real_gid = data[2].removeprefix("terabox_")
+        owner_id = get_terabox_selection_owner_id(real_gid)
+        if owner_id is None:
+            await query.answer("This task has been cancelled!", show_alert=True)
+            await delete_message(message)
+            return
+        if user_id != owner_id:
+            await query.answer("This task is not for you!", show_alert=True)
+            return
+        if data[1] == "pin":
+            await query.answer(
+                data[3] if len(data) >= 4 else "Missing PIN value.",
+                show_alert=True,
+            )
+        elif data[1] == "done":
+            await query.answer()
+            await resume_terabox_with_selection(real_gid)
+            await delete_message(message)
+        else:
+            await delete_message(message)
+            await cancel_terabox_selection(real_gid)
+        return
+
+    if data[2].startswith("rclone_"):
+        from ..helper.mirror_leech_utils.download_utils.rclone_download import (
+            cancel_rclone_selection,
+            get_rclone_selection_owner_id,
+            resume_rclone_with_selection,
+        )
+
+        real_gid = data[2].removeprefix("rclone_")
+        owner_id = get_rclone_selection_owner_id(real_gid)
+        if owner_id is None:
+            await query.answer("This task has been cancelled!", show_alert=True)
+            await delete_message(message)
+            return
+        if user_id != owner_id:
+            await query.answer("This task is not for you!", show_alert=True)
+            return
+        if data[1] == "pin":
+            await query.answer(
+                data[3] if len(data) >= 4 else "Missing PIN value.",
+                show_alert=True,
+            )
+        elif data[1] == "done":
+            await query.answer()
+            await resume_rclone_with_selection(real_gid)
+            await delete_message(message)
+        else:
+            await delete_message(message)
+            await cancel_rclone_selection(real_gid)
+        return
+
     task = await get_task_by_gid(data[2])
     if task is None:
         await query.answer("This task has been cancelled!", show_alert=True)
@@ -166,4 +234,3 @@ async def confirm_selection(_, query):
     else:
         await delete_message(message)
         await task.cancel_task()
-

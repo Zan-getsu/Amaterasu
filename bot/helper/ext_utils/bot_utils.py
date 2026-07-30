@@ -220,26 +220,68 @@ def compare_versions(v1, v2):
     )
 
 
+def get_valid_base_url():
+    base_url = (Config.BASE_URL or "").strip().rstrip("/")
+    if not base_url:
+        return ""
+    parsed = urlparse(base_url)
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        LOGGER.warning("Invalid BASE_URL for web selection: %r", Config.BASE_URL)
+        return ""
+    return base_url
+
+
 def bt_selection_buttons(id_):
     gid = id_[:12] if len(id_) > 25 else id_
     token = make_short_token(get_web_secret(), "torrent-select", id_)
+    base_url = get_valid_base_url()
     buttons = ButtonMaker()
     if Config.WEB_PINCODE:
         buttons.url_button(
             "Select Files",
-            f"{Config.BASE_URL}/app/files?gid={id_}",
+            f"{base_url}/app/files?gid={id_}",
             style=ButtonStyle.PRIMARY,
         )
         buttons.data_button("Pincode", f"sel pin {gid} {token}")
     else:
         buttons.url_button(
             "Select Files",
-            f"{Config.BASE_URL}/app/files?gid={id_}&pin={token}",
+            f"{base_url}/app/files?gid={id_}&pin={token}",
             style=ButtonStyle.PRIMARY,
         )
     buttons.data_button("Done Selecting", f"sel done {gid} {id_}")
     buttons.data_button("✕ CANCEL", f"sel cancel {gid}", style=ButtonStyle.DANGER)
     return buttons.build_menu(2)
+
+
+def _selection_buttons(gid, selector_type):
+    token = make_short_token(get_web_secret(), f"{selector_type}-select", gid)
+    base_url = get_valid_base_url()
+    buttons = ButtonMaker()
+    if Config.WEB_PINCODE:
+        buttons.url_button(
+            "Select Files",
+            f"{base_url}/app/files?gid={gid}&type={selector_type}",
+            style=ButtonStyle.PRIMARY,
+        )
+        buttons.data_button("Pincode", f"sel pin {gid} {token}")
+    else:
+        buttons.url_button(
+            "Select Files",
+            f"{base_url}/app/files?gid={gid}&pin={token}&type={selector_type}",
+            style=ButtonStyle.PRIMARY,
+        )
+    buttons.data_button("Done Selecting", f"sel done {gid} {gid}")
+    buttons.data_button("✕ CANCEL", f"sel cancel {gid}", style=ButtonStyle.DANGER)
+    return buttons.build_menu(2)
+
+
+def terabox_selection_buttons(gid):
+    return _selection_buttons(gid, "terabox")
+
+
+def rclone_selection_buttons(gid):
+    return _selection_buttons(gid, "rclone")
 
 
 async def get_telegraph_list(telegraph_content):

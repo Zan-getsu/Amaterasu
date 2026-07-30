@@ -26,6 +26,7 @@ from ..helper.ext_utils.bot_utils import (
     update_user_ldata,
 )
 from ..helper.ext_utils.db_handler import database
+from ..helper.ext_utils.leech_font import LEECH_FONT_STYLES, normalize_leech_font
 from ..helper.ext_utils.mega_utils import get_mega_account_info
 from ..helper.ext_utils.media_utils import create_thumb
 from ..helper.ext_utils.status_utils import get_readable_file_size
@@ -64,6 +65,7 @@ leech_options = [
     "LEECH_DUMP_CHAT",
     "LEECH_PREFIX",
     "LEECH_SUFFIX",
+    "LEECH_FONT",
     "LEECH_CAPTION",
     "THUMBNAIL_LAYOUT",
 ]
@@ -109,6 +111,12 @@ user_settings_text = {
         "",
         "<i>Send your <code>rclone.conf</code> file to use as your Upload Dest to RClone.</i> \n┖ <b>Time Left :</b> <code>60 sec</code>",
     ),
+    "TERABOX_COOKIE": (
+        "File",
+        "Your private TeraBox session cookie for account browsing, downloads, and uploads.",
+        "<i>Send a cookies.txt export from a logged-in TeraBox browser session.</i> "
+        "\n┖ <b>Time Left :</b> <code>60 sec</code>",
+    ),
     "TOKEN_PICKLE": (
         "",
         "",
@@ -138,6 +146,13 @@ user_settings_text = {
         "",
         "",
         "Send Leech Filename Suffix. You can add HTML tags. Example: <code>@mychannel</code>.</i> \n┖ <b>Time Left :</b> <code>60 sec</code>",
+    ),
+    "LEECH_FONT": (
+        "String",
+        "Font style applied to the generated leech caption.",
+        "Send one font style: <code>b</code>, <code>i</code>, <code>u</code>, "
+        "<code>s</code>, <code>code</code>, or <code>spoiler</code>."
+        "\n┖ <b>Time Left :</b> <code>60 sec</code>",
     ),
     "LEECH_CAPTION": (
         "",
@@ -422,8 +437,12 @@ async def get_user_settings(from_user, stype="main"):
             default_upload = user_dict["DEFAULT_UPLOAD"]
         elif "DEFAULT_UPLOAD" not in user_dict:
             default_upload = Config.DEFAULT_UPLOAD
-        du = "GDRIVE API" if default_upload == "gd" else "RCLONE"
-        dur = "GDRIVE API" if default_upload != "gd" else "RCLONE"
+        _du_names = {"gd": "GDRIVE API", "rc": "RCLONE", "tbx": "TERABOX"}
+        du = _du_names.get(default_upload, "RCLONE")
+        next_upload = {"rc": "gd", "gd": "tbx", "tbx": "rc"}.get(
+            default_upload, "rc"
+        )
+        dur = _du_names[next_upload]
         buttons.data_button(
             f"✦ Swap to {dur} Mode", f"userset {user_id} {default_upload}"
         )
@@ -484,6 +503,14 @@ async def get_user_settings(from_user, stype="main"):
             lsuffix = Config.LEECH_SUFFIX
         else:
             lsuffix = "Not Exists"
+
+        buttons.data_button("✦ LEECH FONT", f"userset {user_id} menu LEECH_FONT")
+        if user_dict.get("LEECH_FONT", False):
+            lfont = user_dict["LEECH_FONT"]
+        elif "LEECH_FONT" not in user_dict and Config.LEECH_FONT:
+            lfont = Config.LEECH_FONT
+        else:
+            lfont = "None"
 
         buttons.data_button("✦ LEECH CAPTION", f"userset {user_id} menu LEECH_CAPTION")
         if user_dict.get("LEECH_CAPTION", False):
@@ -556,6 +583,7 @@ async def get_user_settings(from_user, stype="main"):
 ├─ {'Media Group':<15}: {media_group}
 ├─ {'Prefix':<15}: {escape(lprefix)}
 ├─ {'Suffix':<15}: {escape(lsuffix)}
+├─ {'Font':<15}: {escape(lfont)}
 ├─ {'Caption':<15}: {escape(lcap)}
 ├─ {'Destination':<15}: {leech_dest}
 └─ {'Thumb Layout':<15}: {thumb_layout}
@@ -833,6 +861,14 @@ async def get_user_settings(from_user, stype="main"):
 """
     elif stype == "mirror":
         buttons.data_button("⚙ RClone Tools", f"userset {user_id} rclone")
+        buttons.data_button(
+            "⚙ TeraBox Cookie", f"userset {user_id} menu TERABOX_COOKIE"
+        )
+        tbx_cookie = (
+            "Exists"
+            if await aiopath.exists(f"terabox_cookies/{user_id}.txt")
+            else "Not Exists"
+        )
         rccmsg = "Exists" if await aiopath.exists(rclone_conf) else "Not Exists"
         if user_dict.get("RCLONE_PATH", False):
             rccpath = user_dict["RCLONE_PATH"]
@@ -881,6 +917,7 @@ async def get_user_settings(from_user, stype="main"):
 <code>┌─ {'Name':<11}: {user_name}
 ├─ {'Rclone Conf':<11}: {rccmsg}
 ├─ {'Rclone Path':<11}: {rccpath}
+├─ {'TeraBox':<11}: {tbx_cookie}
 ├─ {'Gdrive Tok':<11}: {tokenmsg}
 ├─ {'Gdrive ID':<11}: {gdrive_id}
 ├─ {'Index Link':<11}: {index}
@@ -1189,6 +1226,11 @@ async def add_file(_, message, ftype, rfunc):
         await makedirs(cpath, exist_ok=True)
         des_dir = f"{cpath}/cookies.txt"
         await message.download(file_name=des_dir)
+    elif ftype == "TERABOX_COOKIE":
+        tbpath = f"{getcwd()}/terabox_cookies/"
+        await makedirs(tbpath, exist_ok=True)
+        des_dir = f"{tbpath}{user_id}.txt"
+        await message.download(file_name=des_dir)
     await delete_message(message)
     update_user_ldata(user_id, ftype, des_dir)
     await rfunc()
@@ -1261,6 +1303,14 @@ async def set_option(_, message, option, rfunc):
         for x in fx:
             x = x.lstrip(".")
             value.append(x.strip().lower())
+    elif option == "LEECH_FONT":
+        value = normalize_leech_font(value)
+        if not value:
+            await send_message(
+                message,
+                f"Leech Font must be one of: {', '.join(LEECH_FONT_STYLES)}.",
+            )
+            return
     elif option == "YT_TAGS":
         if isinstance(value, str):
             value = [tag.strip() for tag in value.split(",") if tag.strip()]
@@ -1361,10 +1411,17 @@ async def get_menu(option, message, user_id):
         "RCLONE_CONFIG": f"rclone/{user_id}.conf",
         "TOKEN_PICKLE": f"tokens/{user_id}.pickle",
         "USER_COOKIE_FILE": f"cookies/{user_id}/cookies.txt",
+        "TERABOX_COOKIE": f"terabox_cookies/{user_id}.txt",
     }
 
     buttons = ButtonMaker()
-    if option in ["THUMBNAIL", "RCLONE_CONFIG", "TOKEN_PICKLE", "USER_COOKIE_FILE"]:
+    if option in [
+        "THUMBNAIL",
+        "RCLONE_CONFIG",
+        "TOKEN_PICKLE",
+        "USER_COOKIE_FILE",
+        "TERABOX_COOKIE",
+    ]:
         key = "file"
     else:
         key = "set"
@@ -1542,6 +1599,7 @@ async def edit_user_settings(client, query):
     rclone_conf = f"rclone/{user_id}.conf"
     token_pickle = f"tokens/{user_id}.pickle"
     yt_cookie_path = f"cookies/{user_id}/cookies.txt"
+    terabox_cookie_path = f"terabox_cookies/{user_id}.txt"
 
     user_dict = user_data.get(user_id, {})
     if user_id != int(data[1]):
@@ -1752,6 +1810,7 @@ async def edit_user_settings(client, query):
             "RCLONE_CONFIG",
             "TOKEN_PICKLE",
             "USER_COOKIE_FILE",
+            "TERABOX_COOKIE",
         ]:
             if data[3] == "THUMBNAIL":
                 fpath = thumb_path
@@ -1759,6 +1818,8 @@ async def edit_user_settings(client, query):
                 fpath = rclone_conf
             elif data[3] == "USER_COOKIE_FILE":
                 fpath = yt_cookie_path
+            elif data[3] == "TERABOX_COOKIE":
+                fpath = terabox_cookie_path
             else:
                 fpath = token_pickle
             if await aiopath.exists(fpath):
@@ -1791,7 +1852,13 @@ async def edit_user_settings(client, query):
             for k in list(user_dict.keys()):
                 if k not in ("SUDO", "AUTH", "VERIFY_TOKEN", "VERIFY_TIME"):
                     del user_dict[k]
-            for fpath in [thumb_path, rclone_conf, token_pickle, yt_cookie_path]:
+            for fpath in [
+                thumb_path,
+                rclone_conf,
+                token_pickle,
+                yt_cookie_path,
+                terabox_cookie_path,
+            ]:
                 if await aiopath.exists(fpath):
                     await remove(fpath)
             await update_user_settings(query)
@@ -1802,9 +1869,9 @@ async def edit_user_settings(client, query):
     elif data[2] == "view":
         await query.answer()
         await send_file(message, thumb_path, name)
-    elif data[2] in ["gd", "rc"]:
+    elif data[2] in ["gd", "rc", "tbx"]:
         await query.answer()
-        du = "rc" if data[2] == "gd" else "gd"
+        du = {"rc": "gd", "gd": "tbx", "tbx": "rc"}.get(data[2], "rc")
         update_user_ldata(user_id, "DEFAULT_UPLOAD", du)
         await update_user_settings(query, stype="general")
         await database.update_user_data(user_id)

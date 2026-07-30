@@ -119,8 +119,11 @@ class Config:
     MEGA_EMAIL = ""
     MEGA_PASSWORD = ""
     DISABLE_MEGA = False
+    TERABOX_ENABLED = True
+    TERABOX_UPLOAD_PATH = ""
     DIRECT_LIMIT = 0
     MEGA_LIMIT = 0
+    TERABOX_LIMIT = 0
     TORRENT_LIMIT = 0
     GD_DL_LIMIT = 0
     RC_DL_LIMIT = 0
@@ -362,10 +365,21 @@ class Config:
             return None
         return text in ("true", "1", "t", "y", "yes", "on")
 
+    @staticmethod
+    def _normalize_default_upload(value):
+        value = str(value or "").strip().lower()
+        if value == "tb":
+            return "tbx"
+        if value in {"gd", "rc", "tbx", "mega"}:
+            return value
+        return "rc"
+
     @classmethod
     def set(cls, key, value):
         if hasattr(cls, key):
-            if key == "CLOUDFLARE_TUNNEL_AUTO_FQDN":
+            if key == "DEFAULT_UPLOAD":
+                value = cls._normalize_default_upload(value)
+            elif key == "CLOUDFLARE_TUNNEL_AUTO_FQDN":
                 value = cls._coerce_optional_bool(value)
             else:
                 value = cls._convert_env_type(key, value)
@@ -464,8 +478,8 @@ class Config:
                     continue
                 if isinstance(value, str):
                     value = value.strip()
-                if attr == "DEFAULT_UPLOAD" and value != "gd":
-                    value = "rc"
+                if attr == "DEFAULT_UPLOAD":
+                    value = cls._normalize_default_upload(value)
                 elif attr in [
                     "BASE_URL",
                     "RCLONE_SERVE_URL",
@@ -574,8 +588,8 @@ class Config:
             if key == "CLOUDFLARE_TUNNEL_AUTO_FQDN" and has_auto_url:
                 continue
             if hasattr(cls, key):
-                if key == "DEFAULT_UPLOAD" and value != "gd":
-                    value = "rc"
+                if key == "DEFAULT_UPLOAD":
+                    value = cls._normalize_default_upload(value)
                 elif key in [
                     "BASE_URL",
                     "RCLONE_SERVE_URL",

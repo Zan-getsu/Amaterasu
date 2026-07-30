@@ -88,7 +88,10 @@ async def send_filetolink_status(message):
         username = getattr(getattr(client, "me", None), "username", None)
         name = f"@{username}" if username else ("main bot" if client_id == 0 else "stream bot")
         load = stream_loads.get(client_id, 0)
-        client_lines.append(f"├─ #{client_id}: {escape(str(name))} | load {load}")
+        client_lines.append(
+            f" • <code>#{client_id}</code> <b>{escape(str(name))}</b>"
+            f"  •  load <code>{load}</code>"
+        )
 
     cache_dir, cache_files, cache_size = _cache_usage()
     cache_max_mb = environ.get("FILETOLINK_CACHE_MAX_MB", "256")
@@ -97,7 +100,11 @@ async def send_filetolink_status(message):
     bin_channel = Config.BIN_CHANNEL or "Disabled"
     leech_dump = Config.LEECH_DUMP_CHAT or "Disabled"
     stream_count = len(stream_clients) or 1
-    client_block = "\n".join(client_lines) if client_lines else "└─ #0: main bot | load 0"
+    client_block = (
+        "\n".join(client_lines)
+        if client_lines
+        else " • <code>#0</code> <b>main bot</b>  •  load <code>0</code>"
+    )
 
     text = (
         "<b>✦ FILETOLINK STATUS</b>\n"

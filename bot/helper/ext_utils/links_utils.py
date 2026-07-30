@@ -1,5 +1,6 @@
 from re import match as re_match
 from base64 import urlsafe_b64decode, urlsafe_b64encode
+from urllib.parse import urlparse
 
 
 def is_magnet(url: str):
@@ -58,6 +59,35 @@ def is_telegram_link(url: str):
 
 def is_mega_link(url: str):
     return "mega.nz" in url or "mega.co.nz" in url
+
+
+_TERABOX_DOMAINS = (
+    "terabox.com",
+    "terabox.app",
+    "teraboxapp.com",
+    "1024terabox.com",
+    "1024tera.com",
+    "freeterabox.com",
+    "nephobox.com",
+    "4funbox.com",
+    "mirrobox.com",
+    "momerybox.com",
+    "teraboxlink.com",
+    "teraboxshare.com",
+    "terabox.club",
+    "terasharelink.com",
+    "terafileshare.com",
+    "gibibox.com",
+    "goaibox.com",
+    "dubox.com",
+)
+
+
+def is_terabox_link(url: str):
+    if not isinstance(url, str) or not url:
+        return False
+    host = (urlparse(url).hostname or "").lower().rstrip(".")
+    return any(host == domain or host.endswith(f".{domain}") for domain in _TERABOX_DOMAINS)
 
 
 def is_pixeldrain_link(url: str):
