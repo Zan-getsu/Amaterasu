@@ -98,7 +98,7 @@ def _fuzzy_search_command(query):
         if best_match and best_score > 60:
             return (
                 "<b>✦ COMMAND MATCH</b>\n"
-                f"<i>Match confidence · {best_score}%</i>\n\n"
+                f"<i>Match confidence : {best_score}%</i>\n\n"
                 f"{best_match}\n\n"
                 "Use /help to browse every command."
             )

@@ -81,16 +81,19 @@ async def get_stats(event, key="home"):
     btns = ButtonMaker()
     if key == "home":
         btns = ButtonMaker()
-        btns.data_button("◉ BOT HEALTH", f"stats {user_id} stbot")
-        btns.data_button("▣ OPERATING SYSTEM", f"stats {user_id} stsys")
-        btns.data_button("⌁ REPOSITORY", f"stats {user_id} strepo")
-        btns.data_button("◆ PACKAGES", f"stats {user_id} stpkgs")
-        btns.data_button("◈ TASK LIMITS", f"stats {user_id} tlimits")
-        btns.data_button("⌬ PROCESSES", f"stats {user_id} systasks")
-        msg = (
-            "<b>✦ SYSTEM DASHBOARD</b>\n"
-            "<i>Select a telemetry panel to inspect.</i>"
-        )
+        btns.data_button("✦ BOT HEALTH", f"stats {user_id} stbot")
+        btns.data_button("✦ OPERATING SYSTEM", f"stats {user_id} stsys")
+        btns.data_button("✦ REPOSITORY", f"stats {user_id} strepo")
+        btns.data_button("✦ PACKAGES", f"stats {user_id} stpkgs")
+        btns.data_button("✦ TASK LIMITS", f"stats {user_id} tlimits")
+        btns.data_button("✦ PROCESSES", f"stats {user_id} systasks")
+        msg = """<b>✦ SYSTEM DASHBOARD</b>
+<pre>┌─ BOT HEALTH
+├─ OPERATING SYSTEM
+├─ REPOSITORY
+├─ PACKAGES
+├─ TASK LIMITS
+└─ SYSTEM PROCESSES</pre>"""
     elif key == "stbot":
         total, used, free, disk = disk_usage("/")
         swap = swap_memory()

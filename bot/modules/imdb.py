@@ -291,7 +291,7 @@ def get_poster(query, bulk=False, id=False, file=None):
         "metascore": str(getattr(movie, "metacritic_rating", "") or ""),
         "end_year": _end_year_str,
         "certificate": _certificate,
-        "keywords": " · ".join(_keywords_list[:10]) or "",
+        "keywords": " : ".join(_keywords_list[:10]) or "",
         "creators": list_to_str([i.name for i in _creators_list[:3]]) or "N/A",
         "budget": getattr(movie, "production_budget", "") or "",
         "box_opening": _box_office.get("opening_weekend", "") or "",
@@ -549,7 +549,7 @@ async def imdb_callback(_, query):
         if keywords:
             kw_items = "".join(
                 f"<li><code>{kw.strip()}</code></li>"
-                for kw in keywords.split(" · ")[:10]
+                for kw in keywords.split(" : ")[:10]
                 if kw.strip()
             )
             keywords_html = f"""

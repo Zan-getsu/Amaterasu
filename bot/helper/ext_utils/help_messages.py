@@ -628,7 +628,7 @@ def get_help_string():
             entries.append(escape(line))
             continue
         entries.append(
-            f"{escape(command.strip())} · "
+            f"{escape(command.strip())} : "
             f"<i>{escape(description.strip())}</i>"
         )
 

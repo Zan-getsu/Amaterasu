@@ -73,10 +73,15 @@ async def send_notification(user_id, message_text, pref_override=None):
     if pref == "silent":
         return
     try:
-        from ...core.tg_client import TgClient
         from ...core.config_manager import Config
+        from ...core.tg_client import TgClient
+        from ..telegram_helper.ui_style import style_panel_text
+
         if TgClient.bot and Config.OWNER_ID:
-            await TgClient.bot.send_message(user_id, message_text)
+            await TgClient.bot.send_message(
+                user_id,
+                style_panel_text(message_text),
+            )
     except Exception as e:
         LOGGER.warning(f"Failed to send notification to user {user_id}: {e}")
 

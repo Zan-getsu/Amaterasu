@@ -1595,15 +1595,15 @@ async def edit_user_settings(client, query):
         
         profile_name = escape(str(pdata.get("name", pid)))
         text = (
-            f"<b>✦ ENCODE PROFILE · {profile_name}</b>\n"
+            f"<b>✦ ENCODE PROFILE : {profile_name}</b>\n"
             "<i>Review the active codecs and parameters.</i>\n\n"
-            f"╭─ <b>Video codec</b> · "
+            f"╭─ <b>Video codec</b> : "
             f"<code>{escape(str(pdata.get('video_codec', 'libsvtav1')))}</code>\n"
-            f"├─ <b>Audio codec</b> · "
+            f"├─ <b>Audio codec</b> : "
             f"<code>{escape(str(pdata.get('audio_codec', 'libopus')))}</code>\n"
-            f"├─ <b>Video params</b> · "
+            f"├─ <b>Video params</b> : "
             f"<code>{escape(str(pdata.get('video_params', {})))}</code>\n"
-            f"╰─ <b>Audio params</b> · "
+            f"╰─ <b>Audio params</b> : "
             f"<code>{escape(str(pdata.get('audio_params', {})))}</code>"
         )
         

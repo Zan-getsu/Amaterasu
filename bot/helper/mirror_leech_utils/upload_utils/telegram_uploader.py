@@ -213,9 +213,11 @@ class TelegramUploader:
 ┠ <b>User :</b> {self._listener.user.mention} ( #ID{self._listener.user_id} ){msg_link_text}
 ┖ <b>Source :</b> <a href='{self._listener.source_url}'>Click Here</a>"""
             try:
+                from ...telegram_helper.ui_style import style_panel_text
+
                 self._log_msg = await TgClient.bot.send_message(
                     chat_id=self._listener.up_dest,
-                    text=msg,
+                    text=style_panel_text(msg),
                     disable_web_page_preview=True,
                     message_thread_id=self._listener.chat_thread_id,
                     disable_notification=True,

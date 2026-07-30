@@ -183,7 +183,7 @@ class TaskListener(TaskConfig):
         
         buttons = ButtonMaker()
         buttons.data_button(
-            "◆ DEFAULT · SVT-AV1", f"enc {self.user_id} sel default"
+            "◆ DEFAULT : SVT-AV1", f"enc {self.user_id} sel default"
         )
         
         for pid, pdata in profiles.items():
@@ -199,7 +199,7 @@ class TaskListener(TaskConfig):
             self.message,
             "<b>✦ ENCODING PROFILE</b>\n"
             "<i>Select a profile for this task.</i>\n\n"
-            "<b>Timeout</b> · <code>60s</code>",
+            "<b>Timeout</b> : <code>60s</code>",
             buttons.build_menu(2),
         )
         
