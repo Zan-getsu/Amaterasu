@@ -81,13 +81,16 @@ async def get_stats(event, key="home"):
     btns = ButtonMaker()
     if key == "home":
         btns = ButtonMaker()
-        btns.data_button("⚙ BOT", f"stats {user_id} stbot")
-        btns.data_button("⚙ OS", f"stats {user_id} stsys")
-        btns.data_button("⚙ REPO", f"stats {user_id} strepo")
-        btns.data_button("⚙ PKGS", f"stats {user_id} stpkgs")
-        btns.data_button("⚙ LIMITS", f"stats {user_id} tlimits")
-        btns.data_button("⚙ SYS", f"stats {user_id} systasks")
-        msg = "<b>❖ SYSTEM DASHBOARD</b>"
+        btns.data_button("◉ BOT HEALTH", f"stats {user_id} stbot")
+        btns.data_button("▣ OPERATING SYSTEM", f"stats {user_id} stsys")
+        btns.data_button("⌁ REPOSITORY", f"stats {user_id} strepo")
+        btns.data_button("◆ PACKAGES", f"stats {user_id} stpkgs")
+        btns.data_button("◈ TASK LIMITS", f"stats {user_id} tlimits")
+        btns.data_button("⌬ PROCESSES", f"stats {user_id} systasks")
+        msg = (
+            "<b>✦ SYSTEM DASHBOARD</b>\n"
+            "<i>Select a telemetry panel to inspect.</i>"
+        )
     elif key == "stbot":
         total, used, free, disk = disk_usage("/")
         swap = swap_memory()
@@ -108,7 +111,7 @@ async def get_stats(event, key="home"):
         sys_cpu = cpu_count(logical=True)
         p_cores = cpu_count(logical=False)
         v_cores = (sys_cpu or 0) - (p_cores or 0)
-        msg = f"""<b>❖ BOT STATISTICS</b>
+        msg = f"""<b>✦ BOT STATISTICS</b>
 <pre>┌─ {'Uptime':<9}: {get_readable_time(time() - bot_start_time)}
 ├─ ─── INSTANCE RAM ─────────────
 ├─ {'Progress':<9}: {get_progress_bar_string(bot_ram_pct)} {bot_ram_pct}%
@@ -145,7 +148,7 @@ async def get_stats(event, key="home"):
         sys_cpu = cpu_count(logical=True)
         p_cores = cpu_count(logical=False)
         v_cores = (sys_cpu or 0) - (p_cores or 0)
-        msg = f"""<b>❖ SYSTEM OS</b>
+        msg = f"""<b>✦ SYSTEM OS</b>
 <pre>┌─ {'Uptime':<9}: {get_readable_time(time() - boot_time())}
 ├─ {'Version':<9}: {version()}
 ├─ {'Arch':<9}: {platform()}
@@ -188,7 +191,7 @@ async def get_stats(event, key="home"):
             )
         )[0]
         official_v = official_v.strip() or "N/A"
-        msg = f"""<b>❖ REPO METRICS</b>
+        msg = f"""<b>✦ REPO METRICS</b>
 <pre>┌─ {'Updated':<10}: {last_commit}
 ├─ {'Current':<10}: {get_version()}
 ├─ {'Latest':<10}: {official_v}
@@ -197,7 +200,7 @@ async def get_stats(event, key="home"):
 </pre>"""
     elif key == "stpkgs":
         ver = bot_cache.get("eng_versions", {})
-        msg = f"""<b>❖ PACKAGES</b>
+        msg = f"""<b>✦ PACKAGES</b>
 <pre>┌─ {'Python':<11}: {ver.get("python", "N/A")}
 ├─ {'Aria2':<11}: {ver.get("aria2", "N/A")}
 ├─ {'qBittorrent':<11}: {ver.get("qBittorrent", "N/A")}
@@ -212,7 +215,7 @@ async def get_stats(event, key="home"):
 └─ {'MegaSDK':<11}: {ver.get("mega", "N/A")}
 </pre>"""
     elif key == "tlimits":
-        msg = f"""<b>❖ TASK LIMITS</b>
+        msg = f"""<b>✦ TASK LIMITS</b>
 <pre>┌─ {'Direct':<11}: {Config.DIRECT_LIMIT or "∞"} GB
 ├─ {'Torrent':<11}: {Config.TORRENT_LIMIT or "∞"} GB
 ├─ {'GDrive':<11}: {Config.GD_DL_LIMIT or "∞"} GB
@@ -258,7 +261,7 @@ async def get_stats(event, key="home"):
         except Exception:
             processes = []
 
-        msg = "<b>❖ SYSTEM TASKS</b>\n<pre>"
+        msg = "<b>✦ SYSTEM TASKS</b>\n<pre>"
 
         if processes:
             for i, proc in enumerate(processes, 1):

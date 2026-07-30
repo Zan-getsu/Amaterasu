@@ -43,7 +43,7 @@ async def task_status(_, message):
     if count == 0:
         currentTime = get_readable_time(time() - bot_start_time)
         free = get_readable_file_size(disk_usage(DOWNLOAD_DIR).free)
-        msg = f"""<b>❖ NO ACTIVE TASKS</b>
+        msg = f"""<b>✦ NO ACTIVE TASKS</b>
 <pre>┌─ {'CPU':<9}: {cpu_percent()}%
 ├─ {'RAM':<9}: {virtual_memory().percent}%
 ├─ {'Free':<9}: {free} [{round(100 - disk_usage(DOWNLOAD_DIR).percent, 1)}%]
@@ -206,7 +206,7 @@ async def status_pages(_, query):
                 case _:
                     tasks["Download"] += 1
 
-        msg = f"""<b>❖ TASKS OVERVIEW</b>
+        msg = f"""<b>✦ TASKS OVERVIEW</b>
 <pre>
 ┌─ {'Download':<9}: {tasks["Download"]} | {'Upload':<9}: {tasks["Upload"]}
 ├─ {'Seed':<9}: {tasks["Seed"]} | {'Archive':<9}: {tasks["Archive"]}

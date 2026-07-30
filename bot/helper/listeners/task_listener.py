@@ -112,7 +112,7 @@ class TaskListener(TaskConfig):
         if self.bot_pm and self.is_super_chat:
             self.pm_msg = await send_message(
                 self.user_id,
-                f"""<b>❖ TASK STARTED</b>
+                f"""<b>✦ TASK STARTED</b>
 <code>└─ {'Link':<9}: {self.source_url}
 </code>
 """,
@@ -120,7 +120,7 @@ class TaskListener(TaskConfig):
         if Config.LINKS_LOG_ID:
             await send_message(
                 Config.LINKS_LOG_ID,
-                f"""<b>❖ {mode_name.upper()} STARTED</b>
+                f"""<b>✦ {mode_name.upper()} STARTED</b>
 <code>┌─ {'User':<15}: {self.tag} ( #ID{self.user_id} )
 ├─ {'Message Link':<15}: {self.message.link}
 └─ {'Link':<15}: {self.source_url}
@@ -182,7 +182,9 @@ class TaskListener(TaskConfig):
         self._temp_profiles = profiles
         
         buttons = ButtonMaker()
-        buttons.data_button("Default (SVT-AV1)", f"enc {self.user_id} sel default")
+        buttons.data_button(
+            "◆ DEFAULT · SVT-AV1", f"enc {self.user_id} sel default"
+        )
         
         for pid, pdata in profiles.items():
             if pid == "_id":
@@ -192,8 +194,14 @@ class TaskListener(TaskConfig):
                 name = f"⭐ {name}"
             buttons.data_button(name, f"enc {self.user_id} sel {pid}")
             
-        buttons.data_button("✕ Cancel", f"enc {self.user_id} cancel")
-        reply_to = await send_message(self.message, "<b>Select Encoding Profile</b>\nTimeout: 60s", buttons.build_menu(2))
+        buttons.data_button("✕ CANCEL", f"enc {self.user_id} cancel")
+        reply_to = await send_message(
+            self.message,
+            "<b>✦ ENCODING PROFILE</b>\n"
+            "<i>Select a profile for this task.</i>\n\n"
+            "<b>Timeout</b> · <code>60s</code>",
+            buttons.build_menu(2),
+        )
         
         self.encode_event = Event()
         self.encode_profile = None
@@ -551,7 +559,7 @@ class TaskListener(TaskConfig):
                 self.message.link or f"pm:{self.user_id}:{self.message.id}"
             )
         msg = (
-            f"<b>❖ {escape(self.name)}</b>\n<code>"
+            f"<b>✦ {escape(self.name)}</b>\n<code>"
             f"┌─ {'Task Size':<15}: {get_readable_file_size(self.size)}"
             f"\n├─ {'Time Taken':<15}: {get_readable_time(time() - self.message.date.timestamp())}"
             f"\n├─ {'In Mode':<15}: </code>{self.mode[0]}<code>"
@@ -766,14 +774,14 @@ class TaskListener(TaskConfig):
             count = len(task_dict)
         await self.remove_from_same_dir()
         msg = (
-            f"""<b>❖ LIMIT BREACHED</b>
+            f"""<b>✦ LIMIT BREACHED</b>
 <code>┌─ {'Task Size':<12}: {get_readable_file_size(self.size)}
 ├─ {'In Mode':<12}: </code>{self.mode[0]}<code>
 ├─ {'Out Mode':<12}: </code>{self.mode[1]}<code>
 └─ {'Details':<12}: {error}
 </code>"""
             if is_limit
-            else f"""<b>❖ DOWNLOAD STOPPED</b>
+            else f"""<b>✦ DOWNLOAD STOPPED</b>
 <code>┌─ {'Due To':<12}: {escape(str(error))}
 ├─ {'Task Size':<12}: {get_readable_file_size(self.size)}
 ├─ {'Time Taken':<12}: {get_readable_time(time() - self.message.date.timestamp())}

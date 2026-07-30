@@ -219,6 +219,44 @@ def _get_progress_bar_icons():
     return escape(filled, quote=False), escape(empty, quote=False)
 
 
+def _status_icon(status):
+    return {
+        MirrorStatus.STATUS_DOWNLOAD: "📥",
+        MirrorStatus.STATUS_UPLOAD: "📤",
+        MirrorStatus.STATUS_QUEUEDL: "⏳",
+        MirrorStatus.STATUS_QUEUEUP: "⏳",
+        MirrorStatus.STATUS_PAUSED: "⏸",
+        MirrorStatus.STATUS_SEED: "🌱",
+        MirrorStatus.STATUS_ARCHIVE: "🗜",
+        MirrorStatus.STATUS_EXTRACT: "📦",
+        MirrorStatus.STATUS_SPLIT: "✂",
+        MirrorStatus.STATUS_CLONE: "♻",
+        MirrorStatus.STATUS_CHECK: "🔎",
+        MirrorStatus.STATUS_CONVERT: "🎞",
+        MirrorStatus.STATUS_FFMPEG: "🎞",
+        MirrorStatus.STATUS_ENCODE: "🎬",
+        MirrorStatus.STATUS_METADATA: "🏷",
+        MirrorStatus.STATUS_YT: "▶",
+    }.get(status, "⚙")
+
+
+def _transfer_arrow(status):
+    if status in (MirrorStatus.STATUS_DOWNLOAD, MirrorStatus.STATUS_QUEUEDL):
+        return "↓"
+    if status in (
+        MirrorStatus.STATUS_UPLOAD,
+        MirrorStatus.STATUS_QUEUEUP,
+        MirrorStatus.STATUS_SEED,
+    ):
+        return "↑"
+    return "⇅"
+
+
+def _premium_field(label, value, *, code=True, branch="├─"):
+    rendered = f"<code>{value}</code>" if code else str(value)
+    return f"{branch} <b>{label}</b> · {rendered}\n"
+
+
 async def get_readable_message(sid, is_user, page_no=1, status="All", page_step=1):
     msg = ""
     button = None
@@ -236,7 +274,7 @@ async def get_readable_message(sid, is_user, page_no=1, status="All", page_step=
         status_dict[sid]["page_no"] = page_no
     start_position = (page_no - 1) * STATUS_LIMIT
 
-    msg = "<b>❖ DOWNLOAD TELEMETRY</b>\n\n"
+    msg = "<b>✦ DOWNLOAD TELEMETRY</b>\n\n"
 
     for index, task in enumerate(
         tasks[start_position : STATUS_LIMIT + start_position], start=1
@@ -247,13 +285,17 @@ async def get_readable_message(sid, is_user, page_no=1, status="All", page_step=
             tstatus = await task.status()
         else:
             tstatus = task.status()
-            
+
         task_name = escape(task.name())
-        msg += f"<code>┌─ {index:02d}. [ {task_name} ]"
-        
+        status_name = escape(str(tstatus))
+        msg += (
+            f"╭─ <b>TASK {index:02d}</b> · <i>{status_name.upper()}</i>\n"
+            f"│ {_status_icon(tstatus)} <b>{task_name}</b>\n"
+        )
+
         if getattr(task.listener, "subname", False):
             sub_name = escape(task.listener.subname)
-            msg += f"\n├─ {'Subname':<9}: {sub_name}"
+            msg += _premium_field("Subname", sub_name)
 
         elapsed = time() - task.listener.message.date.timestamp()
 
@@ -273,33 +315,49 @@ async def get_readable_message(sid, is_user, page_no=1, status="All", page_step=
             else:
                 subsize = ""
                 count = ""
-            
-            msg += f"\n├─ {'Status':<9}: {tstatus}"
-            msg += f"\n├─ {'Progress':<9}: {get_progress_bar_string(progress)} {progress}"
-            msg += f"\n├─ {'Processed':<9}: {task.processed_bytes()}{subsize} / {task.size()}"
+            msg += _premium_field("Status", status_name)
+            msg += _premium_field(
+                "Progress", f"{get_progress_bar_string(progress)} {progress}"
+            )
+            msg += _premium_field(
+                "Processed", f"{task.processed_bytes()}{subsize} / {task.size()}"
+            )
             if count:
-                msg += f"\n├─ {'Count':<9}: {count}"
-            msg += f"\n├─ {'Speed':<9}: ⇅ {task.speed()}"
-            msg += f"\n├─ {'ETA':<9}: ⏳ {task.eta()}"
-            
+                msg += _premium_field("Count", count)
+            msg += _premium_field(
+                "Speed", f"{_transfer_arrow(tstatus)} {task.speed()}"
+            )
+            msg += _premium_field("ETA", f"⏳ {task.eta()}")
+
             if tstatus == MirrorStatus.STATUS_DOWNLOAD and (
                 task.listener.is_torrent or task.listener.is_qbit
             ):
                 try:
-                    msg += f"\n├─ {'Peers':<9}: {task.seeders_num()}s / {task.leechers_num()}l"
+                    msg += _premium_field(
+                        "Peers",
+                        f"{task.seeders_num()} seeders · {task.leechers_num()} leechers",
+                    )
                 except Exception:
                     pass
         elif tstatus == MirrorStatus.STATUS_SEED:
-            msg += f"\n├─ {'Status':<9}: {tstatus}"
-            msg += f"\n├─ {'Size':<9}: {task.size()}"
-            msg += f"\n├─ {'Uploaded':<9}: {task.uploaded_bytes()}"
-            msg += f"\n├─ {'Speed':<9}: ⇅ {task.seed_speed()}"
-            msg += f"\n├─ {'Ratio':<9}: {task.ratio()}"
-            msg += f"\n├─ {'Time':<9}: ◷ {task.seeding_time()}"
+            msg += _premium_field("Status", status_name)
+            msg += _premium_field("Size", task.size())
+            msg += _premium_field("Uploaded", task.uploaded_bytes())
+            msg += _premium_field("Speed", f"↑ {task.seed_speed()}")
+            msg += _premium_field("Ratio", task.ratio())
+            msg += _premium_field("Time", f"◷ {task.seeding_time()}")
         else:
-            msg += f"\n├─ {'Size':<9}: {task.size()}"
-        msg += f"\n├─ {'Engine':<9}: {task.engine}"
-        msg += f"\n├─ {'Mode':<9}: {task.listener.mode[0]} / {task.listener.mode[1]}"
+            msg += _premium_field("Status", status_name)
+            msg += _premium_field("Size", task.size())
+        msg += _premium_field(
+            "Elapsed", f"◷ {get_readable_time(elapsed) or '0s'}"
+        )
+        msg += _premium_field("Engine", escape(str(task.engine)))
+        msg += _premium_field(
+            "Mode",
+            f"{escape(str(task.listener.mode[0]))} → "
+            f"{escape(str(task.listener.mode[1]))}",
+        )
         from ..telegram_helper.bot_commands import BotCommands
 
         if tstatus in [
@@ -312,10 +370,22 @@ async def get_readable_message(sid, is_user, page_no=1, status="All", page_step=
                 or task.listener.is_qbit
                 or task.listener.is_nzb
             ):
-                msg += f"\n├─ {'Select':<9}: </code>/{BotCommands.SelectCommand[1]}_{task.gid()[:8]}<code>"
+                msg += _premium_field(
+                    "Select",
+                    f"/{BotCommands.SelectCommand[1]}_{task.gid()[:8]}",
+                    code=False,
+                )
 
-        msg += f"\n├─ {'User':<9}: </code>{_user_mention}<code>"
-        msg += f"\n└─ {'Stop':<9}: </code>/{BotCommands.CancelTaskCommand[1]}_{task.gid()[:8]}\n\n"
+        msg += _premium_field(
+            "User", f"{_user_mention} · <code>{_user_id}</code>", code=False
+        )
+        msg += _premium_field(
+            "Stop",
+            f"/{BotCommands.CancelTaskCommand[1]}_{task.gid()[:8]}",
+            code=False,
+            branch="╰─",
+        )
+        msg += "\n"
 
     if len(msg) == 0:
         if status == "All":
@@ -323,13 +393,23 @@ async def get_readable_message(sid, is_user, page_no=1, status="All", page_step=
         else:
             msg += f"<code>No Active {status} Tasks!</code>\n\n"
 
-    msg += "<b>❖ SYSTEM METRICS</b>\n<pre>\n"
+    msg += "<b>✦ SYSTEM METRICS</b>\n<pre>\n"
     
     buttons = ButtonMaker()
     if not is_user:
-        buttons.data_button("📜 TSTATS", f"status {sid} ov", position="header", style=ButtonStyle.PRIMARY)
+        buttons.data_button(
+            "◉ OVERVIEW",
+            f"status {sid} ov",
+            position="header",
+            style=ButtonStyle.PRIMARY,
+        )
     if len(tasks) > STATUS_LIMIT:
         buttons.data_button("❮ PREV", f"status {sid} pre", position="header")
+        buttons.data_button(
+            f"{page_no:02d} / {pages:02d}",
+            f"status {sid} ref",
+            position="header",
+        )
         buttons.data_button("NEXT ❯", f"status {sid} nex", position="header")
         if tasks_no > 30:
             for i in [1, 2, 4, 6, 8, 10, 15]:

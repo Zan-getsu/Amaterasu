@@ -61,7 +61,7 @@ async def autorename_command(client, message):
     status_text = "ENABLED" if new_state else "DISABLED"
 
     msg = (
-        "<b>❖ AUTO-RENAME MODE</b>\n"
+        "<b>✦ AUTO-RENAME MODE</b>\n"
         "┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄\n"
         f"├ Status   : {status_icon} <code>{status_text}</code>\n"
         f"├ Template : <code>{current_template or 'Not Set'}</code>\n"
@@ -151,7 +151,7 @@ async def auto_rename_handler(client, message):
                 pct = (current * 100) / total if total else 0
                 await edit_message(
                     progress_msg,
-                    f"<b>❖ AUTO-RENAME DOWNLOAD</b>\n"
+                    f"<b>✦ AUTO-RENAME DOWNLOAD</b>\n"
                     f"┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄\n"
                     f"└ Prog : <code>{pct:.1f}%</code> of "
                     f"<code>{get_readable_file_size(total)}</code>",
@@ -207,7 +207,7 @@ async def auto_rename_handler(client, message):
                 pct = (current * 100) / total if total else 0
                 await edit_message(
                     progress_msg,
-                    f"<b>❖ AUTO-RENAME UPLOAD</b>\n"
+                    f"<b>✦ AUTO-RENAME UPLOAD</b>\n"
                     f"┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄\n"
                     f"└ Prog : <code>{pct:.1f}%</code> of "
                     f"<code>{get_readable_file_size(total)}</code>",

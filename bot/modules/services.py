@@ -83,13 +83,15 @@ async def start(_, message):
             if int(pre_uid) != userid:
                 return await send_message(
                     message,
-                    "<b>Access Token is not yours!</b>\n\n<i>Kindly generate your own to use.</i>",
+                    "<b>✦ TOKEN NOT VALID</b>\n"
+                    "<i>This access token belongs to another user. Generate your own token.</i>",
                 )
             data = user_data.get(userid, {})
             if "VERIFY_TOKEN" not in data or data["VERIFY_TOKEN"] != input_token:
                 return await send_message(
                     message,
-                    "<b>Access Token already used!</b>\n\n<i>Kindly generate a new one.</i>",
+                    "<b>✦ TOKEN ALREADY USED</b>\n"
+                    "<i>Generate a new access token to continue.</i>",
                 )
             elif (
                 Config.LOGIN_PASS
@@ -97,18 +99,19 @@ async def start(_, message):
             ):
                 return await send_message(
                     message,
-                    "<b>Bot Already Logged In via Password</b>\n\n<i>No Need to Accept Temp Tokens.</i>",
+                    "<b>✦ ACCESS ALREADY ACTIVE</b>\n"
+                    "<i>Your password login is active; a temporary token is not required.</i>",
                 )
             buttons.data_button(
-                "Activate Access Token", f"start pass {input_token}", "header"
+                "✓ ACTIVATE ACCESS", f"start pass {input_token}", "header"
             )
             reply_markup = buttons.build_menu(2)
-            msg = f"""⌬ Access Login Token : 
-    │
-    ┟ <b>Status</b> → <code>Generated Successfully</code>
-    ┟ <b>Access Token</b> → <code>{input_token}</code>
-    ┃
-    ┖ <b>Validity:</b> {get_readable_time(int(Config.VERIFY_TIMEOUT))}"""
+            msg = f"""<b>✦ ACCESS TOKEN</b>
+<i>Temporary access is ready for activation.</i>
+
+╭─ <b>Status</b> · <code>Generated</code>
+├─ <b>Token</b> · <code>{input_token}</code>
+╰─ <b>Validity</b> · <code>{get_readable_time(int(Config.VERIFY_TIMEOUT))}</code>"""
             return await send_message(message, msg, reply_markup)
 
     if await CustomFilters.authorized(_, message):
@@ -165,40 +168,56 @@ async def start_cb(_, query):
 @new_task
 async def login(_, message):
     if Config.LOGIN_PASS is None:
-        return await send_message(message, "<i>Login is not enabled !</i>")
+        return await send_message(
+            message,
+            "<b>✦ LOGIN UNAVAILABLE</b>\n<i>Password login is not enabled.</i>",
+        )
     elif len(message.command) > 1:
         user_id = message.from_user.id
         input_pass = message.command[1]
 
         if user_data.get(user_id, {}).get("VERIFY_TOKEN", "") == Config.LOGIN_PASS:
             return await send_message(
-                message, "<b>Already Bot Login In!</b>\n\n<i>No Need to Login Again</i>"
+                message,
+                "<b>✦ ALREADY LOGGED IN</b>\n"
+                "<i>Your permanent bot access is already active.</i>",
             )
 
         if input_pass.casefold() != Config.LOGIN_PASS.casefold():
             return await send_message(
-                message, "<b>Wrong Password!</b>\n\n<i>Kindly check and try again</i>"
+                message,
+                "<b>✦ LOGIN FAILED</b>\n"
+                "<i>The password is incorrect. Check it and try again.</i>",
             )
 
         update_user_ldata(user_id, "VERIFY_TOKEN", Config.LOGIN_PASS)
         if Config.DATABASE_URL:
             await database.update_user_data(user_id)
         return await send_message(
-            message, "<b>Bot Permanent Logged In!</b>\n\n<i>Now you can use the bot</i>"
+            message,
+            "<b>✦ LOGIN COMPLETE</b>\n"
+            "<i>Permanent bot access is now active.</i>",
         )
     else:
         await send_message(
-            message, "<b>Bot Login Usage :</b>\n\n<code>/login [password]</code>"
+            message,
+            "<b>✦ BOT LOGIN</b>\n"
+            "<i>Send your password with the command.</i>\n\n"
+            "/login <code>[password]</code>",
         )
 
 
 @new_task
 async def ping(_, message):
     start_time = monotonic()
-    reply = await send_message(message, "<i>Starting Ping..</i>")
+    reply = await send_message(
+        message, "<b>✦ CONNECTION TEST</b>\n<i>Measuring latency…</i>"
+    )
     end_time = monotonic()
     await edit_message(
-        reply, f"<i>Pong!</i>\n <code>{int((end_time - start_time) * 1000)} ms</code>"
+        reply,
+        "<b>✦ CONNECTION READY</b>\n"
+        f"<b>Latency</b> · <code>{int((end_time - start_time) * 1000)} ms</code>",
     )
 
 
@@ -249,8 +268,8 @@ def _redact_log_content(text: str) -> str:
 async def log(_, message):
     uid = message.from_user.id
     buttons = ButtonMaker()
-    buttons.data_button("Log Disp", f"log {uid} disp")
-    buttons.data_button("Web Log", f"log {uid} web")
+    buttons.data_button("▤ VIEW LOG", f"log {uid} disp")
+    buttons.data_button("↗ WEB PASTE", f"log {uid} web")
     buttons.data_button("✕ CLOSE", f"log {uid} close", style=ButtonStyle.DANGER)
     # Read log.txt, redact secrets, write to a temp file, send that.
     # Avoids sending the raw log.txt which may contain pass= / token=
@@ -309,7 +328,11 @@ async def log_cb(_, query):
                     break
 
             joined_res = '\n'.join(reversed(res))
-            text = f"<b>Showing Last {len(res)} Lines from log.txt:</b> \n\n----------<b>START LOG</b>----------\n\n<blockquote expandable>{escape(joined_res)}</blockquote>\n----------<b>END LOG</b>----------"
+            text = (
+                "<b>✦ RUNTIME LOG</b>\n"
+                f"<i>Showing the latest {len(res)} lines from log.txt.</i>\n\n"
+                f"<blockquote expandable>{escape(joined_res)}</blockquote>"
+            )
 
             btn = ButtonMaker()
             btn.data_button("✕ CLOSE", f"log {user_id} close", style=ButtonStyle.DANGER)

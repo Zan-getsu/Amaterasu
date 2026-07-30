@@ -46,7 +46,7 @@ def _setup_message(step, state):
     if step == "download_dir":
         current = getattr(Config, "DOWNLOAD_DIR", DOWNLOAD_DIR)
         return (
-            "<b>❖ Setup — Step 1/5: Download Directory</b>\n\n"
+            "<b>✦ Setup — Step 1/5: Download Directory</b>\n\n"
             f"<b>Current:</b> <code>{current}</code>\n\n"
             "<i>This is where downloaded files are stored. Ensure the "
             "path exists and is writable. The default "
@@ -62,7 +62,7 @@ def _setup_message(step, state):
         )
         status = "✅ Configured" if configured else "❌ Not configured"
         return (
-            "<b>❖ Setup — Step 2/5: Google Drive</b>\n\n"
+            "<b>✦ Setup — Step 2/5: Google Drive</b>\n\n"
             f"<b>Status:</b> {status}\n\n"
             "<i>To configure GDrive as an upload destination:\n"
             "1. Run <code>/tokengen</code> and open your private web link\n"
@@ -74,7 +74,7 @@ def _setup_message(step, state):
         configured = bool(getattr(Config, "RCLONE_PATH", ""))
         status = "✅ Configured" if configured else "❌ Not configured"
         return (
-            "<b>❖ Setup — Step 3/5: Rclone</b>\n\n"
+            "<b>✦ Setup — Step 3/5: Rclone</b>\n\n"
             f"<b>Status:</b> {status}\n\n"
             "<i>To configure Rclone:\n"
             "1. Run <code>rclone config</code> inside the container\n"
@@ -85,7 +85,7 @@ def _setup_message(step, state):
     elif step == "owner_id":
         oid = getattr(Config, "OWNER_ID", 0)
         return (
-            "<b>❖ Setup — Step 4/5: Owner Confirmation</b>\n\n"
+            "<b>✦ Setup — Step 4/5: Owner Confirmation</b>\n\n"
             f"<b>Current OWNER_ID:</b> <code>{oid}</code>\n\n"
             "<i>This is your Telegram user ID. You received this setup "
             "message because you are the owner. If this ID is correct, "
@@ -98,7 +98,7 @@ def _setup_message(step, state):
         ) else "❌"
         rclone_status = "✅" if getattr(Config, "RCLONE_PATH", "") else "❌"
         return (
-            "<b>❖ Setup — Step 5/5: Summary</b>\n\n"
+            "<b>✦ Setup — Step 5/5: Summary</b>\n\n"
             f"<code>┌─ Download Dir : {getattr(Config, 'DOWNLOAD_DIR', DOWNLOAD_DIR)}\n"
             f"├─ Google Drive  : {gdrive_status}\n"
             f"├─ Rclone        : {rclone_status}\n"

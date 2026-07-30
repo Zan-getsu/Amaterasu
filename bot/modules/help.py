@@ -1,3 +1,5 @@
+from html import escape
+
 from ..helper.ext_utils.bot_utils import COMMAND_USAGE, new_task
 from ..helper.ext_utils.help_messages import (
     YT_HELP_DICT,
@@ -60,8 +62,9 @@ async def bot_help(_, message):
             else:
                 await send_message(
                     message,
-                    f"<b>No command found for '{query}'.</b>\n"
-                    f"Use <code>/help</code> to browse all commands.",
+                    "<b>✦ NO COMMAND FOUND</b>\n"
+                    f"<i>Nothing matched “{escape(query)}”.</i>\n\n"
+                    "Use /help to browse the command directory.",
                 )
             return
     # No query — show full help
@@ -93,12 +96,21 @@ def _fuzzy_search_command(query):
                 best_score = score
                 best_match = line
         if best_match and best_score > 60:
-            return f"<b>Found (score: {best_score}):</b>\n<code>{best_match}</code>\n\nUse /help to browse all commands."
+            return (
+                "<b>✦ COMMAND MATCH</b>\n"
+                f"<i>Match confidence · {best_score}%</i>\n\n"
+                f"{best_match}\n\n"
+                "Use /help to browse every command."
+            )
         return ""
     except ImportError:
         # rapidfuzz not installed — fall back to substring search
         query_lower = query.lower()
         matches = [l for l in lines if query_lower in l.lower()]
         if matches:
-            return f"<b>Found:</b>\n<code>{matches[0]}</code>\n\nUse /help to browse all commands."
+            return (
+                "<b>✦ COMMAND MATCH</b>\n\n"
+                f"{matches[0]}\n\n"
+                "Use /help to browse every command."
+            )
         return ""

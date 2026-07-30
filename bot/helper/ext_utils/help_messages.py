@@ -470,9 +470,11 @@ BOT_COMMANDS = get_bot_commands()
 
 
 def get_help_string():
+    from html import escape
+
     from ..telegram_helper.bot_commands import BotCommands
 
-    help_lines = ["NOTE: Try each command without any argument to see more detalis."]
+    help_lines = []
 
     commands = BotCommands.get_commands()
 
@@ -619,7 +621,23 @@ def get_help_string():
         elif key in BOT_COMMANDS:
             help_lines.append(f"{cmd_str}: {BOT_COMMANDS[key]}")
 
-    return "\n".join(help_lines)
+    entries = []
+    for line in help_lines:
+        command, separator, description = line.partition(":")
+        if not separator:
+            entries.append(escape(line))
+            continue
+        entries.append(
+            f"{escape(command.strip())} · "
+            f"<i>{escape(description.strip())}</i>"
+        )
+
+    return (
+        "<b>✦ COMMAND DIRECTORY</b>\n"
+        "<i>Tap a command to use it, or send it without arguments for details.</i>"
+        "\n\n"
+        + "\n".join(entries)
+    )
 
 
 help_string = get_help_string()

@@ -100,7 +100,7 @@ async def send_filetolink_status(message):
     client_block = "\n".join(client_lines) if client_lines else "└─ #0: main bot | load 0"
 
     text = (
-        "<b>❖ FILETOLINK STATUS</b>\n"
+        "<b>✦ FILETOLINK STATUS</b>\n"
         "<code>"
         f"┌─ {'Base URL':<12}: {escape(str(base_url))}\n"
         f"├─ {'BIN_CHANNEL':<12}: {escape(str(bin_channel))}\n"
@@ -197,7 +197,7 @@ async def prepare_stored_media(message):
         file_id = getattr(media, "file_unique_id", "Unknown")
         
         reply_text = (
-            f"<b>❖ FILETOLINK LOGGER</b>\n<code>"
+            f"<b>✦ FILETOLINK LOGGER</b>\n<code>"
             f"┌─ {'Requested':<10}: </code>{user_mention}<code>\n"
             f"├─ {'User ID':<10}: {user_id}\n"
             f"└─ {'File ID':<10}: {file_id}</code>"
@@ -216,13 +216,23 @@ async def prepare_stored_media(message):
 
 
 def build_caption(title, filename, readable_size, stream_link, download_link):
-    title = title.replace("❖ ", "").strip()
+    title = title.replace("✦ ", "").strip()
+    safe_filename = escape(str(filename))
+    safe_size = escape(str(readable_size))
+    safe_download_text = escape(str(download_link))
+    safe_download_href = escape(str(download_link), quote=True)
+    safe_stream_text = escape(str(stream_link))
+    safe_stream_href = escape(str(stream_link), quote=True)
     caption = (
-        f"<b>❖ {title}</b>\n"
-        f"<code>┌─ {'Name':<6} : {filename}\n"
-        f"└─ {'Size':<6} : {readable_size}</code>\n\n"
-        f"<b>⋗ Download Link:</b>\n<code>{download_link}</code>\n\n"
-        f"<b>⋗ Stream Link:</b>\n<code>{stream_link}</code>"
+        f"<b>✦ {title}</b>\n"
+        "<i>Your secure media links are ready.</i>\n\n"
+        "╭─ <b>FILE DETAILS</b>\n"
+        f"├─ <b>Name</b> · <code>{safe_filename}</code>\n"
+        f"╰─ <b>Size</b> · <code>{safe_size}</code>\n\n"
+        f"<b>↓ Download</b>\n<a href=\"{safe_download_href}\">"
+        f"{safe_download_text}</a>\n\n"
+        f"<b>▶ Stream</b>\n<a href=\"{safe_stream_href}\">"
+        f"{safe_stream_text}</a>"
     )
     return caption
 
@@ -264,12 +274,22 @@ async def process_media_message(client, message, reply_to_msg):
             
         markup, stream_link, download_link = await generate_link_markup(chat_id, message_id, filename, secure_hash)
         
-        caption = build_caption("𝗬𝗼𝘂𝗿 𝗟𝗶𝗻𝗸 𝗚𝗲𝗻𝗲𝗿𝗮𝘁𝗲𝗱 !", filename, readable_size, stream_link, download_link)
+        caption = build_caption(
+            "YOUR LINKS ARE READY",
+            filename,
+            readable_size,
+            stream_link,
+            download_link,
+        )
         
         await edit_message(status_msg, caption, markup)
     except Exception as e:
         LOGGER.error(f"Error in FileToLink processing: {e}")
-        await edit_message(status_msg, f"<b>⚑ ERROR:</b> <i>Failed to generate links. {str(e)}</i>")
+        await edit_message(
+            status_msg,
+            f"<b>✦ LINK GENERATION FAILED</b>\n"
+            f"<i>{escape(str(e))}</i>",
+        )
 
 async def link_command_handler(client, message):
     input_list = (message.text or "").split()
@@ -319,14 +339,20 @@ async def link_command_handler(client, message):
                 markup, stream_link, download_link = await generate_link_markup(t_chat_id, t_message_id, filename, secure_hash)
                 
                 readable_size = get_readable_file_size(getattr(media, "file_size", 0) or 0)
-                caption = build_caption(f"𝗕𝗮𝘁𝗰𝗵 𝗙𝗶𝗹𝗲 {processed + 1}", filename, readable_size, stream_link, download_link)
+                caption = build_caption(
+                    f"BATCH FILE {processed + 1}",
+                    filename,
+                    readable_size,
+                    stream_link,
+                    download_link,
+                )
                 await send_message(message, caption, markup)
                 processed += 1
             except Exception as e:
                 LOGGER.error(f"Failed to process batch message {msg_id}: {e}")
                 failed += 1
                 
-        await edit_message(status_msg, f"<b>❖ BATCH COMPLETED</b>\n\n<code>┌─ {'Processed':<9} : {processed}\n└─ {'Failed':<9} : {failed}</code>")
+        await edit_message(status_msg, f"<b>✦ BATCH COMPLETED</b>\n\n<code>┌─ {'Processed':<9} : {processed}\n└─ {'Failed':<9} : {failed}</code>")
     else:
         await process_media_message(client, message, message.reply_to_message)
 

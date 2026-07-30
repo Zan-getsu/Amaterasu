@@ -5,6 +5,7 @@ from asyncio import (
 )
 from ast import literal_eval
 from functools import partial
+from html import escape
 from io import BytesIO
 from os import getcwd
 from shlex import quote as shlex_quote
@@ -342,16 +343,21 @@ ONOFF_VARS = [
 async def get_buttons(key=None, edit_type=None, edit_mode=False):
     buttons = ButtonMaker()
     if key is None:
-        buttons.data_button("Config Variables", "botset var")
-        buttons.data_button("Module Settings", "botset setonoff")
-        buttons.data_button("Private Files", "botset private open")
-        buttons.data_button("Qbit Settings", "botset qbit")
-        buttons.data_button("Aria2c Settings", "botset aria")
-        buttons.data_button("Sabnzbd Settings", "botset nzb")
-        buttons.data_button("JDownloader Sync", "botset syncjd")
-        buttons.data_button("Encode Preset", "botset botvar_edit DEFAULT_ENCODE_PRESET")
+        buttons.data_button("⚙ CONFIG VARIABLES", "botset var")
+        buttons.data_button("◉ MODULE SETTINGS", "botset setonoff")
+        buttons.data_button("▣ PRIVATE FILES", "botset private open")
+        buttons.data_button("◈ QBITTORRENT", "botset qbit")
+        buttons.data_button("◈ ARIA2C", "botset aria")
+        buttons.data_button("◈ SABNZBD", "botset nzb")
+        buttons.data_button("↻ SYNC JDOWNLOADER", "botset syncjd")
+        buttons.data_button(
+            "◆ ENCODE PRESET", "botset botvar_edit DEFAULT_ENCODE_PRESET"
+        )
         buttons.data_button("✕ CLOSE", "botset close", style=ButtonStyle.DANGER)
-        msg = "Bot Settings:"
+        msg = (
+            "<b>✦ BOT SETTINGS</b>\n"
+            "<i>Configure Amaterasu services, engines, and runtime behavior.</i>"
+        )
     elif edit_type is not None:
         if edit_type == "botvar":
             msg = ""
@@ -374,7 +380,6 @@ async def get_buttons(key=None, edit_type=None, edit_mode=False):
             if isinstance(val, dict):
                 val_str = f"\n<pre><code class='language-python'>{json.dumps(val, indent=4)}</code></pre>\n"
             else:
-                from html import escape
                 val_str = f"'{escape(str(val))}'"
             msg += f"Send a valid value for {key}. Current value is {val_str}. Timeout: 60 sec"
         elif edit_type == "ariavar":
@@ -409,14 +414,25 @@ async def get_buttons(key=None, edit_type=None, edit_mode=False):
             else:
                 msg = f"<i>Send a valid value for <code>{key}</code> in server <code>{Config.USENET_SERVERS[index]['name']}</code>.</i> Current value is <code>{Config.USENET_SERVERS[index][key]}</code>\n┖ <b>Time Left :</b> <code>60 sec</code>"
         elif edit_type == "editvar":
-            msg = f"<b>Variable:</b> <code>{key}</code>\n\n"
-            msg += f"<b>Description:</b> {DEFAULT_DESP.get(key, 'No Description Provided')}\n\n"
+            key_display = escape(str(key))
+            msg = (
+                "<b>✦ VARIABLE DETAILS</b>\n\n"
+                f"<b>Name</b> · <code>{key_display}</code>\n"
+            )
+            msg += (
+                f"<b>Description</b> · "
+                f"<i>{escape(DEFAULT_DESP.get(key, 'No description provided'))}</i>"
+                "\n\n"
+            )
             value = Config.get(key)
             if value == "":
                 value = "None"
             elif key in PROTECTED_VARS:
                 value = "<hidden>"
-            msg += f"<b>Current Value:</b> <code>{value}</code>\n\n"
+            msg += (
+                f"<b>Current value</b> · "
+                f"<code>{escape(str(value))}</code>\n\n"
+            )
             buttons.data_button(
                 "View Value", f"botset showvar {key}", position="header"
             )
@@ -456,7 +472,10 @@ async def get_buttons(key=None, edit_type=None, edit_mode=False):
             buttons.data_button(
                 f"{int(x / 10) + 1}", f"botset start var {x}", position="footer"
             )
-        msg = f"⌬ <b><u>Config Variables</u></b> | <b><u>Page: {int(start / 10) + 1}</b></u>"
+        msg = (
+            "<b>✦ CONFIG VARIABLES</b>\n"
+            f"<i>Page {int(start / 10) + 1} · {state.upper()} mode</i>"
+        )
     elif key == "setonoff":
         for k in ONOFF_VARS:
             val = Config.get(k)
@@ -467,7 +486,10 @@ async def get_buttons(key=None, edit_type=None, edit_mode=False):
                 buttons.data_button(label, f"botset toggleonoff {k} off")
         buttons.data_button("Back", "botset back", position="footer")
         buttons.data_button("Close", "botset close", position="footer", style=ButtonStyle.DANGER)
-        msg = "⌬ <b><u>Module Settings</u></b>"
+        msg = (
+            "<b>✦ MODULE SETTINGS</b>\n"
+            "<i>Enabled modules are marked with a check.</i>"
+        )
     elif key == "private":
         if edit_mode:
             buttons.data_button("Stop Invoke File", "botset private stop", "header")
@@ -492,7 +514,7 @@ async def get_buttons(key=None, edit_type=None, edit_mode=False):
                 ]
             ]
         )
-        msg = f"""<b>❖ PRIVATE FILE SETTINGS</b>
+        msg = f"""<b>✦ PRIVATE FILE SETTINGS</b>
 <pre>
 ├─ ─── DASHBOARD ─────────────────
 {txt}
@@ -517,7 +539,10 @@ async def get_buttons(key=None, edit_type=None, edit_mode=False):
             buttons.data_button(
                 f"{int(x / 10)}", f"botset start aria {x}", position="footer"
             )
-        msg = f"Aria2c Options | Page: {int(start / 10)} | State: {state}"
+        msg = (
+            "<b>✦ ARIA2C SETTINGS</b>\n"
+            f"<i>Page {int(start / 10) + 1} · {state.upper()} mode</i>"
+        )
     elif key == "qbit":
         for k in list(qbit_options.keys())[start : 10 + start]:
             buttons.data_button(k, f"botset qbitvar {k}")
@@ -532,7 +557,10 @@ async def get_buttons(key=None, edit_type=None, edit_mode=False):
             buttons.data_button(
                 f"{int(x / 10)}", f"botset start qbit {x}", position="footer"
             )
-        msg = f"Qbittorrent Options | Page: {int(start / 10)} | State: {state}"
+        msg = (
+            "<b>✦ QBITTORRENT SETTINGS</b>\n"
+            f"<i>Page {int(start / 10) + 1} · {state.upper()} mode</i>"
+        )
     elif key == "nzb":
         for k in list(nzb_options.keys())[start : 10 + start]:
             buttons.data_button(k, f"botset nzbvar {k}")
@@ -548,7 +576,10 @@ async def get_buttons(key=None, edit_type=None, edit_mode=False):
             buttons.data_button(
                 f"{int(x / 10)}", f"botset start nzb {x}", position="footer"
             )
-        msg = f"Sabnzbd Options | Page: {int(start / 10)} | State: {state}"
+        msg = (
+            "<b>✦ SABNZBD SETTINGS</b>\n"
+            f"<i>Page {int(start / 10) + 1} · {state.upper()} mode</i>"
+        )
     elif key == "nzbserver":
         servers = Config.USENET_SERVERS if isinstance(Config.USENET_SERVERS, list) else []
         if len(servers) > 0:
@@ -562,7 +593,10 @@ async def get_buttons(key=None, edit_type=None, edit_mode=False):
                 buttons.data_button(
                     f"{int(x / 10)}", f"botset start nzbser {x}", position="footer"
                 )
-        msg = f"Usenet Servers | Page: {int(start / 10)} | State: {state}"
+        msg = (
+            "<b>✦ USENET SERVERS</b>\n"
+            f"<i>Page {int(start / 10) + 1} · {state.upper()} mode</i>"
+        )
     elif key.startswith("nzbser"):
         servers = Config.USENET_SERVERS if isinstance(Config.USENET_SERVERS, list) else []
         index = int(key.replace("nzbser", ""))
@@ -582,9 +616,12 @@ async def get_buttons(key=None, edit_type=None, edit_mode=False):
                 buttons.data_button(
                     f"{int(x / 10)}", f"botset start {key} {x}", position="footer"
                 )
-        msg = f"Server Keys | Page: {int(start / 10)} | State: {state}"
+        msg = (
+            "<b>✦ SERVER DETAILS</b>\n"
+            f"<i>Page {int(start / 10) + 1} · {state.upper()} mode</i>"
+        )
     else:
-        msg = "Unknown option"
+        msg = "<b>✦ UNKNOWN OPTION</b>\n<i>This settings page is unavailable.</i>"
 
     return msg, buttons.build_menu(1 if key is None else 2)
 
