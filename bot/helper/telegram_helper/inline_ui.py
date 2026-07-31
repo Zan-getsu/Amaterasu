@@ -1,5 +1,8 @@
 """Shared presentation rules for Amaterasu's Telegram interface."""
 
+from re import DOTALL
+from re import compile as re_compile
+
 try:
     from .ui_style import style_panel_text
 except ImportError:  # Support direct module loading in isolated tests.
@@ -56,6 +59,8 @@ _BUTTON_LABELS = {
 
 _LEGACY_MENU_PREFIXES = ("◉ ", "▣ ", "◈ ", "⌁ ", "⌬ ", "◆ ", "⚙ ")
 _PREMIUM_PREFIXES = ("✦ ", "↩ ", "↻ ", "✕ ")
+_LEGACY_TREE_BLOCK = re_compile(r"<code>(?P<body>.*?)</code>", DOTALL)
+_TREE_PREFIXES = ("┌─", "├─", "└─")
 
 
 def style_inline_button(label):
@@ -75,7 +80,42 @@ def style_inline_button(label):
     return label
 
 
+def _style_legacy_tree(match):
+    """Upgrade legacy code-tree cards while leaving ordinary code untouched."""
+    lines = match.group("body").strip("\n").splitlines()
+    if not lines or any(
+        not line.strip().startswith(_TREE_PREFIXES) for line in lines
+    ):
+        return match.group(0)
+
+    fields = []
+    for raw_line in lines:
+        row = raw_line.strip()[2:].strip()
+        if ":" not in row:
+            return match.group(0)
+        label, value = row.split(":", 1)
+        label = label.strip()
+        value = value.strip()
+        if not label:
+            return match.group(0)
+        fields.append((label, value))
+
+    rendered = []
+    for index, (label, value) in enumerate(fields):
+        if len(fields) == 1 or index == len(fields) - 1:
+            branch = "╰─"
+        elif index == 0:
+            branch = "╭─"
+        else:
+            branch = "├─"
+        rendered.append(
+            f"{branch} <b>{label}</b> : <code>{value}</code>"
+        )
+    return "\n".join(rendered)
+
+
 def style_inline_text(text, has_buttons=False):
-    """Normalize only the panel header and preserve fields and code blocks."""
+    """Apply premium cards while preserving intentional preformatted panels."""
     del has_buttons
-    return style_panel_text(text)
+    styled = style_panel_text(text)
+    return _LEGACY_TREE_BLOCK.sub(_style_legacy_tree, styled)

@@ -146,3 +146,40 @@ def test_legacy_diamond_is_not_rendered_by_bot_sources():
         if legacy_mark in path.read_text(encoding="utf-8"):
             offenders.append(path.relative_to(ROOT).as_posix())
     assert offenders == []
+
+
+def test_task_lifecycle_messages_use_the_premium_card_layout():
+    source = (
+        BOT / "helper" / "listeners" / "task_listener.py"
+    ).read_text(encoding="utf-8")
+
+    for title in (
+        "TASK STARTED",
+        "UPLOAD COMPLETE",
+        "LEECH COMPLETE",
+        "DOWNLOAD STOPPED",
+        "UPLOAD STOPPED",
+        "LIMIT BREACHED",
+        "ACTION PERFORMED",
+        "FILES LIST",
+    ):
+        assert title in source
+
+    assert "def _premium_row(" in source
+    assert "def _completion_header(" in source
+    assert "╭─ {icon} <b>Task</b> : <b>{task_name}</b>" in source
+    assert "〶 " not in source
+    assert "⋗ " not in source
+    assert "<code>┌─" not in source
+
+
+def test_restart_messages_use_the_premium_card_layout():
+    source = (BOT / "modules" / "restart.py").read_text(encoding="utf-8")
+
+    assert "<b>✦ RESTARTED SUCCESSFULLY</b>" in source
+    assert "╭─ <b>Date</b> : <code>" in source
+    assert "├─ <b>Time</b> : <code>" in source
+    assert "├─ <b>TimeZone</b> : <code>" in source
+    assert "╰─ <b>Version</b> : <code>" in source
+    assert "⌬ " not in source
+    assert "<code>┌─" not in source

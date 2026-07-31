@@ -76,24 +76,25 @@ async def restart_sessions(_, message):
 
 
 def _restart_header(now, is_restart_chat=False):
-    title = "Restarted Successfully!" if is_restart_chat else "Bot Restarted!"
+    title = "RESTARTED SUCCESSFULLY" if is_restart_chat else "BOT RESTARTED"
     return (
-        f"⌬ <b><i>{title}</i></b>\n"
-        f"┟ <b>Date:</b> {now.strftime('%d/%m/%y')}\n"
-        f"┠ <b>Time:</b> {now.strftime('%I:%M:%S %p')}\n"
-        f"┠ <b>TimeZone:</b> {Config.TIMEZONE}\n"
-        f"┠ <b>Branch:</b> {Config.UPSTREAM_BRANCH}\n"
-        f"┖ <b>Version:</b> {get_version()}"
+        f"<b>✦ {title}</b>\n\n"
+        f"╭─ <b>Date</b> : <code>{now.strftime('%d/%m/%y')}</code>\n"
+        f"├─ <b>Time</b> : <code>{now.strftime('%I:%M:%S %p')}</code>\n"
+        f"├─ <b>TimeZone</b> : <code>{Config.TIMEZONE}</code>\n"
+        f"├─ <b>Branch</b> : <code>{Config.UPSTREAM_BRANCH}</code>\n"
+        f"╰─ <b>Version</b> : <code>{get_version()}</code>"
     )
 
 
 def _restart_success_text(now):
-    return f"""<b>✦ RESTARTED SUCCESSFULLY!</b>
-<code>┌─ {'Date':<9}: {now.strftime("%d/%m/%y")}
-├─ {'Time':<9}: {now.strftime("%I:%M:%S %p")}
-├─ {'TimeZone':<9}: {Config.TIMEZONE}
-└─ {'Version':<9}: {get_version()}
-</code>"""
+    return (
+        "<b>✦ RESTARTED SUCCESSFULLY</b>\n\n"
+        f"╭─ <b>Date</b> : <code>{now.strftime('%d/%m/%y')}</code>\n"
+        f"├─ <b>Time</b> : <code>{now.strftime('%I:%M:%S %p')}</code>\n"
+        f"├─ <b>TimeZone</b> : <code>{Config.TIMEZONE}</code>\n"
+        f"╰─ <b>Version</b> : <code>{get_version()}</code>"
+    )
 
 
 def _restart_target(restart_message, fallback_message):
@@ -136,7 +137,7 @@ async def _write_restart_marker(chat_id, msg_id):
 
 async def send_incomplete_task_message(cid, msg_id, msg):
     try:
-        if msg.startswith("⌬ <b><i>Restarted Successfully!</i></b>"):
+        if msg.startswith("<b>✦ RESTARTED SUCCESSFULLY</b>"):
             await TgClient.bot.edit_message_text(
                 chat_id=cid,
                 message_id=msg_id,

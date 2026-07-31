@@ -6,7 +6,6 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-
 ROOT = Path(__file__).resolve().parents[1]
 INLINE_UI_PATH = ROOT / "bot" / "helper" / "telegram_helper" / "inline_ui.py"
 BUTTON_BUILD_PATH = ROOT / "bot" / "helper" / "telegram_helper" / "button_build.py"
@@ -55,7 +54,7 @@ def test_all_buttonmaker_buttons_pass_through_the_shared_styler():
     assert source.count("text=style_inline_button(key)") == 2
 
 
-def test_panel_renderer_upgrades_header_without_rewriting_code_rows():
+def test_panel_renderer_upgrades_legacy_code_tree_rows():
     inline_ui = _load_inline_ui()
     legacy = (
         "<b>✦ SAMPLE PANEL</b>\n"
@@ -67,11 +66,10 @@ def test_panel_renderer_upgrades_header_without_rewriting_code_rows():
     styled = inline_ui.style_inline_text(legacy, has_buttons=True)
 
     assert styled.startswith("<b>✦ SAMPLE PANEL</b>")
-    assert (
-        "<code>┌─ Name: example.mkv\n"
-        "├─ Size: 1.4 GB\n"
-        "└─ State: Ready</code>"
-    ) in styled
+    assert "╭─ <b>Name</b> : <code>example.mkv</code>" in styled
+    assert "├─ <b>Size</b> : <code>1.4 GB</code>" in styled
+    assert "╰─ <b>State</b> : <code>Ready</code>" in styled
+    assert "<code>┌─" not in styled
 
 
 def test_button_driven_plain_titles_receive_a_panel_header():
@@ -126,10 +124,8 @@ def test_system_metrics_suffix_is_byte_for_byte_protected():
 
     assert styled.endswith(metrics)
     assert "<b>✦ ACTIVE TASKS</b>" in styled
-    assert (
-        "<code>┌─ Status: Download\n└─ Speed: 1.19MB/s</code>"
-        in styled
-    )
+    assert "╭─ <b>Status</b> : <code>Download</code>" in styled
+    assert "╰─ <b>Speed</b> : <code>1.19MB/s</code>" in styled
 
 
 def test_task_card_redesign_retains_all_existing_information():
