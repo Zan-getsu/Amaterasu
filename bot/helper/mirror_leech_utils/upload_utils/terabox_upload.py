@@ -8,7 +8,13 @@ from aiofiles.os import path as aiopath
 from .... import LOGGER
 
 try:
-    from terabox import TeraboxCancelled, TeraboxClient, TeraboxError
+    from terabox import (
+        TeraboxCancelled,
+        TeraboxClient,
+        TeraboxError,
+        __version__ as TERABOX_ADAPTER_VERSION,
+        sanitize_remote_path,
+    )
 except ImportError:
     TeraboxClient = None
 
@@ -19,7 +25,7 @@ def _posix_join(base, *parts):
         for segment in (base, *parts)
         if segment and segment.strip("/")
     )
-    return f"/{joined}" if joined else "/"
+    return sanitize_remote_path(f"/{joined}" if joined else "/")
 
 
 class TeraboxUpload:
@@ -107,6 +113,7 @@ class TeraboxUpload:
             session_path=".terabox_upload_session.json",
         )
         try:
+            LOGGER.info("TeraBox adapter version: %s", TERABOX_ADAPTER_VERSION)
             await self._client.ensure_upload_ready()
             items, total_files, total_folders = self._gather_files()
             if not items:

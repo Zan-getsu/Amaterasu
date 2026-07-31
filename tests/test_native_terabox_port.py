@@ -263,13 +263,35 @@ def test_amaterasu_terabox_adapter_exports_sdk_surface():
         TeraboxFile,
         TeraboxPasswordError,
         __version__,
+        sanitize_remote_path,
     )
 
     assert TeraboxClient
     assert TeraboxFile
     assert issubclass(TeraboxCancelled, TeraboxError)
     assert issubclass(TeraboxPasswordError, TeraboxError)
-    assert __version__ == "1.0.5-amaterasu"
+    assert __version__ == "1.0.6-amaterasu"
+    assert sanitize_remote_path
+
+
+def test_terabox_remote_path_sanitizes_cross_platform_filename_characters():
+    from terabox import sanitize_remote_path
+
+    unsafe = "/AnimeTV_チェーン*on\\_X*'【Ending Theme】.mp4"
+
+    assert (
+        sanitize_remote_path(unsafe)
+        == "/AnimeTV_チェーン_on__X_'【Ending Theme】.mp4"
+    )
+    assert sanitize_remote_path("/Folder/../trailing. ") == "/Folder/_/trailing"
+
+
+def test_terabox_upload_path_join_uses_remote_name_sanitizer():
+    from bot.helper.mirror_leech_utils.upload_utils.terabox_upload import _posix_join
+
+    assert _posix_join("/Test", "episode*on\\_X.mp4") == (
+        "/Test/episode_on__X.mp4"
+    )
 
 
 def test_terabox_cookie_parser_allows_sdk_refreshable_values(monkeypatch):
@@ -1038,7 +1060,7 @@ async def test_terabox_postcreate_normalizes_root_and_does_not_log_token(caplog)
     assert "bdstoken" not in captured[0][2]["data"]
     assert "jsToken" not in captured[0][2]["data"]
     assert captured[0][2]["params"]["jsToken"] == secret
-    assert captured[0][2]["params"]["bdstoken"] == "synthetic-write-token"
+    assert "bdstoken" not in captured[0][2]["params"]
     assert captured[0][2]["params"]["isdir"] == "0"
     assert captured[0][2]["params"]["rtype"] == "1"
     assert captured[0][2]["timeout"] == 30
@@ -1087,7 +1109,7 @@ async def test_terabox_postcreate_compatibility_protocol_uses_sdk_body_auth():
     assert captured[0]["data"]["local_mtime"] == "123"
     assert captured[0]["data"]["app_id"] == "250528"
     assert captured[0]["data"]["jsToken"] == "page-token"
-    assert captured[0]["data"]["bdstoken"] == "write-token"
+    assert "bdstoken" not in captured[0]["data"]
 
 
 async def test_terabox_postcreate_error_exposes_only_code_and_message():
@@ -1125,6 +1147,17 @@ async def test_terabox_postcreate_error_exposes_only_code_and_message():
     assert "errno=2" in str(raised.value)
     assert "message=denied" in str(raised.value)
     assert secret not in str(raised.value)
+
+
+def test_terabox_finalization_rejection_reason_is_sanitized_and_actionable():
+    import terabox
+
+    secret = "response-private-field"
+    error = terabox._UploadApiRejected(2, "invalid filename", 400)
+    reason = terabox._finalization_rejection_reason(error)
+
+    assert reason == "HTTP 400, errno=2, message=invalid filename"
+    assert secret not in reason
 
 
 async def test_terabox_postcreate_maps_auth_errno_to_refreshable_rejection():

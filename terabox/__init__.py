@@ -41,7 +41,7 @@ from aioterabox.exceptions import TeraboxApiError as _SdkApiError
 from aioterabox.exceptions import TeraboxNotFoundError as _SdkNotFoundError
 from aioterabox.exceptions import TeraboxUnauthorizedError as _SdkUnauthorizedError
 
-__version__ = "1.0.5-amaterasu"
+__version__ = "1.0.6-amaterasu"
 
 _DEFAULT_ACCOUNT_BASE_URL = "https://www.terabox.com"
 _REGION_PREFIX = re_compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
@@ -62,6 +62,7 @@ _ENCODED_JS_TOKEN = re_compile(r"%28%22(.*?)%22%29")
 _PAGE_JS_TOKEN = re_compile(
     r"window\.jsToken%20%3D%20a%7D%3Bfn%28%22(.*?)%22%29"
 )
+_INVALID_REMOTE_NAME = re_compile(r'[\\:*?"<>|\x00-\x1f]')
 
 
 class TeraboxError(Exception):
@@ -91,6 +92,20 @@ class _UploadHttpRejected(TeraboxError):
     def __init__(self, status: int):
         super().__init__(f"TeraBox upload finalization returned HTTP {status}")
         self.status = status
+
+
+class _UploadApiRejected(_SdkApiError):
+    """A sanitized create rejection retaining only useful diagnostics."""
+
+    def __init__(self, code, message: str, status: int | None = None):
+        self.code = code
+        self.api_message = message[:120]
+        self.status = status
+        status_detail = f", HTTP {status}" if status and status >= 400 else ""
+        super().__init__(
+            f"TeraBox file create failed (errno={code}, "
+            f"message={self.api_message or 'unknown'}{status_detail})"
+        )
 
 
 class _CookieData(dict):
@@ -248,6 +263,19 @@ def _upload_rejection_reason(error: Exception) -> str:
     return f"errno={error.code}, message={error.api_message or 'unknown'}"
 
 
+def _finalization_rejection_reason(error: Exception) -> str:
+    if isinstance(error, _UploadHttpRejected):
+        return f"HTTP {error.status}"
+    if isinstance(error, _UploadApiRejected):
+        details = []
+        if error.status and error.status >= 400:
+            details.append(f"HTTP {error.status}")
+        details.append(f"errno={error.code}")
+        details.append(f"message={error.api_message or 'unknown'}")
+        return ", ".join(details)
+    return "API rejection"
+
+
 def _terabox_proxy_url() -> str | None:
     proxy_url = os.getenv("TERABOX_PROXY", "").strip()
     if not proxy_url:
@@ -256,6 +284,19 @@ def _terabox_proxy_url() -> str | None:
     if parsed.scheme.lower() in {"http", "https"} and parsed.hostname:
         return proxy_url
     return None
+
+
+def sanitize_remote_path(remote_path: str) -> str:
+    """Make every TeraBox path component portable without losing Unicode."""
+    components = []
+    for component in str(remote_path or "").split("/"):
+        if not component:
+            continue
+        safe = _INVALID_REMOTE_NAME.sub("_", component).rstrip(" .")
+        if safe in {"", ".", ".."}:
+            safe = "_"
+        components.append(safe)
+    return "/" + "/".join(components) if components else "/"
 
 
 def _page_auth_data(page: str) -> dict[str, str]:
@@ -374,7 +415,7 @@ class _RegionalAccountClient(_AccountClient):
 
     async def upload_file(self, filename: str, destination_path: str) -> dict:
         """Upload every chunk, including the SDK's previously omitted remainder."""
-        destination_path = f"/{destination_path.lstrip('/')}"
+        destination_path = sanitize_remote_path(destination_path)
         file_size = await to_thread(os.path.getsize, filename)
         local_mtime = int(await to_thread(os.path.getmtime, filename))
         max_file_size = await self._run_precontent_network_stage(
@@ -484,14 +525,15 @@ class _RegionalAccountClient(_AccountClient):
                         previous_remote,
                     ):
                         return recovered
-                    primary_status = getattr(primary_rejection, "status", "API")
                     raise TeraboxError(
                         "TeraBox upload finalization rejected both supported "
-                        f"protocols (primary={primary_status}, "
-                        f"compatibility=HTTP {fallback_rejection.status}); chunks "
+                        "protocols "
+                        f"(primary={_finalization_rejection_reason(primary_rejection)}; "
+                        "compatibility="
+                        f"{_finalization_rejection_reason(fallback_rejection)}); chunks "
                         "were uploaded but remote completion was not reported"
                     ) from None
-                except _SdkApiError:
+                except _SdkApiError as fallback_rejection:
                     if recovered := await self._recover_finalization_timeout(
                         destination_path,
                         file_size,
@@ -500,8 +542,11 @@ class _RegionalAccountClient(_AccountClient):
                         return recovered
                     raise TeraboxError(
                         "TeraBox upload finalization rejected both supported API "
-                        "protocols; chunks were uploaded but remote completion was "
-                        "not reported"
+                        "protocols "
+                        f"(primary={_finalization_rejection_reason(primary_rejection)}; "
+                        "compatibility="
+                        f"{_finalization_rejection_reason(fallback_rejection)}); chunks "
+                        "were uploaded but remote completion was not reported"
                     ) from None
             except (TimeoutError, aiohttp.ClientError, OSError) as error:
                 if recovered := await self._recover_finalization_timeout(
@@ -788,13 +833,14 @@ class _RegionalAccountClient(_AccountClient):
         if compatibility:
             # aioterabox's original protocol submits all control and auth
             # fields in the form body.  Keep this as the bounded fallback.
-            data.update(self._upload_auth_params(include_bdstoken=True))
+            data.update(self._upload_auth_params())
             data.update({"isdir": "0", "rtype": "1"})
             params = None
         else:
-            # TeraBox's web uploader places create controls and bdstoken in
-            # the query string while the file metadata remains form data.
-            params = self._upload_auth_params(include_bdstoken=True)
+            # Current web-compatible clients put create controls in the query
+            # and authenticate with jsToken plus the session cookies.  A
+            # page-derived bdstoken can be regional and must not be mixed in.
+            params = self._upload_auth_params()
             params.update({"isdir": "0", "rtype": "1"})
         async with self._request(
             "POST",
@@ -823,9 +869,7 @@ class _RegionalAccountClient(_AccountClient):
         message = str(result.get("errmsg") or result.get("msg") or "unknown")[:120]
         if code in _UPLOAD_AUTH_ERROR_CODES or "need verify" in message.lower():
             raise _UploadAuthRejected("finalization", code, message)
-        raise _SdkApiError(
-            f"TeraBox file create failed (errno={code}, message={message})"
-        )
+        raise _UploadApiRejected(code, message, status)
 
 
 def _headers_dict(headers: list[str] | None) -> dict[str, str]:
@@ -1127,7 +1171,7 @@ class TeraboxClient:
         progress_cb=None,
         cancel_event: Event | None = None,
     ):
-        remote_path = f"/{remote_path.lstrip('/')}"
+        remote_path = sanitize_remote_path(remote_path)
         remote_dir = os.path.dirname(remote_path).replace("\\", "/")
         if remote_dir and remote_dir != "/" and remote_dir not in self._created_directories:
             try:
@@ -1213,4 +1257,5 @@ __all__ = [
     "TeraboxFile",
     "TeraboxPasswordError",
     "__version__",
+    "sanitize_remote_path",
 ]
