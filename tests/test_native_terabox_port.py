@@ -1,5 +1,6 @@
 from asyncio import Lock
 from datetime import timedelta
+from traceback import format_exception
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -289,6 +290,25 @@ def test_terabox_cookie_parser_allows_sdk_refreshable_values(monkeypatch):
     assert parsed["csrfToken"] == ""
 
 
+def test_terabox_cookie_parser_normalizes_jstoken_alias(monkeypatch):
+    pytest.importorskip("aiohttp")
+    pytest.importorskip("aioterabox")
+    import terabox
+
+    jar = MagicMock()
+    jar.__iter__.return_value = iter(
+        [
+            SimpleNamespace(name="ndus", value="authenticated"),
+            SimpleNamespace(name="jsToken", value="page-token"),
+        ]
+    )
+    monkeypatch.setattr(terabox, "MozillaCookieJar", lambda _path: jar)
+
+    parsed = terabox._read_cookie_file("cookies.txt")
+
+    assert parsed["jstoken"] == "page-token"
+
+
 def test_terabox_cookie_parser_requires_auth_cookie(monkeypatch):
     import pytest
 
@@ -302,6 +322,384 @@ def test_terabox_cookie_parser_requires_auth_cookie(monkeypatch):
 
     with pytest.raises(terabox.TeraboxError, match="ndus"):
         terabox._read_cookie_file("cookies.txt")
+
+
+def test_terabox_cookie_parser_rejects_empty_auth_cookie(monkeypatch):
+    pytest.importorskip("aiohttp")
+    pytest.importorskip("aioterabox")
+    import terabox
+
+    jar = MagicMock()
+    jar.__iter__.return_value = iter(
+        [SimpleNamespace(name="ndus", value="")]
+    )
+    monkeypatch.setattr(terabox, "MozillaCookieJar", lambda _path: jar)
+
+    with pytest.raises(terabox.TeraboxError, match="ndus"):
+        terabox._read_cookie_file("cookies.txt")
+
+
+def test_terabox_cookie_parser_redacts_malformed_file(monkeypatch):
+    pytest.importorskip("aiohttp")
+    pytest.importorskip("aioterabox")
+    import terabox
+
+    secret = "should-never-appear"
+    jar = MagicMock()
+    jar.load.side_effect = ValueError(secret)
+    monkeypatch.setattr(terabox, "MozillaCookieJar", lambda _path: jar)
+
+    with pytest.raises(terabox.TeraboxError) as raised:
+        terabox._read_cookie_file("cookies.txt")
+
+    assert "Netscape-format" in str(raised.value)
+    assert secret not in str(raised.value)
+    assert secret not in "".join(
+        format_exception(raised.type, raised.value, raised.tb)
+    )
+
+
+def test_terabox_regional_origin_is_validated_and_per_client():
+    pytest.importorskip("aiohttp")
+    pytest.importorskip("aioterabox")
+    import terabox
+
+    cookies = {
+        "jstoken": "",
+        "csrfToken": "",
+        "browserid": "",
+        "ndus": "authenticated",
+    }
+    first = terabox._RegionalAccountClient("", "", object(), cookies=cookies)
+    second = terabox._RegionalAccountClient("", "", object(), cookies=cookies)
+
+    first.account["account_id"] = "cached-account"
+    first.is_vip = True
+    first._signb = "cached-signature"
+    first._public_key = "cached-public-key"
+    assert first.use_region("dm")
+    assert first._rewrite_url("https://www.terabox.com/api/quota") == (
+        "https://dm.terabox.com/api/quota"
+    )
+    assert first.account["account_id"] is None
+    assert first.is_vip is None
+    assert first._signb is None
+    assert first._public_key is None
+    assert second.base_url == "https://www.terabox.com"
+    assert not first.use_region("dm.example.com")
+    assert not first.use_region("../dm")
+    second._remember_region("DM")
+    assert second.detected_region_prefix == "dm"
+    second._remember_region("dm.example.com")
+    assert second.detected_region_prefix == "dm"
+
+
+async def test_terabox_request_captures_region_header_and_rewrites_origin():
+    pytest.importorskip("aiohttp")
+    pytest.importorskip("aioterabox")
+    import terabox
+
+    class Response:
+        def __init__(self, headers):
+            self.headers = headers
+
+        def release(self):
+            return None
+
+    class Session:
+        cookie_jar = ()
+
+        def __init__(self):
+            self.calls = []
+            self.headers = {"Url-Domain-Prefix": "dm"}
+
+        async def request(self, method, url, **kwargs):
+            self.calls.append((method, url, kwargs))
+            return Response(self.headers)
+
+    cookies = {
+        "jstoken": "",
+        "csrfToken": "",
+        "browserid": "",
+        "ndus": "authenticated",
+    }
+    session = Session()
+    client = terabox._RegionalAccountClient("", "", session, cookies=cookies)
+
+    async with client._request("GET", "https://www.terabox.com/api/check/login"):
+        pass
+
+    assert client.detected_region_prefix == "dm"
+    assert client.use_region(client.detected_region_prefix)
+    session.headers = {}
+
+    async with client._request("GET", "https://www.terabox.com/api/quota"):
+        pass
+
+    _method, url, kwargs = session.calls[-1]
+    assert url == "https://dm.terabox.com/api/quota"
+    assert kwargs["headers"]["Origin"] == "https://dm.terabox.com"
+    assert kwargs["headers"]["Referer"] == "https://dm.terabox.com/main"
+
+
+class _FakeTeraboxSession:
+    def __init__(self):
+        self.closed = False
+        self.close = AsyncMock(side_effect=self._mark_closed)
+
+    def _mark_closed(self):
+        self.closed = True
+
+
+class _FakeAccountClient:
+    events = None
+    bootstrap_error = None
+    validation_error = None
+    quota = {"errno": 0, "available": 1}
+    regional_retry = False
+
+    def __init__(self, _email, _password, _session, *, cookies):
+        self.cookies = cookies
+        self.detected_region_prefix = None
+        self._ensure_calls = 0
+
+    async def refresh_cookies(self):
+        self.events.append("bootstrap")
+        if self.bootstrap_error:
+            raise self.bootstrap_error
+        self.cookies.update(
+            {
+                "jstoken": "derived-page-token",
+                "csrfToken": "derived-csrf-token",
+                "browserid": "derived-browser-id",
+            }
+        )
+        return {}
+
+    async def ensure_logged_in(self):
+        self.events.append("validate")
+        self._ensure_calls += 1
+        if self.regional_retry and self._ensure_calls == 1:
+            from aioterabox.exceptions import TeraboxUnauthorizedError
+
+            self.detected_region_prefix = "dm"
+            raise TeraboxUnauthorizedError("Invalid cookies")
+        if self.validation_error:
+            raise self.validation_error
+        return {}
+
+    async def get_storage_quota(self):
+        self.events.append("quota")
+        return self.quota
+
+    def use_region(self, prefix):
+        self.events.append(f"region:{prefix}")
+        return prefix == "dm"
+
+
+def _fake_account_type(**overrides):
+    return type(
+        "FakeAccountClient",
+        (_FakeAccountClient,),
+        {
+            "events": [],
+            "bootstrap_error": None,
+            "validation_error": None,
+            "quota": {"errno": 0, "available": 1},
+            "regional_retry": False,
+            **overrides,
+        },
+    )
+
+
+async def test_terabox_login_bootstraps_before_authenticated_validation(monkeypatch):
+    pytest.importorskip("aiohttp")
+    pytest.importorskip("aioterabox")
+    import terabox
+
+    fake_type = _fake_account_type()
+    monkeypatch.setattr(terabox, "_RegionalAccountClient", fake_type)
+    monkeypatch.setattr(
+        terabox,
+        "_read_cookie_file",
+        lambda _path: {
+            "jstoken": "",
+            "csrfToken": "",
+            "browserid": "",
+            "ndus": "authenticated",
+        },
+    )
+    client = terabox.TeraboxClient("cookies.txt")
+    client._session = _FakeTeraboxSession()
+
+    await client.login()
+
+    assert fake_type.events == ["bootstrap", "validate", "quota"]
+    assert all(
+        client._client.cookies[key]
+        for key in ("jstoken", "csrfToken", "browserid", "ndus")
+    )
+    await client.aclose()
+
+
+async def test_terabox_login_rebootstraps_on_detected_regional_host(monkeypatch):
+    pytest.importorskip("aiohttp")
+    pytest.importorskip("aioterabox")
+    import terabox
+
+    fake_type = _fake_account_type(regional_retry=True)
+    monkeypatch.setattr(terabox, "_RegionalAccountClient", fake_type)
+    monkeypatch.setattr(
+        terabox,
+        "_read_cookie_file",
+        lambda _path: {
+            "jstoken": "",
+            "csrfToken": "",
+            "browserid": "",
+            "ndus": "authenticated",
+        },
+    )
+    client = terabox.TeraboxClient("cookies.txt")
+    client._session = _FakeTeraboxSession()
+
+    await client.login()
+
+    assert fake_type.events == [
+        "bootstrap",
+        "validate",
+        "region:dm",
+        "bootstrap",
+        "validate",
+        "quota",
+    ]
+    await client.aclose()
+
+
+async def test_terabox_bootstrap_failure_is_actionable_and_redacted(monkeypatch):
+    pytest.importorskip("aiohttp")
+    pytest.importorskip("aioterabox")
+    import terabox
+
+    secret = "private-cookie-value"
+    fake_type = _fake_account_type(bootstrap_error=RuntimeError(secret))
+    monkeypatch.setattr(terabox, "_RegionalAccountClient", fake_type)
+    monkeypatch.setattr(
+        terabox,
+        "_read_cookie_file",
+        lambda _path: {
+            "jstoken": "",
+            "csrfToken": "",
+            "browserid": "",
+            "ndus": secret,
+        },
+    )
+    client = terabox.TeraboxClient("cookies.txt")
+    client._session = _FakeTeraboxSession()
+
+    with pytest.raises(terabox.TeraboxError) as raised:
+        await client.login()
+
+    assert "bootstrap failed" in str(raised.value)
+    assert "fresh Netscape" in str(raised.value)
+    assert secret not in str(raised.value)
+    assert secret not in "".join(
+        format_exception(raised.type, raised.value, raised.tb)
+    )
+
+
+async def test_terabox_errno_minus_six_quota_is_not_a_successful_login(monkeypatch):
+    pytest.importorskip("aiohttp")
+    pytest.importorskip("aioterabox")
+    import terabox
+
+    fake_type = _fake_account_type(quota={"errno": -6, "errmsg": "user not login"})
+    monkeypatch.setattr(terabox, "_RegionalAccountClient", fake_type)
+    monkeypatch.setattr(
+        terabox,
+        "_read_cookie_file",
+        lambda _path: {
+            "jstoken": "",
+            "csrfToken": "",
+            "browserid": "",
+            "ndus": "authenticated",
+        },
+    )
+    client = terabox.TeraboxClient("cookies.txt")
+    client._session = _FakeTeraboxSession()
+
+    with pytest.raises(terabox.TeraboxError, match="rejected"):
+        await client.login()
+
+    assert fake_type.events == ["bootstrap", "validate", "quota"]
+
+
+async def test_terabox_validation_failure_does_not_expose_sdk_details(monkeypatch):
+    pytest.importorskip("aiohttp")
+    pytest.importorskip("aioterabox")
+    import terabox
+
+    secret = "response-contained-private-value"
+    fake_type = _fake_account_type(validation_error=RuntimeError(secret))
+    monkeypatch.setattr(terabox, "_RegionalAccountClient", fake_type)
+    monkeypatch.setattr(
+        terabox,
+        "_read_cookie_file",
+        lambda _path: {
+            "jstoken": "",
+            "csrfToken": "",
+            "browserid": "",
+            "ndus": "authenticated",
+        },
+    )
+    client = terabox.TeraboxClient("cookies.txt")
+    client._session = _FakeTeraboxSession()
+
+    with pytest.raises(terabox.TeraboxError) as raised:
+        await client.login()
+
+    assert "authentication validation failed" in str(raised.value)
+    assert secret not in str(raised.value)
+    assert secret not in "".join(
+        format_exception(raised.type, raised.value, raised.tb)
+    )
+
+
+async def test_terabox_sdk_constructor_failure_closes_session_and_is_redacted(
+    monkeypatch,
+):
+    pytest.importorskip("aiohttp")
+    pytest.importorskip("aioterabox")
+    import terabox
+
+    secret = "constructor-private-value"
+
+    class BrokenAccountClient:
+        def __init__(self, *_args, **_kwargs):
+            raise RuntimeError(secret)
+
+    monkeypatch.setattr(terabox, "_RegionalAccountClient", BrokenAccountClient)
+    monkeypatch.setattr(
+        terabox,
+        "_read_cookie_file",
+        lambda _path: {
+            "jstoken": "",
+            "csrfToken": "",
+            "browserid": "",
+            "ndus": "authenticated",
+        },
+    )
+    client = terabox.TeraboxClient("cookies.txt")
+    session = _FakeTeraboxSession()
+    client._session = session
+
+    with pytest.raises(terabox.TeraboxError) as raised:
+        await client.login()
+
+    assert session.closed
+    assert "authentication validation failed" in str(raised.value)
+    assert secret not in "".join(
+        format_exception(raised.type, raised.value, raised.tb)
+    )
 
 
 def test_terabox_multiline_headers_are_split():

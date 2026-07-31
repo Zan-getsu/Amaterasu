@@ -10,16 +10,22 @@ from __future__ import annotations
 import os
 from asyncio import FIRST_COMPLETED, CancelledError, Event, create_task, to_thread, wait
 from asyncio import gather as asyncio_gather
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from http.cookiejar import MozillaCookieJar
 from pathlib import Path
+from re import compile as re_compile
 
 import aiohttp
 from aiofiles import open as aiopen
 from aiofiles.os import makedirs
 from aioterabox.api import TeraboxClient as _AccountClient
+from aioterabox.exceptions import TeraboxUnauthorizedError as _SdkUnauthorizedError
 
 __version__ = "1.0.0-amaterasu"
+
+_DEFAULT_ACCOUNT_BASE_URL = "https://www.terabox.com"
+_REGION_PREFIX = re_compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
 
 
 class TeraboxError(Exception):
@@ -56,8 +62,10 @@ def _read_cookie_file(cookie_file: str) -> dict[str, str]:
     jar = MozillaCookieJar(cookie_file)
     try:
         jar.load(ignore_discard=True, ignore_expires=True)
-    except Exception as error:
-        raise TeraboxError(f"Invalid TeraBox cookies.txt file: {error}") from error
+    except Exception:
+        raise TeraboxError(
+            "Invalid TeraBox cookies.txt file: expected a Netscape-format export"
+        ) from None
     cookies = {cookie.name: cookie.value for cookie in jar}
     aliases = {
         "jstoken": ("jstoken", "jsToken"),
@@ -71,13 +79,78 @@ def _read_cookie_file(cookie_file: str) -> dict[str, str]:
             (cookies[name] for name in names if cookies.get(name)),
             "",
         )
-    # aioterabox requires all four keys to exist, but it refreshes jsToken and
-    # csrfToken during ensure_logged_in(). Browser cookie exports commonly do
-    # not contain those page-derived values, so only the authentication cookie
-    # itself must be non-empty here.
+    # aioterabox requires all four keys to exist. Browser cookie exports commonly
+    # omit the page-derived values, so only the authentication cookie itself must
+    # be non-empty before the explicit bootstrap performed by login().
     if not normalized["ndus"]:
         raise TeraboxError("TeraBox cookie is missing the required ndus value")
     return normalized
+
+
+def _regional_base_url(prefix: str | None) -> str | None:
+    """Return a safe account API origin from TeraBox's regional-prefix header."""
+    normalized = (prefix or "").strip().lower()
+    if not _REGION_PREFIX.fullmatch(normalized):
+        return None
+    return f"https://{normalized}.terabox.com"
+
+
+def _is_rejected_session(error: Exception) -> bool:
+    if isinstance(error, _SdkUnauthorizedError):
+        return True
+    message = str(error).lower()
+    return any(
+        marker in message
+        for marker in ("errno': -6", 'errno": -6', "user not login", "invalid cookies")
+    )
+
+
+class _RegionalAccountClient(_AccountClient):
+    """Make the SDK's hard-coded account origin per-client and region-aware."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.base_url = _DEFAULT_ACCOUNT_BASE_URL
+        self.detected_region_prefix: str | None = None
+
+    def use_region(self, prefix: str | None) -> bool:
+        base_url = _regional_base_url(prefix)
+        if not base_url or base_url == self.base_url:
+            return False
+        self.base_url = base_url
+        self._base_headers["Origin"] = base_url
+        self._base_headers["Referer"] = base_url + "/main"
+        self.account["account_id"] = None
+        self.is_vip = None
+        self._signb = None
+        self._public_key = None
+        return True
+
+    def _remember_region(self, prefix: str | None):
+        if _regional_base_url(prefix):
+            self.detected_region_prefix = prefix.strip().lower()
+
+    def _rewrite_url(self, value: str) -> str:
+        if value == _DEFAULT_ACCOUNT_BASE_URL:
+            return self.base_url
+        if value.startswith(_DEFAULT_ACCOUNT_BASE_URL + "/"):
+            return self.base_url + value[len(_DEFAULT_ACCOUNT_BASE_URL) :]
+        return value
+
+    @asynccontextmanager
+    async def _request(self, method: str, url: str, *, headers=None, **kwargs):
+        rewritten_headers = {
+            key: self._rewrite_url(value) if isinstance(value, str) else value
+            for key, value in (headers or {}).items()
+        }
+        async with super()._request(
+            method,
+            self._rewrite_url(url),
+            headers=rewritten_headers,
+            **kwargs,
+        ) as response:
+            self._remember_region(response.headers.get("Url-Domain-Prefix"))
+            yield response
 
 
 def _headers_dict(headers: list[str] | None) -> dict[str, str]:
@@ -107,12 +180,65 @@ class TeraboxClient:
     async def login(self):
         cookies = await to_thread(_read_cookie_file, self.cookie_file)
         await self._ensure_session()
-        self._client = _AccountClient("", "", self._session, cookies=cookies)
         try:
-            await self._client.ensure_logged_in()
+            self._client = _RegionalAccountClient("", "", self._session, cookies=cookies)
+            await self._bootstrap_session()
+            try:
+                await self._validate_session()
+            except Exception as first_error:
+                prefix = self._client.detected_region_prefix
+                if not prefix or not self._client.use_region(prefix):
+                    raise first_error
+                await self._bootstrap_session(regional=True)
+                await self._validate_session(regional=True)
+        except TeraboxError:
+            await self.aclose()
+            raise
         except Exception as error:
             await self.aclose()
-            raise TeraboxError(f"TeraBox login failed: {error}") from error
+            if _is_rejected_session(error):
+                raise TeraboxError(
+                    "TeraBox session cookie was rejected; sign in again and export "
+                    "a fresh Netscape cookies.txt file containing ndus"
+                ) from None
+            raise TeraboxError(
+                "TeraBox authentication validation failed; the service response "
+                "was incompatible with the native client"
+            ) from None
+
+    async def _bootstrap_session(self, *, regional: bool = False):
+        try:
+            await self._client.refresh_cookies()
+        except Exception:
+            endpoint = "regional TeraBox endpoint" if regional else "TeraBox"
+            raise TeraboxError(
+                f"TeraBox session bootstrap failed on the {endpoint}; sign in "
+                "again and export a fresh Netscape cookies.txt file containing ndus"
+            ) from None
+
+    async def _validate_session(self, *, regional: bool = False):
+        try:
+            await self._client.ensure_logged_in()
+            quota = await self._client.get_storage_quota()
+        except Exception as error:
+            if _is_rejected_session(error):
+                location = "regional endpoint" if regional else "account endpoint"
+                raise TeraboxError(
+                    f"TeraBox session cookie was rejected by the {location}; sign in "
+                    "again and export a fresh Netscape cookies.txt file containing ndus"
+                ) from None
+            raise
+        if not isinstance(quota, dict) or quota.get("errno") != 0:
+            if isinstance(quota, dict) and quota.get("errno") == -6:
+                location = "regional endpoint" if regional else "account endpoint"
+                raise TeraboxError(
+                    f"TeraBox session cookie was rejected by the {location}; sign in "
+                    "again and export a fresh Netscape cookies.txt file containing ndus"
+                )
+            raise TeraboxError(
+                "TeraBox authenticated quota validation returned an unexpected response"
+            )
+        return quota
 
     async def ensure_upload_ready(self):
         if self._client is None:

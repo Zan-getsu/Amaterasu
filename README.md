@@ -925,10 +925,14 @@ Public TeraBox shares can use the cookie-free fallback. A valid logged-in cookie
 is still preferred when available because it is more reliable and is required
 for account browsing and uploads.
 
-1. Sign in to TeraBox in a browser.
-2. Export the cookies in **Netscape `cookies.txt` format**.
-3. Confirm the export contains the `ndus` authentication cookie. Amaterasu
-   refreshes the required `jsToken` and `csrfToken` through the SDK.
+1. Sign in to TeraBox in a browser and open your account drive.
+2. Use Cookie-Editor to export the current site cookies in **Netscape** format.
+   Save the export as a `.txt` file; do not convert it to JSON.
+3. Confirm the export contains a nonempty `ndus` authentication cookie. A
+   normal fresh export may omit `jsToken`, `csrfToken`, and `browserid` because
+   current TeraBox pages derive them at runtime. Amaterasu bootstraps those
+   values, follows TeraBox's per-account regional endpoint, and accepts the
+   session only after an authenticated quota check succeeds.
 4. Install the cookie using one of these private paths:
 
 | Scope | Install location | Stored as |
@@ -938,6 +942,10 @@ for account browsing and uploads.
 
 When both files exist, Amaterasu asks which account to use. User cookies take no
 implicit precedence over the owner account.
+
+If TeraBox rejects the session, sign in again and make a fresh Netscape export.
+An `ndus` cookie can be unexpired according to its file metadata while the
+server has already revoked it.
 
 > [!CAUTION]
 > A TeraBox cookie grants account access. Never commit it, paste its contents
@@ -1026,6 +1034,9 @@ This port includes the following runtime fixes in addition to TeraBox:
   longer report false failures after a successful upload.
 - `/stats` exposes the installed TeraBox SDK version, and bot/user settings
   describe the new TeraBox values and private cookie files.
+- TeraBox authentication bootstraps page-derived session fields before login,
+  follows the server-provided regional account host without changing SDK
+  process globals, and validates the session with a read-only quota request.
 
 ### Docker Image Architecture
 
@@ -1067,11 +1078,10 @@ inline Telegram UI consistency, system metrics, per-user leech fonts, and
 uploader regressions. The web selector was also checked at desktop and mobile
 widths for navigation, selection submission, overflow, and console errors.
 
-The development machine used for that handoff did not have Docker/Podman/WSL or
-live TeraBox account credentials, so the final container build and a real
-account upload must still be run on a Docker-capable host with your private
-cookie. The Dockerfile import check and mocked SDK tests cover those paths
-without exposing credentials.
+The native cookie flow has been verified with read-only login, quota, and root
+listing requests. A real upload still requires an explicit account-writing
+test on a Docker-capable deployment; automated tests mock SDK calls and never
+expose credentials.
 
 ---
 
@@ -1890,8 +1900,10 @@ This auto-leeches new anime releases in 1080p (mkv or mp4), excluding batch pack
   - Confirm the file contains the `ndus` cookie.
   - Upload it through `/usetting`, or install the owner fallback as
     `terabox.txt` through `/bsetting` → Private Files.
-  - Re-export the cookie if TeraBox invalidated the session. Never post the
-    cookie contents in chat or logs.
+  - Amaterasu automatically derives the page tokens and follows regional
+    TeraBox account hosts; you do not need to copy those values manually.
+  - Re-export the cookie if TeraBox reports that the session was rejected.
+    Never post cookie contents in chat or logs.
 </details>
 
 <details>
