@@ -287,6 +287,45 @@ class _RegionalAccountClient(_AccountClient):
                 md5_list_json=md5_list,
             )
 
+    async def _upload_chunks(
+        self,
+        *,
+        upload_host: str,
+        remote_path: str,
+        uploadid: str,
+        file_chunks_md5: list[tuple[str, int, str]],
+        concurrency: int = 1,
+    ) -> list[dict]:
+        """Upload chunks without leaving SDK-created child tasks behind.
+
+        aioterabox 0.2.3 creates one task per chunk with ``asyncio.gather``.
+        When a child fails, other children can outlive the caller, temporary
+        chunk directory, and HTTP session.  Keep the transfer sequential so a
+        failure or cancellation is fully settled before cleanup can begin.
+        """
+        del concurrency
+        results = []
+        for partseq, (chunk_path, chunk_size, chunk_md5) in enumerate(
+            file_chunks_md5
+        ):
+            if not await to_thread(os.path.isfile, chunk_path):
+                raise TeraboxError(
+                    f"Prepared TeraBox upload chunk {partseq + 1} is no longer "
+                    "available; the transfer was stopped before cleanup"
+                )
+            results.append(
+                await self._upload_file_chunk(
+                    upload_host=upload_host,
+                    filename=chunk_path,
+                    filesize=chunk_size,
+                    remote_path=remote_path,
+                    chunk_md5=chunk_md5,
+                    uploadid=uploadid,
+                    partseq=partseq,
+                )
+            )
+        return results
+
     async def _postcreate_file(
         self,
         remote_path: str,
@@ -355,24 +394,37 @@ class TeraboxClient:
         await self._ensure_session()
         try:
             self._client = _RegionalAccountClient("", "", self._session, cookies=cookies)
-            regional = False
-            try:
+            regional = bool(region_hint)
+            regional_prefix = region_hint
+            alternate = False
+            if regional:
+                alternate = await self._bootstrap_regional_session(regional_prefix)
+            else:
                 await self._bootstrap_session()
-            except TeraboxError:
-                if not region_hint:
-                    raise
-                await self._bootstrap_regional_session(region_hint)
-                regional = True
             try:
                 await self._validate_session(regional=regional)
             except Exception as first_error:
                 if regional:
+                    if isinstance(first_error, TeraboxError):
+                        raise first_error
+                    if alternate or not regional_prefix:
+                        raise first_error
+                    await self._bootstrap_alternate_regional_session(regional_prefix)
+                    await self._validate_session(regional=True)
+                    return
+                regional_prefix = self._client.detected_region_prefix
+                if not regional_prefix:
                     raise first_error
-                prefix = self._client.detected_region_prefix
-                if not prefix:
-                    raise first_error
-                await self._bootstrap_regional_session(prefix)
-                await self._validate_session(regional=True)
+                alternate = await self._bootstrap_regional_session(regional_prefix)
+                try:
+                    await self._validate_session(regional=True)
+                except TeraboxError:
+                    raise
+                except Exception as regional_error:
+                    if alternate:
+                        raise regional_error
+                    await self._bootstrap_alternate_regional_session(regional_prefix)
+                    await self._validate_session(regional=True)
         except TeraboxError:
             await self.aclose()
             raise
@@ -384,19 +436,27 @@ class TeraboxClient:
                     "a fresh Netscape cookies.txt file containing ndus"
                 ) from None
             raise TeraboxError(
-                "TeraBox authentication validation failed; the service response "
-                "was incompatible with the native client"
+                "TeraBox authentication validation failed "
+                f"({_bootstrap_failure_reason(error)}); all available account "
+                "routes were exhausted"
             ) from None
 
-    async def _bootstrap_regional_session(self, prefix: str):
+    async def _bootstrap_regional_session(self, prefix: str) -> bool:
         if not self._client.use_region(prefix):
             raise TeraboxError("TeraBox returned an unusable regional endpoint")
         try:
             await self._bootstrap_session(regional=True)
         except TeraboxError:
-            if not self._client.use_region(prefix, alternate=True):
-                raise
-            await self._bootstrap_session(regional=True, alternate=True)
+            await self._bootstrap_alternate_regional_session(prefix)
+            return True
+        return False
+
+    async def _bootstrap_alternate_regional_session(self, prefix: str):
+        if not self._client.use_region(prefix, alternate=True):
+            raise TeraboxError(
+                "TeraBox alternate regional endpoint was already exhausted"
+            )
+        await self._bootstrap_session(regional=True, alternate=True)
 
     async def _bootstrap_session(
         self,
