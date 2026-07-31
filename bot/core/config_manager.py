@@ -52,6 +52,7 @@ class Config:
     BASE_URL = ""
     BOT_TOKEN = ""
     HELPER_TOKENS = ""
+    USE_HELPER_BOTS_FOR_FILETOLINK = True
     HELPER_STRINGS = ""
     HELPER_BOT_PROXIES = ""
     HELPER_USER_PROXIES = ""
@@ -137,6 +138,7 @@ class Config:
     ARCHIVE_LIMIT = 0
     STORAGE_LIMIT = 0
     LEECH_DUMP_CHAT = ""
+    USE_LEECH_DUMP_AS_BIN_CHANNEL = False
     LINKS_LOG_ID = ""
     MIRROR_LOG_ID = ""
     LEECH_PREFIX = ""
@@ -420,6 +422,38 @@ class Config:
         d.pop("MULTI_TOKENS", None)
         d.update(cls.MULTI_TOKENS)
         return d
+
+    @classmethod
+    def helper_bot_tokens(cls):
+        """Return configured helper tokens once each, preserving order."""
+        return list(dict.fromkeys((cls.HELPER_TOKENS or "").split()))
+
+    @classmethod
+    def stream_bot_tokens(cls):
+        """Return the deduplicated tokens assigned to FileToLink."""
+        def token_sort(item):
+            digits = "".join(ch for ch in item[0] if ch.isdigit())
+            return int(digits) if digits else 0
+
+        tokens = [
+            token
+            for _, token in sorted(cls.MULTI_TOKENS.items(), key=token_sort)
+            if token and token != cls.BOT_TOKEN
+        ]
+        if cls.USE_HELPER_BOTS_FOR_FILETOLINK:
+            tokens.extend(
+                token
+                for token in cls.helper_bot_tokens()
+                if token != cls.BOT_TOKEN
+            )
+        return list(dict.fromkeys(tokens))
+
+    @classmethod
+    def effective_bin_channel(cls):
+        """Resolve the FileToLink storage chat without mutating config."""
+        if cls.USE_LEECH_DUMP_AS_BIN_CHANNEL and cls.LEECH_DUMP_CHAT:
+            return cls.LEECH_DUMP_CHAT
+        return cls.BIN_CHANNEL
 
     @classmethod
     def load(cls):

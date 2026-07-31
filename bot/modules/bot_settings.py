@@ -7,7 +7,7 @@ from ast import literal_eval
 from functools import partial
 from html import escape
 from io import BytesIO
-from os import getcwd
+from os import environ, getcwd
 from shlex import quote as shlex_quote
 from time import time
 
@@ -95,6 +95,8 @@ def _config_update_payload(key, value):
 
 DEFAULT_VALUES = {
     "AUTO_PROVISION_STREAM_BOTS": False,
+    "USE_HELPER_BOTS_FOR_FILETOLINK": True,
+    "USE_LEECH_DUMP_AS_BIN_CHANNEL": False,
     "SET_COMMANDS": True,
     "LEECH_SPLIT_SIZE": TgClient.MAX_SPLIT_SIZE,
     "RSS_DELAY": 600,
@@ -161,17 +163,20 @@ BOOL_VARS = [
     "STOP_DUPLICATE",
     "UPDATE_PKGS",
     "USE_IMAGES",
+    "USE_HELPER_BOTS_FOR_FILETOLINK",
+    "USE_LEECH_DUMP_AS_BIN_CHANNEL",
     "USE_SERVICE_ACCOUNTS",
     "WEB_PINCODE",
 ]
 
 DEFAULT_DESP = {
-    "AUTO_PROVISION_STREAM_BOTS": "At startup, use USER_SESSION_STRING to add and promote FileToLink MULTI_TOKEN bots in BIN_CHANNEL and LEECH_DUMP_CHAT. Requires user-admin invite/promote rights; skips provisioning if unavailable.",
+    "AUTO_PROVISION_STREAM_BOTS": "At startup, use USER_SESSION_STRING to add and promote configured FileToLink worker bots in the storage chats. Requires user-admin invite/promote rights; skips provisioning if unavailable.",
     "AS_DOCUMENT": "Send files as document instead of media. Default: False.",
     "AUTHORIZED_CHATS": "User/Chat IDs authorized to use the bot. Space-separated. Supports thread IDs with | separator.",
     "BASE_URL": "Public URL for FileToLink and web UI links. Example: https://stream.example.com.",
     "BOT_TOKEN": "Telegram Bot Token from @BotFather.",
-    "HELPER_TOKENS": "Additional bot tokens for parallel task handling.",
+    "HELPER_TOKENS": "Space-separated helper bot tokens used by HyperDL and HyperUP.",
+    "USE_HELPER_BOTS_FOR_FILETOLINK": "Also use HELPER_TOKENS as FileToLink stream workers. Helpers must be able to read the effective BIN channel. Default: True.",
     "BOT_MAX_TASKS": "Max tasks (including queued) the bot runs in parallel. 0 = unlimited.",
     "BOT_PM": "Send files/links to bot owner PM. Default: False.",
     "CMD_SUFFIX": "Text appended to all bot commands. Useful for running multiple bot instances.",
@@ -250,6 +255,7 @@ DEFAULT_DESP = {
     "ARCHIVE_LIMIT": "Archive (zip) size limit in GB. 0 = unlimited.",
     "STORAGE_LIMIT": "Minimum free storage to maintain in GB. Downloads cancelled if exceeded.",
     "LEECH_DUMP_CHAT": "Chat ID to dump all leeched files. Leave empty to disable.",
+    "USE_LEECH_DUMP_AS_BIN_CHANNEL": "Use LEECH_DUMP_CHAT as FileToLink storage. Falls back to BIN_CHANNEL when the dump chat is empty. Default: False.",
     "LINKS_LOG_ID": "Chat ID for link logging.",
     "MIRROR_LOG_ID": "Chat ID(s) for mirror logs. Space-separated for multiple.",
     "LEECH_PREFIX": "Prefix added to leeched file names.",
@@ -327,6 +333,8 @@ RESTART_VARS = {
     "CMD_SUFFIX", "OWNER_ID", "USER_SESSION_STRING", "TELEGRAM_HASH", "TELEGRAM_API", "BOT_TOKEN",
     "TG_PROXY", "AUTHORIZED_CHATS", "DATABASE_URL", "AUTO_PROVISION_STREAM_BOTS"
 }
+
+HIDDEN_VARS = {"PORT"}
 
 ONOFF_VARS = [
     "DISABLE_TORRENTS",
@@ -461,7 +469,9 @@ async def get_buttons(key=None, edit_type=None, edit_mode=False):
                 msg += "<i>Send a valid value for the above Var.</i>\n┖ <b>Time Left :</b> <code>60 sec</code>"
     elif key == "var":
         conf_dict = {
-            k: v for k, v in Config.get_all().items() if not k.startswith("DISABLE_")
+            k: v
+            for k, v in Config.get_all().items()
+            if not k.startswith("DISABLE_") and k not in HIDDEN_VARS
         }
         all_keys = list(conf_dict.keys())
         for k in all_keys[start : 10 + start]:
@@ -847,6 +857,13 @@ async def toggle_bool_var(_, query, pre_message, key, value):
         await start_from_queued()
     elif key.startswith("CLOUDFLARE_TUNNEL_"):
         await cloudflare_tunnel_booter()
+    elif key == "USE_HELPER_BOTS_FOR_FILETOLINK":
+        # The web server is a child process with its own Config state. Export
+        # this runtime choice so it takes effect immediately even when no
+        # DATABASE_URL is configured; persisted DB config still handles boots.
+        environ[key] = "true" if bool_value else "false"
+        await (await create_subprocess_exec("pkill", "-9", "-f", "gunicorn")).wait()
+        await start_web_server()
 
 
 @new_task

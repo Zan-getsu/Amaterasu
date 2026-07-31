@@ -2,8 +2,14 @@ from asyncio import sleep, gather
 from random import choice
 from re import match as re_match, search as re_search, sub
 from time import time
+from urllib.parse import urlsplit
 
-from pyrogram.types import Message, InputMediaPhoto, ReplyParameters
+from pyrogram.types import (
+    InputMediaAnimation,
+    InputMediaPhoto,
+    Message,
+    ReplyParameters,
+)
 from pyrogram.enums import ButtonStyle, ParseMode
 from pyrogram.errors import (
     FloodWait,
@@ -36,14 +42,35 @@ from ..ext_utils.status_utils import get_readable_message
 from .button_build import ButtonMaker
 from .inline_ui import style_inline_text
 
+GALLERY_ANIMATION_PREFIX = "animation:"
 
-def _resolve_photo(photo):
-    if photo == "IMAGES":
+
+def gallery_animation(media):
+    """Mark a Telegram file ID or URL as an animated gallery item."""
+    return f"{GALLERY_ANIMATION_PREFIX}{media}"
+
+
+def _resolve_gallery_media(media):
+    if media == "IMAGES":
         if Config.IMAGES:
             Config.USE_IMAGES = True
-            return choice(Config.IMAGES)
-        return None
-    return photo
+            media = choice(Config.IMAGES)
+        else:
+            return None, False
+    if not media:
+        return None, False
+
+    media = str(media)
+    if media.startswith(GALLERY_ANIMATION_PREFIX):
+        return media[len(GALLERY_ANIMATION_PREFIX) :], True
+
+    # Backward-compatible support for GIF URLs/local paths already present
+    # in IMAGES before typed animation entries were introduced.
+    try:
+        path = urlsplit(media).path
+    except ValueError:
+        path = media
+    return media, path.lower().endswith(".gif")
 
 
 def _shorten_caption(text, limit=900):
@@ -79,24 +106,37 @@ async def _send_text(message, text, buttons=None, **kwargs):
 
 async def send_message(message, text, buttons=None, block=True, photo=None, **kwargs):
     text = style_inline_text(text, has_buttons=buttons is not None)
+    original_media = photo
     try:
         if photo:
             try:
-                photo = _resolve_photo(photo)
+                photo, is_animation = _resolve_gallery_media(photo)
                 if photo is None:
                     return await _send_text(message, text, buttons, **kwargs)
                 if isinstance(message, Message):
-                    return await message.reply_photo(
-                        photo=photo,
+                    send_media = (
+                        message.reply_animation
+                        if is_animation
+                        else message.reply_photo
+                    )
+                    media_key = "animation" if is_animation else "photo"
+                    return await send_media(
+                        **{media_key: photo},
                         caption=text,
                         reply_parameters=ReplyParameters(message_id=message.id),
                         reply_markup=buttons,
                         disable_notification=True,
                         **kwargs,
                     )
-                return await TgClient.bot.send_photo(
+                send_media = (
+                    TgClient.bot.send_animation
+                    if is_animation
+                    else TgClient.bot.send_photo
+                )
+                media_key = "animation" if is_animation else "photo"
+                return await send_media(
                     chat_id=message,
-                    photo=photo,
+                    **{media_key: photo},
                     caption=text,
                     reply_markup=buttons,
                     disable_notification=True,
@@ -107,14 +147,16 @@ async def send_message(message, text, buttons=None, block=True, photo=None, **kw
                 if not block:
                     return str(f)
                 await sleep(f.value * 1.2)
-                return await send_message(message, text, buttons, block, photo)
+                return await send_message(
+                    message, text, buttons, block, original_media
+                )
             except MediaCaptionTooLong:
                 return await send_message(
                     message,
                     _shorten_caption(text),
                     buttons,
                     block,
-                    photo,
+                    original_media,
                 )
             except (
                 PhotoInvalidDimensions,
@@ -123,9 +165,24 @@ async def send_message(message, text, buttons=None, block=True, photo=None, **kw
                 MediaEmpty,
             ):
                 try:
-                    des_dir = await download_image_url(photo)
+                    des_dir = (
+                        await download_image_url(photo)
+                        if str(photo).startswith(("http://", "https://"))
+                        else None
+                    )
                     if des_dir:
-                        msg = await send_message(message, text, buttons, block, des_dir)
+                        fallback_media = (
+                            gallery_animation(des_dir)
+                            if is_animation
+                            else des_dir
+                        )
+                        msg = await send_message(
+                            message,
+                            text,
+                            buttons,
+                            block,
+                            fallback_media,
+                        )
                         from aiofiles.os import remove as aioremove
 
                         await aioremove(des_dir)
@@ -148,20 +205,26 @@ async def send_message(message, text, buttons=None, block=True, photo=None, **kw
         LOGGER.warning(str(rmi))
         return await send_message(message, text, None)
     except MessageTooLong:
-        return await send_message(message, text[:4096], buttons, block, photo)
+        return await send_message(
+            message, text[:4096], buttons, block, original_media
+        )
     except (MessageEmpty, EntityBoundsInvalid):
         return await send_message(message, text, parse_mode=ParseMode.DISABLED)
     except PeerIdInvalid:
         LOGGER.warning(f"PeerIdInvalid {type(message)}") # My Debug Style
         if isinstance(message, (int, str)):
-            return await send_message(int(message), text, buttons, block, photo)
+            return await send_message(
+                int(message), text, buttons, block, original_media
+            )
     except ConnectionError:
         return
     except Exception as e:
         if "PeerIdInvalid" in str(type(e).__name__):
             LOGGER.warning(f"PeerIdInvalid {type(message)}")
             if isinstance(message, (int, str)):
-                return await send_message(int(message), text, buttons, block, photo)
+                return await send_message(
+                    int(message), text, buttons, block, original_media
+                )
         LOGGER.error(str(e), exc_info=True)
         return str(e)
 
@@ -169,38 +232,52 @@ async def send_message(message, text, buttons=None, block=True, photo=None, **kw
 
 async def edit_message(message, text, buttons=None, block=True, photo=None):
     text = style_inline_text(text, has_buttons=buttons is not None)
+    original_media = photo
     try:
-        photo = _resolve_photo(photo)
+        photo, is_animation = _resolve_gallery_media(photo)
         if message.media:
             if photo:
-                if photo:
-                    try:
-                        return await message.edit_media(
-                            InputMediaPhoto(photo, text), reply_markup=buttons
+                input_media = (
+                    InputMediaAnimation(photo, text)
+                    if is_animation
+                    else InputMediaPhoto(photo, text)
+                )
+                try:
+                    return await message.edit_media(
+                        input_media, reply_markup=buttons
+                    )
+                except (
+                    PhotoInvalidDimensions,
+                    WebpageCurlFailed,
+                    WebpageMediaEmpty,
+                    MediaEmpty,
+                ):
+                    des_dir = (
+                        await download_image_url(photo)
+                        if str(photo).startswith(("http://", "https://"))
+                        else None
+                    )
+                    if des_dir:
+                        fallback_media = (
+                            InputMediaAnimation(des_dir, text)
+                            if is_animation
+                            else InputMediaPhoto(des_dir, text)
                         )
-                    except (
-                        PhotoInvalidDimensions,
-                        WebpageCurlFailed,
-                        WebpageMediaEmpty,
-                        MediaEmpty,
-                    ):
-                        des_dir = await download_image_url(photo)
-                        if des_dir:
-                            msg = await message.edit_media(
-                                InputMediaPhoto(des_dir, text), reply_markup=buttons
-                            )
-                            from aiofiles.os import remove as aioremove
+                        msg = await message.edit_media(
+                            fallback_media, reply_markup=buttons
+                        )
+                        from aiofiles.os import remove as aioremove
 
-                            await aioremove(des_dir)
-                            return msg
-                        return await message.edit_caption(
-                            caption=text, reply_markup=buttons
-                        )
+                        await aioremove(des_dir)
+                        return msg
+                    return await message.edit_caption(
+                        caption=text, reply_markup=buttons
+                    )
             return await message.edit_caption(caption=text, reply_markup=buttons)
         if photo:
             try:
                 new_message = await send_message(
-                    message.chat.id, text, buttons, block, photo
+                    message.chat.id, text, buttons, block, original_media
                 )
                 await delete_message(message)
                 return new_message
@@ -231,12 +308,21 @@ async def edit_message(message, text, buttons=None, block=True, photo=None):
         if message.media:
             if photo:
                 try:
-                    return await message.edit_media(
-                        InputMediaPhoto(
+                    input_media = (
+                        InputMediaAnimation(
                             photo,
                             short_text,
                             parse_mode=ParseMode.DISABLED,
-                        ),
+                        )
+                        if is_animation
+                        else InputMediaPhoto(
+                            photo,
+                            short_text,
+                            parse_mode=ParseMode.DISABLED,
+                        )
+                    )
+                    return await message.edit_media(
+                        input_media,
                         reply_markup=buttons,
                     )
                 except Exception:
@@ -254,13 +340,17 @@ async def edit_message(message, text, buttons=None, block=True, photo=None):
         )
     except ReplyMarkupInvalid as rmi:
         LOGGER.warning(str(rmi))
-        return await edit_message(message, text, None, block, photo)
+        return await edit_message(
+            message, text, None, block, original_media
+        )
     except FloodWait as f:
         LOGGER.warning(str(f))
         if not block:
             return str(f)
         await sleep(f.value * 1.2)
-        return await edit_message(message, text, buttons, block, photo)
+        return await edit_message(
+            message, text, buttons, block, original_media
+        )
     except OSError:
         return
     except Exception as e:

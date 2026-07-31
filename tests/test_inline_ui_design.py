@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -12,6 +13,7 @@ BUTTON_BUILD_PATH = ROOT / "bot" / "helper" / "telegram_helper" / "button_build.
 MESSAGE_UTILS_PATH = ROOT / "bot" / "helper" / "telegram_helper" / "message_utils.py"
 STATUS_UTILS_PATH = ROOT / "bot" / "helper" / "ext_utils" / "status_utils.py"
 FILETOLINK_PATH = ROOT / "bot" / "modules" / "filetolink.py"
+BOT_SETTINGS_PATH = ROOT / "bot" / "modules" / "bot_settings.py"
 
 
 def _load_inline_ui():
@@ -175,6 +177,88 @@ def test_filetolink_redesign_retains_status_logger_and_link_fields():
         "Size",
     ):
         assert label in source
+
+
+def test_port_is_hidden_from_telegram_settings():
+    """PORT remains a runtime config but is not offered in bot settings."""
+    source = BOT_SETTINGS_PATH.read_text(encoding="utf-8")
+    assert 'HIDDEN_VARS = {"PORT"}' in source
+    assert "k not in HIDDEN_VARS" in source
+
+
+def test_image_commands_are_available_to_command_sync():
+    from bot.helper.ext_utils.help_messages import get_bot_commands
+    from bot.helper.telegram_helper.command_sync import build_bot_command_menu
+
+    commands = get_bot_commands()
+    assert "AddImage" in commands
+    assert "Images" in commands
+    menu_commands = {item.command for item in build_bot_command_menu()}
+    assert "addimage" in menu_commands
+    assert "images" in menu_commands
+
+
+@pytest.mark.asyncio
+async def test_gallery_gif_uses_animation_delivery(monkeypatch):
+    from pyrogram.types import InputMediaAnimation
+
+    from bot.core.tg_client import TgClient
+    from bot.helper.telegram_helper.message_utils import (
+        _resolve_gallery_media,
+        edit_message,
+        gallery_animation,
+        send_message,
+    )
+
+    assert _resolve_gallery_media("https://example.com/banner.gif?v=1") == (
+        "https://example.com/banner.gif?v=1",
+        True,
+    )
+    assert _resolve_gallery_media(gallery_animation("telegram-file-id")) == (
+        "telegram-file-id",
+        True,
+    )
+
+    bot = SimpleNamespace(
+        send_animation=AsyncMock(),
+        send_photo=AsyncMock(),
+    )
+    monkeypatch.setattr(TgClient, "bot", bot)
+    await send_message(
+        123,
+        "Animated gallery item",
+        photo=gallery_animation("telegram-file-id"),
+    )
+    kwargs = bot.send_animation.await_args.kwargs
+    assert kwargs["chat_id"] == 123
+    assert kwargs["animation"] == "telegram-file-id"
+
+    await send_message(123, "Static gallery item", photo="photo-file-id")
+    photo_kwargs = bot.send_photo.await_args.kwargs
+    assert photo_kwargs["chat_id"] == 123
+    assert photo_kwargs["photo"] == "photo-file-id"
+
+    gallery_message = SimpleNamespace(
+        media=object(),
+        edit_media=AsyncMock(),
+    )
+    await edit_message(
+        gallery_message,
+        "Next animation",
+        photo=gallery_animation("next-file-id"),
+    )
+    input_media = gallery_message.edit_media.await_args.args[0]
+    assert isinstance(input_media, InputMediaAnimation)
+    assert input_media.media == "next-file-id"
+
+    await edit_message(
+        gallery_message,
+        "Next photo",
+        photo="next-photo-id",
+    )
+    photo_input_media = gallery_message.edit_media.await_args.args[0]
+    assert photo_input_media.media == "next-photo-id"
+    assert type(photo_input_media).__name__ == "InputMediaPhoto"
 
 
 @pytest.mark.asyncio

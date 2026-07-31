@@ -97,7 +97,8 @@ async def send_filetolink_status(message):
     cache_max_mb = environ.get("FILETOLINK_CACHE_MAX_MB", "256")
     cache_total_mb = environ.get("FILETOLINK_CACHE_TOTAL_MAX_MB", "2048")
     base_url = Config.BASE_URL or "Not configured"
-    bin_channel = Config.BIN_CHANNEL or "Disabled"
+    effective_bin_channel = Config.effective_bin_channel()
+    bin_channel = effective_bin_channel or "Disabled"
     leech_dump = Config.LEECH_DUMP_CHAT or "Disabled"
     stream_count = len(stream_clients) or 1
     client_block = (
@@ -158,9 +159,11 @@ def _stream_token(chat_id, message_id, unique_id):
 
 
 async def copy_to_bin(message):
+    bin_channel = Config.effective_bin_channel()
+
     async def copy_message(**kwargs):
         copied = await message.copy(
-            chat_id=Config.BIN_CHANNEL,
+            chat_id=bin_channel,
             reply_markup=None,
             **kwargs,
         )
@@ -191,7 +194,8 @@ async def copy_to_bin(message):
 
 async def prepare_stored_media(message):
     media = get_media(message)
-    if Config.BIN_CHANNEL:
+    bin_channel = Config.effective_bin_channel()
+    if bin_channel:
         copied = await copy_to_bin(message)
         if not copied:
             raise RuntimeError("Failed to store media in BIN_CHANNEL.")
@@ -218,7 +222,7 @@ async def prepare_stored_media(message):
         except Exception as e:
             LOGGER.error(f"Failed to reply to copied message in BIN_CHANNEL: {e}")
             
-        return Config.BIN_CHANNEL, copied.id, media
+        return bin_channel, copied.id, media
     return message.chat.id, message.id, media
 
 
@@ -393,7 +397,8 @@ def _blocked_channel_ids():
 async def channel_media_handler(client, message):
     if not (Config.BASE_URL and Config.CHANNEL and get_media(message)):
         raise ContinuePropagation
-    if Config.BIN_CHANNEL and message.chat and message.chat.id == int(Config.BIN_CHANNEL):
+    bin_channel = Config.effective_bin_channel()
+    if bin_channel and message.chat and message.chat.id == int(bin_channel):
         raise ContinuePropagation
     if message.chat and message.chat.id in _blocked_channel_ids():
         raise ContinuePropagation

@@ -286,6 +286,7 @@ class TgClient:
     user = None
     helper_bots = {}
     helper_loads = {}
+    helper_bot_clients = {}
     stream_clients = {}
     stream_loads = {}
     stream_prewarm = {}
@@ -350,6 +351,7 @@ class TgClient:
             await hbot.start()
             LOGGER.info(f"Helper Bot [@{hbot.me.username}] Started!")
             cls.helper_bots[no], cls.helper_loads[no] = hbot, 0
+            cls.helper_bot_clients[b_token] = hbot
         except FloodWait as e:
             LOGGER.warning(
                 f"Helper Bot{no} FloodWait: Retrying in {e.value}s..."
@@ -370,6 +372,7 @@ class TgClient:
             await hbot.start()
             LOGGER.info(f"Helper Bot [@{hbot.me.username}] Started!")
             cls.helper_bots[no], cls.helper_loads[no] = hbot, 0
+            cls.helper_bot_clients[b_token] = hbot
         except FloodWait as e:
             LOGGER.warning(
                 f"Helper Bot{no} FloodWait: Retrying in {e.value}s (non-blocking)..."
@@ -381,7 +384,8 @@ class TgClient:
 
     @classmethod
     async def start_helper_bots(cls):
-        if not Config.HELPER_TOKENS:
+        helper_tokens = Config.helper_bot_tokens()
+        if not helper_tokens:
             return
         LOGGER.info("Generating helper client from HELPER_TOKENS")
         bot_proxies = cls._parse_proxies(Config.HELPER_BOT_PROXIES)
@@ -392,7 +396,7 @@ class TgClient:
                         no, b_token,
                         bot_proxies[no - 1] if bot_proxies and no - 1 < len(bot_proxies) else None,
                     )
-                    for no, b_token in enumerate(Config.HELPER_TOKENS.split(), start=1)
+                    for no, b_token in enumerate(helper_tokens, start=1)
                 )
             )
 
@@ -577,33 +581,39 @@ class TgClient:
         cls.stream_clients[0] = cls.bot
         cls.stream_loads[0] = 0
 
-        tokens = [
-            (key, token)
-            for key, token in Config.MULTI_TOKENS.items()
-            if token and token != Config.BOT_TOKEN
-        ]
+        tokens = Config.stream_bot_tokens()
         if not tokens:
             await cls.prewarm_stream_clients()
             return
 
-        def token_sort(item):
-            digits = "".join(ch for ch in item[0] if ch.isdigit())
-            return int(digits) if digits else 0
+        helper_tokens = Config.helper_bot_tokens()
+        helper_proxies = cls._parse_proxies(Config.HELPER_BOT_PROXIES)
+        proxy_by_token = {
+            token: helper_proxies[index]
+            for index, token in enumerate(helper_tokens)
+            if index < len(helper_proxies) and helper_proxies[index] is not None
+        }
 
-        LOGGER.info("Generating stream clients from MULTI_TOKENs")
-        for no, (key, token) in enumerate(sorted(tokens, key=token_sort), start=1):
+        LOGGER.info("Generating configured FileToLink stream clients")
+        for no, token in enumerate(tokens, start=1):
             try:
-                client = cls.tgClient(
-                    f"Amaterasu-Stream{no}",
-                    bot_token=token,
-                    no_updates=True,
-                )
-                await client.start()
+                client = cls.helper_bot_clients.get(token)
+                if client is None:
+                    client = cls.tgClient(
+                        f"Amaterasu-Stream{no}",
+                        bot_token=token,
+                        no_updates=True,
+                        proxy=proxy_by_token.get(token),
+                    )
+                    await client.start()
+                    source = "Stream Bot"
+                else:
+                    source = "Shared Helper Bot"
                 cls.stream_clients[no] = client
                 cls.stream_loads[no] = 0
-                LOGGER.info(f"Stream Bot [{key}] [@{client.me.username}] Started!")
+                LOGGER.info(f"{source} [@{client.me.username}] Started!")
             except Exception as e:
-                LOGGER.error(f"Failed to start stream bot from {key}. {e}")
+                LOGGER.error(f"Failed to start FileToLink stream bot {no}. {e}")
         await cls.prewarm_stream_clients()
 
     @classmethod
@@ -697,7 +707,10 @@ class TgClient:
             )
 
         chat_ids = []
-        for raw_chat_id in (Config.BIN_CHANNEL, Config.LEECH_DUMP_CHAT):
+        for raw_chat_id in (
+            Config.effective_bin_channel(),
+            Config.LEECH_DUMP_CHAT,
+        ):
             if raw_chat_id in (None, "", 0, "0"):
                 continue
             try:
@@ -713,11 +726,7 @@ class TgClient:
                 "AUTO_PROVISION_STREAM_BOTS requires BIN_CHANNEL or LEECH_DUMP_CHAT"
             )
 
-        expected_tokens = {
-            token
-            for token in Config.MULTI_TOKENS.values()
-            if token and token != Config.BOT_TOKEN
-        }
+        expected_tokens = set(Config.stream_bot_tokens())
         stream_bots = {}
         for client_id, client in cls.stream_clients.items():
             if client_id == 0 or not getattr(client, "me", None):
@@ -800,52 +809,57 @@ class TgClient:
         async with cls._lock:
             clients = []
             if cls.bot:
-                clients.append(cls.bot.stop())
+                clients.append(cls.bot)
                 cls.bot = None
             if cls.user:
-                clients.append(cls.user.stop())
+                clients.append(cls.user)
                 cls.user = None
             if cls.helper_bots:
-                clients.extend(h_bot.stop() for h_bot in cls.helper_bots.values())
+                clients.extend(cls.helper_bots.values())
                 cls.helper_bots = {}
             cls.helper_loads = {}
+            cls.helper_bot_clients = {}
             if cls.stream_clients:
-                stop_tasks = [
-                    client.stop()
+                clients.extend(
+                    client
                     for cid, client in cls.stream_clients.items()
                     if cid != 0
-                ]
-                if stop_tasks:
-                    await gather(*stop_tasks)
+                )
                 cls.stream_clients = {}
             cls.stream_loads = {}
             cls.stream_prewarm = {}
             if cls.helper_users:
-                clients.extend(h_user.stop() for h_user in cls.helper_users.values())
+                clients.extend(cls.helper_users.values())
                 cls.helper_users = {}
             cls.helper_user_loads = {}
             if clients:
-                await gather(*clients, return_exceptions=True)
+                unique_clients = {id(client): client for client in clients}.values()
+                await gather(
+                    *(client.stop() for client in unique_clients),
+                    return_exceptions=True,
+                )
             LOGGER.info("All Client(s) stopped")
 
     @classmethod
     async def reload(cls):
         async with cls._lock:
-            await cls.bot.restart()
+            clients = [cls.bot]
             if cls.user:
-                await cls.user.restart()
+                clients.append(cls.user)
             if cls.helper_bots:
-                await gather(*[h_bot.restart() for h_bot in cls.helper_bots.values()])
+                clients.extend(cls.helper_bots.values())
             if cls.stream_clients:
-                restart_tasks = [
-                    client.restart()
+                clients.extend(
+                    client
                     for cid, client in cls.stream_clients.items()
                     if cid != 0
-                ]
-                if restart_tasks:
-                    await gather(*restart_tasks)
-            if cls.helper_users:
-                await gather(
-                    *[h_user.restart() for h_user in cls.helper_users.values()]
                 )
+            if cls.helper_users:
+                clients.extend(cls.helper_users.values())
+            unique_clients = {
+                id(client): client for client in clients if client is not None
+            }.values()
+            await gather(
+                *(client.restart() for client in unique_clients)
+            )
             LOGGER.info("All Client(s) restarted")

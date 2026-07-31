@@ -12,6 +12,9 @@ DATABASE_URL = ""
 # ==========================================
 USER_SESSION_STRING = ""
 HELPER_TOKENS = ""
+# Reuse HELPER_TOKENS as FileToLink stream workers. Set False when helper
+# bots do not have access to the effective BIN channel.
+USE_HELPER_BOTS_FOR_FILETOLINK = True
 HELPER_STRINGS = ""
 HELPER_BOT_PROXIES = ""
 HELPER_USER_PROXIES = ""
@@ -169,6 +172,8 @@ AUTHOR_URL = ""
 # 13. LOG CHANNELS & NOTIFIERS
 # ==========================================
 LEECH_DUMP_CHAT = ""
+# Use LEECH_DUMP_CHAT as FileToLink storage instead of BIN_CHANNEL.
+USE_LEECH_DUMP_AS_BIN_CHANNEL = False
 LINKS_LOG_ID = ""
 MIRROR_LOG_ID = ""
 PROGRESS_BAR = "█:░"

@@ -133,7 +133,12 @@ async def main():
                 provision_stream_bots = True
     else:
         _ctt(TgClient.start_user())
-    _ctt(TgClient.start_helper_bots())
+    if provision_stream_bots:
+        # Start helpers first so a token assigned to both roles is reused by
+        # the temporary provisioning pool instead of opening twice.
+        await TgClient.start_helper_bots()
+    else:
+        _ctt(TgClient.start_helper_bots())
     _ctt(TgClient.start_helper_users())
 
     # Stream clients (MULTI_TOKEN bots) are used for load-balanced file
@@ -151,8 +156,11 @@ async def main():
             )
         # Provisioning done — stop the stream clients in this process.
         # The web server subprocess starts its own set for actual streaming.
+        helper_client_ids = {
+            id(client) for client in TgClient.helper_bots.values()
+        }
         for cid, client in list(TgClient.stream_clients.items()):
-            if cid != 0:
+            if cid != 0 and id(client) not in helper_client_ids:
                 try:
                     await client.stop()
                 except Exception:

@@ -17,12 +17,7 @@ def _client_state(client, connection_check=None):
 
 
 def _configured_stream_token_count(config):
-    bot_token = getattr(config, "BOT_TOKEN", "")
-    return sum(
-        1
-        for token in getattr(config, "MULTI_TOKENS", {}).values()
-        if token and token != bot_token
-    )
+    return len(config.stream_bot_tokens())
 
 
 def get_health_report():
@@ -38,9 +33,7 @@ def get_health_report():
     def client_state(client):
         return _client_state(client, TelegramClient.is_connected)
 
-    configured_bot_tokens = len(
-        [token for token in (Config.HELPER_TOKENS or "").split() if token]
-    )
+    configured_bot_tokens = len(Config.helper_bot_tokens())
     configured_user_sessions = len(
         [session for session in (Config.HELPER_STRINGS or "").split() if session]
     )

@@ -441,6 +441,8 @@ def get_bot_commands():
         "Stats": "Bot, OS, Repo & System full Statistics",
         "Rss": "User RSS Management Settings",
         "IMDB": "[query] or ttxxxxxx Get IMDB info",
+        "AddImage": "[reply/link] Add a photo or GIF to the image gallery",
+        "Images": "[query] View the gallery or search for images",
         "CancelAll": "Cancel all Tasks on the Bot",
         "Help": "Detailed help usage of the Amaterasu Bot",
         "BotSet": "[SUDO] Bot Management Settings",
@@ -592,7 +594,9 @@ def get_help_string():
         elif key == "RmBlackList":
             help_lines.append(f"{cmd_str}: Remove a user from blacklist (Only Owner & Sudo).")
         elif key == "AddImage":
-            help_lines.append(f"{cmd_str}: Add an image to the gallery by reply to photo or link.")
+            help_lines.append(
+                f"{cmd_str}: Add a photo or GIF to the gallery by reply or link."
+            )
         elif key == "Images":
             help_lines.append(f"{cmd_str}: View and manage the image gallery.")
         elif key == "Restart":

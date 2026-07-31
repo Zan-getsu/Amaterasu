@@ -7,6 +7,7 @@ from ..helper.telegram_helper.message_utils import (
     send_message,
     edit_message,
     delete_message,
+    gallery_animation,
 )
 
 
@@ -189,17 +190,30 @@ async def picture_add(_, message):
                 editable, "<b>Not a Valid Link, Must Start with 'http'</b>"
             )
         pic_add = msg_text.strip()
-    elif resm and resm.photo:
-        if resm.photo.file_size > 5242880 * 2:
+    elif resm and (
+        resm.animation
+        or (
+            resm.document
+            and (resm.document.mime_type or "").lower() == "image/gif"
+        )
+    ):
+        animation = resm.animation or resm.document
+        if (animation.file_size or 0) > 50 * 1024 * 1024:
             return await edit_message(
-                editable, "<i>Media is Not Supported! Only Photos!!</i>"
+                editable, "<i>GIF is too large! Maximum size is 50 MB.</i>"
+            )
+        pic_add = gallery_animation(animation.file_id)
+    elif resm and resm.photo:
+        if (resm.photo.file_size or 0) > 10 * 1024 * 1024:
+            return await edit_message(
+                editable, "<i>Photo is too large! Maximum size is 10 MB.</i>"
             )
         pic_add = resm.photo.file_id
     else:
         help_msg = f"""<b>✦ ADD IMAGE USAGE</b>
 <code>├─ Reply to Link : /{BotCommands.AddImageCommand} {{link}}
-├─ Reply to Photo: /{BotCommands.AddImageCommand}
-└─ Supported     : Telegra.ph, DDL links, Telegram photos
+├─ Reply to Media: /{BotCommands.AddImageCommand}
+└─ Supported     : Image/GIF links, Telegram photos and GIFs
 </code>"""
         return await edit_message(editable, help_msg)
     Config.IMAGES.append(pic_add)

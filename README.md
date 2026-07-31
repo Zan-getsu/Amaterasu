@@ -574,6 +574,7 @@ All variables go inside `config.py`. Copy `config_sample.py` as your starting te
 |---|---|---|---|
 | `USER_SESSION_STRING` | `str` | `""` | Pyrogram string session for a user account. Required for restricted content downloads and uploads >2 GB |
 | `HELPER_TOKENS` | `str` | `""` | Space-separated helper bot tokens used by HyperDL/HyperUP parallel Telegram transfers |
+| `USE_HELPER_BOTS_FOR_FILETOLINK` | `bool` | `True` | Also use `HELPER_TOKENS` as FileToLink stream workers. Set `False` if helpers cannot read the effective BIN channel |
 | `HELPER_STRINGS` | `str` | `""` | Space-separated helper user session strings. These clients can start with the bot, but HyperDL/HyperUP currently uses helper bot tokens as its active worker pool |
 | `HELPER_BOT_PROXIES` | `str` | `""` | Optional newline-separated proxy dictionaries for `HELPER_TOKENS`, one proxy per helper bot |
 | `HELPER_USER_PROXIES` | `str` | `""` | Optional newline-separated proxy dictionaries for `HELPER_STRINGS`, one proxy per helper user |
@@ -629,6 +630,7 @@ Minimum working config:
 USE_HYPER = True
 LEECH_DUMP_CHAT = "-1001234567890"
 HELPER_TOKENS = "123456:AA... 234567:BB... 345678:CC..."
+USE_HELPER_BOTS_FOR_FILETOLINK = True
 ```
 
 Required setup:
@@ -769,7 +771,7 @@ All limits are in **GB**. Set `0` to disable the limit.
 
 | Variable | Type | Default | Description |
 |---|---|---|---|
-| `IMAGES` | `list` | `[]` | Image URLs or Telegram photo file IDs used as random bot message photos |
+| `IMAGES` | `list` | `[]` | Photo/GIF URLs and Telegram media file IDs used by the gallery and random message media |
 | `IMG_SEARCH` | `str` | `""` | Comma-separated wallpaper search keywords used to auto-fill `IMAGES` on startup |
 | `IMG_PAGE` | `int` | `1` | Number of Wallpaperflare result pages to fetch per `IMG_SEARCH` keyword |
 | `USE_IMAGES` | `bool` | `False` | Enable random images on supported bot messages |
@@ -796,6 +798,7 @@ All limits are in **GB**. Set `0` to disable the limit.
 | Variable | Type | Default | Description |
 |---|---|---|---|
 | `LEECH_DUMP_CHAT` | `str` | `""` | Chat ID where leeched files are dumped (e.g., `-100123456789`) |
+| `USE_LEECH_DUMP_AS_BIN_CHANNEL` | `bool` | `False` | Use `LEECH_DUMP_CHAT` as FileToLink storage; falls back to `BIN_CHANNEL` if the dump chat is empty |
 | `LINKS_LOG_ID` | `str` | `""` | Chat ID for logging generated links |
 | `MIRROR_LOG_ID` | `str` | `""` | Chat ID for logging mirror uploads |
 | `PROGRESS_BAR` | `str` | `"█:░"` | Progress bar symbols in `FILLED:EMPTY` format, e.g. `█:░` or `🟩:⬛` |
@@ -815,8 +818,8 @@ All limits are in **GB**. Set `0` to disable the limit.
 | `BIN_CHANNEL` | `int` | `0` | Telegram channel ID used as file storage backend |
 | `MAX_BATCH_FILES` | `int` | `0` | Max files per batch operation |
 | `CHANNEL` | `bool` | `False` | Enable channel mode |
-| `MULTI_TOKEN1..3` | `str` | `""` | Additional bot tokens for load balancing |
-| `AUTO_PROVISION_STREAM_BOTS` | `bool` | `False` | Use `USER_SESSION_STRING` at startup to add and promote configured `MULTI_TOKEN` bots in `BIN_CHANNEL` and `LEECH_DUMP_CHAT`; provisioning is skipped if unavailable. |
+| `MULTI_TOKEN1..50` | `str` | `""` | Optional dedicated FileToLink bot tokens for load balancing |
+| `AUTO_PROVISION_STREAM_BOTS` | `bool` | `False` | Use `USER_SESSION_STRING` at startup to add and promote configured FileToLink workers in the effective BIN channel and `LEECH_DUMP_CHAT`; provisioning is skipped if unavailable. |
 | `TOKEN_ENABLED` | `bool` | `False` | Reserved legacy setting; FileToLink URLs are always signed |
 | `TOKEN_TTL_HOURS` | `int` | `0` | Reserved legacy setting; route tokens currently do not expire |
 | `SHORTEN_ENABLED` | `bool` | `False` | Enable URL shortening for stream links |
@@ -829,7 +832,7 @@ Runtime cache tuning is environment-driven: set `FILETOLINK_CACHE_MAX_MB` to cap
 
 | Variable | Type | Default | Description |
 |---|---|---|---|
-| `PORT` | `int` | `8080` | Local web server port. Public links use `BASE_URL` |
+| `PORT` | `int` | `8080` | Advanced environment-only internal listener port. It is hidden from Telegram bot settings; use Docker `-p HOST_PORT:8080` for public port mapping |
 | `BIND_TO_LOOPBACK` | `bool` | `True` | When `True`, the web UI binds to `127.0.0.1` only — operators must put a reverse proxy (nginx, Caddy, Cloudflare Tunnel) in front. When `False`, binds `0.0.0.0` for direct LAN access without a reverse proxy. Pair with `ports: ["0.0.0.0:8080:8080"]` in docker-compose for direct access. Trade-off: `False` is more convenient but exposes the web UI to anyone who can reach the host on port 8080. |
 | `CLOUDFLARE_TUNNEL_ENABLED` | `bool` | `False` | Start Cloudflare Tunnel from Amaterasu |
 | `CLOUDFLARE_TUNNEL_TOKEN` | `str` | `""` | Named tunnel token. Empty uses a temporary quick tunnel |
@@ -1759,7 +1762,11 @@ Use `/link status` to check the active `BASE_URL`, stream bot pool, current stre
 The web server serves an existing cached file immediately when available. For uncached full-file opens, the active transfer stays live-first and cache warming starts only after a successful full transfer; Range playback is kept live-first to avoid competing with initial seek/buffer requests.
 
 ### Multi-Token Load Balancing
-Configure `MULTI_TOKEN1`, `MULTI_TOKEN2`, `MULTI_TOKEN3` with additional bot tokens. The server automatically distributes file requests across tokens to avoid Telegram's FloodWait rate limits, and temporarily cools down a stream bot after repeated fetch/stream failures so another available token can take over.
+By default, tokens already configured in `HELPER_TOKENS` are reused as FileToLink workers, so they do not need to be entered again. Every helper must be able to read the effective BIN channel. Set `USE_HELPER_BOTS_FOR_FILETOLINK=False` to keep helpers dedicated to HyperDL/HyperUP.
+
+For a separate FileToLink pool, configure `MULTI_TOKEN1` through `MULTI_TOKEN50`. Tokens present in both settings are deduplicated. The server distributes file requests across the resulting pool to avoid Telegram FloodWait limits and temporarily cools down a stream bot after repeated failures so another available token can take over.
+
+Set `USE_LEECH_DUMP_AS_BIN_CHANNEL=True` to use `LEECH_DUMP_CHAT` for FileToLink storage as well. The saved `BIN_CHANNEL` value remains unchanged and is used again if the option is disabled.
 
 ### Access Control
 | Feature | Variable | Description |
