@@ -1,7 +1,12 @@
 services:
   amaterasu:
-    image: nbots/amaterasu:latest
-    pull_policy: always
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        BASE_IMAGE: nbots/amaterasu:v1
+    image: amaterasu:local
+    pull_policy: never
     container_name: amaterasu-bot
     restart: always
     environment:

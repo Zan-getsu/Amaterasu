@@ -41,7 +41,7 @@ from aioterabox.exceptions import TeraboxApiError as _SdkApiError
 from aioterabox.exceptions import TeraboxNotFoundError as _SdkNotFoundError
 from aioterabox.exceptions import TeraboxUnauthorizedError as _SdkUnauthorizedError
 
-__version__ = "1.0.3-amaterasu"
+__version__ = "1.0.4-amaterasu"
 
 _DEFAULT_ACCOUNT_BASE_URL = "https://www.terabox.com"
 _REGION_PREFIX = re_compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
@@ -50,7 +50,7 @@ _REGIONAL_ACCOUNT_DOMAINS = ("terabox.com", "1024terabox.com")
 _FREE_MAX_FILE_SIZE = 4 * 1024**3
 _VIP_MAX_FILE_SIZE = 20 * 1024**3 - 1
 _UPLOAD_CONTROL_TIMEOUT = 30
-_UPLOAD_FINALIZE_TIMEOUT = 60
+_UPLOAD_FINALIZE_TIMEOUT = 30
 _UPLOAD_NETWORK_ATTEMPTS = 3
 _UPLOAD_AUTH_ERROR_CODES = {-6, 4000020, 4000023}
 _REMOTE_SNAPSHOT_UNKNOWN = object()
@@ -83,6 +83,14 @@ class _UploadAuthRejected(_SdkUnauthorizedError):
         super().__init__(f"TeraBox rejected upload {stage} auth")
         self.code = code
         self.api_message = message[:120]
+
+
+class _UploadHttpRejected(TeraboxError):
+    """A final-create HTTP rejection safe to expose and conditionally retry."""
+
+    def __init__(self, status: int):
+        super().__init__(f"TeraBox upload finalization returned HTTP {status}")
+        self.status = status
 
 
 class _CookieData(dict):
@@ -368,6 +376,7 @@ class _RegionalAccountClient(_AccountClient):
         """Upload every chunk, including the SDK's previously omitted remainder."""
         destination_path = f"/{destination_path.lstrip('/')}"
         file_size = await to_thread(os.path.getsize, filename)
+        local_mtime = int(await to_thread(os.path.getmtime, filename))
         max_file_size = await self._run_precontent_network_stage(
             "membership check",
             self.get_max_file_size,
@@ -436,7 +445,58 @@ class _RegionalAccountClient(_AccountClient):
                     uploadid=upload_id,
                     file_size=file_size,
                     md5_list_json=md5_list,
+                    local_mtime=local_mtime,
                 )
+            except (_UploadHttpRejected, _SdkApiError) as primary_rejection:
+                if recovered := await self._recover_finalization_timeout(
+                    destination_path,
+                    file_size,
+                    previous_remote,
+                ):
+                    return recovered
+                try:
+                    return await self._run_upload_stage_with_auth_refresh(
+                        "finalization compatibility",
+                        self._postcreate_file,
+                        remote_path=destination_path,
+                        uploadid=upload_id,
+                        file_size=file_size,
+                        md5_list_json=md5_list,
+                        local_mtime=local_mtime,
+                        compatibility=True,
+                    )
+                except (TimeoutError, aiohttp.ClientError, OSError) as error:
+                    if recovered := await self._recover_finalization_timeout(
+                        destination_path,
+                        file_size,
+                        previous_remote,
+                    ):
+                        return recovered
+                    raise TeraboxError(
+                        "TeraBox upload compatibility finalization failed "
+                        f"({_bootstrap_failure_reason(error)}); it was not retried "
+                        "because remote completion could not be verified"
+                    ) from None
+                except _UploadHttpRejected as fallback_rejection:
+                    if recovered := await self._recover_finalization_timeout(
+                        destination_path,
+                        file_size,
+                        previous_remote,
+                    ):
+                        return recovered
+                    primary_status = getattr(primary_rejection, "status", "API")
+                    raise TeraboxError(
+                        "TeraBox upload finalization rejected both supported "
+                        f"protocols (primary={primary_status}, "
+                        f"compatibility=HTTP {fallback_rejection.status}); chunks "
+                        "were uploaded but remote completion was not reported"
+                    ) from None
+                except _SdkApiError:
+                    raise TeraboxError(
+                        "TeraBox upload finalization rejected both supported API "
+                        "protocols; chunks were uploaded but remote completion was "
+                        "not reported"
+                    ) from None
             except (TimeoutError, aiohttp.ClientError, OSError) as error:
                 if recovered := await self._recover_finalization_timeout(
                     destination_path,
@@ -704,28 +764,46 @@ class _RegionalAccountClient(_AccountClient):
         uploadid: str,
         file_size: int,
         md5_list_json: list[str],
+        local_mtime: int | None = None,
+        compatibility: bool = False,
     ) -> dict:
         """Finalize an upload without logging jsToken or emitting a root `//`."""
         remote_dir = os.path.dirname(remote_path).rstrip("/") or "/"
         target_path = remote_dir if remote_dir == "/" else remote_dir + "/"
         data = {
             "isdir": "0",
-            "rtype": "2",
+            "rtype": "2" if compatibility else "1",
             "path": remote_path,
             "uploadid": uploadid,
             "target_path": target_path,
             "size": str(file_size),
             "block_list": json.dumps(md5_list_json),
         }
+        if local_mtime is not None:
+            data["local_mtime"] = str(local_mtime)
+        if not compatibility and self.bds_token:
+            data["bdstoken"] = self.bds_token
         async with self._request(
             "POST",
             f"{_DEFAULT_ACCOUNT_BASE_URL}/api/create",
             headers={"Content-Type": "application/x-www-form-urlencoded"},
-            params=self._upload_auth_params(include_bdstoken=True),
+            params=None if compatibility else self._upload_auth_params(),
             data=data,
             timeout=_UPLOAD_FINALIZE_TIMEOUT,
         ) as response:
-            result = await response.json()
+            status = int(getattr(response, "status", 200) or 200)
+            try:
+                result = await response.json(content_type=None)
+            except (TypeError, ValueError):
+                if status >= 400:
+                    raise _UploadHttpRejected(status) from None
+                raise _SdkApiError(
+                    "TeraBox file create returned an unrecognized response"
+                ) from None
+        if not isinstance(result, dict):
+            if status >= 400:
+                raise _UploadHttpRejected(status)
+            raise _SdkApiError("TeraBox file create returned an invalid response")
         if result.get("errno") == 0:
             return result
         code = result.get("errno", "unknown")

@@ -269,7 +269,7 @@ def test_amaterasu_terabox_adapter_exports_sdk_surface():
     assert TeraboxFile
     assert issubclass(TeraboxCancelled, TeraboxError)
     assert issubclass(TeraboxPasswordError, TeraboxError)
-    assert __version__ == "1.0.3-amaterasu"
+    assert __version__ == "1.0.4-amaterasu"
 
 
 def test_terabox_cookie_parser_allows_sdk_refreshable_values(monkeypatch):
@@ -751,6 +751,7 @@ async def test_terabox_large_upload_keeps_final_partial_chunk(tmp_path):
         uploadid="upload-id",
         file_size=len(content),
         md5_list_json=[digest for _size, digest, _data in chunks],
+        local_mtime=int(source.stat().st_mtime),
     )
     assert result["fs_id"] == 123
 
@@ -1015,7 +1016,7 @@ async def test_terabox_postcreate_normalizes_root_and_does_not_log_token(caplog)
     captured = []
 
     class Response:
-        async def json(self):
+        async def json(self, **_kwargs):
             return {"errno": 0, "fs_id": 123}
 
     @asynccontextmanager
@@ -1033,11 +1034,56 @@ async def test_terabox_postcreate_normalizes_root_and_does_not_log_token(caplog)
 
     assert result["fs_id"] == 123
     assert captured[0][2]["data"]["target_path"] == "/"
-    assert captured[0][2]["data"]["rtype"] == "2"
+    assert captured[0][2]["data"]["rtype"] == "1"
+    assert captured[0][2]["data"]["bdstoken"] == "synthetic-write-token"
     assert "jsToken" not in captured[0][2]["data"]
     assert captured[0][2]["params"]["jsToken"] == secret
-    assert captured[0][2]["params"]["bdstoken"] == "synthetic-write-token"
+    assert "bdstoken" not in captured[0][2]["params"]
+    assert captured[0][2]["timeout"] == 30
     assert secret not in caplog.text
+
+
+async def test_terabox_postcreate_compatibility_protocol_is_cookie_only():
+    pytest.importorskip("aiohttp")
+    pytest.importorskip("aioterabox")
+    import terabox
+
+    cookies = {
+        "jstoken": "page-token",
+        "csrfToken": "csrf",
+        "browserid": "browser",
+        "ndus": "authenticated",
+    }
+    client = terabox._RegionalAccountClient("", "", object(), cookies=cookies)
+    client.bds_token = "write-token"
+    captured = []
+
+    class Response:
+        status = 200
+
+        async def json(self, **_kwargs):
+            return {"errno": 0, "fs_id": 123}
+
+    @asynccontextmanager
+    async def request(_method, _url, **kwargs):
+        captured.append(kwargs)
+        yield Response()
+
+    client._request = request
+
+    await client._postcreate_file(
+        "/Folder/file.bin",
+        "upload-id",
+        10,
+        ["digest"],
+        local_mtime=123,
+        compatibility=True,
+    )
+
+    assert captured[0]["params"] is None
+    assert captured[0]["data"]["rtype"] == "2"
+    assert captured[0]["data"]["local_mtime"] == "123"
+    assert "bdstoken" not in captured[0]["data"]
 
 
 async def test_terabox_postcreate_error_exposes_only_code_and_message():
@@ -1055,7 +1101,7 @@ async def test_terabox_postcreate_error_exposes_only_code_and_message():
     client = terabox._RegionalAccountClient("", "", object(), cookies=cookies)
 
     class Response:
-        async def json(self):
+        async def json(self, **_kwargs):
             return {"errno": 2, "errmsg": "denied", "private": secret}
 
     @asynccontextmanager
@@ -1091,7 +1137,7 @@ async def test_terabox_postcreate_maps_auth_errno_to_refreshable_rejection():
     client = terabox._RegionalAccountClient("", "", object(), cookies=cookies)
 
     class Response:
-        async def json(self):
+        async def json(self, **_kwargs):
             return {"errno": -6, "errmsg": "user not login"}
 
     @asynccontextmanager
@@ -1107,6 +1153,42 @@ async def test_terabox_postcreate_maps_auth_errno_to_refreshable_rejection():
             10,
             ["digest"],
         )
+
+
+async def test_terabox_postcreate_maps_non_json_http_error_without_body_leak():
+    pytest.importorskip("aiohttp")
+    pytest.importorskip("aioterabox")
+    import terabox
+
+    cookies = {
+        "jstoken": "page-token",
+        "csrfToken": "csrf",
+        "browserid": "browser",
+        "ndus": "authenticated",
+    }
+    client = terabox._RegionalAccountClient("", "", object(), cookies=cookies)
+
+    class Response:
+        status = 400
+
+        async def json(self, **_kwargs):
+            raise ValueError("private response body")
+
+    @asynccontextmanager
+    async def request(_method, _url, **_kwargs):
+        yield Response()
+
+    client._request = request
+
+    with pytest.raises(terabox._UploadHttpRejected, match="HTTP 400") as raised:
+        await client._postcreate_file(
+            "/Folder/file.bin",
+            "upload-id",
+            10,
+            ["digest"],
+        )
+
+    assert "private response body" not in str(raised.value)
 
 
 async def test_terabox_repeated_verification_error_preserves_safe_errno(tmp_path):
@@ -1261,6 +1343,45 @@ async def test_terabox_upload_does_not_retry_unverified_finalization_timeout(
     assert "finalization" in message
     assert "could create a duplicate" in message
     client._postcreate_file.assert_awaited_once()
+
+
+async def test_terabox_upload_uses_one_compatibility_finalization_after_http_400(
+    tmp_path,
+):
+    pytest.importorskip("aiohttp")
+    pytest.importorskip("aioterabox")
+    import terabox
+
+    cookies = {
+        "jstoken": "page-token",
+        "csrfToken": "csrf",
+        "browserid": "browser",
+        "ndus": "authenticated",
+    }
+    client = terabox._RegionalAccountClient("", "", object(), cookies=cookies)
+    source = tmp_path / "compatibility.bin"
+    source.write_bytes(b"complete payload")
+    client.get_max_file_size = AsyncMock(return_value=20 * 1024**3 - 1)
+    client._locate_upload_host = AsyncMock(return_value="upload.example")
+    client._precreate_file = AsyncMock(return_value="upload-id")
+    client._upload_file_chunk = AsyncMock(return_value={"md5": "digest"})
+    client._postcreate_file = AsyncMock(
+        side_effect=[
+            terabox._UploadHttpRejected(400),
+            {"errno": 0, "fs_id": "remote-fs-id"},
+        ]
+    )
+    client._remote_file_snapshot = AsyncMock(return_value=None)
+    client._recover_finalization_timeout = AsyncMock(return_value=None)
+
+    result = await client.upload_file(str(source), "/Target/compatibility.bin")
+
+    assert result["fs_id"] == "remote-fs-id"
+    assert client._postcreate_file.await_count == 2
+    first_call, second_call = client._postcreate_file.await_args_list
+    assert "compatibility" not in first_call.kwargs
+    assert second_call.kwargs["compatibility"] is True
+    client._recover_finalization_timeout.assert_awaited_once()
 
 
 class _FakeTeraboxSession:
