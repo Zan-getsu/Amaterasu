@@ -390,6 +390,103 @@ def test_terabox_cookie_parser_redacts_malformed_file(monkeypatch):
     )
 
 
+@pytest.mark.parametrize(
+    ("page_token", "expected_token"),
+    [
+        ("direct-page-token", "direct-page-token"),
+        ("prefix%28%22encoded-page-token%22%29", "encoded-page-token"),
+    ],
+)
+def test_terabox_page_auth_parser_supports_current_token_formats(
+    page_token,
+    expected_token,
+):
+    pytest.importorskip("aiohttp")
+    pytest.importorskip("aioterabox")
+    import terabox
+
+    page = (
+        '<script>var templateData = {"jsToken":"'
+        + page_token
+        + '","bdstoken":"write-token","csrf":"csrf-token",'
+        '"pcftoken":"pcf-token"};</script>'
+    )
+
+    assert terabox._page_auth_data(page) == {
+        "jstoken": expected_token,
+        "bdstoken": "write-token",
+        "csrfToken": "csrf-token",
+        "pcftoken": "pcf-token",
+    }
+
+
+def test_terabox_page_auth_parser_supports_encoded_page_fallback():
+    pytest.importorskip("aiohttp")
+    pytest.importorskip("aioterabox")
+    import terabox
+
+    page = (
+        "prefix window.jsToken%20%3D%20a%7D%3Bfn%28%22"
+        "fallback-page-token%22%29 suffix"
+    )
+
+    assert terabox._page_auth_data(page) == {
+        "jstoken": "fallback-page-token",
+        "bdstoken": "",
+        "csrfToken": "",
+        "pcftoken": "",
+    }
+
+
+async def test_terabox_refresh_retains_current_page_write_tokens():
+    pytest.importorskip("aiohttp")
+    pytest.importorskip("aioterabox")
+    import terabox
+
+    cookies = {
+        "jstoken": "",
+        "csrfToken": "",
+        "browserid": "",
+        "ndus": "authenticated",
+    }
+    client = terabox._RegionalAccountClient("", "", object(), cookies=cookies)
+    captured = []
+
+    class Response:
+        async def text(self):
+            return (
+                '<script>var templateData = {"jsToken":"page-token",'
+                '"bdstoken":"write-token","csrf":"csrf-token",'
+                '"pcftoken":"pcf-token"};</script>'
+            )
+
+    @asynccontextmanager
+    async def request(method, url, **kwargs):
+        captured.append((method, url, kwargs))
+        yield Response()
+
+    client._request = request
+    client._session_from_cookie_jar = lambda: {
+        "ndus": "authenticated",
+        "browserid": "rotated-browser",
+    }
+
+    result = await client.refresh_cookies()
+
+    assert client.js_token == "page-token"
+    assert client.bds_token == "write-token"
+    assert client.pcf_token == "pcf-token"
+    assert client._cookies["csrfToken"] == "csrf-token"
+    assert result["cookies"]["browserid"] == "rotated-browser"
+    assert captured == [
+        (
+            "GET",
+            "https://www.terabox.com/main",
+            {"clean_cookies": False, "timeout": 10},
+        )
+    ]
+
+
 def test_terabox_regional_origin_is_validated_and_per_client():
     pytest.importorskip("aiohttp")
     pytest.importorskip("aioterabox")
@@ -633,6 +730,205 @@ async def test_terabox_chunk_failure_does_not_start_later_chunks(tmp_path):
     client._postcreate_file.assert_not_awaited()
 
 
+@pytest.mark.parametrize(
+    "rejected_stage",
+    ["host discovery", "precreate", "chunk", "finalization"],
+)
+async def test_terabox_upload_refreshes_each_rejected_write_stage_once(
+    tmp_path,
+    rejected_stage,
+):
+    pytest.importorskip("aiohttp")
+    pytest.importorskip("aioterabox")
+    import terabox
+
+    rejected = terabox._SdkUnauthorizedError("synthetic rejection")
+    cookies = {
+        "jstoken": "",
+        "csrfToken": "",
+        "browserid": "",
+        "ndus": "authenticated",
+    }
+    client = terabox._RegionalAccountClient("", "", object(), cookies=cookies)
+    source = tmp_path / "auth-refresh.bin"
+    source.write_bytes(b"complete payload")
+    client.get_max_file_size = AsyncMock(return_value=20 * 1024**3 - 1)
+    client._locate_upload_host = AsyncMock(return_value="upload.example")
+    client.refresh_cookies = AsyncMock(return_value={})
+    client._precreate_file = AsyncMock(return_value="upload-id")
+    client._upload_file_chunk = AsyncMock(return_value={"md5": "digest"})
+    client._postcreate_file = AsyncMock(return_value={"errno": 0, "fs_id": 123})
+    stage_method = {
+        "host discovery": client._locate_upload_host,
+        "precreate": client._precreate_file,
+        "chunk": client._upload_file_chunk,
+        "finalization": client._postcreate_file,
+    }[rejected_stage]
+    success = {
+        "host discovery": "upload.example",
+        "precreate": "upload-id",
+        "chunk": {"md5": "digest"},
+        "finalization": {"errno": 0, "fs_id": 123},
+    }[rejected_stage]
+    stage_method.side_effect = [rejected, success]
+
+    result = await client.upload_file(str(source), "/Target/auth-refresh.bin")
+
+    assert result["fs_id"] == 123
+    assert stage_method.await_count == 2
+    client.refresh_cookies.assert_awaited_once()
+
+
+async def test_terabox_upload_reports_stage_after_refreshed_session_is_rejected(
+    tmp_path,
+):
+    pytest.importorskip("aiohttp")
+    pytest.importorskip("aioterabox")
+    import terabox
+
+    cookies = {
+        "jstoken": "",
+        "csrfToken": "",
+        "browserid": "",
+        "ndus": "authenticated",
+    }
+    client = terabox._RegionalAccountClient("", "", object(), cookies=cookies)
+    source = tmp_path / "auth-rejected.bin"
+    source.write_bytes(b"complete payload")
+    client.get_max_file_size = AsyncMock(return_value=20 * 1024**3 - 1)
+    client._locate_upload_host = AsyncMock(return_value="upload.example")
+    client.refresh_cookies = AsyncMock(return_value={})
+    client._precreate_file = AsyncMock(
+        side_effect=terabox._SdkUnauthorizedError("synthetic rejection")
+    )
+    client._upload_file_chunk = AsyncMock()
+
+    with pytest.raises(terabox.TeraboxError, match="precreate.*refreshed session"):
+        await client.upload_file(str(source), "/Target/auth-rejected.bin")
+
+    assert client._precreate_file.await_count == 2
+    client.refresh_cookies.assert_awaited_once()
+    client._upload_file_chunk.assert_not_awaited()
+
+
+async def test_terabox_precreate_uses_current_query_auth_protocol():
+    pytest.importorskip("aiohttp")
+    pytest.importorskip("aioterabox")
+    import terabox
+
+    cookies = {
+        "jstoken": "page-token",
+        "csrfToken": "csrf-token",
+        "browserid": "browser",
+        "ndus": "authenticated",
+    }
+    client = terabox._RegionalAccountClient("", "", object(), cookies=cookies)
+    client.bds_token = "write-token"
+    captured = []
+
+    class Response:
+        async def json(self):
+            return {"errno": 0, "uploadid": "upload-id"}
+
+    @asynccontextmanager
+    async def request(method, url, **kwargs):
+        captured.append((method, url, kwargs))
+        yield Response()
+
+    client._request = request
+
+    result = await client._precreate_file(
+        "/Target/file.bin",
+        123,
+        ["chunk-digest"],
+    )
+
+    assert result == "upload-id"
+    method, url, kwargs = captured[0]
+    assert method == "POST"
+    assert url == "https://www.terabox.com/api/precreate"
+    assert kwargs["params"]["jsToken"] == "page-token"
+    assert kwargs["params"]["bdstoken"] == "write-token"
+    assert kwargs["data"] == {
+        "path": "/Target/file.bin",
+        "autoinit": "1",
+        "size": "123",
+        "file_limit_switch_v34": "true",
+        "rtype": "2",
+        "block_list": '["chunk-digest"]',
+    }
+
+
+async def test_terabox_locate_upload_host_uses_regional_account_origin():
+    pytest.importorskip("aiohttp")
+    pytest.importorskip("aioterabox")
+    import terabox
+
+    cookies = {
+        "jstoken": "page-token",
+        "csrfToken": "csrf-token",
+        "browserid": "browser",
+        "ndus": "authenticated",
+    }
+    client = terabox._RegionalAccountClient("", "", object(), cookies=cookies)
+    assert client.use_region("dm")
+    captured = []
+
+    class Response:
+        async def json(self, **_kwargs):
+            return {"errno": 0, "host": "https://upload.example/"}
+
+    @asynccontextmanager
+    async def request(method, url, **kwargs):
+        captured.append((method, url, kwargs))
+        yield Response()
+
+    client._request = request
+
+    assert await client._locate_upload_host() == "upload.example"
+    assert captured == [
+        (
+            "GET",
+            "https://www.terabox.com/rest/2.0/pcs/file",
+            {"params": {"method": "locateupload"}, "timeout": 10},
+        )
+    ]
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"errno": -6},
+        {"errno": 4000023, "errmsg": "need verify"},
+    ],
+)
+async def test_terabox_locate_upload_host_reports_auth_rejection(payload):
+    pytest.importorskip("aiohttp")
+    pytest.importorskip("aioterabox")
+    import terabox
+
+    cookies = {
+        "jstoken": "page-token",
+        "csrfToken": "csrf-token",
+        "browserid": "browser",
+        "ndus": "authenticated",
+    }
+    client = terabox._RegionalAccountClient("", "", object(), cookies=cookies)
+
+    class Response:
+        async def json(self, **_kwargs):
+            return payload
+
+    @asynccontextmanager
+    async def request(_method, _url, **_kwargs):
+        yield Response()
+
+    client._request = request
+
+    with pytest.raises(terabox._SdkUnauthorizedError):
+        await client._locate_upload_host()
+
+
 async def test_terabox_postcreate_normalizes_root_and_does_not_log_token(caplog):
     pytest.importorskip("aiohttp")
     pytest.importorskip("aioterabox")
@@ -646,6 +942,7 @@ async def test_terabox_postcreate_normalizes_root_and_does_not_log_token(caplog)
         "ndus": "authenticated",
     }
     client = terabox._RegionalAccountClient("", "", object(), cookies=cookies)
+    client.bds_token = "synthetic-write-token"
     captured = []
 
     class Response:
@@ -667,6 +964,10 @@ async def test_terabox_postcreate_normalizes_root_and_does_not_log_token(caplog)
 
     assert result["fs_id"] == 123
     assert captured[0][2]["data"]["target_path"] == "/"
+    assert captured[0][2]["data"]["rtype"] == "2"
+    assert "jsToken" not in captured[0][2]["data"]
+    assert captured[0][2]["params"]["jsToken"] == secret
+    assert captured[0][2]["params"]["bdstoken"] == "synthetic-write-token"
     assert secret not in caplog.text
 
 
@@ -705,6 +1006,38 @@ async def test_terabox_postcreate_error_exposes_only_code_and_message():
     assert "errno=2" in str(raised.value)
     assert "message=denied" in str(raised.value)
     assert secret not in str(raised.value)
+
+
+async def test_terabox_postcreate_maps_auth_errno_to_refreshable_rejection():
+    pytest.importorskip("aiohttp")
+    pytest.importorskip("aioterabox")
+    import terabox
+
+    cookies = {
+        "jstoken": "page-token",
+        "csrfToken": "csrf",
+        "browserid": "browser",
+        "ndus": "authenticated",
+    }
+    client = terabox._RegionalAccountClient("", "", object(), cookies=cookies)
+
+    class Response:
+        async def json(self):
+            return {"errno": -6, "errmsg": "user not login"}
+
+    @asynccontextmanager
+    async def request(_method, _url, **_kwargs):
+        yield Response()
+
+    client._request = request
+
+    with pytest.raises(terabox._SdkUnauthorizedError):
+        await client._postcreate_file(
+            "/Folder/file.bin",
+            "upload-id",
+            10,
+            ["digest"],
+        )
 
 
 class _FakeTeraboxSession:

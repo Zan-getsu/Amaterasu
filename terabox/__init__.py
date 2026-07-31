@@ -1,8 +1,10 @@
 """Amaterasu's source-based TeraBox compatibility layer.
 
-The public account API is provided by the pinned ``aioterabox`` dependency.
-Public share links reuse Amaterasu's existing resolver, keeping this package
-portable across Python versions and CPU architectures.
+The pinned Apache-2.0 ``aioterabox`` package supplies reusable account and HTTP
+primitives.  Current regional routing and write-auth/upload behavior live here
+as ordinary Python so the complete runtime path remains inspectable.  Public
+share links reuse Amaterasu's existing resolver, keeping this package portable
+across Python versions and CPU architectures.
 """
 
 from __future__ import annotations
@@ -16,6 +18,7 @@ from dataclasses import dataclass, field
 from hashlib import md5
 from http.cookiejar import MozillaCookieJar
 from pathlib import Path
+from re import DOTALL
 from re import compile as re_compile
 from urllib.parse import urlsplit
 
@@ -29,7 +32,7 @@ from aioterabox.api import TeraboxClient as _AccountClient
 from aioterabox.exceptions import TeraboxApiError as _SdkApiError
 from aioterabox.exceptions import TeraboxUnauthorizedError as _SdkUnauthorizedError
 
-__version__ = "1.0.0-amaterasu"
+__version__ = "1.0.1-amaterasu"
 
 _DEFAULT_ACCOUNT_BASE_URL = "https://www.terabox.com"
 _REGION_PREFIX = re_compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
@@ -37,6 +40,15 @@ _NON_REGIONAL_COOKIE_PREFIXES = {"www", "d", "data", "s3", "static"}
 _REGIONAL_ACCOUNT_DOMAINS = ("terabox.com", "1024terabox.com")
 _FREE_MAX_FILE_SIZE = 4 * 1024**3
 _VIP_MAX_FILE_SIZE = 20 * 1024**3 - 1
+_UPLOAD_AUTH_ERROR_CODES = {-6, 4000020, 4000023}
+_TEMPLATE_DATA = re_compile(
+    r"<script>\s*var\s+templateData\s*=\s*(\{.*?\})\s*;</script>",
+    DOTALL,
+)
+_ENCODED_JS_TOKEN = re_compile(r"%28%22(.*?)%22%29")
+_PAGE_JS_TOKEN = re_compile(
+    r"window\.jsToken%20%3D%20a%7D%3Bfn%28%22(.*?)%22%29"
+)
 
 
 class TeraboxError(Exception):
@@ -144,7 +156,19 @@ def _is_rejected_session(error: Exception) -> bool:
     message = str(error).lower()
     return any(
         marker in message
-        for marker in ("errno': -6", 'errno": -6', "user not login", "invalid cookies")
+        for marker in (
+            "errno': -6",
+            'errno": -6',
+            "errno=-6",
+            "error_code': -6",
+            'error_code": -6',
+            "error_code=-6",
+            "4000020",
+            "4000023",
+            "need verify",
+            "user not login",
+            "invalid cookies",
+        )
     )
 
 
@@ -170,6 +194,25 @@ def _terabox_proxy_url() -> str | None:
     return None
 
 
+def _page_auth_data(page: str) -> dict[str, str]:
+    """Extract non-cookie write tokens from an authenticated account page."""
+    match = _TEMPLATE_DATA.search(page)
+    template = json.loads(match.group(1)) if match else {}
+    js_token = str(template.get("jsToken") or "")
+    if encoded := _ENCODED_JS_TOKEN.search(js_token):
+        js_token = encoded.group(1)
+    if not js_token and (encoded := _PAGE_JS_TOKEN.search(page)):
+        js_token = encoded.group(1)
+    if not match and not js_token:
+        raise ValueError("TeraBox account page did not contain authentication data")
+    return {
+        "jstoken": js_token,
+        "bdstoken": str(template.get("bdstoken") or ""),
+        "csrfToken": str(template.get("csrf") or ""),
+        "pcftoken": str(template.get("pcftoken") or ""),
+    }
+
+
 class _RegionalAccountClient(_AccountClient):
     """Make the SDK's hard-coded account origin per-client and region-aware."""
 
@@ -178,6 +221,8 @@ class _RegionalAccountClient(_AccountClient):
         self.base_url = _DEFAULT_ACCOUNT_BASE_URL
         self.detected_region_prefix: str | None = None
         self.proxy_url = _terabox_proxy_url()
+        self.bds_token = ""
+        self.pcf_token = ""
 
     def use_region(self, prefix: str | None, *, alternate: bool = False) -> bool:
         domain = _REGIONAL_ACCOUNT_DOMAINS[1 if alternate else 0]
@@ -225,6 +270,32 @@ class _RegionalAccountClient(_AccountClient):
         """Correct aioterabox 0.2.3's reversed free/VIP size limits."""
         return _VIP_MAX_FILE_SIZE if await self.check_vip_status() else _FREE_MAX_FILE_SIZE
 
+    async def refresh_cookies(self) -> dict:
+        """Refresh cookies and retain the page-derived upload tokens."""
+        async with self._request(
+            "GET",
+            f"{_DEFAULT_ACCOUNT_BASE_URL}/main",
+            clean_cookies=False,
+            timeout=10,
+        ) as response:
+            page = await response.text()
+        auth_data = _page_auth_data(page)
+        session_cookies = self._session_from_cookie_jar()
+        derived_cookies = {
+            key: auth_data[key]
+            for key in ("jstoken", "csrfToken")
+            if auth_data[key]
+        }
+        self._update_session(session_cookies, derived_cookies)
+        self.bds_token = auth_data["bdstoken"]
+        self.pcf_token = auth_data["pcftoken"]
+        return {
+            "bdstoken": self.bds_token,
+            "pcftoken": self.pcf_token,
+            "jstoken": self.js_token,
+            "cookies": session_cookies,
+        }
+
     async def upload_file(self, filename: str, destination_path: str) -> dict:
         """Upload every chunk, including the SDK's previously omitted remainder."""
         destination_path = f"/{destination_path.lstrip('/')}"
@@ -266,13 +337,18 @@ class _RegionalAccountClient(_AccountClient):
                     "TeraBox upload preparation did not preserve the complete file"
                 )
 
-            upload_host = await self._locate_upload_host()
+            upload_host = await self._run_upload_stage_with_auth_refresh(
+                "host discovery",
+                self._locate_upload_host,
+            )
             md5_list = [digest for _path, _size, digest in chunks]
-            try:
-                upload_id = await self._precreate_file(destination_path, md5_list)
-            except _SdkUnauthorizedError:
-                await self.refresh_cookies()
-                upload_id = await self._precreate_file(destination_path, md5_list)
+            upload_id = await self._run_upload_stage_with_auth_refresh(
+                "precreate",
+                self._precreate_file,
+                destination_path,
+                file_size,
+                md5_list,
+            )
 
             await self._upload_chunks(
                 upload_host=upload_host,
@@ -280,12 +356,44 @@ class _RegionalAccountClient(_AccountClient):
                 uploadid=upload_id,
                 file_chunks_md5=chunks,
             )
-            return await self._postcreate_file(
+            return await self._run_upload_stage_with_auth_refresh(
+                "finalization",
+                self._postcreate_file,
                 remote_path=destination_path,
                 uploadid=upload_id,
                 file_size=file_size,
                 md5_list_json=md5_list,
             )
+
+    async def _run_upload_stage_with_auth_refresh(
+        self,
+        stage: str,
+        operation,
+        *args,
+        **kwargs,
+    ):
+        """Retry one rejected write request after refreshing derived tokens."""
+        try:
+            return await operation(*args, **kwargs)
+        except Exception as first_error:
+            if not _is_rejected_session(first_error):
+                raise
+        try:
+            await self.refresh_cookies()
+        except Exception as refresh_error:
+            raise TeraboxError(
+                f"TeraBox upload {stage} rejected the session and token refresh "
+                f"failed ({_bootstrap_failure_reason(refresh_error)})"
+            ) from None
+        try:
+            return await operation(*args, **kwargs)
+        except Exception as retry_error:
+            if _is_rejected_session(retry_error):
+                raise TeraboxError(
+                    f"TeraBox upload {stage} rejected the refreshed session; the "
+                    "cookie is accepted for account reads but not for uploads"
+                ) from None
+            raise
 
     async def _upload_chunks(
         self,
@@ -314,7 +422,9 @@ class _RegionalAccountClient(_AccountClient):
                     "available; the transfer was stopped before cleanup"
                 )
             results.append(
-                await self._upload_file_chunk(
+                await self._run_upload_stage_with_auth_refresh(
+                    f"chunk {partseq + 1}",
+                    self._upload_file_chunk,
                     upload_host=upload_host,
                     filename=chunk_path,
                     filesize=chunk_size,
@@ -325,6 +435,81 @@ class _RegionalAccountClient(_AccountClient):
                 )
             )
         return results
+
+    def _upload_auth_params(self) -> dict[str, str]:
+        params = {
+            "app_id": "250528",
+            "web": "1",
+            "channel": "dubox",
+            "clienttype": "0",
+            "jsToken": self.js_token,
+        }
+        if self.bds_token:
+            params["bdstoken"] = self.bds_token
+        return params
+
+    async def _locate_upload_host(self) -> str:
+        """Resolve the upload host through the active regional account origin."""
+        async with self._request(
+            "GET",
+            f"{_DEFAULT_ACCOUNT_BASE_URL}/rest/2.0/pcs/file",
+            params={"method": "locateupload"},
+            timeout=10,
+        ) as response:
+            result = await response.json(content_type=None)
+        raw_host = str(result.get("host") or "").strip()
+        parsed_host = urlsplit(
+            raw_host if "://" in raw_host else f"//{raw_host}"
+        )
+        if (
+            parsed_host.hostname
+            and parsed_host.scheme in {"", "https"}
+            and parsed_host.username is None
+            and parsed_host.password is None
+        ):
+            return parsed_host.netloc
+        code = result.get("errno", result.get("error_code", "unknown"))
+        message = str(result.get("errmsg") or result.get("error_msg") or "unknown")
+        if code in _UPLOAD_AUTH_ERROR_CODES or "need verify" in message.lower():
+            raise _SdkUnauthorizedError("TeraBox rejected upload-host auth")
+        raise _SdkApiError(
+            f"TeraBox upload-host discovery failed (errno={code}, "
+            f"message={message[:120]})"
+        )
+
+    async def _precreate_file(
+        self,
+        remote_path: str,
+        file_size: int,
+        md5_list_json: list[str],
+    ) -> str:
+        """Initialize the current web upload protocol using query auth tokens."""
+        data = {
+            "path": remote_path,
+            "autoinit": "1",
+            "size": str(file_size),
+            "file_limit_switch_v34": "true",
+            "rtype": "2",
+            "block_list": json.dumps(md5_list_json),
+        }
+        async with self._request(
+            "POST",
+            f"{_DEFAULT_ACCOUNT_BASE_URL}/api/precreate",
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            params=self._upload_auth_params(),
+            data=data,
+            timeout=10,
+        ) as response:
+            result = await response.json()
+        if result.get("errno") == 0 and result.get("uploadid"):
+            return result["uploadid"]
+        code = result.get("errno", "unknown")
+        if code in _UPLOAD_AUTH_ERROR_CODES:
+            raise _SdkUnauthorizedError("TeraBox rejected upload precreate auth")
+        message = str(result.get("errmsg") or result.get("msg") or "unknown")[:120]
+        raise _SdkApiError(
+            f"TeraBox file precreate failed (errno={code}, message={message})"
+        )
 
     async def _postcreate_file(
         self,
@@ -338,9 +523,7 @@ class _RegionalAccountClient(_AccountClient):
         target_path = remote_dir if remote_dir == "/" else remote_dir + "/"
         data = {
             "isdir": "0",
-            "rtype": "1",
-            "app_id": "250528",
-            "jsToken": self.js_token,
+            "rtype": "2",
             "path": remote_path,
             "uploadid": uploadid,
             "target_path": target_path,
@@ -351,6 +534,7 @@ class _RegionalAccountClient(_AccountClient):
             "POST",
             f"{_DEFAULT_ACCOUNT_BASE_URL}/api/create",
             headers={"Content-Type": "application/x-www-form-urlencoded"},
+            params=self._upload_auth_params(),
             data=data,
             timeout=10,
         ) as response:
@@ -359,6 +543,8 @@ class _RegionalAccountClient(_AccountClient):
             return result
         code = result.get("errno", "unknown")
         message = str(result.get("errmsg") or result.get("msg") or "unknown")[:120]
+        if code in _UPLOAD_AUTH_ERROR_CODES or "need verify" in message.lower():
+            raise _SdkUnauthorizedError("TeraBox rejected upload finalization auth")
         raise _SdkApiError(
             f"TeraBox file create failed (errno={code}, message={message})"
         )
