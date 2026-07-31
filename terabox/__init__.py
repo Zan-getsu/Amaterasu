@@ -41,7 +41,7 @@ from aioterabox.exceptions import TeraboxApiError as _SdkApiError
 from aioterabox.exceptions import TeraboxNotFoundError as _SdkNotFoundError
 from aioterabox.exceptions import TeraboxUnauthorizedError as _SdkUnauthorizedError
 
-__version__ = "1.0.4-amaterasu"
+__version__ = "1.0.5-amaterasu"
 
 _DEFAULT_ACCOUNT_BASE_URL = "https://www.terabox.com"
 _REGION_PREFIX = re_compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
@@ -492,6 +492,12 @@ class _RegionalAccountClient(_AccountClient):
                         "were uploaded but remote completion was not reported"
                     ) from None
                 except _SdkApiError:
+                    if recovered := await self._recover_finalization_timeout(
+                        destination_path,
+                        file_size,
+                        previous_remote,
+                    ):
+                        return recovered
                     raise TeraboxError(
                         "TeraBox upload finalization rejected both supported API "
                         "protocols; chunks were uploaded but remote completion was "
@@ -767,12 +773,10 @@ class _RegionalAccountClient(_AccountClient):
         local_mtime: int | None = None,
         compatibility: bool = False,
     ) -> dict:
-        """Finalize an upload without logging jsToken or emitting a root `//`."""
+        """Finalize with either the browser-query or SDK-body protocol."""
         remote_dir = os.path.dirname(remote_path).rstrip("/") or "/"
         target_path = remote_dir if remote_dir == "/" else remote_dir + "/"
         data = {
-            "isdir": "0",
-            "rtype": "2" if compatibility else "1",
             "path": remote_path,
             "uploadid": uploadid,
             "target_path": target_path,
@@ -781,13 +785,22 @@ class _RegionalAccountClient(_AccountClient):
         }
         if local_mtime is not None:
             data["local_mtime"] = str(local_mtime)
-        if not compatibility and self.bds_token:
-            data["bdstoken"] = self.bds_token
+        if compatibility:
+            # aioterabox's original protocol submits all control and auth
+            # fields in the form body.  Keep this as the bounded fallback.
+            data.update(self._upload_auth_params(include_bdstoken=True))
+            data.update({"isdir": "0", "rtype": "1"})
+            params = None
+        else:
+            # TeraBox's web uploader places create controls and bdstoken in
+            # the query string while the file metadata remains form data.
+            params = self._upload_auth_params(include_bdstoken=True)
+            params.update({"isdir": "0", "rtype": "1"})
         async with self._request(
             "POST",
             f"{_DEFAULT_ACCOUNT_BASE_URL}/api/create",
             headers={"Content-Type": "application/x-www-form-urlencoded"},
-            params=None if compatibility else self._upload_auth_params(),
+            params=params,
             data=data,
             timeout=_UPLOAD_FINALIZE_TIMEOUT,
         ) as response:

@@ -269,7 +269,7 @@ def test_amaterasu_terabox_adapter_exports_sdk_surface():
     assert TeraboxFile
     assert issubclass(TeraboxCancelled, TeraboxError)
     assert issubclass(TeraboxPasswordError, TeraboxError)
-    assert __version__ == "1.0.4-amaterasu"
+    assert __version__ == "1.0.5-amaterasu"
 
 
 def test_terabox_cookie_parser_allows_sdk_refreshable_values(monkeypatch):
@@ -1034,16 +1034,18 @@ async def test_terabox_postcreate_normalizes_root_and_does_not_log_token(caplog)
 
     assert result["fs_id"] == 123
     assert captured[0][2]["data"]["target_path"] == "/"
-    assert captured[0][2]["data"]["rtype"] == "1"
-    assert captured[0][2]["data"]["bdstoken"] == "synthetic-write-token"
+    assert "rtype" not in captured[0][2]["data"]
+    assert "bdstoken" not in captured[0][2]["data"]
     assert "jsToken" not in captured[0][2]["data"]
     assert captured[0][2]["params"]["jsToken"] == secret
-    assert "bdstoken" not in captured[0][2]["params"]
+    assert captured[0][2]["params"]["bdstoken"] == "synthetic-write-token"
+    assert captured[0][2]["params"]["isdir"] == "0"
+    assert captured[0][2]["params"]["rtype"] == "1"
     assert captured[0][2]["timeout"] == 30
     assert secret not in caplog.text
 
 
-async def test_terabox_postcreate_compatibility_protocol_is_cookie_only():
+async def test_terabox_postcreate_compatibility_protocol_uses_sdk_body_auth():
     pytest.importorskip("aiohttp")
     pytest.importorskip("aioterabox")
     import terabox
@@ -1081,9 +1083,11 @@ async def test_terabox_postcreate_compatibility_protocol_is_cookie_only():
     )
 
     assert captured[0]["params"] is None
-    assert captured[0]["data"]["rtype"] == "2"
+    assert captured[0]["data"]["rtype"] == "1"
     assert captured[0]["data"]["local_mtime"] == "123"
-    assert "bdstoken" not in captured[0]["data"]
+    assert captured[0]["data"]["app_id"] == "250528"
+    assert captured[0]["data"]["jsToken"] == "page-token"
+    assert captured[0]["data"]["bdstoken"] == "write-token"
 
 
 async def test_terabox_postcreate_error_exposes_only_code_and_message():
@@ -1382,6 +1386,47 @@ async def test_terabox_upload_uses_one_compatibility_finalization_after_http_400
     assert "compatibility" not in first_call.kwargs
     assert second_call.kwargs["compatibility"] is True
     client._recover_finalization_timeout.assert_awaited_once()
+
+
+async def test_terabox_upload_recovers_after_compatibility_api_rejection(tmp_path):
+    pytest.importorskip("aiohttp")
+    pytest.importorskip("aioterabox")
+    import terabox
+
+    cookies = {
+        "jstoken": "page-token",
+        "csrfToken": "csrf",
+        "browserid": "browser",
+        "ndus": "authenticated",
+    }
+    client = terabox._RegionalAccountClient("", "", object(), cookies=cookies)
+    source = tmp_path / "delayed-create.bin"
+    source.write_bytes(b"complete payload")
+    recovered = {
+        "errno": 0,
+        "fs_id": "remote-fs-id",
+        "verified_after_timeout": True,
+    }
+    client.get_max_file_size = AsyncMock(return_value=20 * 1024**3 - 1)
+    client._locate_upload_host = AsyncMock(return_value="upload.example")
+    client._precreate_file = AsyncMock(return_value="upload-id")
+    client._upload_file_chunk = AsyncMock(return_value={"md5": "digest"})
+    client._postcreate_file = AsyncMock(
+        side_effect=[
+            terabox._SdkApiError("primary rejected"),
+            terabox._SdkApiError("compatibility rejected"),
+        ]
+    )
+    client._remote_file_snapshot = AsyncMock(return_value=None)
+    client._recover_finalization_timeout = AsyncMock(
+        side_effect=[None, recovered]
+    )
+
+    result = await client.upload_file(str(source), "/Target/delayed-create.bin")
+
+    assert result == recovered
+    assert client._postcreate_file.await_count == 2
+    assert client._recover_finalization_timeout.await_count == 2
 
 
 class _FakeTeraboxSession:
