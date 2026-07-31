@@ -270,7 +270,7 @@ def test_amaterasu_terabox_adapter_exports_sdk_surface():
     assert TeraboxFile
     assert issubclass(TeraboxCancelled, TeraboxError)
     assert issubclass(TeraboxPasswordError, TeraboxError)
-    assert __version__ == "1.0.7-amaterasu"
+    assert __version__ == "1.0.8-amaterasu"
     assert sanitize_remote_path
 
 
@@ -1021,7 +1021,7 @@ async def test_terabox_locate_upload_host_reports_auth_rejection(payload):
         await client._locate_upload_host()
 
 
-async def test_terabox_postcreate_normalizes_root_and_does_not_log_token(caplog):
+async def test_terabox_postcreate_matches_modern_rtype_two_protocol(caplog):
     pytest.importorskip("aiohttp")
     pytest.importorskip("aioterabox")
     import terabox
@@ -1055,19 +1055,17 @@ async def test_terabox_postcreate_normalizes_root_and_does_not_log_token(caplog)
     )
 
     assert result["fs_id"] == 123
-    assert captured[0][2]["data"]["target_path"] == "/"
-    assert "rtype" not in captured[0][2]["data"]
+    assert "target_path" not in captured[0][2]["data"]
+    assert captured[0][2]["data"]["isdir"] == "0"
+    assert captured[0][2]["data"]["rtype"] == "2"
     assert "bdstoken" not in captured[0][2]["data"]
     assert "jsToken" not in captured[0][2]["data"]
-    assert captured[0][2]["params"]["jsToken"] == secret
-    assert "bdstoken" not in captured[0][2]["params"]
-    assert captured[0][2]["params"]["isdir"] == "0"
-    assert captured[0][2]["params"]["rtype"] == "1"
+    assert captured[0][2]["params"] is None
     assert captured[0][2]["timeout"] == 30
     assert secret not in caplog.text
 
 
-async def test_terabox_postcreate_compatibility_protocol_uses_sdk_body_auth():
+async def test_terabox_postcreate_compatibility_matches_alist_query_protocol():
     pytest.importorskip("aiohttp")
     pytest.importorskip("aioterabox")
     import terabox
@@ -1104,11 +1102,14 @@ async def test_terabox_postcreate_compatibility_protocol_uses_sdk_body_auth():
         compatibility=True,
     )
 
-    assert captured[0]["params"] is None
-    assert captured[0]["data"]["rtype"] == "1"
+    assert "rtype" not in captured[0]["data"]
     assert captured[0]["data"]["local_mtime"] == "123"
-    assert captured[0]["data"]["app_id"] == "250528"
-    assert captured[0]["data"]["jsToken"] == "page-token"
+    assert captured[0]["data"]["target_path"] == "/Folder"
+    assert captured[0]["params"]["rtype"] == "1"
+    assert captured[0]["params"]["isdir"] == "0"
+    assert captured[0]["params"]["app_id"] == "250528"
+    assert captured[0]["params"]["jsToken"] == "page-token"
+    assert "dp-logid" not in captured[0]["params"]
     assert "bdstoken" not in captured[0]["data"]
 
 
@@ -2181,16 +2182,16 @@ async def test_upload_probe_metadata_distinguishes_missing_from_unknown():
     from scripts import terabox_upload_probe as probe
 
     class MissingAccount:
-        async def get_files_meta(self, _paths):
+        async def list_remote_directory(self, _path):
             raise probe._SdkNotFoundError("not found")
 
     class BrokenAccount:
-        async def get_files_meta(self, _paths):
+        async def list_remote_directory(self, _path):
             raise TimeoutError
 
     class PresentAccount:
-        async def get_files_meta(self, _paths):
-            return [{"path": "/probe.bin", "size": 123}]
+        async def list_remote_directory(self, _path):
+            return [SimpleNamespace(path="/probe.bin", size=123)]
 
     assert await probe._remote_metadata(MissingAccount(), "/probe.bin") == (
         "missing",
@@ -2202,5 +2203,70 @@ async def test_upload_probe_metadata_distinguishes_missing_from_unknown():
     )
     assert await probe._remote_metadata(PresentAccount(), "/probe.bin") == (
         "found",
-        {"path": "/probe.bin", "size": 123},
+        {"path": "/probe.bin", "size": 123, "fs_id": None},
     )
+
+
+@pytest.mark.asyncio
+async def test_terabox_remote_snapshot_uses_directory_list_without_dlink_lookup():
+    pytest.importorskip("aioterabox")
+    import terabox
+
+    cookies = {
+        "jstoken": "page-token",
+        "csrfToken": "csrf",
+        "browserid": "browser",
+        "ndus": "authenticated",
+    }
+    client = terabox._RegionalAccountClient("", "", object(), cookies=cookies)
+    client.list_remote_directory = AsyncMock(
+        return_value=[SimpleNamespace(path="/Folder/probe.bin", size=123)]
+    )
+
+    assert await client._remote_file_snapshot("/Folder/probe.bin") == (
+        "/Folder/probe.bin",
+        123,
+        0,
+    )
+    client.list_remote_directory.assert_awaited_once_with("/Folder")
+
+
+@pytest.mark.asyncio
+async def test_upload_probe_cleanup_matches_alist_filemanager_protocol():
+    pytest.importorskip("aioterabox")
+    from scripts import terabox_upload_probe as probe
+
+    captured = []
+
+    class Response:
+        async def json(self, **_kwargs):
+            return {"errno": 0}
+
+    @asynccontextmanager
+    async def request(method, url, **kwargs):
+        captured.append((method, url, kwargs))
+        yield Response()
+
+    account = SimpleNamespace(
+        _request=request,
+        _upload_auth_params=lambda **_kwargs: {
+            "app_id": "250528",
+            "web": "1",
+            "channel": "dubox",
+            "clienttype": "0",
+            "jsToken": "secret-token",
+        },
+    )
+
+    await probe._delete_remote(account, "/probe.bin")
+
+    method, url, kwargs = captured[0]
+    assert method == "POST"
+    assert url.endswith("/api/filemanager")
+    assert kwargs["params"]["opera"] == "delete"
+    assert kwargs["params"]["onnest"] == "fail"
+    assert kwargs["data"] == {
+        "async": "0",
+        "filelist": '["/probe.bin"]',
+        "ondup": "newcopy",
+    }

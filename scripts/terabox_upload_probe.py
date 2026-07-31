@@ -126,14 +126,19 @@ def _install_redacted_trace(account) -> None:
                         }
                     )
                 elif endpoint == "/api/create":
-                    query_keys = sorted((kwargs.get("params") or {}).keys())
+                    request_params = kwargs.get("params") or {}
+                    query_keys = sorted(request_params.keys())
                     form_keys = sorted(data) if isinstance(data, dict) else []
+                    rtype = request_params.get("rtype")
+                    if rtype is None and isinstance(data, dict):
+                        rtype = data.get("rtype")
                     event.update(
                         {
                             "protocol": "query" if query_keys else "body",
                             "query_keys": query_keys,
                             "form_keys": form_keys,
                             "block_count": _block_count(data),
+                            "rtype": _safe_code(rtype),
                             "has_fs_id": bool(payload.get("fs_id")),
                         }
                     )
@@ -164,16 +169,46 @@ def _write_probe_file(path: str, size: int) -> None:
 
 
 async def _remote_metadata(account, remote_path: str) -> tuple[str, dict | None]:
+    remote_dir = remote_path.rsplit("/", 1)[0] or "/"
     try:
-        records = await account.get_files_meta([remote_path])
+        records = await account.list_remote_directory(remote_dir)
     except _SdkNotFoundError:
         return "missing", None
     except Exception:
         return "unknown", None
     for record in records if isinstance(records, list) else []:
-        if str(record.get("path") or "") == remote_path:
-            return "found", record
+        if isinstance(record, dict):
+            path = str(record.get("path") or "")
+            size = int(record.get("size") or 0)
+            fs_id = record.get("fs_id")
+        else:
+            path = str(getattr(record, "path", "") or "")
+            size = int(getattr(record, "size", 0) or 0)
+            fs_id = getattr(record, "fs_id", None)
+        if path == remote_path:
+            return "found", {"path": path, "size": size, "fs_id": fs_id}
     return "missing", None
+
+
+async def _delete_remote(account, remote_path: str) -> None:
+    params = account._upload_auth_params(include_dp_logid=False)
+    params.update({"opera": "delete", "onnest": "fail"})
+    data = {
+        "async": "0",
+        "filelist": json.dumps([remote_path]),
+        "ondup": "newcopy",
+    }
+    async with account._request(
+        "POST",
+        "https://www.terabox.com/api/filemanager",
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        params=params,
+        data=data,
+        timeout=10,
+    ) as response:
+        result = await response.json(content_type=None)
+    if not isinstance(result, dict) or result.get("errno") != 0:
+        raise RuntimeError("TeraBox rejected probe cleanup")
 
 
 async def _run(cookie_file: str, keep_remote: bool) -> int:
@@ -237,7 +272,7 @@ async def _run(cookie_file: str, keep_remote: bool) -> int:
             )
         elif metadata_state in {"found", "unknown"}:
             try:
-                await account._filemanager("delete", [remote_path])
+                await _delete_remote(account, remote_path)
                 cleanup_state, _ = await _remote_metadata(account, remote_path)
                 cleanup_ok = cleanup_state == "missing"
             except _SdkNotFoundError:

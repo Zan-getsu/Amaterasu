@@ -41,7 +41,7 @@ from aioterabox.exceptions import TeraboxApiError as _SdkApiError
 from aioterabox.exceptions import TeraboxNotFoundError as _SdkNotFoundError
 from aioterabox.exceptions import TeraboxUnauthorizedError as _SdkUnauthorizedError
 
-__version__ = "1.0.7-amaterasu"
+__version__ = "1.0.8-amaterasu"
 
 _DEFAULT_ACCOUNT_BASE_URL = "https://www.terabox.com"
 _REGION_PREFIX = re_compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
@@ -697,19 +697,30 @@ class _RegionalAccountClient(_AccountClient):
 
     async def _remote_file_snapshot(self, remote_path: str):
         """Return sanitized metadata for timeout recovery without changing state."""
+        remote_dir = os.path.dirname(remote_path).rstrip("/") or "/"
         try:
-            metadata = await self.get_files_meta([remote_path])
+            metadata = await self.list_remote_directory(remote_dir)
         except _SdkNotFoundError:
             return None
         except Exception:
             return _REMOTE_SNAPSHOT_UNKNOWN
         for item in metadata if isinstance(metadata, list) else []:
-            if str(item.get("path") or "") != remote_path:
+            if isinstance(item, dict):
+                item_path = str(item.get("path") or "")
+                item_size = int(item.get("size") or 0)
+                item_id = str(item.get("fs_id") or item_path)
+                item_mtime = int(item.get("server_mtime") or 0)
+            else:
+                item_path = str(getattr(item, "path", "") or "")
+                item_size = int(getattr(item, "size", 0) or 0)
+                item_id = str(getattr(item, "fs_id", "") or item_path)
+                item_mtime = int(getattr(item, "server_mtime", 0) or 0)
+            if item_path != remote_path:
                 continue
             return (
-                str(item.get("fs_id") or ""),
-                int(item.get("size") or 0),
-                int(item.get("server_mtime") or 0),
+                item_id,
+                item_size,
+                item_mtime,
             )
         return None
 
@@ -739,7 +750,12 @@ class _RegionalAccountClient(_AccountClient):
                 }
         return None
 
-    def _upload_auth_params(self, *, include_bdstoken: bool = False) -> dict[str, str]:
+    def _upload_auth_params(
+        self,
+        *,
+        include_bdstoken: bool = False,
+        include_dp_logid: bool = True,
+    ) -> dict[str, str]:
         params = {
             "app_id": "250528",
             "web": "1",
@@ -747,7 +763,7 @@ class _RegionalAccountClient(_AccountClient):
             "clienttype": "0",
             "jsToken": self.js_token,
         }
-        if self.dp_logid:
+        if include_dp_logid and self.dp_logid:
             params["dp-logid"] = self.dp_logid
         if include_bdstoken and self.bds_token:
             params["bdstoken"] = self.bds_token
@@ -826,30 +842,31 @@ class _RegionalAccountClient(_AccountClient):
         local_mtime: int | None = None,
         compatibility: bool = False,
     ) -> dict:
-        """Finalize with either the browser-query or SDK-body protocol."""
+        """Finalize with a matched modern or AList-compatible protocol."""
         remote_dir = os.path.dirname(remote_path).rstrip("/") or "/"
-        target_path = remote_dir if remote_dir == "/" else remote_dir + "/"
         data = {
             "path": remote_path,
             "uploadid": uploadid,
-            "target_path": target_path,
             "size": str(file_size),
             "block_list": json.dumps(md5_list_json),
         }
-        if local_mtime is not None:
-            data["local_mtime"] = str(local_mtime)
         if compatibility:
-            # aioterabox's original protocol submits all control and auth
-            # fields in the form body.  Keep this as the bounded fallback.
-            data.update(self._upload_auth_params())
-            data.update({"isdir": "0", "rtype": "1"})
-            params = None
-        else:
-            # Current web-compatible clients put create controls in the query
-            # and authenticate with jsToken plus the session cookies.  A
-            # page-derived bdstoken can be regional and must not be mixed in.
-            params = self._upload_auth_params()
+            # AList pairs its legacy precreate shape with rtype=1 at create.
+            # Keep the metadata in the body and web authentication in the
+            # query, matching that public implementation exactly.
+            data["target_path"] = remote_dir
+            if local_mtime is not None:
+                data["local_mtime"] = str(local_mtime)
+            params = self._upload_auth_params(include_dp_logid=False)
             params.update({"isdir": "0", "rtype": "1"})
+        else:
+            # The modern public TeraBox client uses rtype=2 for both precreate
+            # and create, with create controls in the form body.  Our
+            # precreate already uses rtype=2, so mixing it with an rtype=1
+            # create can be rejected with errno 31832 after every chunk was
+            # accepted.
+            data.update({"isdir": "0", "rtype": "2"})
+            params = None
         async with self._request(
             "POST",
             f"{_DEFAULT_ACCOUNT_BASE_URL}/api/create",
