@@ -41,7 +41,7 @@ from aioterabox.exceptions import TeraboxApiError as _SdkApiError
 from aioterabox.exceptions import TeraboxNotFoundError as _SdkNotFoundError
 from aioterabox.exceptions import TeraboxUnauthorizedError as _SdkUnauthorizedError
 
-__version__ = "1.0.8-amaterasu"
+__version__ = "1.0.9-amaterasu"
 
 _DEFAULT_ACCOUNT_BASE_URL = "https://www.terabox.com"
 _REGION_PREFIX = re_compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
@@ -857,16 +857,24 @@ class _RegionalAccountClient(_AccountClient):
             data["target_path"] = remote_dir
             if local_mtime is not None:
                 data["local_mtime"] = str(local_mtime)
-            params = self._upload_auth_params(include_dp_logid=False)
+            params = self._upload_auth_params(
+                include_bdstoken=True,
+                include_dp_logid=False,
+            )
             params.update({"isdir": "0", "rtype": "1"})
         else:
-            # The modern public TeraBox client uses rtype=2 for both precreate
-            # and create, with create controls in the form body.  Our
-            # precreate already uses rtype=2, so mixing it with an rtype=1
-            # create can be rejected with errno 31832 after every chunk was
-            # accepted.
+            # The modern public TeraBox transport uses rtype=2 for both
+            # precreate and create, with create controls in the form body.
             data.update({"isdir": "0", "rtype": "2"})
-            params = None
+            # TeraBox's current web client injects its page-derived bdstoken
+            # into the /api/create query.  Our regional probe observed errno
+            # 31832 when both create variants omitted it, after precreate and
+            # every chunk had succeeded.  The errno itself is undocumented,
+            # so retain the observed facts rather than assigning it a meaning.
+            params = self._upload_auth_params(
+                include_bdstoken=True,
+                include_dp_logid=False,
+            )
         async with self._request(
             "POST",
             f"{_DEFAULT_ACCOUNT_BASE_URL}/api/create",

@@ -24,7 +24,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from terabox import TeraboxClient, _SdkNotFoundError, __version__
+from terabox import TeraboxClient, __version__, _SdkNotFoundError  # noqa: E402, I001
 
 
 _PROBE_BYTES = 12 * 1024 * 1024 + 123
@@ -39,25 +39,39 @@ def _safe_json_payload(raw: bytes) -> dict:
     return payload if isinstance(payload, dict) else {}
 
 
-def _safe_message(payload: dict) -> str:
+_SENSITIVE_KEY = re.compile(
+    r"(?:authorization|bdstoken|cookie|csrf|jstoken|ndus|token|uploadid)", re.I
+)
+
+
+def _sensitive_values(*sources) -> set[str]:
+    values: set[str] = set()
+    for source in sources:
+        if not isinstance(source, dict):
+            continue
+        for key, value in source.items():
+            if not _SENSITIVE_KEY.search(str(key)):
+                continue
+            if isinstance(value, (str, int, float)) and len(str(value)) >= 4:
+                values.add(str(value))
+    return values
+
+
+def _safe_message(payload: dict, *secret_sources) -> str:
     value = payload.get("errmsg") or payload.get("error_msg") or payload.get("msg")
-    message = str(value or "").lower()
+    message = " ".join(str(value or "").split())
     if not message:
         return ""
-    categories = (
-        (("auth", "cookie", "login", "session", "token"), "authentication rejected"),
-        (("filename", "file name"), "invalid filename"),
-        (("path",), "invalid path"),
-        (("block", "md5", "checksum"), "invalid block list"),
-        (("size", "length"), "invalid size"),
-        (("missing", "required"), "missing parameter"),
-        (("parameter", "param"), "parameter rejected"),
-        (("server", "internal"), "server error"),
+    secrets_to_redact = _sensitive_values(payload, *secret_sources)
+    for secret in sorted(secrets_to_redact, key=len, reverse=True):
+        message = message.replace(secret, "<redacted>")
+    message = re.sub(
+        r"(?i)\b(authorization|bdstoken|cookie|csrf\w*|jstoken|ndus|token)"
+        r"\s*[:=]\s*[^\s,;&]+",
+        r"\1=<redacted>",
+        message,
     )
-    for needles, category in categories:
-        if any(needle in message for needle in needles):
-            return category
-    return "present"
+    return message[:160]
 
 
 def _safe_code(value):
@@ -109,7 +123,16 @@ def _install_redacted_trace(account) -> None:
                     "errno": _safe_code(
                         payload.get("errno", payload.get("error_code"))
                     ),
-                    "message": _safe_message(payload),
+                    "message": _safe_message(
+                        payload,
+                        kwargs.get("params"),
+                        kwargs.get("data"),
+                        {
+                            "jsToken": getattr(account, "js_token", ""),
+                            "bdstoken": getattr(account, "bds_token", ""),
+                            "csrfToken": getattr(account, "csrf_token", ""),
+                        },
+                    ),
                     "request_id_present": bool(payload.get("request_id")),
                 }
                 if endpoint == "/api/precreate":
@@ -191,7 +214,10 @@ async def _remote_metadata(account, remote_path: str) -> tuple[str, dict | None]
 
 
 async def _delete_remote(account, remote_path: str) -> None:
-    params = account._upload_auth_params(include_dp_logid=False)
+    params = account._upload_auth_params(
+        include_bdstoken=True,
+        include_dp_logid=False,
+    )
     params.update({"opera": "delete", "onnest": "fail"})
     data = {
         "async": "0",

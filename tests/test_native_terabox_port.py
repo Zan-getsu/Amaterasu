@@ -270,7 +270,7 @@ def test_amaterasu_terabox_adapter_exports_sdk_surface():
     assert TeraboxFile
     assert issubclass(TeraboxCancelled, TeraboxError)
     assert issubclass(TeraboxPasswordError, TeraboxError)
-    assert __version__ == "1.0.8-amaterasu"
+    assert __version__ == "1.0.9-amaterasu"
     assert sanitize_remote_path
 
 
@@ -1060,7 +1060,9 @@ async def test_terabox_postcreate_matches_modern_rtype_two_protocol(caplog):
     assert captured[0][2]["data"]["rtype"] == "2"
     assert "bdstoken" not in captured[0][2]["data"]
     assert "jsToken" not in captured[0][2]["data"]
-    assert captured[0][2]["params"] is None
+    assert captured[0][2]["params"]["bdstoken"] == "synthetic-write-token"
+    assert captured[0][2]["params"]["jsToken"] == secret
+    assert "dp-logid" not in captured[0][2]["params"]
     assert captured[0][2]["timeout"] == 30
     assert secret not in caplog.text
 
@@ -1109,6 +1111,7 @@ async def test_terabox_postcreate_compatibility_matches_alist_query_protocol():
     assert captured[0]["params"]["isdir"] == "0"
     assert captured[0]["params"]["app_id"] == "250528"
     assert captured[0]["params"]["jsToken"] == "page-token"
+    assert captured[0]["params"]["bdstoken"] == "write-token"
     assert "dp-logid" not in captured[0]["params"]
     assert "bdstoken" not in captured[0]["data"]
 
@@ -2171,7 +2174,7 @@ async def test_upload_probe_trace_never_prints_request_or_response_secrets(capsy
     output = capsys.readouterr().out
     assert secret not in output
     assert '"http_status": 400' in output
-    assert '"message": "invalid path"' in output
+    assert '"message": "invalid path: <redacted>"' in output
     assert '"block_count": 1' in output
     assert '"partseq": 3' in output
 
@@ -2249,12 +2252,13 @@ async def test_upload_probe_cleanup_matches_alist_filemanager_protocol():
 
     account = SimpleNamespace(
         _request=request,
-        _upload_auth_params=lambda **_kwargs: {
+        _upload_auth_params=lambda **kwargs: {
             "app_id": "250528",
             "web": "1",
             "channel": "dubox",
             "clienttype": "0",
             "jsToken": "secret-token",
+            **({"bdstoken": "secret-bds-token"} if kwargs["include_bdstoken"] else {}),
         },
     )
 
@@ -2265,6 +2269,7 @@ async def test_upload_probe_cleanup_matches_alist_filemanager_protocol():
     assert url.endswith("/api/filemanager")
     assert kwargs["params"]["opera"] == "delete"
     assert kwargs["params"]["onnest"] == "fail"
+    assert kwargs["params"]["bdstoken"] == "secret-bds-token"
     assert kwargs["data"] == {
         "async": "0",
         "filelist": '["/probe.bin"]',
