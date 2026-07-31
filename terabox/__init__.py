@@ -11,7 +11,15 @@ from __future__ import annotations
 
 import json
 import os
-from asyncio import FIRST_COMPLETED, CancelledError, Event, create_task, to_thread, wait
+from asyncio import (
+    FIRST_COMPLETED,
+    CancelledError,
+    Event,
+    create_task,
+    sleep,
+    to_thread,
+    wait,
+)
 from asyncio import gather as asyncio_gather
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
@@ -30,9 +38,10 @@ from aioterabox.api import CHUNK_SIZE as _SDK_CHUNK_SIZE
 from aioterabox.api import MAX_UNCHUNKED_FILE_SIZE as _SDK_UNCHUNKED_LIMIT
 from aioterabox.api import TeraboxClient as _AccountClient
 from aioterabox.exceptions import TeraboxApiError as _SdkApiError
+from aioterabox.exceptions import TeraboxNotFoundError as _SdkNotFoundError
 from aioterabox.exceptions import TeraboxUnauthorizedError as _SdkUnauthorizedError
 
-__version__ = "1.0.2-amaterasu"
+__version__ = "1.0.3-amaterasu"
 
 _DEFAULT_ACCOUNT_BASE_URL = "https://www.terabox.com"
 _REGION_PREFIX = re_compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
@@ -40,7 +49,11 @@ _NON_REGIONAL_COOKIE_PREFIXES = {"www", "d", "data", "s3", "static"}
 _REGIONAL_ACCOUNT_DOMAINS = ("terabox.com", "1024terabox.com")
 _FREE_MAX_FILE_SIZE = 4 * 1024**3
 _VIP_MAX_FILE_SIZE = 20 * 1024**3 - 1
+_UPLOAD_CONTROL_TIMEOUT = 30
+_UPLOAD_FINALIZE_TIMEOUT = 60
+_UPLOAD_NETWORK_ATTEMPTS = 3
 _UPLOAD_AUTH_ERROR_CODES = {-6, 4000020, 4000023}
+_REMOTE_SNAPSHOT_UNKNOWN = object()
 _TEMPLATE_DATA = re_compile(
     r"<script>\s*var\s+templateData\s*=\s*(\{.*?\})\s*;</script>",
     DOTALL,
@@ -355,7 +368,10 @@ class _RegionalAccountClient(_AccountClient):
         """Upload every chunk, including the SDK's previously omitted remainder."""
         destination_path = f"/{destination_path.lstrip('/')}"
         file_size = await to_thread(os.path.getsize, filename)
-        max_file_size = await self.get_max_file_size()
+        max_file_size = await self._run_precontent_network_stage(
+            "membership check",
+            self.get_max_file_size,
+        )
         if file_size > max_file_size:
             raise ValueError(
                 f"File size {file_size} exceeds maximum allowed size of "
@@ -392,12 +408,12 @@ class _RegionalAccountClient(_AccountClient):
                     "TeraBox upload preparation did not preserve the complete file"
                 )
 
-            upload_host = await self._run_upload_stage_with_auth_refresh(
+            upload_host = await self._run_precontent_network_stage(
                 "host discovery",
                 self._locate_upload_host,
             )
             md5_list = [digest for _path, _size, digest in chunks]
-            upload_id = await self._run_upload_stage_with_auth_refresh(
+            upload_id = await self._run_precontent_network_stage(
                 "precreate",
                 self._precreate_file,
                 destination_path,
@@ -411,14 +427,54 @@ class _RegionalAccountClient(_AccountClient):
                 uploadid=upload_id,
                 file_chunks_md5=chunks,
             )
-            return await self._run_upload_stage_with_auth_refresh(
-                "finalization",
-                self._postcreate_file,
-                remote_path=destination_path,
-                uploadid=upload_id,
-                file_size=file_size,
-                md5_list_json=md5_list,
-            )
+            previous_remote = await self._remote_file_snapshot(destination_path)
+            try:
+                return await self._run_upload_stage_with_auth_refresh(
+                    "finalization",
+                    self._postcreate_file,
+                    remote_path=destination_path,
+                    uploadid=upload_id,
+                    file_size=file_size,
+                    md5_list_json=md5_list,
+                )
+            except (TimeoutError, aiohttp.ClientError, OSError) as error:
+                if recovered := await self._recover_finalization_timeout(
+                    destination_path,
+                    file_size,
+                    previous_remote,
+                ):
+                    return recovered
+                raise TeraboxError(
+                    "TeraBox upload finalization failed "
+                    f"({_bootstrap_failure_reason(error)}); the request was not "
+                    "retried because remote completion could not be verified and "
+                    "a retry could create a duplicate"
+                ) from None
+
+    async def _run_precontent_network_stage(
+        self,
+        stage: str,
+        operation,
+        *args,
+        **kwargs,
+    ):
+        """Retry transport failures only before any file content is uploaded."""
+        last_error = None
+        for _attempt in range(_UPLOAD_NETWORK_ATTEMPTS):
+            try:
+                return await self._run_upload_stage_with_auth_refresh(
+                    stage,
+                    operation,
+                    *args,
+                    **kwargs,
+                )
+            except (TimeoutError, aiohttp.ClientError, OSError) as error:
+                last_error = error
+        raise TeraboxError(
+            f"TeraBox upload {stage} failed after {_UPLOAD_NETWORK_ATTEMPTS} "
+            f"network attempts ({_bootstrap_failure_reason(last_error)}); no file "
+            "content was sent"
+        ) from None
 
     async def _run_upload_stage_with_auth_refresh(
         self,
@@ -488,8 +544,8 @@ class _RegionalAccountClient(_AccountClient):
                     f"Prepared TeraBox upload chunk {partseq + 1} is no longer "
                     "available; the transfer was stopped before cleanup"
                 )
-            results.append(
-                await self._run_upload_stage_with_auth_refresh(
+            try:
+                result = await self._run_upload_stage_with_auth_refresh(
                     f"chunk {partseq + 1}",
                     self._upload_file_chunk,
                     upload_host=upload_host,
@@ -500,8 +556,69 @@ class _RegionalAccountClient(_AccountClient):
                     uploadid=uploadid,
                     partseq=partseq,
                 )
-            )
+            except TeraboxError:
+                raise
+            except Exception as error:
+                if isinstance(error, TimeoutError):
+                    reason = "request timed out after the SDK's bounded retries"
+                elif isinstance(error, aiohttp.ClientError):
+                    reason = "network request failed after the SDK's bounded retries"
+                elif isinstance(error, _SdkApiError):
+                    reason = "the upload service rejected the chunk or retries expired"
+                elif isinstance(error, OSError):
+                    reason = "chunk transport or local file access failed"
+                else:
+                    reason = f"unexpected {type(error).__name__}"
+                raise TeraboxError(
+                    f"TeraBox upload chunk {partseq + 1} failed ({reason}); later "
+                    "chunks and finalization were not started"
+                ) from None
+            results.append(result)
         return results
+
+    async def _remote_file_snapshot(self, remote_path: str):
+        """Return sanitized metadata for timeout recovery without changing state."""
+        try:
+            metadata = await self.get_files_meta([remote_path])
+        except _SdkNotFoundError:
+            return None
+        except Exception:
+            return _REMOTE_SNAPSHOT_UNKNOWN
+        for item in metadata if isinstance(metadata, list) else []:
+            if str(item.get("path") or "") != remote_path:
+                continue
+            return (
+                str(item.get("fs_id") or ""),
+                int(item.get("size") or 0),
+                int(item.get("server_mtime") or 0),
+            )
+        return None
+
+    async def _recover_finalization_timeout(
+        self,
+        remote_path: str,
+        file_size: int,
+        previous_remote,
+    ) -> dict | None:
+        """Confirm a lost final-create response through read-only metadata calls."""
+        for delay in (0, 2, 5):
+            if delay:
+                await sleep(delay)
+            current = await self._remote_file_snapshot(remote_path)
+            if current in {None, _REMOTE_SNAPSHOT_UNKNOWN}:
+                continue
+            if current[1] != file_size:
+                continue
+            if previous_remote is _REMOTE_SNAPSHOT_UNKNOWN:
+                continue
+            if previous_remote is None or current != previous_remote:
+                return {
+                    "errno": 0,
+                    "fs_id": current[0] or remote_path,
+                    "path": remote_path,
+                    "verified_after_timeout": True,
+                }
+        return None
 
     def _upload_auth_params(self, *, include_bdstoken: bool = False) -> dict[str, str]:
         params = {
@@ -523,7 +640,7 @@ class _RegionalAccountClient(_AccountClient):
             "GET",
             f"{_DEFAULT_ACCOUNT_BASE_URL}/rest/2.0/pcs/file",
             params={"method": "locateupload"},
-            timeout=10,
+            timeout=_UPLOAD_CONTROL_TIMEOUT,
         ) as response:
             result = await response.json(content_type=None)
         raw_host = str(result.get("host") or "").strip()
@@ -568,7 +685,7 @@ class _RegionalAccountClient(_AccountClient):
             headers={"Content-Type": "application/x-www-form-urlencoded"},
             params=self._upload_auth_params(),
             data=data,
-            timeout=10,
+            timeout=_UPLOAD_CONTROL_TIMEOUT,
         ) as response:
             result = await response.json()
         if result.get("errno") == 0 and result.get("uploadid"):
@@ -606,7 +723,7 @@ class _RegionalAccountClient(_AccountClient):
             headers={"Content-Type": "application/x-www-form-urlencoded"},
             params=self._upload_auth_params(include_bdstoken=True),
             data=data,
-            timeout=10,
+            timeout=_UPLOAD_FINALIZE_TIMEOUT,
         ) as response:
             result = await response.json()
         if result.get("errno") == 0:
