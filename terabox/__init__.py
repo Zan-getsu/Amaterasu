@@ -41,7 +41,7 @@ from aioterabox.exceptions import TeraboxApiError as _SdkApiError
 from aioterabox.exceptions import TeraboxNotFoundError as _SdkNotFoundError
 from aioterabox.exceptions import TeraboxUnauthorizedError as _SdkUnauthorizedError
 
-__version__ = "1.0.6-amaterasu"
+__version__ = "1.0.7-amaterasu"
 
 _DEFAULT_ACCOUNT_BASE_URL = "https://www.terabox.com"
 _REGION_PREFIX = re_compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
@@ -84,6 +84,14 @@ class _UploadAuthRejected(_SdkUnauthorizedError):
         super().__init__(f"TeraBox rejected upload {stage} auth")
         self.code = code
         self.api_message = message[:120]
+
+
+class _SessionRejected(_SdkUnauthorizedError):
+    """An authenticated read rejection that may still be a route mismatch."""
+
+    def __init__(self, location: str):
+        super().__init__(f"TeraBox rejected session validation on {location}")
+        self.location = location
 
 
 class _UploadHttpRejected(TeraboxError):
@@ -940,8 +948,9 @@ class TeraboxClient:
             await self.aclose()
             if _is_rejected_session(error):
                 raise TeraboxError(
-                    "TeraBox session cookie was rejected; sign in again and export "
-                    "a fresh Netscape cookies.txt file containing ndus"
+                    "TeraBox session cookie was rejected after token refresh and all "
+                    "available account routes; sign in again and export a fresh "
+                    "Netscape cookies.txt file containing ndus"
                 ) from None
             raise TeraboxError(
                 "TeraBox authentication validation failed "
@@ -995,18 +1004,12 @@ class TeraboxClient:
         except Exception as error:
             if _is_rejected_session(error):
                 location = "regional endpoint" if regional else "account endpoint"
-                raise TeraboxError(
-                    f"TeraBox session cookie was rejected by the {location}; sign in "
-                    "again and export a fresh Netscape cookies.txt file containing ndus"
-                ) from None
+                raise _SessionRejected(location) from None
             raise
         if not isinstance(quota, dict) or quota.get("errno") != 0:
             if isinstance(quota, dict) and quota.get("errno") == -6:
                 location = "regional endpoint" if regional else "account endpoint"
-                raise TeraboxError(
-                    f"TeraBox session cookie was rejected by the {location}; sign in "
-                    "again and export a fresh Netscape cookies.txt file containing ndus"
-                )
+                raise _SessionRejected(location)
             raise TeraboxError(
                 "TeraBox authenticated quota validation returned an unexpected response"
             )

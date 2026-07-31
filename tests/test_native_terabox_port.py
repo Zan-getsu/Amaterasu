@@ -270,7 +270,7 @@ def test_amaterasu_terabox_adapter_exports_sdk_surface():
     assert TeraboxFile
     assert issubclass(TeraboxCancelled, TeraboxError)
     assert issubclass(TeraboxPasswordError, TeraboxError)
-    assert __version__ == "1.0.6-amaterasu"
+    assert __version__ == "1.0.7-amaterasu"
     assert sanitize_remote_path
 
 
@@ -1764,6 +1764,106 @@ async def test_terabox_login_uses_alternate_domain_when_regional_validation_fail
         "quota",
     ]
     await client.aclose()
+
+
+async def test_terabox_login_uses_alternate_domain_after_regional_auth_rejection(
+    monkeypatch,
+):
+    pytest.importorskip("aiohttp")
+    pytest.importorskip("aioterabox")
+    import terabox
+
+    class AlternateAuthAccount(_FakeAccountClient):
+        events = []
+
+        async def refresh_cookies(self):
+            self.events.append("bootstrap")
+            return {}
+
+        async def ensure_logged_in(self):
+            self.events.append("validate")
+            self._ensure_calls += 1
+            if self._ensure_calls == 1:
+                raise terabox._SdkUnauthorizedError("Invalid cookies")
+            return {}
+
+    monkeypatch.setattr(terabox, "_RegionalAccountClient", AlternateAuthAccount)
+    monkeypatch.setattr(
+        terabox,
+        "_read_cookie_file",
+        lambda _path: terabox._CookieData(
+            {
+                "jstoken": "",
+                "csrfToken": "",
+                "browserid": "",
+                "ndus": "authenticated",
+            },
+            region_hint="dm",
+        ),
+    )
+    client = terabox.TeraboxClient("cookies.txt")
+    client._session = _FakeTeraboxSession()
+
+    await client.login()
+
+    assert AlternateAuthAccount.events == [
+        "region:dm",
+        "bootstrap",
+        "validate",
+        "region:dm:alternate",
+        "bootstrap",
+        "validate",
+        "quota",
+    ]
+    await client.aclose()
+
+
+async def test_terabox_requests_fresh_cookie_only_after_all_regional_routes_reject(
+    monkeypatch,
+):
+    pytest.importorskip("aiohttp")
+    pytest.importorskip("aioterabox")
+    import terabox
+
+    class RejectedRegionalAccount(_FakeAccountClient):
+        events = []
+
+        async def refresh_cookies(self):
+            self.events.append("bootstrap")
+            return {}
+
+        async def ensure_logged_in(self):
+            self.events.append("validate")
+            raise terabox._SdkUnauthorizedError("Invalid cookies")
+
+    monkeypatch.setattr(terabox, "_RegionalAccountClient", RejectedRegionalAccount)
+    monkeypatch.setattr(
+        terabox,
+        "_read_cookie_file",
+        lambda _path: terabox._CookieData(
+            {
+                "jstoken": "",
+                "csrfToken": "",
+                "browserid": "",
+                "ndus": "authenticated",
+            },
+            region_hint="dm",
+        ),
+    )
+    client = terabox.TeraboxClient("cookies.txt")
+    client._session = _FakeTeraboxSession()
+
+    with pytest.raises(terabox.TeraboxError, match="all available account routes"):
+        await client.login()
+
+    assert RejectedRegionalAccount.events == [
+        "region:dm",
+        "bootstrap",
+        "validate",
+        "region:dm:alternate",
+        "bootstrap",
+        "validate",
+    ]
 
 
 async def test_terabox_bootstrap_failure_is_actionable_and_redacted(monkeypatch):
