@@ -32,7 +32,7 @@ from aioterabox.api import TeraboxClient as _AccountClient
 from aioterabox.exceptions import TeraboxApiError as _SdkApiError
 from aioterabox.exceptions import TeraboxUnauthorizedError as _SdkUnauthorizedError
 
-__version__ = "1.0.1-amaterasu"
+__version__ = "1.0.2-amaterasu"
 
 _DEFAULT_ACCOUNT_BASE_URL = "https://www.terabox.com"
 _REGION_PREFIX = re_compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
@@ -61,6 +61,15 @@ class TeraboxPasswordError(TeraboxError):
 
 class TeraboxCancelled(TeraboxError):
     pass
+
+
+class _UploadAuthRejected(_SdkUnauthorizedError):
+    """A sanitized write-auth rejection with no cookie or token material."""
+
+    def __init__(self, stage: str, code, message: str):
+        super().__init__(f"TeraBox rejected upload {stage} auth")
+        self.code = code
+        self.api_message = message[:120]
 
 
 class _CookieData(dict):
@@ -150,6 +159,34 @@ def _regional_base_url(
     return f"https://{normalized}.{domain}"
 
 
+def _account_base_url(value: str) -> str | None:
+    """Return a safe TeraBox account origin from a final response URL."""
+    parsed = urlsplit(value)
+    if (
+        parsed.scheme.lower() != "https"
+        or not parsed.hostname
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.port not in {None, 443}
+    ):
+        return None
+    hostname = parsed.hostname.lower()
+    for domain in _REGIONAL_ACCOUNT_DOMAINS:
+        if hostname == f"www.{domain}":
+            return f"https://{hostname}"
+        suffix = f".{domain}"
+        if not hostname.endswith(suffix):
+            continue
+        prefix = hostname[: -len(suffix)]
+        if (
+            "." not in prefix
+            and prefix not in _NON_REGIONAL_COOKIE_PREFIXES
+            and _REGION_PREFIX.fullmatch(prefix)
+        ):
+            return f"https://{hostname}"
+    return None
+
+
 def _is_rejected_session(error: Exception) -> bool:
     if isinstance(error, _SdkUnauthorizedError):
         return True
@@ -182,6 +219,12 @@ def _bootstrap_failure_reason(error: Exception) -> str:
     if isinstance(error, (AttributeError, KeyError, TypeError, ValueError)):
         return "response format was not recognized"
     return "SDK bootstrap request failed"
+
+
+def _upload_rejection_reason(error: Exception) -> str:
+    if not isinstance(error, _UploadAuthRejected):
+        return ""
+    return f"errno={error.code}, message={error.api_message or 'unknown'}"
 
 
 def _terabox_proxy_url() -> str | None:
@@ -223,11 +266,10 @@ class _RegionalAccountClient(_AccountClient):
         self.proxy_url = _terabox_proxy_url()
         self.bds_token = ""
         self.pcf_token = ""
+        self.dp_logid = ""
 
-    def use_region(self, prefix: str | None, *, alternate: bool = False) -> bool:
-        domain = _REGIONAL_ACCOUNT_DOMAINS[1 if alternate else 0]
-        base_url = _regional_base_url(prefix, domain)
-        if not base_url or base_url == self.base_url:
+    def _set_account_base_url(self, base_url: str) -> bool:
+        if base_url == self.base_url:
             return False
         self.base_url = base_url
         self._base_headers["Origin"] = base_url
@@ -237,6 +279,13 @@ class _RegionalAccountClient(_AccountClient):
         self._signb = None
         self._public_key = None
         return True
+
+    def use_region(self, prefix: str | None, *, alternate: bool = False) -> bool:
+        domain = _REGIONAL_ACCOUNT_DOMAINS[1 if alternate else 0]
+        base_url = _regional_base_url(prefix, domain)
+        if not base_url:
+            return False
+        return self._set_account_base_url(base_url)
 
     def _remember_region(self, prefix: str | None):
         if _regional_base_url(prefix):
@@ -263,7 +312,13 @@ class _RegionalAccountClient(_AccountClient):
             headers=rewritten_headers,
             **kwargs,
         ) as response:
-            self._remember_region(response.headers.get("Url-Domain-Prefix"))
+            headers = response.headers
+            self._remember_region(headers.get("Url-Domain-Prefix"))
+            if logid := headers.get("logid") or headers.get("dp-logid"):
+                self.dp_logid = str(logid)
+            if response_url := getattr(response, "url", None):
+                if account_base := _account_base_url(str(response_url)):
+                    self._set_account_base_url(account_base)
             yield response
 
     async def get_max_file_size(self) -> int:
@@ -389,9 +444,21 @@ class _RegionalAccountClient(_AccountClient):
             return await operation(*args, **kwargs)
         except Exception as retry_error:
             if _is_rejected_session(retry_error):
+                reason = _upload_rejection_reason(retry_error)
+                detail = f" ({reason})" if reason else ""
+                guidance = ""
+                if isinstance(retry_error, _UploadAuthRejected) and (
+                    retry_error.code == 4000023
+                ):
+                    guidance = (
+                        "; TeraBox requires browser verification for this network, "
+                        "so authenticate through the bot server's public IP or its "
+                        "configured proxy and export cookies from that same route"
+                    )
                 raise TeraboxError(
                     f"TeraBox upload {stage} rejected the refreshed session; the "
                     "cookie is accepted for account reads but not for uploads"
+                    f"{detail}{guidance}"
                 ) from None
             raise
 
@@ -436,7 +503,7 @@ class _RegionalAccountClient(_AccountClient):
             )
         return results
 
-    def _upload_auth_params(self) -> dict[str, str]:
+    def _upload_auth_params(self, *, include_bdstoken: bool = False) -> dict[str, str]:
         params = {
             "app_id": "250528",
             "web": "1",
@@ -444,7 +511,9 @@ class _RegionalAccountClient(_AccountClient):
             "clienttype": "0",
             "jsToken": self.js_token,
         }
-        if self.bds_token:
+        if self.dp_logid:
+            params["dp-logid"] = self.dp_logid
+        if include_bdstoken and self.bds_token:
             params["bdstoken"] = self.bds_token
         return params
 
@@ -471,7 +540,7 @@ class _RegionalAccountClient(_AccountClient):
         code = result.get("errno", result.get("error_code", "unknown"))
         message = str(result.get("errmsg") or result.get("error_msg") or "unknown")
         if code in _UPLOAD_AUTH_ERROR_CODES or "need verify" in message.lower():
-            raise _SdkUnauthorizedError("TeraBox rejected upload-host auth")
+            raise _UploadAuthRejected("host discovery", code, message)
         raise _SdkApiError(
             f"TeraBox upload-host discovery failed (errno={code}, "
             f"message={message[:120]})"
@@ -490,6 +559,7 @@ class _RegionalAccountClient(_AccountClient):
             "size": str(file_size),
             "file_limit_switch_v34": "true",
             "rtype": "2",
+            "target_path": os.path.dirname(remote_path).rstrip("/") or "/",
             "block_list": json.dumps(md5_list_json),
         }
         async with self._request(
@@ -504,9 +574,9 @@ class _RegionalAccountClient(_AccountClient):
         if result.get("errno") == 0 and result.get("uploadid"):
             return result["uploadid"]
         code = result.get("errno", "unknown")
-        if code in _UPLOAD_AUTH_ERROR_CODES:
-            raise _SdkUnauthorizedError("TeraBox rejected upload precreate auth")
         message = str(result.get("errmsg") or result.get("msg") or "unknown")[:120]
+        if code in _UPLOAD_AUTH_ERROR_CODES:
+            raise _UploadAuthRejected("precreate", code, message)
         raise _SdkApiError(
             f"TeraBox file precreate failed (errno={code}, message={message})"
         )
@@ -534,7 +604,7 @@ class _RegionalAccountClient(_AccountClient):
             "POST",
             f"{_DEFAULT_ACCOUNT_BASE_URL}/api/create",
             headers={"Content-Type": "application/x-www-form-urlencoded"},
-            params=self._upload_auth_params(),
+            params=self._upload_auth_params(include_bdstoken=True),
             data=data,
             timeout=10,
         ) as response:
@@ -544,7 +614,7 @@ class _RegionalAccountClient(_AccountClient):
         code = result.get("errno", "unknown")
         message = str(result.get("errmsg") or result.get("msg") or "unknown")[:120]
         if code in _UPLOAD_AUTH_ERROR_CODES or "need verify" in message.lower():
-            raise _SdkUnauthorizedError("TeraBox rejected upload finalization auth")
+            raise _UploadAuthRejected("finalization", code, message)
         raise _SdkApiError(
             f"TeraBox file create failed (errno={code}, message={message})"
         )

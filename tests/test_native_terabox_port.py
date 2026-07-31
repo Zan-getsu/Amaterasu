@@ -262,12 +262,14 @@ def test_amaterasu_terabox_adapter_exports_sdk_surface():
         TeraboxError,
         TeraboxFile,
         TeraboxPasswordError,
+        __version__,
     )
 
     assert TeraboxClient
     assert TeraboxFile
     assert issubclass(TeraboxCancelled, TeraboxError)
     assert issubclass(TeraboxPasswordError, TeraboxError)
+    assert __version__ == "1.0.2-amaterasu"
 
 
 def test_terabox_cookie_parser_allows_sdk_refreshable_values(monkeypatch):
@@ -525,6 +527,26 @@ def test_terabox_regional_origin_is_validated_and_per_client():
     assert second.detected_region_prefix == "dm"
 
 
+@pytest.mark.parametrize(
+    ("url", "expected"),
+    [
+        ("https://www.terabox.com/main", "https://www.terabox.com"),
+        ("https://dm.terabox.com/main", "https://dm.terabox.com"),
+        ("https://dm.1024terabox.com/main", "https://dm.1024terabox.com"),
+        ("http://dm.terabox.com/main", None),
+        ("https://user@dm.terabox.com/main", None),
+        ("https://dm.terabox.com.evil.example/main", None),
+        ("https://d.terabox.com/main", None),
+    ],
+)
+def test_terabox_account_response_origin_is_safely_validated(url, expected):
+    pytest.importorskip("aiohttp")
+    pytest.importorskip("aioterabox")
+    import terabox
+
+    assert terabox._account_base_url(url) == expected
+
+
 async def test_terabox_request_captures_region_header_and_rewrites_origin():
     pytest.importorskip("aiohttp")
     pytest.importorskip("aioterabox")
@@ -571,6 +593,42 @@ async def test_terabox_request_captures_region_header_and_rewrites_origin():
     assert url == "https://dm.terabox.com/api/quota"
     assert kwargs["headers"]["Origin"] == "https://dm.terabox.com"
     assert kwargs["headers"]["Referer"] == "https://dm.terabox.com/main"
+
+
+async def test_terabox_request_adopts_safe_final_redirect_origin_and_logid():
+    pytest.importorskip("aiohttp")
+    pytest.importorskip("aioterabox")
+    import terabox
+
+    class Response:
+        headers = {"logid": "response-log-id"}
+        url = "https://dm.1024terabox.com/main"
+
+        def release(self):
+            return None
+
+    class Session:
+        cookie_jar = ()
+
+        async def request(self, _method, _url, **_kwargs):
+            return Response()
+
+    cookies = {
+        "jstoken": "",
+        "csrfToken": "",
+        "browserid": "",
+        "ndus": "authenticated",
+    }
+    client = terabox._RegionalAccountClient("", "", Session(), cookies=cookies)
+    assert client.use_region("dm")
+
+    async with client._request("GET", "https://www.terabox.com/main"):
+        pass
+
+    assert client.base_url == "https://dm.1024terabox.com"
+    assert client._base_headers["Origin"] == "https://dm.1024terabox.com"
+    assert client._base_headers["Referer"] == "https://dm.1024terabox.com/main"
+    assert client.dp_logid == "response-log-id"
 
 
 async def test_terabox_http_proxy_is_opt_in_and_applied_per_client(monkeypatch):
@@ -824,6 +882,7 @@ async def test_terabox_precreate_uses_current_query_auth_protocol():
     }
     client = terabox._RegionalAccountClient("", "", object(), cookies=cookies)
     client.bds_token = "write-token"
+    client.dp_logid = "response-log-id"
     captured = []
 
     class Response:
@@ -848,13 +907,15 @@ async def test_terabox_precreate_uses_current_query_auth_protocol():
     assert method == "POST"
     assert url == "https://www.terabox.com/api/precreate"
     assert kwargs["params"]["jsToken"] == "page-token"
-    assert kwargs["params"]["bdstoken"] == "write-token"
+    assert kwargs["params"]["dp-logid"] == "response-log-id"
+    assert "bdstoken" not in kwargs["params"]
     assert kwargs["data"] == {
         "path": "/Target/file.bin",
         "autoinit": "1",
         "size": "123",
         "file_limit_switch_v34": "true",
         "rtype": "2",
+        "target_path": "/Target",
         "block_list": '["chunk-digest"]',
     }
 
@@ -1038,6 +1099,40 @@ async def test_terabox_postcreate_maps_auth_errno_to_refreshable_rejection():
             10,
             ["digest"],
         )
+
+
+async def test_terabox_repeated_verification_error_preserves_safe_errno(tmp_path):
+    pytest.importorskip("aiohttp")
+    pytest.importorskip("aioterabox")
+    import terabox
+
+    cookies = {
+        "jstoken": "page-token",
+        "csrfToken": "csrf",
+        "browserid": "browser",
+        "ndus": "authenticated",
+    }
+    client = terabox._RegionalAccountClient("", "", object(), cookies=cookies)
+    source = tmp_path / "verification.bin"
+    source.write_bytes(b"payload")
+    rejected = terabox._UploadAuthRejected(
+        "precreate",
+        4000023,
+        "need verify",
+    )
+    client.get_max_file_size = AsyncMock(return_value=20 * 1024**3 - 1)
+    client._locate_upload_host = AsyncMock(return_value="upload.example")
+    client.refresh_cookies = AsyncMock(return_value={})
+    client._precreate_file = AsyncMock(side_effect=rejected)
+
+    with pytest.raises(terabox.TeraboxError) as raised:
+        await client.upload_file(str(source), "/Target/verification.bin")
+
+    message = str(raised.value)
+    assert "precreate" in message
+    assert "errno=4000023" in message
+    assert "message=need verify" in message
+    assert "bot server's public IP" in message
 
 
 class _FakeTeraboxSession:
