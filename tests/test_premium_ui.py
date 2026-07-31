@@ -80,7 +80,7 @@ def test_status_card_keeps_clickable_commands_and_all_core_fields():
         BOT / "helper" / "ext_utils" / "status_utils.py"
     ).read_text(encoding="utf-8")
 
-    assert 'msg = "<b>✦ DOWNLOAD TELEMETRY</b>\\n\\n"' in source
+    assert 'msg = "<b>✦ ACTIVE TASKS</b>\\n\\n"' in source
     assert 'f" : <b>{task_name}</b>\\n"' in source
     for label in (
         "Status",

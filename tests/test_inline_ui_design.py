@@ -130,7 +130,7 @@ def test_system_metrics_suffix_is_byte_for_byte_protected():
 
 def test_task_card_redesign_retains_all_existing_information():
     source = STATUS_UTILS_PATH.read_text(encoding="utf-8")
-    assert 'msg = "<b>✦ DOWNLOAD TELEMETRY</b>\\n\\n"' in source
+    assert 'msg = "<b>✦ ACTIVE TASKS</b>\\n\\n"' in source
     for label in (
         "Subname",
         "Status",
@@ -395,7 +395,7 @@ async def test_rendered_task_card_preserves_fields_and_metrics(monkeypatch):
     inline_ui = _load_inline_ui()
     styled = inline_ui.style_inline_text(raw, has_buttons=True)
 
-    assert styled.startswith("<b>✦ DOWNLOAD TELEMETRY</b>")
+    assert styled.startswith("<b>✦ ACTIVE TASKS</b>")
     assert "📥 <b>TASK 01</b> : <b>Example Movie</b>" in styled
     for value in (
         "Example Movie",
