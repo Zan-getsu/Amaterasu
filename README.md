@@ -947,6 +947,13 @@ If TeraBox rejects the session, sign in again and make a fresh Netscape export.
 An `ndus` cookie can be unexpired according to its file metadata while the
 server has already revoked it.
 
+If the bot host cannot reach TeraBox directly, set `TERABOX_PROXY` to a stable
+HTTP(S) proxy URL, for example `http://user:password@proxy.example:8080`, before
+starting the bot. The proxy is opt-in, applies only to native TeraBox requests,
+and should use the same trusted region as the browser session when possible.
+SOCKS proxy URLs require additional connector support and are not accepted by
+this setting.
+
 > [!CAUTION]
 > A TeraBox cookie grants account access. Never commit it, paste its contents
 > into Telegram, include it in logs, or expose it from a public web directory.

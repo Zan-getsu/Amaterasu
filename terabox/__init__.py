@@ -7,19 +7,26 @@ portable across Python versions and CPU architectures.
 
 from __future__ import annotations
 
+import json
 import os
 from asyncio import FIRST_COMPLETED, CancelledError, Event, create_task, to_thread, wait
 from asyncio import gather as asyncio_gather
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
+from hashlib import md5
 from http.cookiejar import MozillaCookieJar
 from pathlib import Path
 from re import compile as re_compile
+from urllib.parse import urlsplit
 
 import aiohttp
 from aiofiles import open as aiopen
+from aiofiles import tempfile as aiotempfile
 from aiofiles.os import makedirs
+from aioterabox.api import CHUNK_SIZE as _SDK_CHUNK_SIZE
+from aioterabox.api import MAX_UNCHUNKED_FILE_SIZE as _SDK_UNCHUNKED_LIMIT
 from aioterabox.api import TeraboxClient as _AccountClient
+from aioterabox.exceptions import TeraboxApiError as _SdkApiError
 from aioterabox.exceptions import TeraboxUnauthorizedError as _SdkUnauthorizedError
 
 __version__ = "1.0.0-amaterasu"
@@ -27,6 +34,9 @@ __version__ = "1.0.0-amaterasu"
 _DEFAULT_ACCOUNT_BASE_URL = "https://www.terabox.com"
 _REGION_PREFIX = re_compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
 _NON_REGIONAL_COOKIE_PREFIXES = {"www", "d", "data", "s3", "static"}
+_REGIONAL_ACCOUNT_DOMAINS = ("terabox.com", "1024terabox.com")
+_FREE_MAX_FILE_SIZE = 4 * 1024**3
+_VIP_MAX_FILE_SIZE = 20 * 1024**3 - 1
 
 
 class TeraboxError(Exception):
@@ -115,12 +125,17 @@ def _cookie_region_hint(records) -> str | None:
     return None
 
 
-def _regional_base_url(prefix: str | None) -> str | None:
+def _regional_base_url(
+    prefix: str | None,
+    domain: str = _REGIONAL_ACCOUNT_DOMAINS[0],
+) -> str | None:
     """Return a safe account API origin from TeraBox's regional-prefix header."""
     normalized = (prefix or "").strip().lower()
-    if not _REGION_PREFIX.fullmatch(normalized):
+    if domain not in _REGIONAL_ACCOUNT_DOMAINS or not _REGION_PREFIX.fullmatch(
+        normalized
+    ):
         return None
-    return f"https://{normalized}.terabox.com"
+    return f"https://{normalized}.{domain}"
 
 
 def _is_rejected_session(error: Exception) -> bool:
@@ -145,6 +160,16 @@ def _bootstrap_failure_reason(error: Exception) -> str:
     return "SDK bootstrap request failed"
 
 
+def _terabox_proxy_url() -> str | None:
+    proxy_url = os.getenv("TERABOX_PROXY", "").strip()
+    if not proxy_url:
+        return None
+    parsed = urlsplit(proxy_url)
+    if parsed.scheme.lower() in {"http", "https"} and parsed.hostname:
+        return proxy_url
+    return None
+
+
 class _RegionalAccountClient(_AccountClient):
     """Make the SDK's hard-coded account origin per-client and region-aware."""
 
@@ -152,9 +177,11 @@ class _RegionalAccountClient(_AccountClient):
         super().__init__(*args, **kwargs)
         self.base_url = _DEFAULT_ACCOUNT_BASE_URL
         self.detected_region_prefix: str | None = None
+        self.proxy_url = _terabox_proxy_url()
 
-    def use_region(self, prefix: str | None) -> bool:
-        base_url = _regional_base_url(prefix)
+    def use_region(self, prefix: str | None, *, alternate: bool = False) -> bool:
+        domain = _REGIONAL_ACCOUNT_DOMAINS[1 if alternate else 0]
+        base_url = _regional_base_url(prefix, domain)
         if not base_url or base_url == self.base_url:
             return False
         self.base_url = base_url
@@ -179,6 +206,8 @@ class _RegionalAccountClient(_AccountClient):
 
     @asynccontextmanager
     async def _request(self, method: str, url: str, *, headers=None, **kwargs):
+        if self.proxy_url and "proxy" not in kwargs:
+            kwargs["proxy"] = self.proxy_url
         rewritten_headers = {
             key: self._rewrite_url(value) if isinstance(value, str) else value
             for key, value in (headers or {}).items()
@@ -191,6 +220,109 @@ class _RegionalAccountClient(_AccountClient):
         ) as response:
             self._remember_region(response.headers.get("Url-Domain-Prefix"))
             yield response
+
+    async def get_max_file_size(self) -> int:
+        """Correct aioterabox 0.2.3's reversed free/VIP size limits."""
+        return _VIP_MAX_FILE_SIZE if await self.check_vip_status() else _FREE_MAX_FILE_SIZE
+
+    async def upload_file(self, filename: str, destination_path: str) -> dict:
+        """Upload every chunk, including the SDK's previously omitted remainder."""
+        destination_path = f"/{destination_path.lstrip('/')}"
+        file_size = await to_thread(os.path.getsize, filename)
+        max_file_size = await self.get_max_file_size()
+        if file_size > max_file_size:
+            raise ValueError(
+                f"File size {file_size} exceeds maximum allowed size of "
+                f"{max_file_size} bytes."
+            )
+
+        async with aiotempfile.TemporaryDirectory() as tmpdir:
+            chunks = []
+            async with aiopen(filename, "rb") as source:
+                if file_size > _SDK_UNCHUNKED_LIMIT:
+                    index = 0
+                    while data := await source.read(_SDK_CHUNK_SIZE):
+                        chunk_path = os.path.join(
+                            tmpdir,
+                            f"{os.path.basename(destination_path)}.part{index:03d}",
+                        )
+                        async with aiopen(chunk_path, "wb") as chunk_file:
+                            await chunk_file.write(data)
+                        chunks.append(
+                            (
+                                chunk_path,
+                                len(data),
+                                md5(data, usedforsecurity=False).hexdigest(),
+                            )
+                        )
+                        index += 1
+                else:
+                    chunks.append(
+                        (filename, file_size, await self.file_md5(source))
+                    )
+
+            if sum(chunk_size for _path, chunk_size, _digest in chunks) != file_size:
+                raise TeraboxError(
+                    "TeraBox upload preparation did not preserve the complete file"
+                )
+
+            upload_host = await self._locate_upload_host()
+            md5_list = [digest for _path, _size, digest in chunks]
+            try:
+                upload_id = await self._precreate_file(destination_path, md5_list)
+            except _SdkUnauthorizedError:
+                await self.refresh_cookies()
+                upload_id = await self._precreate_file(destination_path, md5_list)
+
+            await self._upload_chunks(
+                upload_host=upload_host,
+                remote_path=destination_path,
+                uploadid=upload_id,
+                file_chunks_md5=chunks,
+            )
+            return await self._postcreate_file(
+                remote_path=destination_path,
+                uploadid=upload_id,
+                file_size=file_size,
+                md5_list_json=md5_list,
+            )
+
+    async def _postcreate_file(
+        self,
+        remote_path: str,
+        uploadid: str,
+        file_size: int,
+        md5_list_json: list[str],
+    ) -> dict:
+        """Finalize an upload without logging jsToken or emitting a root `//`."""
+        remote_dir = os.path.dirname(remote_path).rstrip("/") or "/"
+        target_path = remote_dir if remote_dir == "/" else remote_dir + "/"
+        data = {
+            "isdir": "0",
+            "rtype": "1",
+            "app_id": "250528",
+            "jsToken": self.js_token,
+            "path": remote_path,
+            "uploadid": uploadid,
+            "target_path": target_path,
+            "size": str(file_size),
+            "block_list": json.dumps(md5_list_json),
+        }
+        async with self._request(
+            "POST",
+            f"{_DEFAULT_ACCOUNT_BASE_URL}/api/create",
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            data=data,
+            timeout=10,
+        ) as response:
+            result = await response.json()
+        if result.get("errno") == 0:
+            return result
+        code = result.get("errno", "unknown")
+        message = str(result.get("errmsg") or result.get("msg") or "unknown")[:120]
+        raise _SdkApiError(
+            f"TeraBox file create failed (errno={code}, message={message})"
+        )
 
 
 def _headers_dict(headers: list[str] | None) -> dict[str, str]:
@@ -227,17 +359,19 @@ class TeraboxClient:
             try:
                 await self._bootstrap_session()
             except TeraboxError:
-                if not region_hint or not self._client.use_region(region_hint):
+                if not region_hint:
                     raise
+                await self._bootstrap_regional_session(region_hint)
                 regional = True
-                await self._bootstrap_session(regional=True)
             try:
                 await self._validate_session(regional=regional)
             except Exception as first_error:
-                prefix = self._client.detected_region_prefix
-                if not prefix or not self._client.use_region(prefix):
+                if regional:
                     raise first_error
-                await self._bootstrap_session(regional=True)
+                prefix = self._client.detected_region_prefix
+                if not prefix:
+                    raise first_error
+                await self._bootstrap_regional_session(prefix)
                 await self._validate_session(regional=True)
         except TeraboxError:
             await self.aclose()
@@ -254,11 +388,31 @@ class TeraboxClient:
                 "was incompatible with the native client"
             ) from None
 
-    async def _bootstrap_session(self, *, regional: bool = False):
+    async def _bootstrap_regional_session(self, prefix: str):
+        if not self._client.use_region(prefix):
+            raise TeraboxError("TeraBox returned an unusable regional endpoint")
+        try:
+            await self._bootstrap_session(regional=True)
+        except TeraboxError:
+            if not self._client.use_region(prefix, alternate=True):
+                raise
+            await self._bootstrap_session(regional=True, alternate=True)
+
+    async def _bootstrap_session(
+        self,
+        *,
+        regional: bool = False,
+        alternate: bool = False,
+    ):
         try:
             await self._client.refresh_cookies()
         except Exception as error:
-            endpoint = "regional TeraBox endpoint" if regional else "TeraBox"
+            if alternate:
+                endpoint = "alternate regional TeraBox endpoint"
+            elif regional:
+                endpoint = "regional TeraBox endpoint"
+            else:
+                endpoint = "TeraBox"
             raise TeraboxError(
                 f"TeraBox session bootstrap failed on the {endpoint} "
                 f"({_bootstrap_failure_reason(error)}). The cookie file was parsed "
@@ -491,6 +645,20 @@ class TeraboxClient:
             result = await task
         except CancelledError as error:
             raise TeraboxCancelled("Transfer cancelled") from error
+        except TeraboxError:
+            raise
+        except ValueError as error:
+            raise TeraboxError(str(error)) from None
+        except Exception as error:
+            if _is_rejected_session(error):
+                raise TeraboxError(
+                    "TeraBox rejected the upload session; authenticate again using "
+                    "the bot server's network"
+                ) from None
+            raise TeraboxError(
+                f"TeraBox upload API failed ({type(error).__name__}); no remote "
+                "completion was reported"
+            ) from None
         finally:
             if cancel_task and not cancel_task.done():
                 cancel_task.cancel()
