@@ -240,9 +240,9 @@ def build_caption(title, filename, readable_size, stream_link, download_link):
         "╭─ <b>FILE DETAILS</b>\n"
         f"├─ <b>Name</b> : <code>{safe_filename}</code>\n"
         f"╰─ <b>Size</b> : <code>{safe_size}</code>\n\n"
-        f"<b>↓ Download</b>\n<a href=\"{safe_download_href}\">"
+        f"<b>⬇️ DOWNLOAD</b>\n<a href=\"{safe_download_href}\">"
         f"{safe_download_text}</a>\n\n"
-        f"<b>▶ Stream</b>\n<a href=\"{safe_stream_href}\">"
+        f"<b>▶️ STREAM</b>\n<a href=\"{safe_stream_href}\">"
         f"{safe_stream_text}</a>"
     )
     return caption

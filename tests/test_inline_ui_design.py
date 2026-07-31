@@ -198,6 +198,15 @@ def test_image_commands_are_available_to_command_sync():
     assert "images" in menu_commands
 
 
+def test_filetolink_caption_icons_match_buttons():
+    source = FILETOLINK_PATH.read_text(encoding="utf-8")
+
+    assert '<b>⬇️ DOWNLOAD</b>' in source
+    assert '<b>▶️ STREAM</b>' in source
+    assert '<b>↓ Download</b>' not in source
+    assert '<b>▶ Stream</b>' not in source
+
+
 @pytest.mark.asyncio
 async def test_gallery_gif_uses_animation_delivery(monkeypatch):
     from pyrogram.types import InputMediaAnimation, InputMediaDocument
@@ -265,6 +274,7 @@ async def test_gallery_gif_uses_animation_delivery(monkeypatch):
     input_media = gallery_message.edit_media.await_args.args[0]
     assert isinstance(input_media, InputMediaAnimation)
     assert input_media.media == "next-file-id"
+    assert input_media.caption == "Next animation"
 
     await edit_message(
         gallery_message,
@@ -283,6 +293,7 @@ async def test_gallery_gif_uses_animation_delivery(monkeypatch):
     document_input_media = gallery_message.edit_media.await_args.args[0]
     assert isinstance(document_input_media, InputMediaDocument)
     assert document_input_media.media == "next-document-id"
+    assert document_input_media.caption == "Next document GIF"
 
 
 @pytest.mark.asyncio
@@ -323,6 +334,7 @@ async def test_legacy_gallery_animation_document_id_falls_back(monkeypatch):
     fallback_media = gallery_message.edit_media.await_args_list[1].args[0]
     assert isinstance(fallback_media, InputMediaDocument)
     assert fallback_media.media == "old-document-id"
+    assert fallback_media.caption == "Legacy GIF"
 
 
 @pytest.mark.asyncio

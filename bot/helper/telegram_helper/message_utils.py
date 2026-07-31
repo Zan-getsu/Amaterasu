@@ -89,7 +89,7 @@ def _gallery_input_media(media, caption, media_type, **kwargs):
         "document": InputMediaDocument,
         "photo": InputMediaPhoto,
     }[media_type]
-    return media_class(media, caption, **kwargs)
+    return media_class(media=media, caption=caption, **kwargs)
 
 
 def _animation_file_id_is_document(error):
