@@ -8,6 +8,7 @@ from ..helper.telegram_helper.message_utils import (
     edit_message,
     delete_message,
     gallery_animation,
+    gallery_document,
 )
 
 
@@ -197,12 +198,16 @@ async def picture_add(_, message):
             and (resm.document.mime_type or "").lower() == "image/gif"
         )
     ):
-        animation = resm.animation or resm.document
-        if (animation.file_size or 0) > 50 * 1024 * 1024:
+        gif_media = resm.animation or resm.document
+        if (gif_media.file_size or 0) > 50 * 1024 * 1024:
             return await edit_message(
                 editable, "<i>GIF is too large! Maximum size is 50 MB.</i>"
             )
-        pic_add = gallery_animation(animation.file_id)
+        pic_add = (
+            gallery_animation(gif_media.file_id)
+            if resm.animation
+            else gallery_document(gif_media.file_id)
+        )
     elif resm and resm.photo:
         if (resm.photo.file_size or 0) > 10 * 1024 * 1024:
             return await edit_message(

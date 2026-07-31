@@ -200,27 +200,33 @@ def test_image_commands_are_available_to_command_sync():
 
 @pytest.mark.asyncio
 async def test_gallery_gif_uses_animation_delivery(monkeypatch):
-    from pyrogram.types import InputMediaAnimation
+    from pyrogram.types import InputMediaAnimation, InputMediaDocument
 
     from bot.core.tg_client import TgClient
     from bot.helper.telegram_helper.message_utils import (
         _resolve_gallery_media,
         edit_message,
         gallery_animation,
+        gallery_document,
         send_message,
     )
 
     assert _resolve_gallery_media("https://example.com/banner.gif?v=1") == (
         "https://example.com/banner.gif?v=1",
-        True,
+        "animation",
     )
     assert _resolve_gallery_media(gallery_animation("telegram-file-id")) == (
         "telegram-file-id",
-        True,
+        "animation",
+    )
+    assert _resolve_gallery_media(gallery_document("document-file-id")) == (
+        "document-file-id",
+        "document",
     )
 
     bot = SimpleNamespace(
         send_animation=AsyncMock(),
+        send_document=AsyncMock(),
         send_photo=AsyncMock(),
     )
     monkeypatch.setattr(TgClient, "bot", bot)
@@ -237,6 +243,15 @@ async def test_gallery_gif_uses_animation_delivery(monkeypatch):
     photo_kwargs = bot.send_photo.await_args.kwargs
     assert photo_kwargs["chat_id"] == 123
     assert photo_kwargs["photo"] == "photo-file-id"
+
+    await send_message(
+        123,
+        "Document-backed GIF",
+        photo=gallery_document("document-file-id"),
+    )
+    document_kwargs = bot.send_document.await_args.kwargs
+    assert document_kwargs["chat_id"] == 123
+    assert document_kwargs["document"] == "document-file-id"
 
     gallery_message = SimpleNamespace(
         media=object(),
@@ -259,6 +274,55 @@ async def test_gallery_gif_uses_animation_delivery(monkeypatch):
     photo_input_media = gallery_message.edit_media.await_args.args[0]
     assert photo_input_media.media == "next-photo-id"
     assert type(photo_input_media).__name__ == "InputMediaPhoto"
+
+    await edit_message(
+        gallery_message,
+        "Next document GIF",
+        photo=gallery_document("next-document-id"),
+    )
+    document_input_media = gallery_message.edit_media.await_args.args[0]
+    assert isinstance(document_input_media, InputMediaDocument)
+    assert document_input_media.media == "next-document-id"
+
+
+@pytest.mark.asyncio
+async def test_legacy_gallery_animation_document_id_falls_back(monkeypatch):
+    from pyrogram.types import InputMediaDocument
+
+    from bot.core.tg_client import TgClient
+    from bot.helper.telegram_helper.message_utils import (
+        edit_message,
+        gallery_animation,
+        send_message,
+    )
+
+    mismatch = ValueError(
+        "Expected ANIMATION, got DOCUMENT file id instead"
+    )
+    bot = SimpleNamespace(
+        send_animation=AsyncMock(side_effect=mismatch),
+        send_document=AsyncMock(),
+    )
+    monkeypatch.setattr(TgClient, "bot", bot)
+    await send_message(
+        123,
+        "Legacy GIF",
+        photo=gallery_animation("old-document-id"),
+    )
+    assert bot.send_document.await_args.kwargs["document"] == "old-document-id"
+
+    gallery_message = SimpleNamespace(
+        media=object(),
+        edit_media=AsyncMock(side_effect=[mismatch, SimpleNamespace()]),
+    )
+    await edit_message(
+        gallery_message,
+        "Legacy GIF",
+        photo=gallery_animation("old-document-id"),
+    )
+    fallback_media = gallery_message.edit_media.await_args_list[1].args[0]
+    assert isinstance(fallback_media, InputMediaDocument)
+    assert fallback_media.media == "old-document-id"
 
 
 @pytest.mark.asyncio

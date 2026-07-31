@@ -452,8 +452,14 @@ class Config:
     def effective_bin_channel(cls):
         """Resolve the FileToLink storage chat without mutating config."""
         if cls.USE_LEECH_DUMP_AS_BIN_CHANNEL and cls.LEECH_DUMP_CHAT:
-            return cls.LEECH_DUMP_CHAT
-        return cls.BIN_CHANNEL
+            channel = cls.LEECH_DUMP_CHAT
+        else:
+            channel = cls.BIN_CHANNEL
+        if isinstance(channel, str):
+            channel = channel.strip()
+            if channel.lstrip("-").isdigit():
+                return int(channel)
+        return channel
 
     @classmethod
     def load(cls):

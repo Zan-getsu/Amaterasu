@@ -95,7 +95,7 @@ def test_effective_bin_channel_preserves_separate_channel_value():
         assert Config.effective_bin_channel() == -1001
 
         Config.USE_LEECH_DUMP_AS_BIN_CHANNEL = True
-        assert Config.effective_bin_channel() == "-1002"
+        assert Config.effective_bin_channel() == -1002
         assert Config.BIN_CHANNEL == -1001
 
         Config.LEECH_DUMP_CHAT = ""

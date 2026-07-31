@@ -6,6 +6,7 @@ from urllib.parse import urlsplit
 
 from pyrogram.types import (
     InputMediaAnimation,
+    InputMediaDocument,
     InputMediaPhoto,
     Message,
     ReplyParameters,
@@ -43,11 +44,17 @@ from .button_build import ButtonMaker
 from .inline_ui import style_inline_text
 
 GALLERY_ANIMATION_PREFIX = "animation:"
+GALLERY_DOCUMENT_PREFIX = "document:"
 
 
 def gallery_animation(media):
     """Mark a Telegram file ID or URL as an animated gallery item."""
     return f"{GALLERY_ANIMATION_PREFIX}{media}"
+
+
+def gallery_document(media):
+    """Mark a Telegram file ID as a document-backed gallery item."""
+    return f"{GALLERY_DOCUMENT_PREFIX}{media}"
 
 
 def _resolve_gallery_media(media):
@@ -56,13 +63,15 @@ def _resolve_gallery_media(media):
             Config.USE_IMAGES = True
             media = choice(Config.IMAGES)
         else:
-            return None, False
+            return None, "photo"
     if not media:
-        return None, False
+        return None, "photo"
 
     media = str(media)
     if media.startswith(GALLERY_ANIMATION_PREFIX):
-        return media[len(GALLERY_ANIMATION_PREFIX) :], True
+        return media[len(GALLERY_ANIMATION_PREFIX) :], "animation"
+    if media.startswith(GALLERY_DOCUMENT_PREFIX):
+        return media[len(GALLERY_DOCUMENT_PREFIX) :], "document"
 
     # Backward-compatible support for GIF URLs/local paths already present
     # in IMAGES before typed animation entries were introduced.
@@ -70,7 +79,24 @@ def _resolve_gallery_media(media):
         path = urlsplit(media).path
     except ValueError:
         path = media
-    return media, path.lower().endswith(".gif")
+    media_type = "animation" if path.lower().endswith(".gif") else "photo"
+    return media, media_type
+
+
+def _gallery_input_media(media, caption, media_type, **kwargs):
+    media_class = {
+        "animation": InputMediaAnimation,
+        "document": InputMediaDocument,
+        "photo": InputMediaPhoto,
+    }[media_type]
+    return media_class(media, caption, **kwargs)
+
+
+def _animation_file_id_is_document(error):
+    return (
+        isinstance(error, ValueError)
+        and "Expected ANIMATION, got DOCUMENT file id instead" in str(error)
+    )
 
 
 def _shorten_caption(text, limit=900):
@@ -110,38 +136,42 @@ async def send_message(message, text, buttons=None, block=True, photo=None, **kw
     try:
         if photo:
             try:
-                photo, is_animation = _resolve_gallery_media(photo)
+                photo, media_type = _resolve_gallery_media(photo)
                 if photo is None:
                     return await _send_text(message, text, buttons, **kwargs)
                 if isinstance(message, Message):
-                    send_media = (
-                        message.reply_animation
-                        if is_animation
-                        else message.reply_photo
+                    send_target = message
+                    send_kwargs = {
+                        "reply_parameters": ReplyParameters(message_id=message.id)
+                    }
+                    method_prefix = "reply"
+                else:
+                    send_target = TgClient.bot
+                    send_kwargs = {"chat_id": message}
+                    method_prefix = "send"
+
+                async def send_gallery_item(item_type):
+                    send_media = getattr(
+                        send_target, f"{method_prefix}_{item_type}"
                     )
-                    media_key = "animation" if is_animation else "photo"
                     return await send_media(
-                        **{media_key: photo},
+                        **send_kwargs,
+                        **{item_type: photo},
                         caption=text,
-                        reply_parameters=ReplyParameters(message_id=message.id),
                         reply_markup=buttons,
                         disable_notification=True,
                         **kwargs,
                     )
-                send_media = (
-                    TgClient.bot.send_animation
-                    if is_animation
-                    else TgClient.bot.send_photo
-                )
-                media_key = "animation" if is_animation else "photo"
-                return await send_media(
-                    chat_id=message,
-                    **{media_key: photo},
-                    caption=text,
-                    reply_markup=buttons,
-                    disable_notification=True,
-                    **kwargs,
-                )
+
+                try:
+                    return await send_gallery_item(media_type)
+                except ValueError as e:
+                    if (
+                        media_type == "animation"
+                        and _animation_file_id_is_document(e)
+                    ):
+                        return await send_gallery_item("document")
+                    raise
             except FloodWait as f:
                 LOGGER.warning(str(f))
                 if not block:
@@ -173,8 +203,12 @@ async def send_message(message, text, buttons=None, block=True, photo=None, **kw
                     if des_dir:
                         fallback_media = (
                             gallery_animation(des_dir)
-                            if is_animation
-                            else des_dir
+                            if media_type == "animation"
+                            else (
+                                gallery_document(des_dir)
+                                if media_type == "document"
+                                else des_dir
+                            )
                         )
                         msg = await send_message(
                             message,
@@ -234,18 +268,25 @@ async def edit_message(message, text, buttons=None, block=True, photo=None):
     text = style_inline_text(text, has_buttons=buttons is not None)
     original_media = photo
     try:
-        photo, is_animation = _resolve_gallery_media(photo)
+        photo, media_type = _resolve_gallery_media(photo)
         if message.media:
             if photo:
-                input_media = (
-                    InputMediaAnimation(photo, text)
-                    if is_animation
-                    else InputMediaPhoto(photo, text)
-                )
+                input_media = _gallery_input_media(photo, text, media_type)
                 try:
                     return await message.edit_media(
                         input_media, reply_markup=buttons
                     )
+                except ValueError as e:
+                    if (
+                        media_type == "animation"
+                        and _animation_file_id_is_document(e)
+                    ):
+                        media_type = "document"
+                        return await message.edit_media(
+                            _gallery_input_media(photo, text, media_type),
+                            reply_markup=buttons,
+                        )
+                    raise
                 except (
                     PhotoInvalidDimensions,
                     WebpageCurlFailed,
@@ -258,10 +299,10 @@ async def edit_message(message, text, buttons=None, block=True, photo=None):
                         else None
                     )
                     if des_dir:
-                        fallback_media = (
-                            InputMediaAnimation(des_dir, text)
-                            if is_animation
-                            else InputMediaPhoto(des_dir, text)
+                        fallback_media = _gallery_input_media(
+                            des_dir,
+                            text,
+                            media_type,
                         )
                         msg = await message.edit_media(
                             fallback_media, reply_markup=buttons
@@ -308,18 +349,11 @@ async def edit_message(message, text, buttons=None, block=True, photo=None):
         if message.media:
             if photo:
                 try:
-                    input_media = (
-                        InputMediaAnimation(
-                            photo,
-                            short_text,
-                            parse_mode=ParseMode.DISABLED,
-                        )
-                        if is_animation
-                        else InputMediaPhoto(
-                            photo,
-                            short_text,
-                            parse_mode=ParseMode.DISABLED,
-                        )
+                    input_media = _gallery_input_media(
+                        photo,
+                        short_text,
+                        media_type,
+                        parse_mode=ParseMode.DISABLED,
                     )
                     return await message.edit_media(
                         input_media,
