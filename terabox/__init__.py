@@ -26,6 +26,7 @@ __version__ = "1.0.0-amaterasu"
 
 _DEFAULT_ACCOUNT_BASE_URL = "https://www.terabox.com"
 _REGION_PREFIX = re_compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
+_NON_REGIONAL_COOKIE_PREFIXES = {"www", "d", "data", "s3", "static"}
 
 
 class TeraboxError(Exception):
@@ -38,6 +39,14 @@ class TeraboxPasswordError(TeraboxError):
 
 class TeraboxCancelled(TeraboxError):
     pass
+
+
+class _CookieData(dict):
+    """Cookie mapping plus non-secret routing metadata from the export."""
+
+    def __init__(self, *args, region_hint: str | None = None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.region_hint = region_hint
 
 
 @dataclass(slots=True)
@@ -66,14 +75,15 @@ def _read_cookie_file(cookie_file: str) -> dict[str, str]:
         raise TeraboxError(
             "Invalid TeraBox cookies.txt file: expected a Netscape-format export"
         ) from None
-    cookies = {cookie.name: cookie.value for cookie in jar}
+    records = list(jar)
+    cookies = {cookie.name: cookie.value for cookie in records}
     aliases = {
         "jstoken": ("jstoken", "jsToken"),
         "csrfToken": ("csrfToken", "csrf_token"),
         "browserid": ("browserid",),
         "ndus": ("ndus",),
     }
-    normalized = dict(cookies)
+    normalized = _CookieData(cookies, region_hint=_cookie_region_hint(records))
     for target, names in aliases.items():
         normalized[target] = next(
             (cookies[name] for name in names if cookies.get(name)),
@@ -85,6 +95,24 @@ def _read_cookie_file(cookie_file: str) -> dict[str, str]:
     if not normalized["ndus"]:
         raise TeraboxError("TeraBox cookie is missing the required ndus value")
     return normalized
+
+
+def _cookie_region_hint(records) -> str | None:
+    """Infer a safe regional prefix from cookie domains without reading values."""
+    for cookie in records:
+        domain = str(getattr(cookie, "domain", "") or "").lstrip(".").lower()
+        for root in ("terabox.com", "1024terabox.com"):
+            suffix = "." + root
+            if not domain.endswith(suffix):
+                continue
+            prefix = domain[: -len(suffix)]
+            if (
+                "." not in prefix
+                and prefix not in _NON_REGIONAL_COOKIE_PREFIXES
+                and _regional_base_url(prefix)
+            ):
+                return prefix
+    return None
 
 
 def _regional_base_url(prefix: str | None) -> str | None:
@@ -103,6 +131,18 @@ def _is_rejected_session(error: Exception) -> bool:
         marker in message
         for marker in ("errno': -6", 'errno": -6', "user not login", "invalid cookies")
     )
+
+
+def _bootstrap_failure_reason(error: Exception) -> str:
+    if isinstance(error, TimeoutError):
+        return "request timed out"
+    if isinstance(error, aiohttp.ClientResponseError):
+        return f"HTTP {error.status}"
+    if isinstance(error, aiohttp.ClientError):
+        return "network request failed"
+    if isinstance(error, (AttributeError, KeyError, TypeError, ValueError)):
+        return "response format was not recognized"
+    return "SDK bootstrap request failed"
 
 
 class _RegionalAccountClient(_AccountClient):
@@ -179,12 +219,20 @@ class TeraboxClient:
 
     async def login(self):
         cookies = await to_thread(_read_cookie_file, self.cookie_file)
+        region_hint = getattr(cookies, "region_hint", None)
         await self._ensure_session()
         try:
             self._client = _RegionalAccountClient("", "", self._session, cookies=cookies)
-            await self._bootstrap_session()
+            regional = False
             try:
-                await self._validate_session()
+                await self._bootstrap_session()
+            except TeraboxError:
+                if not region_hint or not self._client.use_region(region_hint):
+                    raise
+                regional = True
+                await self._bootstrap_session(regional=True)
+            try:
+                await self._validate_session(regional=regional)
             except Exception as first_error:
                 prefix = self._client.detected_region_prefix
                 if not prefix or not self._client.use_region(prefix):
@@ -209,11 +257,13 @@ class TeraboxClient:
     async def _bootstrap_session(self, *, regional: bool = False):
         try:
             await self._client.refresh_cookies()
-        except Exception:
+        except Exception as error:
             endpoint = "regional TeraBox endpoint" if regional else "TeraBox"
             raise TeraboxError(
-                f"TeraBox session bootstrap failed on the {endpoint}; sign in "
-                "again and export a fresh Netscape cookies.txt file containing ndus"
+                f"TeraBox session bootstrap failed on the {endpoint} "
+                f"({_bootstrap_failure_reason(error)}). The cookie file was parsed "
+                "successfully; check TeraBox reachability, proxy settings, and the "
+                "installed aioterabox version"
             ) from None
 
     async def _validate_session(self, *, regional: bool = False):

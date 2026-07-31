@@ -309,6 +309,34 @@ def test_terabox_cookie_parser_normalizes_jstoken_alias(monkeypatch):
     assert parsed["jstoken"] == "page-token"
 
 
+def test_terabox_cookie_parser_preserves_regional_domain_hint(monkeypatch):
+    pytest.importorskip("aiohttp")
+    pytest.importorskip("aioterabox")
+    import terabox
+
+    jar = MagicMock()
+    jar.__iter__.return_value = iter(
+        [
+            SimpleNamespace(
+                name="ndus",
+                value="authenticated",
+                domain=".terabox.com",
+            ),
+            SimpleNamespace(
+                name="captcha_ticket",
+                value="challenge",
+                domain=".dm.terabox.com",
+            ),
+        ]
+    )
+    monkeypatch.setattr(terabox, "MozillaCookieJar", lambda _path: jar)
+
+    parsed = terabox._read_cookie_file("cookies.txt")
+
+    assert parsed.region_hint == "dm"
+    assert "region_hint" not in parsed
+
+
 def test_terabox_cookie_parser_requires_auth_cookie(monkeypatch):
     import pytest
 
@@ -575,6 +603,62 @@ async def test_terabox_login_rebootstraps_on_detected_regional_host(monkeypatch)
     await client.aclose()
 
 
+async def test_terabox_login_retries_bootstrap_using_cookie_domain_hint(monkeypatch):
+    pytest.importorskip("aiohttp")
+    pytest.importorskip("aioterabox")
+    import terabox
+
+    class RegionalBootstrapAccount(_FakeAccountClient):
+        events = []
+
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self._bootstrap_calls = 0
+
+        async def refresh_cookies(self):
+            self.events.append("bootstrap")
+            self._bootstrap_calls += 1
+            if self._bootstrap_calls == 1:
+                raise TimeoutError("private transport details")
+            self.cookies.update(
+                {
+                    "jstoken": "derived-page-token",
+                    "csrfToken": "derived-csrf-token",
+                    "browserid": "derived-browser-id",
+                }
+            )
+            return {}
+
+    monkeypatch.setattr(terabox, "_RegionalAccountClient", RegionalBootstrapAccount)
+    monkeypatch.setattr(
+        terabox,
+        "_read_cookie_file",
+        lambda _path: terabox._CookieData(
+            {
+                "jstoken": "",
+                "csrfToken": "",
+                "browserid": "",
+                "ndus": "authenticated",
+            },
+            region_hint="dm",
+        ),
+    )
+    client = terabox.TeraboxClient("cookies.txt")
+    client._session = _FakeTeraboxSession()
+
+    await client.login()
+
+    assert RegionalBootstrapAccount.events == [
+        "bootstrap",
+        "region:dm",
+        "bootstrap",
+        "validate",
+        "quota",
+    ]
+    assert "region_hint" not in client._client.cookies
+    await client.aclose()
+
+
 async def test_terabox_bootstrap_failure_is_actionable_and_redacted(monkeypatch):
     pytest.importorskip("aiohttp")
     pytest.importorskip("aioterabox")
@@ -600,7 +684,8 @@ async def test_terabox_bootstrap_failure_is_actionable_and_redacted(monkeypatch)
         await client.login()
 
     assert "bootstrap failed" in str(raised.value)
-    assert "fresh Netscape" in str(raised.value)
+    assert "cookie file was parsed successfully" in str(raised.value)
+    assert "aioterabox version" in str(raised.value)
     assert secret not in str(raised.value)
     assert secret not in "".join(
         format_exception(raised.type, raised.value, raised.tb)
