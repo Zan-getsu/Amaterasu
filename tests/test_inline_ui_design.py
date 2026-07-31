@@ -1,7 +1,8 @@
 from datetime import datetime, timezone
 from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
-from types import SimpleNamespace
+from sys import modules
+from types import ModuleType, SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
@@ -11,6 +12,7 @@ INLINE_UI_PATH = ROOT / "bot" / "helper" / "telegram_helper" / "inline_ui.py"
 BUTTON_BUILD_PATH = ROOT / "bot" / "helper" / "telegram_helper" / "button_build.py"
 MESSAGE_UTILS_PATH = ROOT / "bot" / "helper" / "telegram_helper" / "message_utils.py"
 STATUS_UTILS_PATH = ROOT / "bot" / "helper" / "ext_utils" / "status_utils.py"
+MEGA_SDK_PATH = ROOT / "bot" / "helper" / "ext_utils" / "mega_sdk.py"
 FILETOLINK_PATH = ROOT / "bot" / "modules" / "filetolink.py"
 BOT_SETTINGS_PATH = ROOT / "bot" / "modules" / "bot_settings.py"
 
@@ -201,6 +203,84 @@ def test_filetolink_caption_icons_match_buttons():
     assert '<b>▶️ STREAM</b>' in source
     assert '<b>↓ Download</b>' not in source
     assert '<b>▶ Stream</b>' not in source
+
+
+def test_megasdk_version_comes_from_the_base_image(monkeypatch):
+    mega = ModuleType("mega")
+    for name in (
+        "MegaApi",
+        "MegaCancelToken",
+        "MegaError",
+        "MegaListener",
+        "MegaRequest",
+        "MegaTransfer",
+        "MegaUploadOptions",
+    ):
+        setattr(mega, name, type(name, (), {}))
+    monkeypatch.setitem(modules, "mega", mega)
+    monkeypatch.setenv("MEGA_SDK_VERSION", "v7.0.0")
+    spec = spec_from_file_location("amaterasu_mega_sdk_version", MEGA_SDK_PATH)
+    module = module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    assert module.MEGA_SDK_VERSION == "7.0.0"
+
+
+def test_megasdk_version_has_a_transition_fallback(monkeypatch):
+    mega = ModuleType("mega")
+    for name in (
+        "MegaApi",
+        "MegaCancelToken",
+        "MegaError",
+        "MegaListener",
+        "MegaRequest",
+        "MegaTransfer",
+        "MegaUploadOptions",
+    ):
+        setattr(mega, name, type(name, (), {}))
+    monkeypatch.setitem(modules, "mega", mega)
+    monkeypatch.delenv("MEGA_SDK_VERSION", raising=False)
+    spec = spec_from_file_location("amaterasu_mega_sdk_fallback", MEGA_SDK_PATH)
+    module = module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    assert module.MEGA_SDK_VERSION == "7.0.0"
+
+
+def test_megasdk_version_is_na_when_bindings_are_missing(monkeypatch):
+    mega = ModuleType("mega")
+    monkeypatch.setitem(modules, "mega", mega)
+    monkeypatch.setenv("MEGA_SDK_VERSION", "v7.0.0")
+    spec = spec_from_file_location("amaterasu_mega_sdk_missing", MEGA_SDK_PATH)
+    module = module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    assert module.MEGA_SDK_AVAILABLE is False
+    assert module.MEGA_SDK_VERSION == "N/A"
+
+
+def test_base_image_uses_megasdk_without_megacmd():
+    dockerfile = (ROOT / "Dockerfile.base").read_text(encoding="utf-8")
+    build_script = (ROOT / "build.sh").read_text(encoding="utf-8")
+    stats_source = (ROOT / "bot" / "modules" / "stats.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert "ENV MEGA_SDK_VERSION=${MEGA_SDK_VERSION}" in dockerfile
+    assert "from mega import MegaApi" in dockerfile
+    assert "from mega import MegaApi" in build_script
+    assert "mega-version" not in stats_source
+
+    combined = "\n".join((dockerfile, build_script))
+    for obsolete_reference in (
+        "apt-get install -y --no-install-recommends megacmd",
+        "mega-cmd",
+        "mega-get",
+        "mega-ls",
+        "mega-put",
+        "mega-version",
+    ):
+        assert obsolete_reference not in combined
 
 
 @pytest.mark.asyncio

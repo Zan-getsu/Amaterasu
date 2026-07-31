@@ -66,10 +66,7 @@ verify() {
         ffmpeg -hide_banner -decoders 2>/dev/null | grep -E "av1|dav1d"
         echo
         echo "[4] Mega SDK Python:"
-        python3 -c "from mega import Mega; print(\"OK\")"
-        echo
-        echo "[5] megacmd:"
-        which mega-cmd mega-ls mega-get mega-put 2>/dev/null || true
+        python3 -c "from mega import MegaApi; import os; print(\"{}: OK\".format(os.environ.get(\"MEGA_SDK_VERSION\", \"unknown\")))"
         echo
         echo "ALL CHECKS PASSED"
     '

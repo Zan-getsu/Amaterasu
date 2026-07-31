@@ -8,11 +8,9 @@
 #  - FFmpeg:      8.x compiled from source with full AV1 stack
 #  - AV1 stack:   SVT-AV1 + libaom + dav1d (all built from source)
 #  - Mega SDK:    v7.0.0 official C++ SDK Python bindings (autotools build)
-#  - megacmd:     installed from Mega's official Debian 12 apt repo
 #  - Download:    aria2 1.37.0 from source, qbittorrent-nox, sabnzbdplus, p7zip, rclone, cloudflared, java
 #
 #  Why Debian 12 (Bookworm)?
-#    * Provides native arm64 megacmd package (Debian 11 does not).
 #    * Ships modern cmake 3.25 / meson 1.0 / ninja 1.11 (no pip fallback needed).
 #    * GCC 12 default; Mega SDK v7.0.0 requires C++17 (for std::filesystem).
 #
@@ -219,27 +217,9 @@ RUN set -eux; \
     cloudflared --version
 
 # -----------------------------------------------------------------------------
-# 2. megacmd CLI from Mega's official Debian 12 repo
-#    (Debian 12 repo has BOTH amd64 and arm64 — solves the original blocker)
-#
-#    URL NOTE: Mega renamed the repo path from "Debian_12.0" to "Debian_12"
-#    (no minor-version suffix). The old URL returns 404. If you ever upgrade
-#    to Debian 13, the path will likely be "Debian_13" — verify at
-#    https://mega.nz/linux/repo/ before changing.
+# 2. MEGAcmd intentionally omitted. Amaterasu uses the Mega SDK Python
+#    bindings directly for downloads, uploads, cloning, and account tools.
 # -----------------------------------------------------------------------------
-RUN set -eux; \
-    arch="$(dpkg --print-architecture)"; \
-    curl -fsSL "https://mega.nz/linux/repo/Debian_12/Release.key" \
-        | gpg --dearmor -o /usr/share/keyrings/mega-archive-keyring.gpg; \
-    echo "deb [arch=${arch} signed-by=/usr/share/keyrings/mega-archive-keyring.gpg] https://mega.nz/linux/repo/Debian_12/ ./" \
-        > /etc/apt/sources.list.d/mega.nz.list; \
-    for i in 1 2 3; do \
-        if apt-get update; then break; fi; \
-        echo "apt-get update failed (attempt $i/3), retrying in 5s..."; \
-        sleep 5; \
-    done; \
-    apt-get install -y --no-install-recommends megacmd; \
-    rm -rf /var/lib/apt/lists/*
 
 # -----------------------------------------------------------------------------
 # 3. SVT-AV1 — scalable AV1 encoder (used by FFmpeg --enable-libsvtav1)
@@ -423,6 +403,7 @@ RUN set -eux; \
 # patched to make MegaUploadOptions optional and fall back to the old
 # startUpload(localPath, parent, fileName, mtime, ...) API when it's missing.
 ARG MEGA_SDK_VERSION=v7.0.0
+ENV MEGA_SDK_VERSION=${MEGA_SDK_VERSION}
 
 RUN set -eux; \
     git clone --depth 1 --branch "${MEGA_SDK_VERSION}" \
@@ -525,9 +506,7 @@ RUN set -eux; \
     echo "=== ldconfig cache (libmega entries) ==="; \
     ldconfig -p | grep libmega || echo "WARNING: libmega not in ldconfig cache"; \
     echo "=== Mega SDK Python binding ==="; \
-    python3 -c "from mega import MegaApi; print('Mega SDK Python: OK')"; \
-    echo "=== megacmd CLI ==="; \
-    (mega-version || mega-cmd-version || true); \
+    python3 -c "from mega import MegaApi; print('Mega SDK Python ${MEGA_SDK_VERSION}: OK')"; \
     echo "=== Download tools ==="; \
     which aria2c || echo "WARNING: aria2c not found"; \
     aria2c --version | head -1; \

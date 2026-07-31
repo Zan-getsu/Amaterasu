@@ -1,3 +1,13 @@
+from os import environ
+
+
+DEFAULT_MEGA_SDK_VERSION = "7.0.0"
+MEGA_SDK_VERSION = (
+    environ.get("MEGA_SDK_VERSION", DEFAULT_MEGA_SDK_VERSION)
+    .strip()
+    .removeprefix("v")
+    or DEFAULT_MEGA_SDK_VERSION
+)
 MEGA_SDK_AVAILABLE = True
 MEGA_SDK_IMPORT_ERROR = None
 
@@ -13,6 +23,7 @@ try:
 except (ImportError, ModuleNotFoundError) as e:
     MEGA_SDK_AVAILABLE = False
     MEGA_SDK_IMPORT_ERROR = e
+    MEGA_SDK_VERSION = "N/A"
 
     MegaApi = None
     MegaCancelToken = None
