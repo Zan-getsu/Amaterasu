@@ -2126,3 +2126,81 @@ def test_terabox_tree_preserves_implicit_folders():
     assert parent["name"] == "parent"
     assert child["name"] == "child"
     assert file_node["id"] == "file-1"
+
+
+@pytest.mark.asyncio
+async def test_upload_probe_trace_never_prints_request_or_response_secrets(capsys):
+    pytest.importorskip("aioterabox")
+    from scripts import terabox_upload_probe as probe
+
+    secret = "s3cr3t-value-0123456789abcdef"
+
+    class Response:
+        status = 400
+        headers = {"Content-Type": "application/json"}
+
+        async def read(self):
+            return (
+                '{"errno":2,"errmsg":"invalid path: %s","ndus":"%s",'
+                '"jsToken":"%s"}' % (secret, secret, secret)
+            ).encode()
+
+    @asynccontextmanager
+    async def request(_method, _url, **_kwargs):
+        yield Response()
+
+    account = SimpleNamespace(_request=request)
+    probe._install_redacted_trace(account)
+
+    async with account._request(
+        "POST",
+        f"https://www.terabox.com/api/create?ndus={secret}",
+        params={"jsToken": secret, "rtype": 1},
+        data={"block_list": '["hash"]', "path": "/safe.bin", "ndus": secret},
+    ):
+        pass
+    async with account._request(
+        "POST",
+        "https://c-jp.1024terabox.com/rest/2.0/pcs/superfile2",
+        params={"partseq": "3", "uploadid": secret},
+        data=object(),
+    ):
+        pass
+
+    output = capsys.readouterr().out
+    assert secret not in output
+    assert '"http_status": 400' in output
+    assert '"message": "invalid path"' in output
+    assert '"block_count": 1' in output
+    assert '"partseq": 3' in output
+
+
+@pytest.mark.asyncio
+async def test_upload_probe_metadata_distinguishes_missing_from_unknown():
+    pytest.importorskip("aioterabox")
+    from scripts import terabox_upload_probe as probe
+
+    class MissingAccount:
+        async def get_files_meta(self, _paths):
+            raise probe._SdkNotFoundError("not found")
+
+    class BrokenAccount:
+        async def get_files_meta(self, _paths):
+            raise TimeoutError
+
+    class PresentAccount:
+        async def get_files_meta(self, _paths):
+            return [{"path": "/probe.bin", "size": 123}]
+
+    assert await probe._remote_metadata(MissingAccount(), "/probe.bin") == (
+        "missing",
+        None,
+    )
+    assert await probe._remote_metadata(BrokenAccount(), "/probe.bin") == (
+        "unknown",
+        None,
+    )
+    assert await probe._remote_metadata(PresentAccount(), "/probe.bin") == (
+        "found",
+        {"path": "/probe.bin", "size": 123},
+    )
