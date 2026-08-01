@@ -96,6 +96,8 @@ async def send_filetolink_status(message):
     cache_dir, cache_files, cache_size = _cache_usage()
     cache_max_mb = environ.get("FILETOLINK_CACHE_MAX_MB", "256")
     cache_total_mb = environ.get("FILETOLINK_CACHE_TOTAL_MAX_MB", "2048")
+    getfile_concurrency = environ.get("FILETOLINK_GETFILE_CONCURRENCY", "8")
+    prefetch_chunks = environ.get("FILETOLINK_PREFETCH_CHUNKS", "4")
     base_url = Config.BASE_URL or "Not configured"
     effective_bin_channel = Config.effective_bin_channel()
     bin_channel = effective_bin_channel or "Disabled"
@@ -118,6 +120,8 @@ async def send_filetolink_status(message):
         f"├─ {'Cache Size':<12}: {get_readable_file_size(cache_size)}\n"
         f"├─ {'File Cap':<12}: {cache_max_mb} MB\n"
         f"├─ {'Total Cap':<12}: {cache_total_mb} MB\n"
+        f"├─ {'TG Requests':<12}: {getfile_concurrency} / bot\n"
+        f"├─ {'Prefetch':<12}: {prefetch_chunks} chunks\n"
         f"└─ {'Cache Dir':<12}: {escape(str(cache_dir))}\n\n"
         f"{client_block}"
         "</code>"

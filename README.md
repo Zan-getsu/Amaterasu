@@ -826,7 +826,7 @@ All limits are in **GB**. Set `0` to disable the limit.
 | `GLOBAL_RATE_LIMIT` | `bool` | `False` | Reserved legacy setting; not currently enforced |
 | `RATE_LIMIT_ENABLED` | `bool` | `False` | Reserved legacy setting; not currently enforced |
 
-Runtime cache tuning is environment-driven: set `FILETOLINK_CACHE_MAX_MB` to cap a single cached file (default `256`) and `FILETOLINK_CACHE_TOTAL_MAX_MB` to cap total FileToLink cache usage (default `2048`). Use `/link status` to inspect stream clients, storage config, and cache usage.
+Runtime performance tuning is environment-driven. `FILETOLINK_GETFILE_CONCURRENCY` caps in-flight Telegram chunk requests per stream bot (default `8`), while `FILETOLINK_PREFETCH_CHUNKS` controls the maximum ordered look-ahead per transfer (default `4`). Active transfers automatically receive a smaller prefetch window so simultaneous users share each worker fairly. `FILETOLINK_CACHE_MAX_MB` caps a single cached file (default `256`) and `FILETOLINK_CACHE_TOTAL_MAX_MB` caps total cache usage (default `2048`). Complete live responses populate the cache directly without a second Telegram download. Use `/link status` to inspect stream clients, tuning, storage config, and cache usage.
 
 ### 14. Web Server
 

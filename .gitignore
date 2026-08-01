@@ -43,3 +43,4 @@ tests/*
 !tests/test_user_leech_font.py
 !tests/test_status_network_metrics.py
 !tests/test_inline_ui_design.py
+!tests/test_filetolink_streaming.py

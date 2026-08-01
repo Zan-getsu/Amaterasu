@@ -1,6 +1,6 @@
 import mimetypes
 import re
-from asyncio import create_task, sleep, to_thread
+from asyncio import CancelledError, Semaphore, create_task, gather, sleep, to_thread
 from contextlib import asynccontextmanager, suppress
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
@@ -1597,9 +1597,33 @@ CORS_HEADERS = {
     "Access-Control-Allow-Headers": "Range, Content-Type, *",
     "Access-Control-Expose-Headers": "Content-Length, Content-Range, Content-Disposition",
 }
-_filetolink_cache_locks = {}
-_filetolink_cache_warm_tasks = set()
+_filetolink_cache_writers = set()
+_filetolink_chunk_slots = {}
 _stream_client_health = {}
+
+
+def _positive_env_int(name: str, default: int, maximum: int) -> int:
+    try:
+        value = int(environ.get(name, str(default)))
+    except (TypeError, ValueError):
+        value = default
+    return min(max(value, 1), maximum)
+
+
+# Each bot account gets a bounded GetFile request pool.  A single transfer may
+# prefetch several ordered chunks when the worker is quiet, while concurrent
+# transfers automatically reduce their own window and share the same slots.
+# This keeps Telegram busy without letting one request flood a media session.
+FILETOLINK_GETFILE_CONCURRENCY = _positive_env_int(
+    "FILETOLINK_GETFILE_CONCURRENCY",
+    MAX_CONCURRENT_PER_CLIENT,
+    32,
+)
+FILETOLINK_PREFETCH_CHUNKS = _positive_env_int(
+    "FILETOLINK_PREFETCH_CHUNKS",
+    4,
+    FILETOLINK_GETFILE_CONCURRENCY,
+)
 
 
 def _resolve_cache_max_bytes() -> int:
@@ -1620,6 +1644,126 @@ def _resolve_cache_total_max_bytes() -> int:
 
 FILETOLINK_CACHE_MAX_BYTES = _resolve_cache_max_bytes()
 FILETOLINK_CACHE_TOTAL_MAX_BYTES = _resolve_cache_total_max_bytes()
+
+
+def _chunk_slots_for_client(client_id: int) -> Semaphore:
+    slots = _filetolink_chunk_slots.get(client_id)
+    if slots is None:
+        slots = Semaphore(FILETOLINK_GETFILE_CONCURRENCY)
+        _filetolink_chunk_slots[client_id] = slots
+    return slots
+
+
+def _transfer_prefetch_depth(client_id: int) -> int:
+    """Give quiet workers more pipeline depth and busy workers a fair share."""
+    from bot.core.tg_client import TgClient
+
+    active_transfers = max(1, int(TgClient.stream_loads.get(client_id, 1) or 1))
+    fair_share = max(1, FILETOLINK_GETFILE_CONCURRENCY // active_transfers)
+    return min(FILETOLINK_PREFETCH_CHUNKS, fair_share)
+
+
+async def _fetch_telegram_chunk(client_id: int, client, message, chunk_index: int) -> bytes:
+    """Fetch one Telegram chunk with bounded retries and shared backpressure."""
+    from pyrogram.errors import FloodWait
+
+    last_error = None
+    for attempt in range(3):
+        try:
+            async with _chunk_slots_for_client(client_id):
+                media_stream = client.stream_media(
+                    message,
+                    offset=chunk_index,
+                    limit=1,
+                )
+                try:
+                    async for chunk in media_stream:
+                        if chunk:
+                            return chunk
+                finally:
+                    close_stream = getattr(media_stream, "aclose", None)
+                    if close_stream is not None:
+                        await close_stream()
+            raise EOFError(f"Telegram returned no data for chunk {chunk_index}")
+        except CancelledError:
+            raise
+        except FloodWait as error:
+            last_error = error
+            await sleep(max(float(getattr(error, "value", 1)), 1.0) + 1.0)
+        except Exception as error:
+            last_error = error
+            if attempt < 2:
+                await sleep(min(2 ** attempt, 2))
+
+    raise OSError(
+        f"Telegram chunk {chunk_index} failed after 3 attempts: {last_error}"
+    ) from last_error
+
+
+async def _iter_telegram_range(
+    client_id: int,
+    client,
+    message,
+    start: int,
+    end: int,
+    file_size: int,
+):
+    """Yield an inclusive byte range with ordered, load-aware prefetching."""
+    first_chunk = start // CHUNK_SIZE
+    last_chunk = end // CHUNK_SIZE
+    expected_chunk = first_chunk
+    next_chunk = first_chunk
+    pending = {}
+
+    try:
+        while expected_chunk <= last_chunk:
+            target_depth = _transfer_prefetch_depth(client_id)
+            while len(pending) < target_depth and next_chunk <= last_chunk:
+                pending[next_chunk] = create_task(
+                    _fetch_telegram_chunk(client_id, client, message, next_chunk)
+                )
+                next_chunk += 1
+
+            chunk = await pending.pop(expected_chunk)
+            chunk_start = expected_chunk * CHUNK_SIZE
+            expected_size = min(CHUNK_SIZE, file_size - chunk_start)
+            if len(chunk) < expected_size:
+                raise OSError(
+                    f"Telegram returned a short chunk at {chunk_start}: "
+                    f"{len(chunk)}/{expected_size} bytes"
+                )
+
+            left = max(start - chunk_start, 0)
+            right = min(end - chunk_start + 1, len(chunk))
+            if right <= left:
+                raise OSError(
+                    f"Telegram chunk {expected_chunk} does not cover the requested range"
+                )
+            yield chunk[left:right]
+            expected_chunk += 1
+    finally:
+        for task in pending.values():
+            if not task.done():
+                task.cancel()
+        if pending:
+            await gather(*pending.values(), return_exceptions=True)
+
+
+async def _iter_cached_range(path: Path, start: int, length: int):
+    """Serve a cached range without depending on Starlette range support."""
+    from aiofiles import open as aio_open
+
+    remaining = length
+    async with aio_open(path, "rb") as cache_file:
+        await cache_file.seek(start)
+        while remaining > 0:
+            chunk = await cache_file.read(min(CHUNK_SIZE, remaining))
+            if not chunk:
+                raise OSError(
+                    f"Cached FileToLink media ended with {remaining} bytes missing"
+                )
+            remaining -= len(chunk)
+            yield chunk
 
 
 def _release_stream_load(client_id: int) -> None:
@@ -1720,7 +1864,6 @@ async def get_message_with_stream_client(chat_id: int, message_id: int) -> tuple
         _acquire_stream_client(client_id)
         try:
             message = await get_message(client, chat_id, message_id)
-            _record_stream_success(client_id)
             return client_id, client, message
         except HTTPException as e:
             last_error = e
@@ -2017,162 +2160,60 @@ def _prune_filetolink_cache(required_bytes: int = 0) -> None:
             break
 
 
-async def _get_cached_media(
-    preferred_client_id: int,
-    preferred_client,
-    message,
+def _begin_progressive_cache(
     chat_id,
     message_id: int,
     unique_id: str,
     filename: str,
     file_size: int,
-) -> Path | None:
+) -> tuple[str, Path, Path] | None:
+    """Reserve a write-through cache file for one complete live response."""
     if file_size <= 0 or file_size > FILETOLINK_CACHE_MAX_BYTES:
         return None
     if FILETOLINK_CACHE_TOTAL_MAX_BYTES and file_size > FILETOLINK_CACHE_TOTAL_MAX_BYTES:
         return None
 
-    import asyncio
-    from pyrogram.errors import FloodWait
-    from bot.core.tg_client import TgClient
-
-    if cached_path := _existing_cached_media(
-        chat_id,
-        message_id,
-        unique_id,
-        filename,
-        file_size,
-    ):
-        return cached_path
-
     cache_path = _cache_path_for_media(chat_id, message_id, unique_id, filename)
+    cache_key = cache_path.stem
+    if cache_key in _filetolink_cache_writers:
+        return None
 
     try:
         cache_path.parent.mkdir(parents=True, exist_ok=True)
-    except Exception as e:
-        LOGGER.warning(f"FileToLink cache disabled; cannot create cache dir: {e}")
-        return None
-    lock_key = cache_path.stem
-    lock = _filetolink_cache_locks.setdefault(lock_key, asyncio.Lock())
-
-    async with lock:
-        if cached_path := _existing_cached_media(
-            chat_id,
-            message_id,
-            unique_id,
-            filename,
-            file_size,
-        ):
-            return cached_path
-
         _prune_filetolink_cache(file_size)
+    except OSError as error:
+        LOGGER.warning("FileToLink cache disabled; cannot prepare cache: %s", error)
+        return None
 
-        temp_path = cache_path.with_suffix(f"{cache_path.suffix}.part")
+    temp_path = cache_path.with_name(
+        f"{cache_path.name}.{token_urlsafe(6)}.part"
+    )
+    _filetolink_cache_writers.add(cache_key)
+    return cache_key, temp_path, cache_path
+
+
+def _finish_progressive_cache(
+    reservation: tuple[str, Path, Path] | None,
+    file_size: int,
+    complete: bool,
+) -> None:
+    if reservation is None:
+        return
+
+    cache_key, temp_path, cache_path = reservation
+    try:
+        if complete and temp_path.exists() and temp_path.stat().st_size == file_size:
+            temp_path.replace(cache_path)
+            LOGGER.info("FileToLink write-through cache ready: %s", cache_path.name)
+        else:
+            with suppress(FileNotFoundError):
+                temp_path.unlink()
+    except OSError as error:
+        LOGGER.warning("Could not finalize FileToLink cache %s: %s", cache_path, error)
         with suppress(FileNotFoundError):
             temp_path.unlink()
-
-        client_choices = [(preferred_client_id, preferred_client)]
-        client_choices.extend(
-            (cid, client)
-            for cid, client in TgClient.stream_clients.items()
-            if cid != preferred_client_id
-        )
-
-        for cache_client_id, cache_client in client_choices:
-            extra_load = cache_client_id != preferred_client_id
-            downloaded_path = temp_path
-            if extra_load:
-                TgClient.stream_loads[cache_client_id] = (
-                    TgClient.stream_loads.get(cache_client_id, 0) + 1
-                )
-            try:
-                cache_message = message
-                if cache_client_id != preferred_client_id:
-                    cache_message = await get_message(cache_client, chat_id, message_id)
-                downloaded = await cache_client.download_media(
-                    cache_message,
-                    file_name=str(temp_path),
-                )
-                downloaded_path = Path(downloaded) if downloaded else temp_path
-                if not downloaded_path.exists():
-                    raise RuntimeError("download_media returned no file")
-                downloaded_size = downloaded_path.stat().st_size
-                if downloaded_size <= 0:
-                    raise RuntimeError("downloaded file is empty")
-                if downloaded_size != file_size:
-                    raise RuntimeError(
-                        f"downloaded file is incomplete ({downloaded_size}/{file_size})"
-                    )
-                downloaded_path.replace(cache_path)
-                LOGGER.info(
-                    f"FileToLink cache ready: {filename} | client={cache_client_id} "
-                    f"| size={cache_path.stat().st_size}"
-                )
-                return cache_path
-            except FloodWait as e:
-                await asyncio.sleep(e.value)
-            except Exception as e:
-                LOGGER.warning(
-                    f"FileToLink cache failed for {filename} with client="
-                    f"{cache_client_id}: {e}"
-                )
-                with suppress(FileNotFoundError):
-                    temp_path.unlink()
-                if downloaded_path != temp_path:
-                    with suppress(FileNotFoundError):
-                        downloaded_path.unlink()
-            finally:
-                if extra_load:
-                    TgClient.stream_loads[cache_client_id] = max(
-                        TgClient.stream_loads.get(cache_client_id, 1) - 1,
-                        0,
-                    )
-
-    return None
-
-
-def _schedule_cache_warm(
-    preferred_client_id: int,
-    preferred_client,
-    message,
-    chat_id,
-    message_id: int,
-    unique_id: str,
-    filename: str,
-    file_size: int,
-) -> None:
-    if file_size <= 0 or file_size > FILETOLINK_CACHE_MAX_BYTES:
-        return
-    if FILETOLINK_CACHE_TOTAL_MAX_BYTES and file_size > FILETOLINK_CACHE_TOTAL_MAX_BYTES:
-        return
-    if _existing_cached_media(chat_id, message_id, unique_id, filename, file_size):
-        return
-
-    cache_key = _cache_path_for_media(chat_id, message_id, unique_id, filename).stem
-    if cache_key in _filetolink_cache_warm_tasks:
-        return
-    _filetolink_cache_warm_tasks.add(cache_key)
-
-    async def warm_cache():
-        _acquire_stream_client(preferred_client_id)
-        try:
-            await _get_cached_media(
-                preferred_client_id,
-                preferred_client,
-                message,
-                chat_id,
-                message_id,
-                unique_id,
-                filename,
-                file_size,
-            )
-        except Exception as e:
-            LOGGER.warning(f"FileToLink background cache warm failed for {filename}: {e}")
-        finally:
-            _release_stream_load(preferred_client_id)
-            _filetolink_cache_warm_tasks.discard(cache_key)
-
-    create_task(warm_cache())
+    finally:
+        _filetolink_cache_writers.discard(cache_key)
 
 
 @app.options("/watch/{path:path}")
@@ -2273,6 +2314,7 @@ async def stream_media(chat_id: str, message_id: int, request: Request, filename
         chat_id = int(chat_id)
     except ValueError:
         pass
+    from bot.core.tg_client import TgClient
     from fastapi.responses import StreamingResponse
 
     client_id, client, message = await get_message_with_stream_client(chat_id, message_id)
@@ -2327,15 +2369,14 @@ async def stream_media(chat_id: str, message_id: int, request: Request, filename
             "Accept-Ranges": "bytes",
             "Content-Type": mime_type,
             "Cache-Control": "public, max-age=31536000",
-            "Connection": "keep-alive",
             "Content-Disposition": f"{disposition}; filename*=UTF-8''{encoded_filename}",
+            "Content-Length": str(content_length),
             "X-Content-Type-Options": "nosniff",
             **CORS_HEADERS,
         }
         
         if ranged_response:
             headers["Content-Range"] = f"bytes {start}-{end}/{file_size}"
-            headers["Content-Length"] = str(content_length)
             
         if request.method == "HEAD":
             headers["Content-Length"] = str(content_length)
@@ -2354,6 +2395,16 @@ async def stream_media(chat_id: str, message_id: int, request: Request, filename
             file_size,
         )
         if cached_path:
+            if ranged_response:
+                response = StreamingResponse(
+                    _iter_cached_range(cached_path, start, content_length),
+                    status_code=206,
+                    media_type=mime_type,
+                    headers=headers,
+                )
+                _release_stream_load(client_id)
+                return response
+
             file_headers = {
                 key: value
                 for key, value in headers.items()
@@ -2377,114 +2428,93 @@ async def stream_media(chat_id: str, message_id: int, request: Request, filename
             return response
             
         async def stream_generator():
+            cache_reservation = None
+            cache_file = None
+            cache_complete = False
             try:
                 bytes_sent = 0
                 stream_started = monotonic()
-                
-                import asyncio
-                from pyrogram.errors import FloodWait
-                
-                started_stream = False
-                retries_left = 3
 
-                while bytes_sent < content_length:
-                    absolute_pos = start + bytes_sent
-                    bytes_to_skip = absolute_pos % CHUNK_SIZE
-                    chunk_offset = absolute_pos // CHUNK_SIZE
-                    remaining_total = content_length - bytes_sent
-                    chunk_limit = (
-                        (remaining_total + bytes_to_skip + CHUNK_SIZE - 1)
-                        // CHUNK_SIZE
-                    ) + 1
-
-                    try:
-                        media_generator = client.stream_media(
-                            message, offset=chunk_offset, limit=chunk_limit
-                        )
-
-                        async for chunk in media_generator:
-                            started_stream = True
-                            retries_left = 3
-                            if bytes_to_skip > 0:
-                                if len(chunk) <= bytes_to_skip:
-                                    bytes_to_skip -= len(chunk)
-                                    continue
-                                chunk = chunk[bytes_to_skip:]
-                                bytes_to_skip = 0
-                                
-                            remaining = content_length - bytes_sent
-                            if len(chunk) > remaining:
-                                chunk = chunk[:remaining]
-                                
-                            if chunk:
-                                yield chunk
-                                bytes_sent += len(chunk)
-                                
-                            if bytes_sent >= content_length:
-                                break
-                    except FloodWait as e:
-                        await asyncio.sleep(e.value)
-                    except TimeoutError as e:
-                        if retries_left <= 0:
-                            _record_stream_failure(client_id, f"stream timeout: {e}")
+                # Cache the exact bytes already crossing the live response.
+                # This replaces the former second full Telegram download that
+                # ran after every successful response and stole bandwidth from
+                # concurrent users.
+                if start == 0 and end == file_size - 1:
+                    cache_reservation = _begin_progressive_cache(
+                        chat_id,
+                        message_id,
+                        unique_id,
+                        filename,
+                        file_size,
+                    )
+                    if cache_reservation is not None:
+                        from aiofiles import open as aio_open
+                        try:
+                            cache_file = await aio_open(cache_reservation[1], "wb")
+                        except OSError as error:
                             LOGGER.warning(
-                                f"Telegram stream timed out for {filename} after "
-                                f"{bytes_sent}/{content_length} bytes: {e}"
+                                "Could not open FileToLink write-through cache: %s",
+                                error,
                             )
-                            return
-                        retries_left -= 1
-                        await asyncio.sleep(2)
-                    except Exception as e:
-                        if e.__class__.__name__ == "TimeoutError":
-                            if retries_left <= 0:
-                                _record_stream_failure(client_id, f"stream timeout: {e}")
-                                LOGGER.warning(
-                                    f"Telegram stream timed out for {filename} after "
-                                    f"{bytes_sent}/{content_length} bytes: {e}"
-                                )
-                                return
-                            retries_left -= 1
-                            await asyncio.sleep(2)
-                            continue
-                        if started_stream:
-                            _record_stream_failure(client_id, f"stream interrupted: {e}")
-                            LOGGER.warning(
-                                f"Telegram stream interrupted for {filename} after "
-                                f"{bytes_sent}/{content_length} bytes: {e}"
+                            _finish_progressive_cache(
+                                cache_reservation,
+                                file_size,
+                                False,
                             )
-                            return
-                        _record_stream_failure(client_id, f"stream failed: {e}")
-                        raise HTTPException(status_code=404, detail="Failed to stream media") from e
+                            cache_reservation = None
+
+                async for chunk in _iter_telegram_range(
+                    client_id,
+                    client,
+                    message,
+                    start,
+                    end,
+                    file_size,
+                ):
+                    if cache_file is not None:
+                        await cache_file.write(chunk)
+                    bytes_sent += len(chunk)
+                    yield chunk
+
                 if bytes_sent >= content_length:
                     _record_stream_success(client_id)
+                    cache_complete = start == 0 and end == file_size - 1
                     elapsed = max(monotonic() - stream_started, 0.001)
                     LOGGER.info(
                         "FileToLink performance: name=%s client=%s bytes=%s "
-                        "elapsed=%.2fs speed=%.2fMiB/s chunk=%s",
+                        "elapsed=%.2fs speed=%.2fMiB/s chunk=%s prefetch=%s active=%s",
                         filename,
                         client_id,
                         bytes_sent,
                         elapsed,
                         bytes_sent / elapsed / (1024 * 1024),
                         CHUNK_SIZE,
+                        _transfer_prefetch_depth(client_id),
+                        TgClient.stream_loads.get(client_id, 1),
                     )
-                    if not range_header:
-                        _schedule_cache_warm(
-                            client_id,
-                            client,
-                            message,
-                            chat_id,
-                            message_id,
-                            unique_id,
-                            filename,
-                            file_size,
-                        )
+            except CancelledError:
+                raise
+            except Exception as error:
+                _record_stream_failure(client_id, f"stream interrupted: {error}")
+                LOGGER.warning(
+                    "Telegram stream interrupted for %s after %s/%s bytes: %s",
+                    filename,
+                    bytes_sent,
+                    content_length,
+                    error,
+                )
+                raise
             finally:
+                if cache_file is not None:
+                    with suppress(Exception):
+                        await cache_file.close()
+                _finish_progressive_cache(
+                    cache_reservation,
+                    file_size,
+                    cache_complete,
+                )
                 _release_stream_load(client_id)
                 
-        # Keep Content-Length off full live Telegram streams. If Telegram
-        # times out mid-transfer, chunked streaming can end cleanly. Range
-        # seeks still include it above so browsers can keep playback position.
         return StreamingResponse(
             stream_generator(),
             status_code=206 if ranged_response else 200,
