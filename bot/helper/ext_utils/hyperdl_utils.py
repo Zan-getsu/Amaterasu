@@ -125,6 +125,38 @@ class HypertgDownload(HypertgTransfer):
                     await sleep(attempt + 1)
         raise ValueError(f"Failed to get file ref with {client.me.username}: {last_err}")
 
+    async def _resolve_file_refs(self, client_ids):
+        """Resolve helper file references concurrently before starting parts."""
+        ref_results = await gather(
+            *(
+                self._fetch_ref(client_id, self.clients[client_id])
+                for client_id in client_ids
+            ),
+            return_exceptions=True,
+        )
+        refs = {}
+        ref_errors = []
+        for client_id, result in zip(client_ids, ref_results, strict=True):
+            if isinstance(result, CancelledError):
+                raise result
+            if isinstance(result, BaseException):
+                ref_errors.append((client_id, result))
+            else:
+                refs[client_id] = result
+        if ref_errors:
+            LOGGER.warning(
+                "HypertgDL ref setup failed on %s/%s helpers; continuing with "
+                "%s healthy helper(s): %s",
+                len(ref_errors),
+                len(client_ids),
+                len(refs),
+                "; ".join(
+                    f"ci={client_id}: {error}"
+                    for client_id, error in ref_errors
+                ),
+            )
+        return refs
+
     @staticmethod
     def _media_of(message):
         for attr in ("audio", "document", "photo", "sticker", "animation",
@@ -729,6 +761,20 @@ class HypertgDownload(HypertgTransfer):
             n_user = min(len(user_clients), use_count - n_bot)
             cidx = await _pick_clients(self.work_loads, bot_clients, n_bot)
             cidx.extend(await _pick_clients(self.work_loads, user_clients, n_user))
+            remaining = use_count - len(cidx)
+            if remaining:
+                unused_clients = {
+                    idx: client
+                    for idx, client in use_clients.items()
+                    if idx not in cidx
+                }
+                cidx.extend(
+                    await _pick_clients(
+                        self.work_loads,
+                        unused_clients,
+                        remaining,
+                    )
+                )
         else:
             cidx = await _pick_clients(self.work_loads, use_clients, use_count)
 
@@ -759,7 +805,36 @@ class HypertgDownload(HypertgTransfer):
             await self._close_all()
 
     async def _run_download_with_clients(self, cidx, final):
-        n_use = len(cidx)
+        requested_clients = list(dict.fromkeys(cidx))
+        fid_map = await self._resolve_file_refs(requested_clients)
+        if not fid_map:
+            LOGGER.error("HypertgDL could not resolve any healthy helper")
+            return None
+
+        valid_dcs = set(DataCenter.PROD) | set(DataCenter.TEST)
+        invalid_clients = {
+            client_id
+            for client_id, fid in fid_map.items()
+            if not isinstance(getattr(fid, "dc_id", None), int)
+            or fid.dc_id not in valid_dcs
+        }
+        if invalid_clients:
+            LOGGER.warning(
+                "HypertgDL ignored %s helper(s) with invalid media DC ids: %s",
+                len(invalid_clients),
+                sorted(invalid_clients),
+            )
+            for client_id in invalid_clients:
+                fid_map.pop(client_id, None)
+        if not fid_map:
+            LOGGER.warning(
+                "HypertgDL found no helper with a valid media reference; "
+                "falling back to the standard Telegram downloader"
+            )
+            return None
+
+        active_clients = list(fid_map)
+        n_use = len(active_clients)
         min_part = 1 * MB
         n_parts = min(n_use, max(1, self.file_size // min_part)) if self.file_size >= min_part else 1
         psz = self.file_size // n_parts if n_parts > 0 else self.file_size
@@ -773,32 +848,19 @@ class HypertgDownload(HypertgTransfer):
             )
             for i in range(n_parts)
         ]
-        assigns = [cidx[i % n_use] for i in range(n_parts)]
+        assigns = [active_clients[i % n_use] for i in range(n_parts)]
+        unique_clients = list(dict.fromkeys(assigns))
 
-        unique_clients = set(assigns)
-        fid_map = {}
-        try:
-            for ci in unique_clients:
-                fid_map[ci] = await self._fetch_ref(ci, self.clients[ci])
-        except Exception as e:
-            LOGGER.error(f"HypertgDL ref fail: {e}")
-            return None
+        LOGGER.info(
+            "HyperDL transfer plan: size=%s workers=%s pipeline=%s "
+            "initial_requests=%s",
+            self.file_size,
+            len(unique_clients),
+            self.pipeline_depth,
+            len(unique_clients) * self.pipeline_depth,
+        )
 
         first_fid = fid_map[assigns[0]]
-        valid_dcs = set(DataCenter.PROD) | set(DataCenter.TEST)
-        invalid_dcs = {
-            getattr(fid, "dc_id", None)
-            for fid in fid_map.values()
-            if not isinstance(getattr(fid, "dc_id", None), int)
-            or fid.dc_id not in valid_dcs
-        }
-        if invalid_dcs:
-            LOGGER.warning(
-                "HypertgDL decoded invalid media DC id(s) %s; "
-                "falling back to the standard Telegram downloader",
-                sorted(invalid_dcs, key=lambda value: str(value)),
-            )
-            return None
         try:
             await self._warmup(unique_clients, first_fid.dc_id)
         except Exception as e:
@@ -849,7 +911,7 @@ class HypertgDownload(HypertgTransfer):
                 await sleep(1)
 
                 good_bots = sorted(
-                    [i for i in self.clients.keys() if i not in bad_bots],
+                    [i for i in fid_map if i not in bad_bots],
                     key=lambda i: self.work_loads.get(i, 0),
                 )
                 if not good_bots:
@@ -964,7 +1026,7 @@ class HypertgDownload(HypertgTransfer):
                 # The download is INCOMPLETE. Returning the file path here
                 # would cause the caller to upload a truncated/corrupt file.
                 # Delete the partial file and return None so the caller
-                # (telegram_download.py) falls back to standard Pyrogram
+                # (telegram_download.py) falls back to standard WZGram
                 # download, which is slower but reliable.
                 try:
                     if await aiopath.exists(final):
@@ -986,7 +1048,7 @@ class HypertgDownload(HypertgTransfer):
                 LOGGER.error(
                     f"HypertgDL size mismatch: expected {self.file_size} bytes, "
                     f"got {actual_size} bytes. File is incomplete — falling "
-                    f"back to standard Pyrogram download."
+                    f"back to standard WZGram download."
                 )
                 try:
                     if await aiopath.exists(final):

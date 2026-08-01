@@ -15,6 +15,8 @@ HELPER_TOKENS = ""
 # Reuse HELPER_TOKENS as FileToLink stream workers. Set False when helper
 # bots do not have access to the effective BIN channel.
 USE_HELPER_BOTS_FOR_FILETOLINK = True
+FILETOLINK_GETFILE_CONCURRENCY = 8
+FILETOLINK_PREFETCH_CHUNKS = 4
 HELPER_STRINGS = ""
 HELPER_BOT_PROXIES = ""
 HELPER_USER_PROXIES = ""

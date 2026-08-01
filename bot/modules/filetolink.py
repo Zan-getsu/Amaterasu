@@ -96,8 +96,8 @@ async def send_filetolink_status(message):
     cache_dir, cache_files, cache_size = _cache_usage()
     cache_max_mb = environ.get("FILETOLINK_CACHE_MAX_MB", "256")
     cache_total_mb = environ.get("FILETOLINK_CACHE_TOTAL_MAX_MB", "2048")
-    getfile_concurrency = environ.get("FILETOLINK_GETFILE_CONCURRENCY", "8")
-    prefetch_chunks = environ.get("FILETOLINK_PREFETCH_CHUNKS", "4")
+    getfile_concurrency = Config.FILETOLINK_GETFILE_CONCURRENCY
+    prefetch_chunks = Config.FILETOLINK_PREFETCH_CHUNKS
     base_url = Config.BASE_URL or "Not configured"
     effective_bin_channel = Config.effective_bin_channel()
     bin_channel = effective_bin_channel or "Disabled"

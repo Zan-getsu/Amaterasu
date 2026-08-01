@@ -96,6 +96,8 @@ def _config_update_payload(key, value):
 DEFAULT_VALUES = {
     "AUTO_PROVISION_STREAM_BOTS": False,
     "USE_HELPER_BOTS_FOR_FILETOLINK": True,
+    "FILETOLINK_GETFILE_CONCURRENCY": 8,
+    "FILETOLINK_PREFETCH_CHUNKS": 4,
     "USE_LEECH_DUMP_AS_BIN_CHANNEL": False,
     "SET_COMMANDS": True,
     "LEECH_SPLIT_SIZE": TgClient.MAX_SPLIT_SIZE,
@@ -129,46 +131,6 @@ DEFAULT_VALUES = {
     },
 }
 
-BOOL_VARS = [
-    "AUTO_PROVISION_STREAM_BOTS",
-    "AS_DOCUMENT",
-    "BOT_PM",
-    "CLEAN_LOG_MSG",
-    "CLOUDFLARE_TUNNEL_AUTO_URL",
-    "CLOUDFLARE_TUNNEL_ENABLED",
-    "COLORED_BTNS",
-    "DELETE_LINKS",
-    "DRIVE_CATEGORY_MODE",
-    "DISABLE_BULK",
-    "DISABLE_FF_MODE",
-    "DISABLE_JD",
-    "DISABLE_LEECH",
-    "DISABLE_MULTI",
-    "DISABLE_NZB",
-    "DISABLE_RSS",
-    "DISABLE_SEARCH",
-    "DISABLE_SEED",
-    "DISABLE_TORRENTS",
-    "DISABLE_YTDLP",
-    "DISABLE_MEGA",
-    "TERABOX_ENABLED",
-    "EQUAL_SPLITS",
-    "INC_TASK_RESUME",
-    "INCOMPLETE_TASK_NOTIFIER",
-    "IS_TEAM_DRIVE",
-    "MEDIA_GROUP",
-    "MEDIA_STORE",
-    "SET_COMMANDS",
-    "SHOW_CLOUD_LINK",
-    "STOP_DUPLICATE",
-    "UPDATE_PKGS",
-    "USE_IMAGES",
-    "USE_HELPER_BOTS_FOR_FILETOLINK",
-    "USE_LEECH_DUMP_AS_BIN_CHANNEL",
-    "USE_SERVICE_ACCOUNTS",
-    "WEB_PINCODE",
-]
-
 DEFAULT_DESP = {
     "AUTO_PROVISION_STREAM_BOTS": "At startup, use USER_SESSION_STRING to add and promote configured FileToLink worker bots in the storage chats. Requires user-admin invite/promote rights; skips provisioning if unavailable.",
     "AS_DOCUMENT": "Send files as document instead of media. Default: False.",
@@ -177,6 +139,8 @@ DEFAULT_DESP = {
     "BOT_TOKEN": "Telegram Bot Token from @BotFather.",
     "HELPER_TOKENS": "Space-separated helper bot tokens used by HyperDL and HyperUP.",
     "USE_HELPER_BOTS_FOR_FILETOLINK": "Also use HELPER_TOKENS as FileToLink stream workers. Helpers must be able to read the effective BIN channel. Default: True.",
+    "FILETOLINK_GETFILE_CONCURRENCY": "Maximum concurrent Telegram GetFile requests per FileToLink stream bot. Valid range: 1-32. Default: 8.",
+    "FILETOLINK_PREFETCH_CHUNKS": "Maximum ordered look-ahead chunks per FileToLink transfer. Automatically capped at GETFILE_CONCURRENCY and reduced under load. Default: 4.",
     "BOT_MAX_TASKS": "Max tasks (including queued) the bot runs in parallel. 0 = unlimited.",
     "BOT_PM": "Send files/links to bot owner PM. Default: False.",
     "CMD_SUFFIX": "Text appended to all bot commands. Useful for running multiple bot instances.",
@@ -264,7 +228,7 @@ DEFAULT_DESP = {
     "LEECH_FONT": "Font style for captions: b, i, u, s, code, spoiler.",
     "LEECH_SPLIT_SIZE": "Split size for Telegram uploads in bytes. Default: 2GB (4GB for premium).",
     "MEDIA_GROUP": "Upload split parts as media group. Default: False.",
-    "USE_HYPER": "Enable adaptive HyperDL/HyperUP overflow while keeping the primary WZGram lane for the first active transfer. Default: True.",
+    "USE_HYPER": "Use HyperDL as the primary path for eligible Telegram downloads, with WZGram overflow/fallback, and enable HyperUP acceleration. Default: True.",
     "HYPER_THREADS": "Number of parallel download parts (clients). 0 = auto.",
     "HYPER_PIPELINE": "Concurrent GetFile requests per HyperDL part. Default: 4.",
     "HYPER_CHUNK": "HyperDL working chunk size in bytes. Telegram transfers are normalized to 1 MiB.",
@@ -326,8 +290,40 @@ DEFAULT_DESP = {
 }
 
 PROTECTED_VARS = {
-    "TELEGRAM_HASH", "TELEGRAM_API", "OWNER_ID", "BOT_TOKEN", "AUTHORIZED_CHATS", "DATABASE_URL", "CLOUDFLARE_TUNNEL_TOKEN",
-    "SUDO_USERS", "USER_SESSION_STRING", "TG_PROXY",
+    "AMATERASU_WEB_SECRET",
+    "AUTHORIZED_CHATS",
+    "BOT_TOKEN",
+    "BUZZHEAVIER_API",
+    "CLOUDFLARE_TUNNEL_TOKEN",
+    "DATABASE_URL",
+    "DEBRID_LINK_API",
+    "DEVUPLOADS_KEY",
+    "FILELION_API",
+    "GOFILE_API",
+    "HELPER_BOT_PROXIES",
+    "HELPER_STRINGS",
+    "HELPER_TOKENS",
+    "HELPER_USER_PROXIES",
+    "HYDRA_API_KEY",
+    "INSTADL_API",
+    "JD_PASS",
+    "JIODRIVE_TOKEN",
+    "LOGIN_PASS",
+    "MEGA_PASSWORD",
+    "OPENSUBTITLES_API",
+    "OWNER_ID",
+    "PIXELDRAIN_KEY",
+    "PROTECTED_API",
+    "RCLONE_SERVE_PASS",
+    "STREAMWISH_API",
+    "SUDO_USERS",
+    "TELEGRAM_API",
+    "TELEGRAM_HASH",
+    "TG_PROXY",
+    "URL_SHORTENER_API_KEY",
+    "USER_SESSION_STRING",
+    "VIKINGFILE_HASH",
+    "WEB_ACCESS_PASSWORD",
 }
 RESTART_VARS = {
     "CMD_SUFFIX", "OWNER_ID", "USER_SESSION_STRING", "TELEGRAM_HASH", "TELEGRAM_API", "BOT_TOKEN",
@@ -335,6 +331,339 @@ RESTART_VARS = {
 }
 
 HIDDEN_VARS = {"PORT"}
+
+FILETOLINK_WEB_VARS = {
+    "FILETOLINK_GETFILE_CONCURRENCY",
+    "FILETOLINK_PREFETCH_CHUNKS",
+}
+
+# Each configuration key has one canonical home. Feature pages intentionally
+# do not duplicate shared values (for example BASE_URL); this keeps ownership
+# clear and prevents categories from drifting when Config declaration order
+# changes. Keys not listed here remain reachable under Advanced & Other.
+CONFIG_CATEGORIES = {
+    "general": (
+        "General",
+        "Core identity, language, persistence, and shared application values.",
+        (
+            "BASE_URL",
+            "BOT_TOKEN",
+            "OWNER_ID",
+            "DATABASE_URL",
+            "DEFAULT_LANG",
+            "TIMEZONE",
+            "CMD_SUFFIX",
+            "SET_COMMANDS",
+            "NAME",
+            "BOT_PM",
+        ),
+    ),
+    "telegram": (
+        "Telegram & Sessions",
+        "Telegram API credentials, clients, helper accounts, and chat routing.",
+        (
+            "TELEGRAM_API",
+            "TELEGRAM_HASH",
+            "USER_SESSION_STRING",
+            "TG_PROXY",
+            "HELPER_TOKENS",
+            "HELPER_STRINGS",
+            "HELPER_BOT_PROXIES",
+            "HELPER_USER_PROXIES",
+            "TRANSMISSION_MODE",
+            "IS_PREMIUM_BOT",
+            "CHANNEL",
+            "LINKS_LOG_ID",
+            "MIRROR_LOG_ID",
+        ),
+    ),
+    "filetolink": (
+        "FileToLink",
+        "Storage, workers, streaming concurrency, prefetch, and link behavior.",
+        (
+            "BIN_CHANNEL",
+            "AUTO_PROVISION_STREAM_BOTS",
+            "USE_HELPER_BOTS_FOR_FILETOLINK",
+            "USE_LEECH_DUMP_AS_BIN_CHANNEL",
+            "FILETOLINK_GETFILE_CONCURRENCY",
+            "FILETOLINK_PREFETCH_CHUNKS",
+            "MEDIA_STORE",
+            "SHORTEN_ENABLED",
+            "SHORTEN_MEDIA_LINKS",
+            "URL_SHORTENER_API_KEY",
+            "URL_SHORTENER_SITE",
+        ),
+    ),
+    "hyper": (
+        "Hyper Transfers",
+        "HyperDL and HyperUP routing and parallel transfer tuning.",
+        (
+            "USE_HYPER",
+            "HYPER_THREADS",
+            "HYPER_PIPELINE",
+            "HYPER_CHUNK",
+        ),
+    ),
+    "leech": (
+        "Leech & Upload",
+        "Telegram upload format, naming, splitting, captions, and destinations.",
+        (
+            "DEFAULT_UPLOAD",
+            "AS_DOCUMENT",
+            "EQUAL_SPLITS",
+            "EXCLUDED_EXTENSIONS",
+            "LEECH_DUMP_CHAT",
+            "LEECH_PREFIX",
+            "LEECH_SUFFIX",
+            "LEECH_FONT",
+            "LEECH_CAPTION",
+            "LEECH_SPLIT_SIZE",
+            "MEDIA_GROUP",
+            "NAME_SWAP",
+            "UPLOAD_PATHS",
+            "SHOW_CLOUD_LINK",
+            "DELETE_LINKS",
+            "THUMBNAIL_LAYOUT",
+            "UPLOAD_PARALLELISM",
+        ),
+    ),
+    "limits": (
+        "Queues & Limits",
+        "Task concurrency, service size limits, quotas, and rate controls.",
+        (
+            "BOT_MAX_TASKS",
+            "USER_MAX_TASKS",
+            "USER_TIME_INTERVAL",
+            "QUEUE_ALL",
+            "QUEUE_DOWNLOAD",
+            "QUEUE_UPLOAD",
+            "DIRECT_LIMIT",
+            "MEGA_LIMIT",
+            "TERABOX_LIMIT",
+            "TORRENT_LIMIT",
+            "GD_DL_LIMIT",
+            "RC_DL_LIMIT",
+            "CLONE_LIMIT",
+            "JD_LIMIT",
+            "NZB_LIMIT",
+            "YTDLP_LIMIT",
+            "PLAYLIST_LIMIT",
+            "LEECH_LIMIT",
+            "EXTRACT_LIMIT",
+            "ARCHIVE_LIMIT",
+            "STORAGE_LIMIT",
+            "RSS_SIZE_LIMIT",
+            "USER_DAILY_QUOTA_GB",
+            "USER_MONTHLY_QUOTA_GB",
+            "GLOBAL_RATE_LIMIT",
+            "MAX_GLOBAL_REQUESTS_PER_MINUTE",
+            "RATE_LIMIT_ENABLED",
+            "MAX_FILES_PER_PERIOD",
+            "RATE_LIMIT_PERIOD_MINUTES",
+            "MAX_QUEUE_SIZE",
+            "MAX_BATCH_FILES",
+        ),
+    ),
+    "cloud": (
+        "Cloud Storage",
+        "Google Drive and rclone destinations, serving, and remote backends.",
+        (
+            "GDRIVE_ID",
+            "GD_DESP",
+            "INDEX_URL",
+            "IS_TEAM_DRIVE",
+            "STOP_DUPLICATE",
+            "USE_SERVICE_ACCOUNTS",
+            "DRIVE_CATEGORY_MODE",
+            "DRIVE_CATEGORY_SA",
+            "RCLONE_PATH",
+            "RCLONE_FLAGS",
+            "RCLONE_SERVE_URL",
+            "RCLONE_SERVE_PORT",
+            "RCLONE_SERVE_USER",
+            "RCLONE_SERVE_PASS",
+            "RCLONE_SFTP_REMOTE",
+            "RCLONE_WEBDAV_REMOTE",
+            "RCLONE_B2_REMOTE",
+            "RCLONE_ONEDRIVE_REMOTE",
+            "RCLONE_DROPBOX_REMOTE",
+        ),
+    ),
+    "downloads": (
+        "Download Engines",
+        "Torrent, Mega, TeraBox, JDownloader, Usenet, and search configuration.",
+        (
+            "TORRENT_TIMEOUT",
+            "TERABOX_ENABLED",
+            "TERABOX_UPLOAD_PATH",
+            "MEGA_EMAIL",
+            "MEGA_PASSWORD",
+            "JD_EMAIL",
+            "JD_PASS",
+            "USENET_SERVERS",
+            "SEARCH_API_LINK",
+            "SEARCH_LIMIT",
+            "SEARCH_PLUGINS",
+            "SKIP_SABNZBD_INI_CHECK",
+        ),
+    ),
+    "media": (
+        "Media & Encoding",
+        "FFmpeg, encoding, subtitles, artwork, and YouTube behavior.",
+        (
+            "FFMPEG_CMDS",
+            "DEFAULT_ENCODE_PRESET",
+            "FFMPEG_HW_ACCEL",
+            "AUTO_SUBTITLES",
+            "SUBTITLE_LANGS",
+            "OPENSUBTITLES_API",
+            "PLAYLIST_PARALLELISM",
+            "YT_DLP_OPTIONS",
+            "YT_DESP",
+            "YT_TAGS",
+            "YT_CATEGORY_ID",
+            "YT_PRIVACY_STATUS",
+            "IMAGES",
+            "IMG_SEARCH",
+            "IMG_PAGE",
+            "IMG_SOURCES",
+            "USE_IMAGES",
+        ),
+    ),
+    "appearance": (
+        "UI & Messages",
+        "Status presentation, buttons, templates, and public attribution.",
+        (
+            "COLORED_BTNS",
+            "CLEAN_LOG_MSG",
+            "PROGRESS_BAR",
+            "STATUS_LIMIT",
+            "STATUS_UPDATE_INTERVAL",
+            "AUTHOR_NAME",
+            "AUTHOR_URL",
+            "IMDB_TEMPLATE",
+        ),
+    ),
+    "security": (
+        "Access & Security",
+        "Authorization, web secrets, token gates, network trust, and admin tools.",
+        (
+            "AUTHORIZED_CHATS",
+            "SUDO_USERS",
+            "FORCE_SUB_IDS",
+            "BANNED_CHANNELS",
+            "TOKEN_ENABLED",
+            "TOKEN_TTL_HOURS",
+            "VERIFY_TIMEOUT",
+            "LOGIN_PASS",
+            "WEB_ACCESS_PASSWORD",
+            "WEB_PINCODE",
+            "AMATERASU_WEB_SECRET",
+            "ENABLE_SHELL_COMMAND",
+            "ENABLE_EXEC_COMMAND",
+            "INSECURE_HOSTS",
+            "UPSTREAM_ALLOWLIST",
+        ),
+    ),
+    "web": (
+        "Web & Network",
+        "Binding, TLS, Cloudflare Tunnel, and web worker connectivity.",
+        (
+            "BIND_TO_LOOPBACK",
+            "BIND_ADDRESS",
+            "CLOUDFLARE_TUNNEL_ENABLED",
+            "CLOUDFLARE_TUNNEL_TOKEN",
+            "CLOUDFLARE_TUNNEL_TARGET",
+            "CLOUDFLARE_TUNNEL_METRICS",
+            "CLOUDFLARE_TUNNEL_AUTO_URL",
+        ),
+    ),
+    "integrations": (
+        "APIs & Integrations",
+        "External download, upload, search, and protected-link services.",
+        (
+            "DEBRID_LINK_API",
+            "FILELION_API",
+            "GOFILE_API",
+            "GOFILE_FOLDER_ID",
+            "GOFILE_AUTO_CREATE_FOLDER",
+            "PIXELDRAIN_KEY",
+            "PROTECTED_API",
+            "BUZZHEAVIER_API",
+            "DEVUPLOADS_KEY",
+            "DEVUPLOADS_FOLDER",
+            "VIKINGFILE_HASH",
+            "VIKINGFILE_FOLDER",
+            "INSTADL_API",
+            "JIODRIVE_TOKEN",
+            "HYDRA_IP",
+            "HYDRA_API_KEY",
+            "STREAMWISH_API",
+        ),
+    ),
+    "system": (
+        "System & Automation",
+        "Resource controls, scheduled work, recovery, updates, and logging.",
+        (
+            "CPU_LIMIT",
+            "THROTTLE_SERVICES",
+            "RSS_CHAT",
+            "RSS_DELAY",
+            "INC_TASK_RESUME",
+            "INCOMPLETE_TASK_NOTIFIER",
+            "INCOMPLETE_TASK_TTL",
+            "UPSTREAM_REPO",
+            "UPSTREAM_BRANCH",
+            "UPDATE_PKGS",
+            "LOG_FORMAT",
+            "SLEEP_THRESHOLD",
+            "WORKERS",
+            "PING_INTERVAL",
+        ),
+    ),
+    "advanced": (
+        "Advanced & Other",
+        "Remaining expert settings that do not belong to a feature category.",
+        (),
+    ),
+}
+
+
+def _visible_config_variables():
+    return {
+        k: v
+        for k, v in Config.get_all().items()
+        if not k.startswith("DISABLE_") and k not in HIDDEN_VARS
+    }
+
+
+def _config_category_for_key(key):
+    if key.startswith("MULTI_TOKEN"):
+        return "telegram"
+    for slug, (_, _, keys) in CONFIG_CATEGORIES.items():
+        if slug != "advanced" and key in keys:
+            return slug
+    return "advanced"
+
+
+def _config_keys_for_category(slug, config=None):
+    if config is None:
+        config = _visible_config_variables()
+    if slug == "all":
+        return sorted(config)
+    return sorted(
+        key
+        for key in config
+        if _config_category_for_key(key) == slug
+    )
+
+
+def _is_bool_variable(key):
+    return isinstance(Config.get(key), bool)
+
+
+def _is_protected_variable(key):
+    return key in PROTECTED_VARS or key.startswith("MULTI_TOKEN")
 
 ONOFF_VARS = [
     "DISABLE_TORRENTS",
@@ -427,6 +756,7 @@ async def get_buttons(key=None, edit_type=None, edit_mode=False):
                 msg = f"<i>Send a valid value for <code>{key}</code> in server <code>{Config.USENET_SERVERS[index]['name']}</code>.</i> Current value is <code>{Config.USENET_SERVERS[index][key]}</code>\n┖ <b>Time Left :</b> <code>60 sec</code>"
         elif edit_type == "editvar":
             key_display = escape(str(key))
+            is_bool = _is_bool_variable(key)
             msg = (
                 "<b>✦ VARIABLE DETAILS</b>\n\n"
                 f"<b>Name</b> : <code>{key_display}</code>\n"
@@ -439,7 +769,7 @@ async def get_buttons(key=None, edit_type=None, edit_mode=False):
             value = Config.get(key)
             if value == "":
                 value = "None"
-            elif key in PROTECTED_VARS:
+            elif _is_protected_variable(key):
                 value = "<hidden>"
             msg += (
                 f"<b>Current value</b> : "
@@ -448,8 +778,13 @@ async def get_buttons(key=None, edit_type=None, edit_mode=False):
             buttons.data_button(
                 "View Value", f"botset showvar {key}", position="header"
             )
-            buttons.data_button("Back", "botset back var", position="footer")
-            if key not in BOOL_VARS:
+            category_slug = _config_category_for_key(key)
+            buttons.data_button(
+                "Back",
+                f"botset category {category_slug}",
+                position="footer",
+            )
+            if not is_bool:
                 if not edit_mode:
                     buttons.data_button(
                         "Edit Value", f"botset editvar {key} edit", style=ButtonStyle.PRIMARY
@@ -460,35 +795,74 @@ async def get_buttons(key=None, edit_type=None, edit_mode=False):
                 msg += "<i>Choose a valid value for the above Var</i>\n\n"
                 buttons.data_button("True", f"botset boolvar {key} on")
                 buttons.data_button("False", f"botset boolvar {key} off")
-            if key not in BOOL_VARS and key not in PROTECTED_VARS:
+            if not is_bool and not _is_protected_variable(key):
                 buttons.data_button("Reset", f"botset resetvar {key}")
             buttons.data_button("Close", "botset close", position="footer", style=ButtonStyle.DANGER)
             if edit_mode and key in RESTART_VARS:
                 msg += "\n<b>Note:</b> Restart required for this edit to take effect!\n\n"
-            if edit_mode and key not in BOOL_VARS:
+            if edit_mode and not is_bool:
                 msg += "<i>Send a valid value for the above Var.</i>\n┖ <b>Time Left :</b> <code>60 sec</code>"
     elif key == "var":
-        conf_dict = {
-            k: v
-            for k, v in Config.get_all().items()
-            if not k.startswith("DISABLE_") and k not in HIDDEN_VARS
-        }
-        all_keys = list(conf_dict.keys())
-        for k in all_keys[start : 10 + start]:
-            buttons.data_button(k, f"botset editvar {k}")
-        if state == "view":
-            buttons.data_button("Edit", "botset edit var", style=ButtonStyle.PRIMARY)
+        conf_dict = _visible_config_variables()
+        for slug, (label, _, _) in CONFIG_CATEGORIES.items():
+            count = len(_config_keys_for_category(slug, conf_dict))
+            if count:
+                buttons.data_button(
+                    f"{label} ({count})",
+                    f"botset category {slug}",
+                )
+        buttons.data_button(
+            f"All Variables ({len(conf_dict)})",
+            "botset category all",
+        )
+        buttons.data_button("↩ BACK", "botset back", position="footer")
+        buttons.data_button(
+            "✕ CLOSE",
+            "botset close",
+            position="footer",
+            style=ButtonStyle.DANGER,
+        )
+        msg = (
+            "<b>✦ CONFIG CATEGORIES</b>\n"
+            "<i>Choose a feature area. Shared variables have one canonical "
+            "home; use All Variables for alphabetical access.</i>"
+        )
+    elif key.startswith("varcat_"):
+        slug = key.removeprefix("varcat_")
+        if slug != "all" and slug not in CONFIG_CATEGORIES:
+            slug = "advanced"
+        conf_dict = _visible_config_variables()
+        if slug == "all":
+            label = "All Variables"
+            description = "Every visible configuration variable, sorted alphabetically."
         else:
-            buttons.data_button("View", "botset view var", style=ButtonStyle.PRIMARY)
-        buttons.data_button("↩ BACK", "botset back")
-        buttons.data_button("✕ CLOSE", "botset close", style=ButtonStyle.DANGER)
+            label, description, _ = CONFIG_CATEGORIES.get(
+                slug,
+                CONFIG_CATEGORIES["advanced"],
+            )
+        all_keys = _config_keys_for_category(slug, conf_dict)
+        page_start = min(start, max(0, ((len(all_keys) - 1) // 10) * 10))
+        for k in all_keys[page_start : 10 + page_start]:
+            buttons.data_button(k, f"botset editvar {k}")
+        buttons.data_button("↩ CATEGORIES", "botset var", position="footer")
+        buttons.data_button(
+            "✕ CLOSE",
+            "botset close",
+            position="footer",
+            style=ButtonStyle.DANGER,
+        )
         for x in range(0, len(all_keys), 10):
             buttons.data_button(
-                f"{int(x / 10) + 1}", f"botset start var {x}", position="footer"
+                f"{int(x / 10) + 1}",
+                f"botset start {key} {x}",
+                position="footer",
             )
+        page_number = int(page_start / 10) + 1
+        page_count = max(1, (len(all_keys) + 9) // 10)
         msg = (
-            "<b>✦ CONFIG VARIABLES</b>\n"
-            f"<i>Page {int(start / 10) + 1} : {state.upper()} mode</i>"
+            f"<b>✦ {escape(label.upper())}</b>\n"
+            f"<i>{escape(description)}</i>\n"
+            f"<code>{len(all_keys)} variables • Page {page_number}/{page_count}</code>"
         )
     elif key == "setonoff":
         for k in ONOFF_VARS:
@@ -646,6 +1020,13 @@ async def update_buttons(message, key=None, edit_type=None, edit_mode=False):
     await edit_message(message, msg, button)
 
 
+async def _apply_filetolink_web_tuning():
+    for key in FILETOLINK_WEB_VARS:
+        environ[key] = str(Config.get(key))
+    await (await create_subprocess_exec("pkill", "-9", "-f", "gunicorn")).wait()
+    await start_web_server()
+
+
 @new_task
 async def edit_variable(_, message, pre_message, key):
     handler_dict[message.chat.id] = False
@@ -759,6 +1140,8 @@ async def edit_variable(_, message, pre_message, key):
     if not isinstance(value, (str, int, float, bool, list, dict, type(None))):
         value = str(value)
     Config.set(key, value)
+    if key in FILETOLINK_WEB_VARS:
+        value = Config.get(key)
     if key == "CMD_SUFFIX":
         value = Config.CMD_SUFFIX
         BotCommands.refresh_commands()
@@ -788,6 +1171,8 @@ async def edit_variable(_, message, pre_message, key):
     elif key in ("PORT", "WEB_ACCESS_PASSWORD"):
         await (await create_subprocess_exec("pkill", "-9", "-f", "gunicorn")).wait()
         await start_web_server()
+    elif key in FILETOLINK_WEB_VARS:
+        await _apply_filetolink_web_tuning()
     elif key in [
         "RCLONE_SERVE_URL",
         "RCLONE_SERVE_PORT",
@@ -935,7 +1320,7 @@ async def _handle_service_toggle(key, disabled):
 
 @new_task
 async def show_var_value(_, query, key):
-    value = "<hidden>" if key in PROTECTED_VARS else f"{Config.get(key)}"
+    value = "<hidden>" if _is_protected_variable(key) else f"{Config.get(key)}"
     if value == "":
         value = "None"
     if len(value) > 200:
@@ -1262,10 +1647,17 @@ async def edit_bot_settings(client, query):
     elif data[1] in ["var", "aria", "qbit", "nzb", "nzbserver", "setonoff"] or data[1].startswith(
         "nzbser"
     ):
-        if data[1] == "nzbserver":
+        if data[1] in ("var", "nzbserver"):
             globals()["start"] = 0
         await query.answer()
         await update_buttons(message, data[1])
+    elif data[1] == "category":
+        await query.answer()
+        slug = data[2] if len(data) > 2 else "advanced"
+        if slug != "all" and slug not in CONFIG_CATEGORIES:
+            slug = "advanced"
+        globals()["start"] = 0
+        await update_buttons(message, f"varcat_{slug}")
     elif data[1] == "resetvar":
         await query.answer()
         value = ""
@@ -1314,6 +1706,8 @@ async def edit_bot_settings(client, query):
         elif data[2] == "SUDO_USERS":
             sudo_users.clear()
         Config.set(data[2], value)
+        if data[2] in FILETOLINK_WEB_VARS:
+            value = Config.get(data[2])
         await update_buttons(message, data[2], "editvar", False)
         if data[2] == "DATABASE_URL":
             await database.disconnect()
@@ -1347,6 +1741,8 @@ async def edit_bot_settings(client, query):
             await rclone_serve_booter()
         elif data[2] in ("PORT", "WEB_ACCESS_PASSWORD"):
             await start_web_server()
+        elif data[2] in FILETOLINK_WEB_VARS:
+            await _apply_filetolink_web_tuning()
         elif data[2].startswith("CLOUDFLARE_TUNNEL_"):
             await cloudflare_tunnel_booter()
         elif data[2] == "TIMEZONE":

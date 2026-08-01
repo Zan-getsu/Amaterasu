@@ -448,6 +448,12 @@ async def start_web_server():
         Config.WEB_ACCESS_PASSWORD = access_pwd
     proc_env = environ.copy()
     proc_env["WEB_ACCESS_PASSWORD"] = access_pwd
+    proc_env["FILETOLINK_GETFILE_CONCURRENCY"] = str(
+        Config.FILETOLINK_GETFILE_CONCURRENCY
+    )
+    proc_env["FILETOLINK_PREFETCH_CHUNKS"] = str(
+        Config.FILETOLINK_PREFETCH_CHUNKS
+    )
     # Resolve bind address from BIND_TO_LOOPBACK (Phase 0.1).
     # Config.BIND_ADDRESS is still respected as an explicit override for
     # advanced operators. Priority: explicit BIND_ADDRESS > BIND_TO_LOOPBACK

@@ -12,6 +12,8 @@ from types import ModuleType, SimpleNamespace
 import pytest
 
 SOURCE_PATH = Path(__file__).parents[1] / "web" / "wserver.py"
+BOT_SETTINGS_PATH = Path(__file__).parents[1] / "bot" / "modules" / "bot_settings.py"
+STARTUP_PATH = Path(__file__).parents[1] / "bot" / "core" / "startup.py"
 
 
 def load_functions(names, namespace):
@@ -142,6 +144,42 @@ def test_prefetch_depth_shares_worker_across_active_transfers(monkeypatch):
     assert namespace["_transfer_prefetch_depth"](3) == 2
     fake_client_type.stream_loads[3] = 8
     assert namespace["_transfer_prefetch_depth"](3) == 1
+
+
+def test_filetolink_tuning_is_wired_to_bsettings_and_web_process():
+    settings_source = BOT_SETTINGS_PATH.read_text(encoding="utf-8")
+    startup_source = STARTUP_PATH.read_text(encoding="utf-8")
+
+    for key in (
+        "FILETOLINK_GETFILE_CONCURRENCY",
+        "FILETOLINK_PREFETCH_CHUNKS",
+    ):
+        assert key in settings_source
+        assert f'proc_env["{key}"]' in startup_source
+
+    assert "_apply_filetolink_web_tuning" in settings_source
+
+
+def test_filetolink_tuning_is_exposed_and_safely_bounded():
+    from bot.core.config_manager import Config
+
+    original_concurrency = Config.FILETOLINK_GETFILE_CONCURRENCY
+    original_prefetch = Config.FILETOLINK_PREFETCH_CHUNKS
+    try:
+        assert "FILETOLINK_GETFILE_CONCURRENCY" in Config.get_all()
+        assert "FILETOLINK_PREFETCH_CHUNKS" in Config.get_all()
+
+        Config.set("FILETOLINK_GETFILE_CONCURRENCY", 0)
+        assert Config.FILETOLINK_GETFILE_CONCURRENCY == 1
+        assert Config.FILETOLINK_PREFETCH_CHUNKS == 1
+
+        Config.set("FILETOLINK_GETFILE_CONCURRENCY", 100)
+        Config.set("FILETOLINK_PREFETCH_CHUNKS", 100)
+        assert Config.FILETOLINK_GETFILE_CONCURRENCY == 32
+        assert Config.FILETOLINK_PREFETCH_CHUNKS == 32
+    finally:
+        Config.set("FILETOLINK_GETFILE_CONCURRENCY", original_concurrency)
+        Config.set("FILETOLINK_PREFETCH_CHUNKS", original_prefetch)
 
 
 def test_stream_health_resets_only_after_a_completed_transfer():

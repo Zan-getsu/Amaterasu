@@ -556,7 +556,7 @@ Troubleshooting:
 
 ## 🔧 Configuration Reference
 
-All variables go inside `config.py`. Copy `config_sample.py` as your starting template.
+All variables go inside `config.py`. Copy `config_sample.py` as your starting template. In Telegram, `/bsetting` organizes these variables by feature category and also provides an alphabetical **All Variables** view; shared values such as `BASE_URL` live under **General**.
 
 ### 1. Required (Mandatory)
 
@@ -575,6 +575,8 @@ All variables go inside `config.py`. Copy `config_sample.py` as your starting te
 | `USER_SESSION_STRING` | `str` | `""` | Pyrogram string session for a user account. Required for restricted content downloads and uploads >2 GB |
 | `HELPER_TOKENS` | `str` | `""` | Space-separated helper bot tokens used by HyperDL/HyperUP parallel Telegram transfers |
 | `USE_HELPER_BOTS_FOR_FILETOLINK` | `bool` | `True` | Also use `HELPER_TOKENS` as FileToLink stream workers. Set `False` if helpers cannot read the effective BIN channel |
+| `FILETOLINK_GETFILE_CONCURRENCY` | `int` | `8` | Maximum concurrent Telegram `GetFile` requests per FileToLink stream bot. Valid range: 1–32 |
+| `FILETOLINK_PREFETCH_CHUNKS` | `int` | `4` | Maximum ordered look-ahead chunks per transfer; capped by concurrency and reduced automatically under load |
 | `HELPER_STRINGS` | `str` | `""` | Space-separated helper user session strings. These clients can start with the bot, but HyperDL/HyperUP currently uses helper bot tokens as its active worker pool |
 | `HELPER_BOT_PROXIES` | `str` | `""` | Optional newline-separated proxy dictionaries for `HELPER_TOKENS`, one proxy per helper bot |
 | `HELPER_USER_PROXIES` | `str` | `""` | Optional newline-separated proxy dictionaries for `HELPER_STRINGS`, one proxy per helper user |
@@ -612,7 +614,7 @@ All variables go inside `config.py`. Copy `config_sample.py` as your starting te
 | `USE_HYPER` | `bool` | `True` | Enable HyperDL/HyperUP acceleration when helper bots and `LEECH_DUMP_CHAT` are configured |
 | `HYPER_THREADS` | `int` | `0` | Number of helper workers used for HyperDL. `0` lets Amaterasu choose automatically |
 | `HYPER_PIPELINE` | `int` | `4` | Concurrent Telegram `GetFile` request depth per HyperDL worker group |
-| `HYPER_CHUNK` | `int` | `524288` | HyperDL chunk size in bytes. Default is 512 KiB |
+| `HYPER_CHUNK` | `int` | `1048576` | HyperDL working chunk size. Telegram requests are normalized to 1 MiB |
 | `LEECH_PREFIX` | `str` | `""` | Text prepended to every uploaded filename |
 | `LEECH_SUFFIX` | `str` | `""` | Text appended to every uploaded filename |
 | `LEECH_FONT` | `str` | `""` | Caption font style: `b`, `i`, `u`, `s`, `code`, or `spoiler`; each user can override it from `/usetting` → Leech Settings |
@@ -622,7 +624,7 @@ All variables go inside `config.py`. Copy `config_sample.py` as your starting te
 
 ### HyperDL / HyperUP Setup
 
-HyperDL and HyperUP accelerate Telegram-to-server downloads and server-to-Telegram uploads by using extra helper bot clients in parallel. They are enabled only when all required runtime pieces are available; otherwise Amaterasu falls back to the normal Pyrogram transfer path.
+HyperDL and HyperUP accelerate Telegram-to-server downloads and server-to-Telegram uploads by using extra helper bot clients. HyperDL splits eligible files across helpers: files of at least 10 MiB use one or more available HyperDL lanes first, while simultaneous overflow and any integrity/setup failure use WZGram. The normal transfer path remains active whenever the required Hyper setup is unavailable.
 
 Minimum working config:
 
@@ -645,8 +647,8 @@ How it is used:
 
 | Path | Requirement | Behavior |
 |---|---|---|
-| HyperDL | `USE_HYPER=True`, `HELPER_TOKENS`, `LEECH_DUMP_CHAT` | Telegram source media is copied to `LEECH_DUMP_CHAT`, then helper bots download different byte ranges in parallel |
-| HyperUP | `USE_HYPER=True`, `HELPER_TOKENS`, `LEECH_DUMP_CHAT` | Helper bots upload file parts in parallel before the main client sends the final Telegram media |
+| HyperDL | `USE_HYPER=True`, `HELPER_TOKENS`, `LEECH_DUMP_CHAT` | Files at least 10 MiB are copied to `LEECH_DUMP_CHAT`, then helper bots download different byte ranges in parallel; WZGram handles overflow and fallback |
+| HyperUP | `USE_HYPER=True`, `HELPER_TOKENS`, `LEECH_DUMP_CHAT` | Helper bots provide accelerated upload capacity |
 | Normal transfer | Missing helper bots, missing dump chat, or `USE_HYPER=False` | Amaterasu uses the regular Telegram download/upload path |
 
 Recommended helper count:
@@ -662,7 +664,7 @@ Optional tuning:
 ```python
 HYPER_THREADS = 0        # 0 = auto. Set 2, 4, 6... to cap parallel download parts.
 HYPER_PIPELINE = 4       # Higher can be faster, but may increase FloodWaits.
-HYPER_CHUNK = 512 * 1024 # Keep 512 KiB unless you are testing carefully.
+HYPER_CHUNK = 1024 * 1024 # Telegram GetFile requests are normalized to 1 MiB.
 ```
 
 Optional per-helper proxy config uses one Python dictionary per line. Blank lines mean "no proxy" for that helper index.
@@ -826,7 +828,7 @@ All limits are in **GB**. Set `0` to disable the limit.
 | `GLOBAL_RATE_LIMIT` | `bool` | `False` | Reserved legacy setting; not currently enforced |
 | `RATE_LIMIT_ENABLED` | `bool` | `False` | Reserved legacy setting; not currently enforced |
 
-Runtime performance tuning is environment-driven. `FILETOLINK_GETFILE_CONCURRENCY` caps in-flight Telegram chunk requests per stream bot (default `8`), while `FILETOLINK_PREFETCH_CHUNKS` controls the maximum ordered look-ahead per transfer (default `4`). Active transfers automatically receive a smaller prefetch window so simultaneous users share each worker fairly. `FILETOLINK_CACHE_MAX_MB` caps a single cached file (default `256`) and `FILETOLINK_CACHE_TOTAL_MAX_MB` caps total cache usage (default `2048`). Complete live responses populate the cache directly without a second Telegram download. Use `/link status` to inspect stream clients, tuning, storage config, and cache usage.
+`FILETOLINK_GETFILE_CONCURRENCY` caps in-flight Telegram chunk requests per stream bot (default `8`), while `FILETOLINK_PREFETCH_CHUNKS` controls the maximum ordered look-ahead per transfer (default `4`). Both can be changed from `/bsetting`; the web stream service restarts automatically so the new values take effect immediately. Active transfers automatically receive a smaller prefetch window so simultaneous users share each worker fairly. `FILETOLINK_CACHE_MAX_MB` caps a single cached file (default `256`) and `FILETOLINK_CACHE_TOTAL_MAX_MB` caps total cache usage (default `2048`). Complete live responses populate the cache directly without a second Telegram download. Use `/link status` to inspect stream clients, tuning, storage config, and cache usage.
 
 ### 14. Web Server
 

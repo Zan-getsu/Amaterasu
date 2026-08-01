@@ -53,6 +53,8 @@ class Config:
     BOT_TOKEN = ""
     HELPER_TOKENS = ""
     USE_HELPER_BOTS_FOR_FILETOLINK = True
+    FILETOLINK_GETFILE_CONCURRENCY = 8
+    FILETOLINK_PREFETCH_CHUNKS = 4
     HELPER_STRINGS = ""
     HELPER_BOT_PROXIES = ""
     HELPER_USER_PROXIES = ""
@@ -385,7 +387,19 @@ class Config:
                 value = cls._coerce_optional_bool(value)
             else:
                 value = cls._convert_env_type(key, value)
+            if key == "FILETOLINK_GETFILE_CONCURRENCY":
+                value = min(max(int(value), 1), 32)
+            elif key == "FILETOLINK_PREFETCH_CHUNKS":
+                value = min(
+                    max(int(value), 1),
+                    cls.FILETOLINK_GETFILE_CONCURRENCY,
+                )
             setattr(cls, key, value)
+            if (
+                key == "FILETOLINK_GETFILE_CONCURRENCY"
+                and cls.FILETOLINK_PREFETCH_CHUNKS > value
+            ):
+                cls.FILETOLINK_PREFETCH_CHUNKS = value
             if key == "BASE_URL":
                 cls.FQDN = ""
                 cls.HAS_SSL = True
@@ -465,8 +479,20 @@ class Config:
     def load(cls):
         cls.load_config()
         cls.load_env()
+        cls._normalize_filetolink_tuning()
         cls._validate_required()
         cls.construct_base_url()
+
+    @classmethod
+    def _normalize_filetolink_tuning(cls):
+        cls.FILETOLINK_GETFILE_CONCURRENCY = min(
+            max(int(cls.FILETOLINK_GETFILE_CONCURRENCY), 1),
+            32,
+        )
+        cls.FILETOLINK_PREFETCH_CHUNKS = min(
+            max(int(cls.FILETOLINK_PREFETCH_CHUNKS), 1),
+            cls.FILETOLINK_GETFILE_CONCURRENCY,
+        )
 
     @classmethod
     def _validate_required(cls):
@@ -649,6 +675,7 @@ class Config:
                 cls.MULTI_TOKENS[key] = value.strip() if isinstance(value, str) else str(value)
         if has_auto_url:
             cls.CLOUDFLARE_TUNNEL_AUTO_FQDN = None
+        cls._normalize_filetolink_tuning()
         cls._validate_required()
         cls.construct_base_url()
 

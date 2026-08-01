@@ -29,21 +29,25 @@ from ...telegram_helper.message_utils import send_status_message
 global_lock = Lock()
 standard_download_lock = Lock()
 GLOBAL_GID = dict()
+HYPER_DL_MIN_SIZE = 10 * 1024 * 1024
+_hyper_download_active = 0
+# Kept as a compatibility sentinel for older extensions/tests that inspected
+# the former WZGram-primary lane. Routing no longer mutates this value.
 _primary_download_active = 0
 
 
-def _claim_primary_download():
-    """Reserve the fast WZGram lane without blocking overflow transfers."""
-    global _primary_download_active
-    if _primary_download_active:
+def _claim_hyper_download(capacity):
+    """Reserve a parallel helper lane without oversubscribing its clients."""
+    global _hyper_download_active
+    if _hyper_download_active >= max(1, capacity):
         return False
-    _primary_download_active = 1
+    _hyper_download_active += 1
     return True
 
 
-def _release_primary_download():
-    global _primary_download_active
-    _primary_download_active = max(0, _primary_download_active - 1)
+def _release_hyper_download():
+    global _hyper_download_active
+    _hyper_download_active = max(0, _hyper_download_active - 1)
 
 
 class TelegramDownloadHelper:
@@ -72,11 +76,31 @@ class TelegramDownloadHelper:
             )
         )
         # Route selection is deferred until the task actually leaves the queue.
-        # The first active transfer uses WZGram; HyperDL supplies overflow
-        # capacity instead of slowing every individual transfer.
+        # Eligible primary transfers use the parallel helper pool; WZGram adds
+        # overflow capacity without oversubscribing those helpers.
         self._hyper_dl = False
-        self._primary_download_claimed = False
+        self._hyper_download_claimed = False
+        self._download_engine = "WZGram"
+        self._standard_session = ""
         self._hyper_dl_instance = None
+
+    def _hyper_capacity(self):
+        mode = self._listener.transmission_mode
+        bot_count = len(TgClient.helper_bots) if mode in ("bot", "both") else 0
+        user_count = 0
+        if mode in ("user", "both"):
+            user_count = len(TgClient.helper_users)
+            if TgClient.user is not None and all(
+                client is not TgClient.user
+                for client in TgClient.helper_users.values()
+            ):
+                user_count += 1
+        client_count = bot_count + user_count
+        if client_count <= 0:
+            return 0
+        requested_parts = Config.HYPER_THREADS or min(4, max(2, client_count))
+        workers_per_transfer = min(max(1, requested_parts), client_count)
+        return max(1, client_count // workers_per_transfer)
 
     @property
     def speed(self):
@@ -97,7 +121,7 @@ class TelegramDownloadHelper:
             "bytes=%s elapsed=%.2fs speed=%.2fMiB/s",
             self._listener.name,
             outcome,
-            "HyperDL" if self._hyper_dl else "WZGram",
+            self._download_engine,
             transferred,
             elapsed,
             speed_mib,
@@ -139,9 +163,11 @@ class TelegramDownloadHelper:
 
     async def _on_download_complete(self):
         self._log_performance("completed")
-        await self._listener.on_download_complete()
-        async with global_lock:
-            GLOBAL_GID.pop(self._id)
+        try:
+            await self._listener.on_download_complete()
+        finally:
+            async with global_lock:
+                GLOBAL_GID.pop(self._id, None)
         return
 
     async def _remove_bad_download(self, download):
@@ -288,7 +314,7 @@ class TelegramDownloadHelper:
                 except Exception as hyper_err:
                     LOGGER.warning(
                         f"HypertgDL failed ({type(hyper_err).__name__}: "
-                        f"{hyper_err}); falling back to standard Pyrogram download"
+                        f"{hyper_err}); falling back to standard WZGram download"
                     )
                     download = None
                 # If HypertgDL returned None, the fast path was unavailable
@@ -297,12 +323,14 @@ class TelegramDownloadHelper:
                 # corrupt file.
                 if download is None and not self._listener.is_cancelled:
                     self._hyper_dl = False
+                    self._download_engine = "HyperDL→WZGram"
+                    self.session = self._standard_session or "bot"
                     fallback_message = getattr(self._hyper_dl_instance, "message", None)
                     if not self._has_downloadable_media(fallback_message):
                         fallback_message = None
                     LOGGER.info(
                         "HypertgDL returned no complete download; falling back "
-                        "to standard Pyrogram download (slower but reliable)"
+                        "to standard WZGram download (slower but reliable)"
                     )
                     download = await self._standard_download(
                         message,
@@ -421,20 +449,38 @@ class TelegramDownloadHelper:
                                 GLOBAL_GID.pop(self._id)
                         return
                 self._start_time = time()
-                if self._hyper_available:
-                    if _claim_primary_download():
-                        self._primary_download_claimed = True
-                        self._hyper_dl = False
-                        LOGGER.info(
-                            "Telegram download route: WZGram primary lane "
-                            "(HyperDL remains available for overflow)"
-                        )
-                    else:
+                hyper_capacity = self._hyper_capacity()
+                hyper_eligible = (
+                    self._hyper_available
+                    and self._listener.size >= HYPER_DL_MIN_SIZE
+                    and hyper_capacity > 0
+                )
+                if hyper_eligible:
+                    if _claim_hyper_download(hyper_capacity):
+                        self._hyper_download_claimed = True
                         self._hyper_dl = True
+                        self._download_engine = "HyperDL"
+                        self._standard_session = self.session
                         self.session = "hyper"
                         LOGGER.info(
-                            "Telegram download route: HyperDL overflow lane"
+                            "Telegram download route: HyperDL primary lane "
+                            "(capacity=%s concurrent transfer%s)",
+                            hyper_capacity,
+                            "" if hyper_capacity == 1 else "s",
                         )
+                    else:
+                        self._hyper_dl = False
+                        self._download_engine = "WZGram"
+                        LOGGER.info(
+                            "Telegram download route: WZGram overflow lane "
+                            "(HyperDL helper pool busy)"
+                        )
+                elif self._hyper_available:
+                    LOGGER.info(
+                        "Telegram download route: WZGram small-file lane "
+                        "(HyperDL threshold=%sMiB)",
+                        HYPER_DL_MIN_SIZE // (1024 * 1024),
+                    )
                 try:
                     await self._on_download_start(
                         media.file_unique_id,
@@ -443,9 +489,9 @@ class TelegramDownloadHelper:
                     )
                     await self._download(message, path)
                 finally:
-                    if self._primary_download_claimed:
-                        _release_primary_download()
-                        self._primary_download_claimed = False
+                    if getattr(self, "_hyper_download_claimed", False):
+                        _release_hyper_download()
+                        self._hyper_download_claimed = False
             else:
                 await self._on_download_error("File already being downloaded!")
         else:
