@@ -406,6 +406,12 @@ async def get_readable_message(sid, is_user, page_no=1, status="All", page_step=
             style=ButtonStyle.PRIMARY,
         )
     buttons.data_button(
+        "▶ FILETOLINK",
+        f"status {sid} fl",
+        position="header",
+        style=ButtonStyle.PRIMARY,
+    )
+    buttons.data_button(
         "↻ REFRESH",
         f"status {sid} ref",
         position="header",

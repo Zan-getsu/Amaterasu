@@ -5,6 +5,7 @@ import re
 import sys
 from contextlib import suppress
 from hashlib import sha256
+from html import escape
 from pathlib import Path
 from secrets import token_urlsafe
 from types import ModuleType, SimpleNamespace
@@ -14,6 +15,7 @@ import pytest
 SOURCE_PATH = Path(__file__).parents[1] / "web" / "wserver.py"
 BOT_SETTINGS_PATH = Path(__file__).parents[1] / "bot" / "modules" / "bot_settings.py"
 STARTUP_PATH = Path(__file__).parents[1] / "bot" / "core" / "startup.py"
+FILETOLINK_MODULE_PATH = Path(__file__).parents[1] / "bot" / "modules" / "filetolink.py"
 
 
 def load_functions(names, namespace):
@@ -144,6 +146,193 @@ def test_prefetch_depth_shares_worker_across_active_transfers(monkeypatch):
     assert namespace["_transfer_prefetch_depth"](3) == 2
     fake_client_type.stream_loads[3] = 8
     assert namespace["_transfer_prefetch_depth"](3) == 1
+
+
+def test_runtime_snapshot_tracks_progress_speed_and_worker_health():
+    namespace = {
+        "FILETOLINK_CACHE_TOTAL_MAX_BYTES": 4096,
+        "_filetolink_active_streams": {},
+        "_filetolink_worker_counts": lambda: (2, 1),
+        "monotonic": lambda: 100.0,
+        "wall_time": lambda: 1000.0,
+        "token_urlsafe": lambda _size: "transfer-1",
+    }
+    load_functions(
+        {
+            "_begin_filetolink_transfer",
+            "_update_filetolink_transfer",
+            "_finish_filetolink_transfer",
+            "_build_filetolink_status_snapshot",
+        },
+        namespace,
+    )
+
+    transfer_id = namespace["_begin_filetolink_transfer"](
+        "movie.mkv", "Stream", "Telegram", 1024, 3
+    )
+    namespace["_filetolink_active_streams"][transfer_id]["started_mono"] = 98.0
+    namespace["_update_filetolink_transfer"](transfer_id, 512)
+    snapshot = namespace["_build_filetolink_status_snapshot"](2, 2048)
+
+    assert snapshot["state"] == "degraded"
+    assert snapshot["workers"] == {"total": 2, "ready": 1}
+    assert snapshot["active_count"] == 1
+    assert snapshot["aggregate_speed"] == 256
+    assert snapshot["transfers"][0]["progress"] == 50
+    assert snapshot["transfers"][0]["source"] == "Telegram"
+    assert "started_mono" not in snapshot["transfers"][0]
+
+    namespace["_finish_filetolink_transfer"](transfer_id)
+    assert namespace["_filetolink_active_streams"] == {}
+
+
+def test_streaming_paths_publish_live_filetolink_metrics():
+    source = SOURCE_PATH.read_text(encoding="utf-8")
+
+    assert "_filetolink_status_publisher" in source
+    assert '"FILETOLINK_STATUS_FILE"' in source
+    assert '"Telegram"' in source
+    assert '"Cache"' in source
+    assert source.count("_update_filetolink_transfer(transfer_id, bytes_sent)") == 2
+    assert source.count("_finish_filetolink_transfer(transfer_id)") == 2
+
+
+@pytest.mark.asyncio
+async def test_status_publisher_throttles_cache_directory_scans():
+    clock = [1.0]
+    scans = []
+    written = []
+
+    def cache_usage():
+        scans.append(clock[0])
+        return 4, 2048
+
+    namespace = {
+        "_filetolink_cache_metrics": {"files": 0, "bytes": 0, "sampled_at": 0.0},
+        "_filetolink_cache_usage": cache_usage,
+        "_build_filetolink_status_snapshot": lambda files, size, state: {
+            "files": files,
+            "bytes": size,
+            "state": state,
+        },
+        "_write_filetolink_status_snapshot": written.append,
+        "monotonic": lambda: clock[0],
+        "to_thread": asyncio.to_thread,
+    }
+    load_functions({"_publish_filetolink_status"}, namespace)
+
+    await namespace["_publish_filetolink_status"]()
+    clock[0] = 3.0
+    await namespace["_publish_filetolink_status"]()
+    clock[0] = 7.0
+    await namespace["_publish_filetolink_status"]()
+
+    assert scans == [1.0, 7.0]
+    assert len(written) == 3
+    assert written[-1]["files"] == 4
+
+
+def test_status_snapshot_number_parser_rejects_non_finite_values():
+    tree = ast.parse(FILETOLINK_MODULE_PATH.read_text(encoding="utf-8"))
+    functions = [
+        node
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef)
+        and node.name in {"_safe_number", "_safe_count"}
+    ]
+    namespace = {"isfinite": __import__("math").isfinite}
+    exec(
+        compile(
+            ast.Module(functions, type_ignores=[]),
+            str(FILETOLINK_MODULE_PATH),
+            "exec",
+        ),
+        namespace,
+    )
+
+    assert namespace["_safe_number"]("nan") == 0
+    assert namespace["_safe_number"]("inf") == 0
+    assert namespace["_safe_count"]("not-a-number", 3) == 3
+
+
+def test_filetolink_status_renderer_executes_active_and_idle_views():
+    class FakeButtonMaker:
+        def __init__(self):
+            self.buttons = []
+
+        def data_button(self, label, data, **_kwargs):
+            self.buttons.append((label, data))
+
+        def build_menu(self, **_kwargs):
+            return self.buttons
+
+    tree = ast.parse(FILETOLINK_MODULE_PATH.read_text(encoding="utf-8"))
+    functions = [
+        node
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef)
+        and node.name
+        in {
+            "_safe_number",
+            "_safe_count",
+            "_filetolink_state",
+            "build_filetolink_status",
+        }
+    ]
+    snapshot = {
+        "stale": False,
+        "state": "streaming",
+        "updated_at": 990,
+        "workers": {"ready": 2, "total": 2},
+        "active_count": 1,
+        "aggregate_speed": 256,
+        "cache": {"files": 3, "bytes": 1024, "max_bytes": 4096},
+        "transfers": [
+            {
+                "name": "movie<final>.mkv",
+                "mode": "Stream",
+                "source": "Telegram",
+                "bytes_sent": 512,
+                "total": 1024,
+                "progress": 50,
+                "speed": 256,
+                "started_at": 990,
+            }
+        ],
+    }
+    namespace = {
+        "ButtonMaker": FakeButtonMaker,
+        "ButtonStyle": SimpleNamespace(PRIMARY="primary"),
+        "Config": SimpleNamespace(BASE_URL="https://files.example"),
+        "_read_filetolink_status": lambda: snapshot,
+        "escape": escape,
+        "get_progress_bar_string": lambda value: f"bar-{value}",
+        "get_readable_file_size": lambda value: f"{int(value)}B",
+        "get_readable_time": lambda value: f"{int(value)}s",
+        "isfinite": __import__("math").isfinite,
+        "time": lambda: 1000,
+    }
+    exec(
+        compile(
+            ast.Module(functions, type_ignores=[]),
+            str(FILETOLINK_MODULE_PATH),
+            "exec",
+        ),
+        namespace,
+    )
+
+    text, buttons = namespace["build_filetolink_status"](77)
+    assert "TRANSFER 01" in text
+    assert "movie&lt;final&gt;.mkv" in text
+    assert "bar-50.0 50.0%" in text
+    assert "🟢 Streaming" in text
+    assert buttons == [("↻ REFRESH", "status 77 fl"), ("↩ TASKS", "status 77 home")]
+
+    snapshot.update({"stale": True, "transfers": [], "active_count": 0})
+    text, buttons = namespace["build_filetolink_status"](77, standalone=True)
+    assert "No active transfers" in text
+    assert "🔴 Offline" in text
+    assert buttons[-1] == ("✕ CLOSE", "status 77 dismiss")
 
 
 def test_filetolink_tuning_is_wired_to_bsettings_and_web_process():

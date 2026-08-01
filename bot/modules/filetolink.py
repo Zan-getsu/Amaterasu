@@ -2,8 +2,11 @@ from asyncio import sleep
 from contextlib import suppress
 from datetime import datetime
 from html import escape
+from json import loads as json_loads
+from math import isfinite
 from os import environ
 from pathlib import Path
+from time import time
 from urllib.parse import quote
 
 from pyrogram import ContinuePropagation
@@ -14,7 +17,11 @@ from pyrogram.types import ReplyParameters
 from bot import LOGGER
 from bot.core.config_manager import Config
 from bot.helper.ext_utils.bot_utils import arg_parser, get_web_secret
-from bot.helper.ext_utils.status_utils import get_readable_file_size
+from bot.helper.ext_utils.status_utils import (
+    get_progress_bar_string,
+    get_readable_file_size,
+    get_readable_time,
+)
 from bot.helper.ext_utils.shortener_utils import short_url
 from bot.helper.telegram_helper.button_build import ButtonMaker
 from bot.helper.telegram_helper.compat import get_user_mention
@@ -77,56 +84,142 @@ def _cache_usage():
     return cache_dir, file_count, total_size
 
 
-async def send_filetolink_status(message):
-    from bot.core.tg_client import TgClient
+def _safe_number(value, default=0.0):
+    try:
+        number = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return float(default)
+    return number if isfinite(number) else float(default)
 
-    stream_clients = getattr(TgClient, "stream_clients", {}) or {}
-    stream_loads = getattr(TgClient, "stream_loads", {}) or {}
-    client_lines = []
-    for client_id in sorted(stream_clients):
-        client = stream_clients[client_id]
-        username = getattr(getattr(client, "me", None), "username", None)
-        name = f"@{username}" if username else ("main bot" if client_id == 0 else "stream bot")
-        load = stream_loads.get(client_id, 0)
-        client_lines.append(
-            f" • <code>#{client_id}</code> <b>{escape(str(name))}</b>"
-            f"  •  load <code>{load}</code>"
+
+def _safe_count(value, default=0):
+    return max(int(_safe_number(value, default)), 0)
+
+
+def _read_filetolink_status() -> dict:
+    """Read the web worker's atomic runtime snapshot."""
+    status_path = Path(
+        environ.get(
+            "FILETOLINK_STATUS_FILE", "/tmp/amaterasu-filetolink-status.json"
+        )
+    )
+    snapshot = {}
+    with suppress(OSError, ValueError, TypeError):
+        snapshot = json_loads(status_path.read_text(encoding="utf-8"))
+        if not isinstance(snapshot, dict):
+            snapshot = {}
+
+    cache = snapshot.get("cache") if isinstance(snapshot.get("cache"), dict) else {}
+    if "files" not in cache or "bytes" not in cache:
+        _, fallback_files, fallback_bytes = _cache_usage()
+        cache.setdefault("files", fallback_files)
+        cache.setdefault("bytes", fallback_bytes)
+    try:
+        cache_total_mb = max(int(environ.get("FILETOLINK_CACHE_TOTAL_MAX_MB", "2048")), 0)
+    except (TypeError, ValueError):
+        cache_total_mb = 2048
+    cache.setdefault("max_bytes", cache_total_mb * 1024 * 1024)
+    snapshot["cache"] = cache
+
+    updated_at = _safe_number(snapshot.get("updated_at"))
+    snapshot["stale"] = not updated_at or time() - updated_at > 10
+    snapshot.setdefault("workers", {"ready": 0, "total": 0})
+    snapshot.setdefault("transfers", [])
+    snapshot.setdefault("active_count", len(snapshot["transfers"]))
+    snapshot.setdefault("aggregate_speed", 0)
+    return snapshot
+
+
+def _filetolink_state(snapshot: dict) -> tuple[str, str]:
+    if not Config.BASE_URL:
+        return "⚪", "Disabled"
+    if snapshot.get("stale") or snapshot.get("state") == "stopped":
+        return "🔴", "Offline"
+    state = str(snapshot.get("state") or "ready").lower()
+    if state == "streaming":
+        return "🟢", "Streaming"
+    if state == "degraded":
+        return "🟠", "Degraded"
+    return "🟢", "Ready"
+
+
+def build_filetolink_status(sid: int, *, standalone: bool = False):
+    """Render FileToLink with the same task-card language as /status."""
+    snapshot = _read_filetolink_status()
+    transfers = snapshot.get("transfers")
+    if not isinstance(transfers, list):
+        transfers = []
+    transfers = sorted(
+        (item for item in transfers if isinstance(item, dict)),
+        key=lambda item: _safe_number(item.get("started_at")),
+    )[:5]
+
+    text = "<b>✦ FILETOLINK STATUS</b>\n\n"
+    for index, transfer in enumerate(transfers, start=1):
+        name = str(transfer.get("name") or "Unknown file")
+        if len(name) > 70:
+            name = f"{name[:67]}..."
+        total = _safe_count(transfer.get("total"))
+        processed = _safe_count(transfer.get("bytes_sent"))
+        progress = min(max(_safe_number(transfer.get("progress")), 0), 100)
+        mode = "Downloading" if str(transfer.get("mode")).lower() == "download" else "Streaming"
+        elapsed = get_readable_time(
+            max(time() - _safe_number(transfer.get("started_at"), time()), 0)
+        ) or "0s"
+        text += (
+            f"╭─ ▶ <b>TRANSFER {index:02d}</b> : <b>{escape(name)}</b>\n"
+            f"├─ <b>Status</b> : <code>{mode}</code>\n"
+            f"├─ <b>Progress</b> : <code>{get_progress_bar_string(progress)} {progress:.1f}%</code>\n"
+            f"├─ <b>Processed</b> : <code>{get_readable_file_size(processed)} / {get_readable_file_size(total)}</code>\n"
+            f"├─ <b>Speed</b> : <code>↓ {get_readable_file_size(_safe_number(transfer.get('speed')))}/s</code>\n"
+            f"├─ <b>Elapsed</b> : <code>◷ {elapsed}</code>\n"
+            f"╰─ <b>Source</b> : <code>{escape(str(transfer.get('source') or 'Telegram'))}</code>\n\n"
         )
 
-    cache_dir, cache_files, cache_size = _cache_usage()
-    cache_max_mb = environ.get("FILETOLINK_CACHE_MAX_MB", "256")
-    cache_total_mb = environ.get("FILETOLINK_CACHE_TOTAL_MAX_MB", "2048")
-    getfile_concurrency = Config.FILETOLINK_GETFILE_CONCURRENCY
-    prefetch_chunks = Config.FILETOLINK_PREFETCH_CHUNKS
-    base_url = Config.BASE_URL or "Not configured"
-    effective_bin_channel = Config.effective_bin_channel()
-    bin_channel = effective_bin_channel or "Disabled"
-    leech_dump = Config.LEECH_DUMP_CHAT or "Disabled"
-    stream_count = len(stream_clients) or 1
-    client_block = (
-        "\n".join(client_lines)
-        if client_lines
-        else " • <code>#0</code> <b>main bot</b>  •  load <code>0</code>"
+    if not transfers:
+        text += "<i>No active transfers.</i>\n\n"
+
+    state_icon, state_label = _filetolink_state(snapshot)
+    workers = snapshot.get("workers") if isinstance(snapshot.get("workers"), dict) else {}
+    ready_workers = _safe_count(workers.get("ready"))
+    total_workers = _safe_count(workers.get("total"))
+    active_count = _safe_count(snapshot.get("active_count"), len(transfers))
+    cache = snapshot["cache"]
+    cache_files = _safe_count(cache.get("files"))
+    cache_bytes = _safe_count(cache.get("bytes"))
+    cache_max = _safe_count(cache.get("max_bytes"))
+    cache_value = get_readable_file_size(cache_bytes)
+    if cache_max:
+        cache_value += f" / {get_readable_file_size(cache_max)}"
+    cache_value += f" • {cache_files} files"
+
+    text += (
+        "<b>✦ SERVICE METRICS</b>\n<pre>\n"
+        f"┌─ {'State':<9}: {state_icon} {state_label}\n"
+        f"├─ {'Transfers':<9}: {active_count} active\n"
+        f"├─ {'Workers':<9}: {ready_workers} / {total_workers} ready\n"
+        f"├─ {'Speed':<9}: ↓ {get_readable_file_size(_safe_number(snapshot.get('aggregate_speed')))}/s\n"
+        f"└─ {'Cache':<9}: {cache_value}\n</pre>"
     )
 
-    text = (
-        "<b>✦ FILETOLINK STATUS</b>\n"
-        "<code>"
-        f"┌─ {'Base URL':<12}: {escape(str(base_url))}\n"
-        f"├─ {'BIN_CHANNEL':<12}: {escape(str(bin_channel))}\n"
-        f"├─ {'Dump Chat':<12}: {escape(str(leech_dump))}\n"
-        f"├─ {'Stream Bots':<12}: {stream_count}\n"
-        f"├─ {'Cache Files':<12}: {cache_files}\n"
-        f"├─ {'Cache Size':<12}: {get_readable_file_size(cache_size)}\n"
-        f"├─ {'File Cap':<12}: {cache_max_mb} MB\n"
-        f"├─ {'Total Cap':<12}: {cache_total_mb} MB\n"
-        f"├─ {'TG Requests':<12}: {getfile_concurrency} / bot\n"
-        f"├─ {'Prefetch':<12}: {prefetch_chunks} chunks\n"
-        f"└─ {'Cache Dir':<12}: {escape(str(cache_dir))}\n\n"
-        f"{client_block}"
-        "</code>"
+    buttons = ButtonMaker()
+    buttons.data_button(
+        "↻ REFRESH",
+        f"status {sid} fl",
+        position="header",
+        style=ButtonStyle.PRIMARY,
     )
-    await send_message(message, text)
+    if standalone:
+        buttons.data_button("✕ CLOSE", f"status {sid} dismiss", position="header")
+    else:
+        buttons.data_button("↩ TASKS", f"status {sid} home", position="header")
+    return text, buttons.build_menu(h_cols=2)
+
+
+async def send_filetolink_status(message):
+    sid = message.chat.id
+    text, buttons = build_filetolink_status(sid, standalone=True)
+    await send_message(message, text, buttons)
 
 
 async def maybe_shorten(link: str) -> str:

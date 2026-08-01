@@ -5,13 +5,13 @@ from contextlib import asynccontextmanager, suppress
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 from importlib import import_module
-from json import loads as json_loads
+from json import dumps as json_dumps, loads as json_loads
 from logging import INFO, WARNING, FileHandler, StreamHandler, basicConfig, getLogger
 from os import environ
 from pathlib import Path
 from re import compile as re_compile
 from secrets import token_urlsafe
-from time import monotonic
+from time import monotonic, time as wall_time
 from urllib.parse import quote, urlencode, urlparse
 
 from aioaria2 import Aria2HttpClient
@@ -20,7 +20,7 @@ from aiohttp.client_exceptions import ClientError
 from aioqbt.client import create_client
 from aioqbt.exc import AQError
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -189,6 +189,7 @@ async def lifespan(app: FastAPI):
             Config.load_dict(db_config)
             Config.load_env()
             
+    status_publisher = None
     if Config.BOT_TOKEN:
         TgClient.bot = TgClient.tgClient(
             "Amaterasu-Web-Bot",
@@ -200,12 +201,21 @@ async def lifespan(app: FastAPI):
             
     aria2 = Aria2HttpClient("http://localhost:6800/jsonrpc")
     qbittorrent = await create_client("http://localhost:8090/api/v2/")
-    yield
-    await aria2.close()
-    await qbittorrent.close()
     if Config.BOT_TOKEN:
-        await TgClient.stop()
-    await database.disconnect()
+        status_publisher = create_task(_filetolink_status_publisher())
+    try:
+        yield
+    finally:
+        if status_publisher is not None:
+            status_publisher.cancel()
+            with suppress(CancelledError):
+                await status_publisher
+            await _publish_filetolink_status(state="stopped")
+        await aria2.close()
+        await qbittorrent.close()
+        if Config.BOT_TOKEN:
+            await TgClient.stop()
+        await database.disconnect()
 
 
 app = FastAPI(lifespan=lifespan)
@@ -1589,6 +1599,9 @@ CHUNK_SIZE = 1024 * 1024
 MAX_CONCURRENT_PER_CLIENT = 8
 STREAM_CLIENT_COOLDOWN_SECONDS = 45
 FILETOLINK_CACHE_DIR = environ.get("FILETOLINK_CACHE_DIR", "/tmp/amaterasu-filetolink")
+FILETOLINK_STATUS_FILE = environ.get(
+    "FILETOLINK_STATUS_FILE", "/tmp/amaterasu-filetolink-status.json"
+)
 VALID_DISPOSITIONS = {"inline", "attachment"}
 RANGE_REGEX = re.compile(r"^bytes=(?P<start>\d*)-(?P<end>\d*)$")
 CORS_HEADERS = {
@@ -1599,7 +1612,149 @@ CORS_HEADERS = {
 }
 _filetolink_cache_writers = set()
 _filetolink_chunk_slots = {}
+_filetolink_active_streams = {}
+_filetolink_cache_metrics = {"files": 0, "bytes": 0, "sampled_at": 0.0}
 _stream_client_health = {}
+
+
+def _filetolink_cache_usage() -> tuple[int, int]:
+    cache_dir = Path(FILETOLINK_CACHE_DIR)
+    file_count = 0
+    total_size = 0
+    with suppress(OSError):
+        for path in cache_dir.iterdir():
+            with suppress(OSError):
+                if path.is_file() and not path.name.endswith(".part"):
+                    file_count += 1
+                    total_size += path.stat().st_size
+    return file_count, total_size
+
+
+def _begin_filetolink_transfer(
+    filename: str,
+    mode: str,
+    source: str,
+    total: int,
+    client_id: int | None = None,
+) -> str:
+    transfer_id = token_urlsafe(8)
+    now = monotonic()
+    _filetolink_active_streams[transfer_id] = {
+        "id": transfer_id,
+        "name": str(filename),
+        "mode": str(mode),
+        "source": str(source),
+        "bytes_sent": 0,
+        "total": max(int(total or 0), 0),
+        "speed": 0.0,
+        "started_at": wall_time(),
+        "started_mono": now,
+        "client_id": client_id,
+    }
+    return transfer_id
+
+
+def _update_filetolink_transfer(transfer_id: str, bytes_sent: int) -> None:
+    transfer = _filetolink_active_streams.get(transfer_id)
+    if transfer is None:
+        return
+    sent = max(int(bytes_sent or 0), 0)
+    elapsed = max(monotonic() - transfer["started_mono"], 0.001)
+    transfer["bytes_sent"] = sent
+    transfer["speed"] = sent / elapsed
+
+
+def _finish_filetolink_transfer(transfer_id: str) -> None:
+    _filetolink_active_streams.pop(transfer_id, None)
+
+
+def _filetolink_worker_counts() -> tuple[int, int]:
+    from bot.core.tg_client import TgClient
+
+    clients = dict(getattr(TgClient, "stream_clients", {}) or {})
+    if not clients and getattr(TgClient, "bot", None) is not None:
+        clients = {0: TgClient.bot}
+    total = len(clients)
+    ready = sum(1 for client_id in clients if _stream_client_available(client_id))
+    return total, ready
+
+
+def _build_filetolink_status_snapshot(
+    cache_files: int,
+    cache_bytes: int,
+    state: str | None = None,
+) -> dict:
+    workers_total, workers_ready = _filetolink_worker_counts()
+    transfers = []
+    for transfer in list(_filetolink_active_streams.values()):
+        public_transfer = {
+            key: value
+            for key, value in transfer.items()
+            if key != "started_mono"
+        }
+        total = max(int(public_transfer.get("total") or 0), 0)
+        sent = max(int(public_transfer.get("bytes_sent") or 0), 0)
+        public_transfer["progress"] = min(sent * 100 / total, 100) if total else 0
+        transfers.append(public_transfer)
+
+    if state is None:
+        if workers_total and workers_ready < workers_total:
+            state = "degraded"
+        elif transfers:
+            state = "streaming"
+        else:
+            state = "ready"
+
+    return {
+        "version": 1,
+        "updated_at": wall_time(),
+        "state": state,
+        "workers": {"total": workers_total, "ready": workers_ready},
+        "active_count": len(transfers),
+        "aggregate_speed": sum(float(item.get("speed") or 0) for item in transfers),
+        "cache": {
+            "files": cache_files,
+            "bytes": cache_bytes,
+            "max_bytes": FILETOLINK_CACHE_TOTAL_MAX_BYTES,
+        },
+        "transfers": transfers,
+    }
+
+
+def _write_filetolink_status_snapshot(snapshot: dict) -> None:
+    status_path = Path(FILETOLINK_STATUS_FILE)
+    temp_path = status_path.with_name(f".{status_path.name}.tmp")
+    try:
+        status_path.parent.mkdir(parents=True, exist_ok=True)
+        temp_path.write_text(json_dumps(snapshot, ensure_ascii=False), encoding="utf-8")
+        temp_path.replace(status_path)
+    except OSError as error:
+        LOGGER.debug("Could not publish FileToLink status: %s", error)
+
+
+async def _publish_filetolink_status(state: str | None = None) -> None:
+    sampled_at = float(_filetolink_cache_metrics["sampled_at"])
+    if state is not None or sampled_at <= 0 or monotonic() - sampled_at >= 5:
+        cache_files, cache_bytes = await to_thread(_filetolink_cache_usage)
+        _filetolink_cache_metrics.update(
+            {"files": cache_files, "bytes": cache_bytes, "sampled_at": monotonic()}
+        )
+    else:
+        cache_files = int(_filetolink_cache_metrics["files"])
+        cache_bytes = int(_filetolink_cache_metrics["bytes"])
+    snapshot = _build_filetolink_status_snapshot(cache_files, cache_bytes, state)
+    await to_thread(_write_filetolink_status_snapshot, snapshot)
+
+
+async def _filetolink_status_publisher() -> None:
+    while True:
+        try:
+            await _publish_filetolink_status()
+        except CancelledError:
+            raise
+        except Exception as error:
+            LOGGER.warning("FileToLink status publisher recovered from: %s", error)
+        await sleep(1)
 
 
 def _positive_env_int(name: str, default: int, maximum: int) -> int:
@@ -2395,42 +2550,45 @@ async def stream_media(chat_id: str, message_id: int, request: Request, filename
             file_size,
         )
         if cached_path:
-            if ranged_response:
-                response = StreamingResponse(
-                    _iter_cached_range(cached_path, start, content_length),
-                    status_code=206,
-                    media_type=mime_type,
-                    headers=headers,
-                )
-                _release_stream_load(client_id)
-                return response
-
-            file_headers = {
-                key: value
-                for key, value in headers.items()
-                if key.lower()
-                not in {
-                    "accept-ranges",
-                    "content-disposition",
-                    "content-length",
-                    "content-range",
-                    "content-type",
-                }
-            }
-            response = FileResponse(
-                cached_path,
-                media_type=mime_type,
-                filename=filename,
-                content_disposition_type=disposition,
-                headers=file_headers,
-            )
             _release_stream_load(client_id)
+
+            async def cached_stream_generator():
+                transfer_id = _begin_filetolink_transfer(
+                    filename,
+                    mode,
+                    "Cache",
+                    content_length,
+                )
+                bytes_sent = 0
+                try:
+                    async for chunk in _iter_cached_range(
+                        cached_path, start, content_length
+                    ):
+                        bytes_sent += len(chunk)
+                        _update_filetolink_transfer(transfer_id, bytes_sent)
+                        yield chunk
+                finally:
+                    _finish_filetolink_transfer(transfer_id)
+
+            response = StreamingResponse(
+                cached_stream_generator(),
+                status_code=206 if ranged_response else 200,
+                media_type=mime_type,
+                headers=headers,
+            )
             return response
             
         async def stream_generator():
             cache_reservation = None
             cache_file = None
             cache_complete = False
+            transfer_id = _begin_filetolink_transfer(
+                filename,
+                mode,
+                "Telegram",
+                content_length,
+                client_id,
+            )
             try:
                 bytes_sent = 0
                 stream_started = monotonic()
@@ -2474,6 +2632,7 @@ async def stream_media(chat_id: str, message_id: int, request: Request, filename
                     if cache_file is not None:
                         await cache_file.write(chunk)
                     bytes_sent += len(chunk)
+                    _update_filetolink_transfer(transfer_id, bytes_sent)
                     yield chunk
 
                 if bytes_sent >= content_length:
@@ -2513,6 +2672,7 @@ async def stream_media(chat_id: str, message_id: int, request: Request, filename
                     file_size,
                     cache_complete,
                 )
+                _finish_filetolink_transfer(transfer_id)
                 _release_stream_load(client_id)
                 
         return StreamingResponse(

@@ -2,6 +2,7 @@ from psutil import cpu_percent, virtual_memory, disk_usage
 from time import time
 from asyncio import gather, iscoroutinefunction
 
+from pyrogram.enums import ButtonStyle
 from pyrogram.errors import QueryIdInvalid
 
 from .. import (
@@ -34,6 +35,35 @@ from ..helper.telegram_helper.message_utils import (
     edit_message,
 )
 from ..helper.telegram_helper.button_build import ButtonMaker
+from .filetolink import build_filetolink_status
+
+
+def _idle_status_panel(sid):
+    current_time = get_readable_time(time() - bot_start_time)
+    storage = disk_usage(DOWNLOAD_DIR)
+    free = get_readable_file_size(storage.free)
+    msg = f"""<b>✦ NO ACTIVE TASKS</b>
+<pre>┌─ {'CPU':<9}: {cpu_percent()}%
+├─ {'RAM':<9}: {virtual_memory().percent}%
+├─ {'Free':<9}: {free} [{round(100 - storage.percent, 1)}%]
+└─ {'Uptime':<9}: {current_time}</pre>
+
+<b>⋗ NOTE:</b>
+Each user can get status for their tasks by using: /{BotCommands.StatusCommand[3]} or /{BotCommands.StatusCommand[4]}"""
+    buttons = ButtonMaker()
+    buttons.data_button(
+        "▶ FILETOLINK",
+        f"status {sid} fl",
+        position="header",
+        style=ButtonStyle.PRIMARY,
+    )
+    buttons.data_button(
+        "↻ REFRESH",
+        f"status {sid} home",
+        position="header",
+        style=ButtonStyle.PRIMARY,
+    )
+    return msg, buttons.build_menu(h_cols=2)
 
 
 @new_task
@@ -41,17 +71,8 @@ async def task_status(_, message):
     async with task_dict_lock:
         count = len(task_dict)
     if count == 0:
-        currentTime = get_readable_time(time() - bot_start_time)
-        free = get_readable_file_size(disk_usage(DOWNLOAD_DIR).free)
-        msg = f"""<b>✦ NO ACTIVE TASKS</b>
-<pre>┌─ {'CPU':<9}: {cpu_percent()}%
-├─ {'RAM':<9}: {virtual_memory().percent}%
-├─ {'Free':<9}: {free} [{round(100 - disk_usage(DOWNLOAD_DIR).percent, 1)}%]
-└─ {'Uptime':<9}: {currentTime}</pre>
-
-<b>⋗ NOTE:</b>
-Each user can get status for their tasks by using: /{BotCommands.StatusCommand[3]} or /{BotCommands.StatusCommand[4]}"""
-        reply_message = await send_message(message, msg)
+        msg, buttons = _idle_status_panel(message.chat.id)
+        reply_message = await send_message(message, msg, buttons)
         await auto_delete_message(message, reply_message)
     else:
         text = message.text.split()
@@ -96,7 +117,36 @@ async def get_download_status(download):
 async def status_pages(_, query):
     data = query.data.split()
     key = int(data[1])
-    if data[2] == "ref":
+    if data[2] == "fl":
+        msg, button = build_filetolink_status(key)
+        async with task_dict_lock:
+            previous_view = None
+            if key in status_dict:
+                previous_view = status_dict[key].get("view", "tasks")
+                status_dict[key]["view"] = "filetolink"
+        result = await edit_message(query.message, msg, button)
+        if isinstance(result, str) and previous_view is not None:
+            async with task_dict_lock:
+                if key in status_dict:
+                    status_dict[key]["view"] = previous_view
+    elif data[2] == "home":
+        async with task_dict_lock:
+            has_status = key in status_dict
+            if has_status:
+                status_dict[key]["view"] = "tasks"
+        if has_status:
+            await update_status_message(key, force=True)
+            async with task_dict_lock:
+                has_status = key in status_dict
+            if not has_status:
+                msg, button = _idle_status_panel(key)
+                await edit_message(query.message, msg, button)
+        else:
+            msg, button = _idle_status_panel(key)
+            await edit_message(query.message, msg, button)
+    elif data[2] == "dismiss":
+        await delete_message(query.message)
+    elif data[2] == "ref":
         await update_status_message(key, force=True)
     elif data[2] in ["nex", "pre"]:
         async with task_dict_lock:

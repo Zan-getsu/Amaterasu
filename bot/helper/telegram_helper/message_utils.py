@@ -571,6 +571,8 @@ async def update_status_message(sid, force=False):
             return
         if time() < status_dict[sid].get("flood_until", 0):
             return
+        if status_dict[sid].get("view", "tasks") != "tasks":
+            return
         # Keep a small per-message guard for Telegram, but do not silently
         # override a configured interval below three seconds.
         min_interval = max(1, min(int(Config.STATUS_UPDATE_INTERVAL), 3))
