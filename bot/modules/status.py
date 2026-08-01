@@ -1,18 +1,13 @@
-from psutil import cpu_percent, virtual_memory, disk_usage
-from time import time
 from asyncio import gather, iscoroutinefunction
 
-from pyrogram.enums import ButtonStyle
 from pyrogram.errors import QueryIdInvalid
 
 from .. import (
     task_dict_lock,
     status_dict,
     task_dict,
-    bot_start_time,
     intervals,
     sabnzbd_client,
-    DOWNLOAD_DIR,
 )
 from ..core.config_manager import Config
 from ..core.torrent_manager import TorrentManager
@@ -22,14 +17,11 @@ from ..helper.ext_utils.status_utils import (
     EngineStatus,
     MirrorStatus,
     get_readable_file_size,
-    get_readable_time,
+    get_idle_status_message,
     speed_string_to_bytes,
 )
-from ..helper.telegram_helper.bot_commands import BotCommands
 from ..helper.telegram_helper.message_utils import (
-    send_message,
     delete_message,
-    auto_delete_message,
     send_status_message,
     update_status_message,
     edit_message,
@@ -38,42 +30,13 @@ from ..helper.telegram_helper.button_build import ButtonMaker
 from .filetolink import build_filetolink_status
 
 
-def _idle_status_panel(sid):
-    current_time = get_readable_time(time() - bot_start_time)
-    storage = disk_usage(DOWNLOAD_DIR)
-    free = get_readable_file_size(storage.free)
-    msg = f"""<b>✦ NO ACTIVE TASKS</b>
-<pre>┌─ {'CPU':<9}: {cpu_percent()}%
-├─ {'RAM':<9}: {virtual_memory().percent}%
-├─ {'Free':<9}: {free} [{round(100 - storage.percent, 1)}%]
-└─ {'Uptime':<9}: {current_time}</pre>
-
-<b>⋗ NOTE:</b>
-Each user can get status for their tasks by using: /{BotCommands.StatusCommand[3]} or /{BotCommands.StatusCommand[4]}"""
-    buttons = ButtonMaker()
-    buttons.data_button(
-        "▶ FILETOLINK",
-        f"status {sid} fl",
-        position="header",
-        style=ButtonStyle.PRIMARY,
-    )
-    buttons.data_button(
-        "↻ REFRESH",
-        f"status {sid} home",
-        position="header",
-        style=ButtonStyle.PRIMARY,
-    )
-    return msg, buttons.build_menu(h_cols=2)
-
-
 @new_task
 async def task_status(_, message):
     async with task_dict_lock:
         count = len(task_dict)
     if count == 0:
-        msg, buttons = _idle_status_panel(message.chat.id)
-        reply_message = await send_message(message, msg, buttons)
-        await auto_delete_message(message, reply_message)
+        await send_status_message(message)
+        await delete_message(message)
     else:
         text = message.text.split()
         if len(text) > 1:
@@ -139,10 +102,10 @@ async def status_pages(_, query):
             async with task_dict_lock:
                 has_status = key in status_dict
             if not has_status:
-                msg, button = _idle_status_panel(key)
+                msg, button = get_idle_status_message(key)
                 await edit_message(query.message, msg, button)
         else:
-            msg, button = _idle_status_panel(key)
+            msg, button = get_idle_status_message(key)
             await edit_message(query.message, msg, button)
     elif data[2] == "dismiss":
         await delete_message(query.message)

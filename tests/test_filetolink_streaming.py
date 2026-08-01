@@ -15,7 +15,15 @@ import pytest
 SOURCE_PATH = Path(__file__).parents[1] / "web" / "wserver.py"
 BOT_SETTINGS_PATH = Path(__file__).parents[1] / "bot" / "modules" / "bot_settings.py"
 STARTUP_PATH = Path(__file__).parents[1] / "bot" / "core" / "startup.py"
+TG_CLIENT_PATH = Path(__file__).parents[1] / "bot" / "core" / "tg_client.py"
 FILETOLINK_MODULE_PATH = Path(__file__).parents[1] / "bot" / "modules" / "filetolink.py"
+MESSAGE_UTILS_PATH = (
+    Path(__file__).parents[1]
+    / "bot"
+    / "helper"
+    / "telegram_helper"
+    / "message_utils.py"
+)
 
 
 def load_functions(names, namespace):
@@ -45,13 +53,14 @@ class FakeStreamClient:
         self.requested = []
 
     async def stream_media(self, _message, offset=0, limit=0):
-        assert limit == 1
-        self.requested.append(offset)
+        assert limit > 0
+        self.requested.append((offset, limit))
         self.in_flight += 1
         self.max_in_flight = max(self.max_in_flight, self.in_flight)
         try:
-            await asyncio.sleep(self.delays.get(offset, 0))
-            yield self.chunks[offset]
+            for chunk_index in range(offset, min(offset + limit, len(self.chunks))):
+                await asyncio.sleep(self.delays.get(chunk_index, 0))
+                yield self.chunks[chunk_index]
         finally:
             self.in_flight -= 1
 
@@ -69,16 +78,12 @@ def stream_namespace(monkeypatch):
         "CancelledError": asyncio.CancelledError,
         "CHUNK_SIZE": 16,
         "FILETOLINK_GETFILE_CONCURRENCY": 4,
-        "Semaphore": asyncio.Semaphore,
-        "_filetolink_chunk_slots": {},
-        "create_task": asyncio.create_task,
-        "gather": asyncio.gather,
         "sleep": asyncio.sleep,
+        "suppress": suppress,
     }
     return load_functions(
         {
-            "_chunk_slots_for_client",
-            "_fetch_telegram_chunk",
+            "_iter_native_telegram_batch",
             "_iter_telegram_range",
         },
         namespace,
@@ -109,24 +114,97 @@ async def test_telegram_range_prefetches_but_yields_bytes_in_order(stream_namesp
     )
 
     assert received == b"a" * 3 + b"b" * chunk_size + b"c" * 3
-    assert client.max_in_flight > 1
-    assert sorted(client.requested) == [0, 1, 2]
+    assert client.requested == [(0, 3)]
 
 
 @pytest.mark.asyncio
-async def test_chunk_pool_caps_each_telegram_worker(stream_namespace):
-    stream_namespace["FILETOLINK_GETFILE_CONCURRENCY"] = 2
-    client = FakeStreamClient([bytes([index]) * 16 for index in range(6)])
+async def test_native_batch_resumes_from_the_first_missing_chunk(stream_namespace):
+    class FlakyClient(FakeStreamClient):
+        async def stream_media(self, message, offset=0, limit=0):
+            self.requested.append((offset, limit))
+            if len(self.requested) == 1:
+                yield self.chunks[offset]
+                raise ConnectionError("temporary media session failure")
+            async for chunk in super().stream_media(message, offset, limit):
+                yield chunk
 
-    chunks = await asyncio.gather(
-        *(
-            stream_namespace["_fetch_telegram_chunk"](4, client, object(), index)
-            for index in range(6)
+    client = FlakyClient([bytes([index]) * 16 for index in range(3)])
+    received = [
+        chunk
+        async for chunk in stream_namespace["_iter_native_telegram_batch"](
+            client, object(), 0, 2
         )
-    )
+    ]
 
-    assert chunks == [bytes([index]) * 16 for index in range(6)]
-    assert client.max_in_flight == 2
+    assert received == [
+        (0, b"\x00" * 16),
+        (1, b"\x01" * 16),
+        (2, b"\x02" * 16),
+    ]
+    assert client.requested[0] == (0, 3)
+    assert client.requested[1] == (1, 2)
+
+
+@pytest.mark.asyncio
+async def test_native_batch_stops_after_three_failures_without_progress(
+    stream_namespace,
+):
+    class FailingClient:
+        def __init__(self):
+            self.requested = []
+
+        async def stream_media(self, _message, offset=0, limit=0):
+            self.requested.append((offset, limit))
+            raise ConnectionError("Telegram media DC unavailable")
+            yield  # pragma: no cover
+
+    async def no_sleep(_delay):
+        return None
+
+    stream_namespace["sleep"] = no_sleep
+    client = FailingClient()
+    with pytest.raises(OSError, match="failed after 3 attempts"):
+        _ = [
+            chunk
+            async for chunk in stream_namespace["_iter_native_telegram_batch"](
+                client, object(), 4, 6
+            )
+        ]
+
+    assert client.requested == [(4, 3), (4, 3), (4, 3)]
+
+
+@pytest.mark.asyncio
+async def test_native_batch_ignores_cleanup_error_after_success(stream_namespace):
+    class StreamWithBrokenClose:
+        def __init__(self):
+            self.sent = False
+
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self):
+            if self.sent:
+                raise StopAsyncIteration
+            self.sent = True
+            return b"x" * 16
+
+        async def aclose(self):
+            raise ConnectionError("close failed")
+
+    class Client:
+        def stream_media(self, _message, offset=0, limit=0):
+            assert (offset, limit) == (0, 1)
+            return StreamWithBrokenClose()
+
+    received = [
+        chunk
+        async for chunk in stream_namespace["_iter_native_telegram_batch"](
+            Client(), object(), 0, 0
+        )
+    ]
+
+    assert received == [(0, b"x" * 16)]
 
 
 def test_prefetch_depth_shares_worker_across_active_transfers(monkeypatch):
@@ -141,6 +219,8 @@ def test_prefetch_depth_shares_worker_across_active_transfers(monkeypatch):
     }
     load_functions({"_transfer_prefetch_depth"}, namespace)
 
+    assert namespace["_transfer_prefetch_depth"](3) == 8
+    fake_client_type.stream_loads[3] = 2
     assert namespace["_transfer_prefetch_depth"](3) == 4
     fake_client_type.stream_loads[3] = 3
     assert namespace["_transfer_prefetch_depth"](3) == 2
@@ -335,6 +415,70 @@ def test_filetolink_status_renderer_executes_active_and_idle_views():
     assert buttons[-1] == ("✕ CLOSE", "status 77 dismiss")
 
 
+@pytest.mark.asyncio
+async def test_status_timer_refreshes_the_visible_filetolink_panel(monkeypatch):
+    tree = ast.parse(MESSAGE_UTILS_PATH.read_text(encoding="utf-8"))
+    function = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.AsyncFunctionDef)
+        and node.name == "update_status_message"
+    )
+    filetolink_module = ModuleType("bot.modules.filetolink")
+    filetolink_module.build_filetolink_status = lambda sid: (
+        f"filetolink-{sid}-updated",
+        "buttons",
+    )
+    modules_package = ModuleType("bot.modules")
+    modules_package.__path__ = []
+    monkeypatch.setitem(sys.modules, "bot.modules", modules_package)
+    monkeypatch.setitem(sys.modules, "bot.modules.filetolink", filetolink_module)
+
+    edited = []
+
+    async def edit_message(message, text, buttons, **_kwargs):
+        edited.append((message, text, buttons))
+        return message
+
+    status_message = SimpleNamespace(text="old task status")
+    namespace = {
+        "Config": SimpleNamespace(STATUS_UPDATE_INTERVAL=1),
+        "LOGGER": logging.getLogger(__name__),
+        "edit_message": edit_message,
+        "get_idle_status_message": lambda sid: (f"idle-{sid}", None),
+        "get_readable_message": None,
+        "intervals": {"stopAll": False, "status": {}},
+        "re_search": re.search,
+        "status_dict": {
+            77: {
+                "message": status_message,
+                "time": 0,
+                "page_no": 1,
+                "page_step": 1,
+                "status": "All",
+                "is_user": False,
+                "view": "filetolink",
+            }
+        },
+        "task_dict": {},
+        "task_dict_lock": asyncio.Lock(),
+        "time": lambda: 100.0,
+    }
+    exec(
+        compile(
+            ast.Module([function], type_ignores=[]),
+            str(MESSAGE_UTILS_PATH),
+            "exec",
+        ),
+        namespace,
+    )
+
+    await namespace["update_status_message"](77)
+
+    assert edited == [(status_message, "filetolink-77-updated", "buttons")]
+    assert status_message.text == "filetolink-77-updated"
+
+
 def test_filetolink_tuning_is_wired_to_bsettings_and_web_process():
     settings_source = BOT_SETTINGS_PATH.read_text(encoding="utf-8")
     startup_source = STARTUP_PATH.read_text(encoding="utf-8")
@@ -347,6 +491,14 @@ def test_filetolink_tuning_is_wired_to_bsettings_and_web_process():
         assert f'proc_env["{key}"]' in startup_source
 
     assert "_apply_filetolink_web_tuning" in settings_source
+
+
+def test_filetolink_prewarm_builds_the_native_download_session_pool():
+    source = TG_CLIENT_PATH.read_text(encoding="utf-8")
+
+    assert 'getattr(client, "DOWNLOAD_POOL_SIZE", 1)' in source
+    assert "client._get_media_session_pool(" in source
+    assert "sessions=%s/%s" in source
 
 
 def test_filetolink_tuning_is_exposed_and_safely_bounded():

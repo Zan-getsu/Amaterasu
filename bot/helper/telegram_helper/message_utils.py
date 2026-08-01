@@ -34,12 +34,12 @@ try:
 except ImportError:
     FloodPremiumWait = FloodWait
 
-from ... import LOGGER, bot_cache, categories_dict, intervals, status_dict, task_dict_lock, user_data
+from ... import LOGGER, bot_cache, categories_dict, intervals, status_dict, task_dict, task_dict_lock, user_data
 from ...core.config_manager import Config
 from ...core.tg_client import TgClient
 from ..ext_utils.bot_utils import SetInterval, download_image_url, fetch_drive_cat
 from ..ext_utils.exceptions import TgLinkException
-from ..ext_utils.status_utils import get_readable_message
+from ..ext_utils.status_utils import get_idle_status_message, get_readable_message
 from .button_build import ButtonMaker
 from .inline_ui import style_inline_text
 
@@ -571,27 +571,34 @@ async def update_status_message(sid, force=False):
             return
         if time() < status_dict[sid].get("flood_until", 0):
             return
-        if status_dict[sid].get("view", "tasks") != "tasks":
-            return
         # Keep a small per-message guard for Telegram, but do not silently
         # override a configured interval below three seconds.
         min_interval = max(1, min(int(Config.STATUS_UPDATE_INTERVAL), 3))
         if not force and time() - status_dict[sid]["time"] < min_interval:
             return
         status_dict[sid]["time"] = time()
-        page_no = status_dict[sid]["page_no"]
-        status = status_dict[sid]["status"]
         is_user = status_dict[sid]["is_user"]
-        page_step = status_dict[sid]["page_step"]
-        text, buttons = await get_readable_message(
-            sid, is_user, page_no, status, page_step
-        )
+        if status_dict[sid].get("view", "tasks") == "filetolink":
+            from bot.modules.filetolink import build_filetolink_status
+
+            text, buttons = build_filetolink_status(sid)
+        elif not is_user and not task_dict:
+            text, buttons = get_idle_status_message(sid)
+        else:
+            page_no = status_dict[sid]["page_no"]
+            status = status_dict[sid]["status"]
+            page_step = status_dict[sid]["page_step"]
+            text, buttons = await get_readable_message(
+                sid, is_user, page_no, status, page_step
+            )
         if text is None:
-            del status_dict[sid]
-            if obj := intervals["status"].get(sid):
-                obj.cancel()
-                del intervals["status"][sid]
-            return
+            if is_user:
+                del status_dict[sid]
+                if obj := intervals["status"].get(sid):
+                    obj.cancel()
+                    del intervals["status"][sid]
+                return
+            text, buttons = get_idle_status_message(sid)
         if text != status_dict[sid]["message"].text:
             message = await edit_message(
                 status_dict[sid]["message"], text, buttons, block=False, photo="IMAGES"
@@ -635,15 +642,20 @@ async def send_status_message(msg, user_id=0):
             page_no = status_dict[sid]["page_no"]
             status = status_dict[sid]["status"]
             page_step = status_dict[sid]["page_step"]
-            text, buttons = await get_readable_message(
-                sid, is_user, page_no, status, page_step
-            )
+            if not is_user and not task_dict:
+                text, buttons = get_idle_status_message(sid)
+            else:
+                text, buttons = await get_readable_message(
+                    sid, is_user, page_no, status, page_step
+                )
             if text is None:
-                del status_dict[sid]
-                if obj := intervals["status"].get(sid):
-                    obj.cancel()
-                    del intervals["status"][sid]
-                return
+                if is_user:
+                    del status_dict[sid]
+                    if obj := intervals["status"].get(sid):
+                        obj.cancel()
+                        del intervals["status"][sid]
+                    return
+                text, buttons = get_idle_status_message(sid)
             old_message = status_dict[sid]["message"]
             message = await send_message(msg, text, buttons, block=False, photo="IMAGES")
             if isinstance(message, str):
@@ -653,11 +665,18 @@ async def send_status_message(msg, user_id=0):
                 return
             await delete_message(old_message)
             message.text = text
-            status_dict[sid].update({"message": message, "time": time()})
+            status_dict[sid].update(
+                {"message": message, "time": time(), "view": "tasks"}
+            )
         else:
-            text, buttons = await get_readable_message(sid, is_user)
+            if not is_user and not task_dict:
+                text, buttons = get_idle_status_message(sid)
+            else:
+                text, buttons = await get_readable_message(sid, is_user)
             if text is None:
-                return
+                if is_user:
+                    return
+                text, buttons = get_idle_status_message(sid)
             message = await send_message(msg, text, buttons, block=False, photo="IMAGES")
             if isinstance(message, str):
                 LOGGER.error(

@@ -140,7 +140,7 @@ DEFAULT_DESP = {
     "HELPER_TOKENS": "Space-separated helper bot tokens used by HyperDL and HyperUP.",
     "USE_HELPER_BOTS_FOR_FILETOLINK": "Also use HELPER_TOKENS as FileToLink stream workers. Helpers must be able to read the effective BIN channel. Default: True.",
     "FILETOLINK_GETFILE_CONCURRENCY": "Maximum concurrent Telegram GetFile requests per FileToLink stream bot. Valid range: 1-32. Default: 8.",
-    "FILETOLINK_PREFETCH_CHUNKS": "Maximum ordered look-ahead chunks per FileToLink transfer. Automatically capped at GETFILE_CONCURRENCY and reduced under load. Default: 4.",
+    "FILETOLINK_PREFETCH_CHUNKS": "Shared-load look-ahead chunks per FileToLink transfer. An idle transfer can use the full GETFILE_CONCURRENCY budget; concurrent transfers are reduced to a fair share. Default: 4.",
     "BOT_MAX_TASKS": "Max tasks (including queued) the bot runs in parallel. 0 = unlimited.",
     "BOT_PM": "Send files/links to bot owner PM. Default: False.",
     "CMD_SUFFIX": "Text appended to all bot commands. Useful for running multiple bot instances.",

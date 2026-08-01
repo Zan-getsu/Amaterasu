@@ -634,16 +634,26 @@ class TgClient:
                 # uses a separate media session, so establish the home media
                 # DC now to avoid first-request connection/auth latency.
                 media_dc_id = await client.storage.dc_id()
-                media_session = await client.get_session(
-                    media_dc_id,
-                    is_media=True,
+                requested_pool_size = max(
+                    1,
+                    int(getattr(client, "DOWNLOAD_POOL_SIZE", 1) or 1),
                 )
-                if not media_session.is_started.is_set():
-                    raise ConnectionError("media session did not start")
+                media_pool = await client._get_media_session_pool(
+                    media_dc_id,
+                    requested_pool_size,
+                )
+                ready_sessions = sum(
+                    session.is_started.is_set() for session in media_pool
+                )
+                if not ready_sessions:
+                    raise ConnectionError("media session pool did not start")
                 LOGGER.info(
-                    "Pre-warmed FileToLink stream client %s (control + media DC%s)",
+                    "Pre-warmed FileToLink stream client %s "
+                    "(control + media DC%s, sessions=%s/%s)",
                     client_id,
                     media_dc_id,
+                    ready_sessions,
+                    requested_pool_size,
                 )
                 return True
             except Exception as error:

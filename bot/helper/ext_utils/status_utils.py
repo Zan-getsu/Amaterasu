@@ -259,6 +259,35 @@ def _premium_field(label, value, *, code=True, branch="├─"):
     return f"{branch} <b>{label}</b> : {rendered}\n"
 
 
+def get_idle_status_message(sid):
+    """Build the persistent no-task view used by the status refresh loop."""
+    from ..telegram_helper.bot_commands import BotCommands
+
+    storage = disk_usage(DOWNLOAD_DIR)
+    msg = f"""<b>✦ NO ACTIVE TASKS</b>
+<pre>┌─ {'CPU':<9}: {cpu_percent()}%
+├─ {'RAM':<9}: {virtual_memory().percent}%
+├─ {'Free':<9}: {get_readable_file_size(storage.free)} [{round(100 - storage.percent, 1)}%]
+└─ {'Uptime':<9}: {get_readable_time(time() - bot_start_time)}</pre>
+
+<b>⋗ NOTE:</b>
+Each user can get status for their tasks by using: /{BotCommands.StatusCommand[3]} or /{BotCommands.StatusCommand[4]}"""
+    buttons = ButtonMaker()
+    buttons.data_button(
+        "▶ FILETOLINK",
+        f"status {sid} fl",
+        position="header",
+        style=ButtonStyle.PRIMARY,
+    )
+    buttons.data_button(
+        "↻ REFRESH",
+        f"status {sid} home",
+        position="header",
+        style=ButtonStyle.PRIMARY,
+    )
+    return msg, buttons.build_menu(h_cols=2)
+
+
 async def get_readable_message(sid, is_user, page_no=1, status="All", page_step=1):
     msg = ""
     button = None

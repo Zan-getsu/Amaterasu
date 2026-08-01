@@ -1,6 +1,6 @@
 import mimetypes
 import re
-from asyncio import CancelledError, Semaphore, create_task, gather, sleep, to_thread
+from asyncio import CancelledError, create_task, gather, sleep, to_thread
 from contextlib import asynccontextmanager, suppress
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
@@ -1611,7 +1611,6 @@ CORS_HEADERS = {
     "Access-Control-Expose-Headers": "Content-Length, Content-Range, Content-Disposition",
 }
 _filetolink_cache_writers = set()
-_filetolink_chunk_slots = {}
 _filetolink_active_streams = {}
 _filetolink_cache_metrics = {"files": 0, "bytes": 0, "sampled_at": 0.0}
 _stream_client_health = {}
@@ -1801,57 +1800,64 @@ FILETOLINK_CACHE_MAX_BYTES = _resolve_cache_max_bytes()
 FILETOLINK_CACHE_TOTAL_MAX_BYTES = _resolve_cache_total_max_bytes()
 
 
-def _chunk_slots_for_client(client_id: int) -> Semaphore:
-    slots = _filetolink_chunk_slots.get(client_id)
-    if slots is None:
-        slots = Semaphore(FILETOLINK_GETFILE_CONCURRENCY)
-        _filetolink_chunk_slots[client_id] = slots
-    return slots
-
-
 def _transfer_prefetch_depth(client_id: int) -> int:
-    """Give quiet workers more pipeline depth and busy workers a fair share."""
+    """Fill an idle worker, then divide its request budget under contention."""
     from bot.core.tg_client import TgClient
 
     active_transfers = max(1, int(TgClient.stream_loads.get(client_id, 1) or 1))
+    if active_transfers == 1:
+        return FILETOLINK_GETFILE_CONCURRENCY
     fair_share = max(1, FILETOLINK_GETFILE_CONCURRENCY // active_transfers)
     return min(FILETOLINK_PREFETCH_CHUNKS, fair_share)
 
 
-async def _fetch_telegram_chunk(client_id: int, client, message, chunk_index: int) -> bytes:
-    """Fetch one Telegram chunk with bounded retries and shared backpressure."""
+async def _iter_native_telegram_batch(client, message, first_chunk: int, last_chunk: int):
+    """Use WZGram's native ordered pool and resume a partial batch on errors."""
     from pyrogram.errors import FloodWait
 
+    next_chunk = first_chunk
+    failures = 0
     last_error = None
-    for attempt in range(3):
+    while next_chunk <= last_chunk:
+        media_stream = None
         try:
-            async with _chunk_slots_for_client(client_id):
-                media_stream = client.stream_media(
-                    message,
-                    offset=chunk_index,
-                    limit=1,
-                )
-                try:
-                    async for chunk in media_stream:
-                        if chunk:
-                            return chunk
-                finally:
-                    close_stream = getattr(media_stream, "aclose", None)
-                    if close_stream is not None:
-                        await close_stream()
-            raise EOFError(f"Telegram returned no data for chunk {chunk_index}")
+            media_stream = client.stream_media(
+                message,
+                offset=next_chunk,
+                limit=last_chunk - next_chunk + 1,
+            )
+            async for chunk in media_stream:
+                if not chunk:
+                    raise EOFError(f"Telegram returned no data for chunk {next_chunk}")
+                chunk_index = next_chunk
+                next_chunk += 1
+                failures = 0
+                yield chunk_index, chunk
+                if next_chunk > last_chunk:
+                    return
+            raise EOFError(f"Telegram batch ended before chunk {next_chunk}")
         except CancelledError:
             raise
         except FloodWait as error:
             last_error = error
+            failures += 1
+            if failures >= 3:
+                break
             await sleep(max(float(getattr(error, "value", 1)), 1.0) + 1.0)
         except Exception as error:
             last_error = error
-            if attempt < 2:
-                await sleep(min(2 ** attempt, 2))
+            failures += 1
+            if failures >= 3:
+                break
+            await sleep(min(2 ** (failures - 1), 2))
+        finally:
+            close_stream = getattr(media_stream, "aclose", None) if media_stream else None
+            if close_stream is not None:
+                with suppress(Exception):
+                    await close_stream()
 
     raise OSError(
-        f"Telegram chunk {chunk_index} failed after 3 attempts: {last_error}"
+        f"Telegram chunk {next_chunk} failed after 3 attempts: {last_error}"
     ) from last_error
 
 
@@ -1867,20 +1873,16 @@ async def _iter_telegram_range(
     first_chunk = start // CHUNK_SIZE
     last_chunk = end // CHUNK_SIZE
     expected_chunk = first_chunk
-    next_chunk = first_chunk
-    pending = {}
-
-    try:
-        while expected_chunk <= last_chunk:
-            target_depth = _transfer_prefetch_depth(client_id)
-            while len(pending) < target_depth and next_chunk <= last_chunk:
-                pending[next_chunk] = create_task(
-                    _fetch_telegram_chunk(client_id, client, message, next_chunk)
-                )
-                next_chunk += 1
-
-            chunk = await pending.pop(expected_chunk)
-            chunk_start = expected_chunk * CHUNK_SIZE
+    while expected_chunk <= last_chunk:
+        target_depth = _transfer_prefetch_depth(client_id)
+        batch_last = min(expected_chunk + target_depth - 1, last_chunk)
+        async for chunk_index, chunk in _iter_native_telegram_batch(
+            client,
+            message,
+            expected_chunk,
+            batch_last,
+        ):
+            chunk_start = chunk_index * CHUNK_SIZE
             expected_size = min(CHUNK_SIZE, file_size - chunk_start)
             if len(chunk) < expected_size:
                 raise OSError(
@@ -1892,16 +1894,10 @@ async def _iter_telegram_range(
             right = min(end - chunk_start + 1, len(chunk))
             if right <= left:
                 raise OSError(
-                    f"Telegram chunk {expected_chunk} does not cover the requested range"
+                    f"Telegram chunk {chunk_index} does not cover the requested range"
                 )
             yield chunk[left:right]
-            expected_chunk += 1
-    finally:
-        for task in pending.values():
-            if not task.done():
-                task.cancel()
-        if pending:
-            await gather(*pending.values(), return_exceptions=True)
+            expected_chunk = chunk_index + 1
 
 
 async def _iter_cached_range(path: Path, start: int, length: int):

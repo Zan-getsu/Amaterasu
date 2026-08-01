@@ -193,18 +193,21 @@ def test_filetolink_status_uses_main_status_design_and_essential_metrics():
         assert internal_label not in status_renderer
 
 
-def test_main_status_has_filetolink_navigation_and_view_guard():
+def test_main_status_has_filetolink_navigation_and_auto_refresh():
     status_source = STATUS_PATH.read_text(encoding="utf-8")
     status_utils_source = STATUS_UTILS_PATH.read_text(encoding="utf-8")
     message_utils_source = MESSAGE_UTILS_PATH.read_text(encoding="utf-8")
 
-    assert '"▶ FILETOLINK"' in status_source
     assert '"▶ FILETOLINK"' in status_utils_source
+    assert "get_idle_status_message" in status_source
+    assert "not is_user and not task_dict" in message_utils_source
     assert 'data[2] == "fl"' in status_source
     assert 'data[2] == "home"' in status_source
     assert 'status_dict[key]["view"] = "filetolink"' in status_source
     assert "if not has_status:" in status_source
-    assert 'get("view", "tasks") != "tasks"' in message_utils_source
+    assert 'get("view", "tasks") == "filetolink"' in message_utils_source
+    assert "build_filetolink_status(sid)" in message_utils_source
+    assert "get_idle_status_message(sid)" in message_utils_source
 
 
 def test_port_is_hidden_from_telegram_settings():
