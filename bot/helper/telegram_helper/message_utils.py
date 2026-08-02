@@ -581,7 +581,10 @@ async def update_status_message(sid, force=False):
         if status_dict[sid].get("view", "tasks") == "filetolink":
             from bot.modules.filetolink import build_filetolink_status
 
-            text, buttons = build_filetolink_status(sid)
+            text, buttons = build_filetolink_status(
+                sid,
+                page_no=status_dict[sid].get("filetolink_page", 1),
+            )
         elif not is_user and not task_dict:
             text, buttons = get_idle_status_message(sid)
         else:

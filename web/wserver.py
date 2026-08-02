@@ -1,6 +1,6 @@
 import mimetypes
 import re
-from asyncio import CancelledError, create_task, gather, sleep, to_thread
+from asyncio import CancelledError, create_task, current_task, gather, sleep, to_thread
 from contextlib import asynccontextmanager, suppress
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
@@ -1648,6 +1648,8 @@ def _begin_filetolink_transfer(
         "speed": 0.0,
         "started_at": wall_time(),
         "started_mono": now,
+        "last_activity_mono": now,
+        "task": current_task(),
         "client_id": client_id,
     }
     return transfer_id
@@ -1661,10 +1663,43 @@ def _update_filetolink_transfer(transfer_id: str, bytes_sent: int) -> None:
     elapsed = max(monotonic() - transfer["started_mono"], 0.001)
     transfer["bytes_sent"] = sent
     transfer["speed"] = sent / elapsed
+    transfer["last_activity_mono"] = monotonic()
 
 
 def _finish_filetolink_transfer(transfer_id: str) -> None:
     _filetolink_active_streams.pop(transfer_id, None)
+
+
+def _prune_stale_filetolink_transfers() -> None:
+    """Cancel transfers which have delivered no bytes for too long."""
+    now = monotonic()
+    for transfer_id, transfer in list(_filetolink_active_streams.items()):
+        task = transfer.get("task")
+        task_done = task is not None and task.done()
+        last_activity = float(
+            transfer.get("last_activity_mono", transfer.get("started_mono", now))
+        )
+        idle_seconds = max(now - last_activity, 0)
+        if not task_done and idle_seconds < FILETOLINK_TRANSFER_STALE_SECONDS:
+            continue
+
+        # Remove it before cancellation so the next published snapshot is
+        # immediately correct.  The generator's finally block releases the
+        # Telegram worker load and any progressive-cache reservation.
+        _filetolink_active_streams.pop(transfer_id, None)
+        if task is not None and not task_done:
+            task.cancel()
+        elif transfer.get("client_id") is not None:
+            # A completed task with a surviving registry entry never reached
+            # its normal finally block, so its worker load still needs release.
+            _release_stream_load(transfer["client_id"])
+        LOGGER.warning(
+            "Removed inactive FileToLink transfer: name=%s client=%s idle=%.1fs reason=%s",
+            transfer.get("name", "Unknown file"),
+            transfer.get("client_id"),
+            idle_seconds,
+            "completed" if task_done else "stalled",
+        )
 
 
 def _filetolink_worker_counts() -> tuple[int, int]:
@@ -1689,7 +1724,7 @@ def _build_filetolink_status_snapshot(
         public_transfer = {
             key: value
             for key, value in transfer.items()
-            if key != "started_mono"
+            if key not in {"started_mono", "last_activity_mono", "task"}
         }
         total = max(int(public_transfer.get("total") or 0), 0)
         sent = max(int(public_transfer.get("bytes_sent") or 0), 0)
@@ -1732,6 +1767,7 @@ def _write_filetolink_status_snapshot(snapshot: dict) -> None:
 
 
 async def _publish_filetolink_status(state: str | None = None) -> None:
+    _prune_stale_filetolink_transfers()
     sampled_at = float(_filetolink_cache_metrics["sampled_at"])
     if state is not None or sampled_at <= 0 or monotonic() - sampled_at >= 5:
         cache_files, cache_bytes = await to_thread(_filetolink_cache_usage)
@@ -1778,6 +1814,7 @@ FILETOLINK_PREFETCH_CHUNKS = _positive_env_int(
     4,
     FILETOLINK_GETFILE_CONCURRENCY,
 )
+FILETOLINK_TRANSFER_STALE_SECONDS = 300
 
 
 def _resolve_cache_max_bytes() -> int:

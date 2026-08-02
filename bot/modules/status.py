@@ -80,18 +80,23 @@ async def get_download_status(download):
 async def status_pages(_, query):
     data = query.data.split()
     key = int(data[1])
-    if data[2] == "fl":
-        msg, button = build_filetolink_status(key)
+    if data[2] in {"fl", "flp"}:
+        requested_page = int(data[3]) if data[2] == "flp" and len(data) > 3 else 1
+        msg, button = build_filetolink_status(key, page_no=requested_page)
         async with task_dict_lock:
             previous_view = None
+            previous_page = 1
             if key in status_dict:
                 previous_view = status_dict[key].get("view", "tasks")
+                previous_page = status_dict[key].get("filetolink_page", 1)
                 status_dict[key]["view"] = "filetolink"
+                status_dict[key]["filetolink_page"] = requested_page
         result = await edit_message(query.message, msg, button)
         if isinstance(result, str) and previous_view is not None:
             async with task_dict_lock:
                 if key in status_dict:
                     status_dict[key]["view"] = previous_view
+                    status_dict[key]["filetolink_page"] = previous_page
     elif data[2] == "home":
         async with task_dict_lock:
             has_status = key in status_dict

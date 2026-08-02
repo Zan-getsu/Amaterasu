@@ -143,7 +143,12 @@ def _filetolink_state(snapshot: dict) -> tuple[str, str]:
     return "🟢", "Ready"
 
 
-def build_filetolink_status(sid: int, *, standalone: bool = False):
+def build_filetolink_status(
+    sid: int,
+    *,
+    standalone: bool = False,
+    page_no: int = 1,
+):
     """Render FileToLink with the same task-card language as /status."""
     snapshot = _read_filetolink_status()
     transfers = snapshot.get("transfers")
@@ -152,9 +157,9 @@ def build_filetolink_status(sid: int, *, standalone: bool = False):
     transfers = sorted(
         (item for item in transfers if isinstance(item, dict)),
         key=lambda item: _safe_number(item.get("started_at")),
-    )[:5]
+    )
 
-    text = "<b>✦ FILETOLINK STATUS</b>\n\n"
+    transfer_cards = []
     for index, transfer in enumerate(transfers, start=1):
         name = str(transfer.get("name") or "Unknown file")
         if len(name) > 70:
@@ -166,7 +171,7 @@ def build_filetolink_status(sid: int, *, standalone: bool = False):
         elapsed = get_readable_time(
             max(time() - _safe_number(transfer.get("started_at"), time()), 0)
         ) or "0s"
-        text += (
+        transfer_cards.append(
             f"╭─ ▶ <b>TRANSFER {index:02d}</b> : <b>{escape(name)}</b>\n"
             f"├─ <b>Status</b> : <code>{mode}</code>\n"
             f"├─ <b>Progress</b> : <code>{get_progress_bar_string(progress)} {progress:.1f}%</code>\n"
@@ -175,9 +180,6 @@ def build_filetolink_status(sid: int, *, standalone: bool = False):
             f"├─ <b>Elapsed</b> : <code>◷ {elapsed}</code>\n"
             f"╰─ <b>Source</b> : <code>{escape(str(transfer.get('source') or 'Telegram'))}</code>\n\n"
         )
-
-    if not transfers:
-        text += "<i>No active transfers.</i>\n\n"
 
     state_icon, state_label = _filetolink_state(snapshot)
     workers = snapshot.get("workers") if isinstance(snapshot.get("workers"), dict) else {}
@@ -193,7 +195,7 @@ def build_filetolink_status(sid: int, *, standalone: bool = False):
         cache_value += f" / {get_readable_file_size(cache_max)}"
     cache_value += f" • {cache_files} files"
 
-    text += (
+    metrics = (
         "<b>✦ SERVICE METRICS</b>\n<pre>\n"
         f"┌─ {'State':<9}: {state_icon} {state_label}\n"
         f"├─ {'Transfers':<9}: {active_count} active\n"
@@ -202,10 +204,41 @@ def build_filetolink_status(sid: int, *, standalone: bool = False):
         f"└─ {'Cache':<9}: {cache_value}\n</pre>"
     )
 
+    # /status is normally a media message, so Telegram applies its caption
+    # limit. STATUS_LIMIT remains the maximum number of transfers per page;
+    # the secondary budget keeps every page safely below that caption limit.
+    status_limit = Config.STATUS_LIMIT if Config.STATUS_LIMIT > 0 else 10
+    caption_budget = 820
+    base_length = len("<b>✦ FILETOLINK STATUS</b>\n\n") + len(metrics)
+    pages = []
+    current_page = []
+    current_length = base_length
+    for card in transfer_cards:
+        if current_page and (
+            len(current_page) >= status_limit
+            or current_length + len(card) > caption_budget
+        ):
+            pages.append(current_page)
+            current_page = []
+            current_length = base_length
+        current_page.append(card)
+        current_length += len(card)
+    if current_page or not pages:
+        pages.append(current_page)
+
+    page_count = len(pages)
+    page_no = min(max(int(page_no or 1), 1), page_count)
+    text = "<b>✦ FILETOLINK STATUS</b>\n\n"
+    if pages[page_no - 1]:
+        text += "".join(pages[page_no - 1])
+    else:
+        text += "<i>No active transfers.</i>\n\n"
+    text += metrics
+
     buttons = ButtonMaker()
     buttons.data_button(
         "↻ REFRESH",
-        f"status {sid} fl",
+        f"status {sid} flp {page_no}",
         position="header",
         style=ButtonStyle.PRIMARY,
     )
@@ -213,7 +246,23 @@ def build_filetolink_status(sid: int, *, standalone: bool = False):
         buttons.data_button("✕ CLOSE", f"status {sid} dismiss", position="header")
     else:
         buttons.data_button("↩ TASKS", f"status {sid} home", position="header")
-    return text, buttons.build_menu(h_cols=2)
+    if page_count > 1:
+        buttons.data_button(
+            "❮ PREV",
+            f"status {sid} flp {max(page_no - 1, 1)}",
+            position="f_body",
+        )
+        buttons.data_button(
+            f"{page_no:02d} / {page_count:02d}",
+            f"status {sid} flp {page_no}",
+            position="f_body",
+        )
+        buttons.data_button(
+            "NEXT ❯",
+            f"status {sid} flp {min(page_no + 1, page_count)}",
+            position="f_body",
+        )
+    return text, buttons.build_menu(h_cols=2, fb_cols=3)
 
 
 async def send_filetolink_status(message):

@@ -229,6 +229,7 @@ def test_prefetch_depth_shares_worker_across_active_transfers(monkeypatch):
 
 
 def test_runtime_snapshot_tracks_progress_speed_and_worker_health():
+    task = SimpleNamespace()
     namespace = {
         "FILETOLINK_CACHE_TOTAL_MAX_BYTES": 4096,
         "_filetolink_active_streams": {},
@@ -236,6 +237,7 @@ def test_runtime_snapshot_tracks_progress_speed_and_worker_health():
         "monotonic": lambda: 100.0,
         "wall_time": lambda: 1000.0,
         "token_urlsafe": lambda _size: "transfer-1",
+        "current_task": lambda: task,
     }
     load_functions(
         {
@@ -261,9 +263,63 @@ def test_runtime_snapshot_tracks_progress_speed_and_worker_health():
     assert snapshot["transfers"][0]["progress"] == 50
     assert snapshot["transfers"][0]["source"] == "Telegram"
     assert "started_mono" not in snapshot["transfers"][0]
+    assert "last_activity_mono" not in snapshot["transfers"][0]
+    assert "task" not in snapshot["transfers"][0]
 
     namespace["_finish_filetolink_transfer"](transfer_id)
     assert namespace["_filetolink_active_streams"] == {}
+
+
+def test_stale_runtime_transfers_are_cancelled_and_removed():
+    class FakeTask:
+        def __init__(self, done=False):
+            self.cancelled = False
+            self.finished = done
+
+        def done(self):
+            return self.finished
+
+        def cancel(self):
+            self.cancelled = True
+
+    stale_task = FakeTask()
+    recent_task = FakeTask()
+    completed_task = FakeTask(done=True)
+    released = []
+    namespace = {
+        "FILETOLINK_TRANSFER_STALE_SECONDS": 300,
+        "LOGGER": logging.getLogger(__name__),
+        "_release_stream_load": released.append,
+        "_filetolink_active_streams": {
+            "stale": {
+                "name": "finished.mkv",
+                "client_id": 1,
+                "last_activity_mono": 600.0,
+                "task": stale_task,
+            },
+            "recent": {
+                "name": "active.mkv",
+                "client_id": 2,
+                "last_activity_mono": 950.0,
+                "task": recent_task,
+            },
+            "completed": {
+                "name": "already-done.mkv",
+                "client_id": 3,
+                "last_activity_mono": 999.0,
+                "task": completed_task,
+            },
+        },
+        "monotonic": lambda: 1000.0,
+    }
+    load_functions({"_prune_stale_filetolink_transfers"}, namespace)
+
+    namespace["_prune_stale_filetolink_transfers"]()
+
+    assert set(namespace["_filetolink_active_streams"]) == {"recent"}
+    assert stale_task.cancelled
+    assert not recent_task.cancelled
+    assert released == [3]
 
 
 def test_streaming_paths_publish_live_filetolink_metrics():
@@ -296,6 +352,7 @@ async def test_status_publisher_throttles_cache_directory_scans():
             "state": state,
         },
         "_write_filetolink_status_snapshot": written.append,
+        "_prune_stale_filetolink_transfers": lambda: None,
         "monotonic": lambda: clock[0],
         "to_thread": asyncio.to_thread,
     }
@@ -383,7 +440,10 @@ def test_filetolink_status_renderer_executes_active_and_idle_views():
     namespace = {
         "ButtonMaker": FakeButtonMaker,
         "ButtonStyle": SimpleNamespace(PRIMARY="primary"),
-        "Config": SimpleNamespace(BASE_URL="https://files.example"),
+        "Config": SimpleNamespace(
+            BASE_URL="https://files.example",
+            STATUS_LIMIT=1,
+        ),
         "_read_filetolink_status": lambda: snapshot,
         "escape": escape,
         "get_progress_bar_string": lambda value: f"bar-{value}",
@@ -406,7 +466,22 @@ def test_filetolink_status_renderer_executes_active_and_idle_views():
     assert "movie&lt;final&gt;.mkv" in text
     assert "bar-50.0 50.0%" in text
     assert "🟢 Streaming" in text
-    assert buttons == [("↻ REFRESH", "status 77 fl"), ("↩ TASKS", "status 77 home")]
+    assert buttons == [
+        ("↻ REFRESH", "status 77 flp 1"),
+        ("↩ TASKS", "status 77 home"),
+    ]
+
+    snapshot["transfers"] = [
+        {**snapshot["transfers"][0], "name": f"movie-{index}.mkv"}
+        for index in range(1, 4)
+    ]
+    snapshot["active_count"] = 3
+    text, buttons = namespace["build_filetolink_status"](77, page_no=2)
+    assert "TRANSFER 02" in text
+    assert "TRANSFER 01" not in text
+    assert ("❮ PREV", "status 77 flp 1") in buttons
+    assert ("NEXT ❯", "status 77 flp 3") in buttons
+    assert len(text) <= 820
 
     snapshot.update({"stale": True, "transfers": [], "active_count": 0})
     text, buttons = namespace["build_filetolink_status"](77, standalone=True)
@@ -425,7 +500,7 @@ async def test_status_timer_refreshes_the_visible_filetolink_panel(monkeypatch):
         and node.name == "update_status_message"
     )
     filetolink_module = ModuleType("bot.modules.filetolink")
-    filetolink_module.build_filetolink_status = lambda sid: (
+    filetolink_module.build_filetolink_status = lambda sid, **_kwargs: (
         f"filetolink-{sid}-updated",
         "buttons",
     )
