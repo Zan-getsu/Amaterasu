@@ -327,7 +327,8 @@ PROTECTED_VARS = {
 }
 RESTART_VARS = {
     "CMD_SUFFIX", "OWNER_ID", "USER_SESSION_STRING", "TELEGRAM_HASH", "TELEGRAM_API", "BOT_TOKEN",
-    "TG_PROXY", "AUTHORIZED_CHATS", "DATABASE_URL", "AUTO_PROVISION_STREAM_BOTS"
+    "TG_PROXY", "AUTHORIZED_CHATS", "DATABASE_URL", "AUTO_PROVISION_STREAM_BOTS",
+    "DISABLE_TORRENTS"
 }
 
 HIDDEN_VARS = {"PORT"}
@@ -687,7 +688,8 @@ async def get_buttons(key=None, edit_type=None, edit_mode=False):
         buttons.data_button("✦ CONFIG VARIABLES", "botset var")
         buttons.data_button("✦ MODULE SETTINGS", "botset setonoff")
         buttons.data_button("✦ PRIVATE FILES", "botset private open")
-        buttons.data_button("✦ QBITTORRENT", "botset qbit")
+        if not Config.DISABLE_TORRENTS:
+            buttons.data_button("✦ QBITTORRENT", "botset qbit")
         buttons.data_button("✦ ARIA2C", "botset aria")
         buttons.data_button("✦ SABNZBD", "botset nzb")
         buttons.data_button("↻ SYNC JDOWNLOADER", "botset syncjd")
@@ -798,8 +800,8 @@ async def get_buttons(key=None, edit_type=None, edit_mode=False):
             if not is_bool and not _is_protected_variable(key):
                 buttons.data_button("Reset", f"botset resetvar {key}")
             buttons.data_button("Close", "botset close", position="footer", style=ButtonStyle.DANGER)
-            if edit_mode and key in RESTART_VARS:
-                msg += "\n<b>Note:</b> Restart required for this edit to take effect!\n\n"
+            if key in RESTART_VARS:
+                msg += "\n<b>Note:</b> Restart required for changes to take effect!\n\n"
             if edit_mode and not is_bool:
                 msg += "<i>Send a valid value for the above Var.</i>\n┖ <b>Time Left :</b> <code>60 sec</code>"
     elif key == "var":
@@ -933,6 +935,15 @@ async def get_buttons(key=None, edit_type=None, edit_mode=False):
             f"<i>Page {int(start / 10) + 1} : {state.upper()} mode</i>"
         )
     elif key == "qbit":
+        if Config.DISABLE_TORRENTS:
+            buttons.data_button("↩ BACK", "botset back")
+            buttons.data_button("✕ CLOSE", "botset close", style=ButtonStyle.DANGER)
+            msg = (
+                "<b>✦ QBITTORRENT SETTINGS</b>\n"
+                "<i>Torrents are disabled. Set DISABLE_TORRENTS to False and "
+                "restart the bot before opening these settings.</i>"
+            )
+            return msg, buttons.build_menu(2)
         for k in list(qbit_options.keys())[start : 10 + start]:
             buttons.data_button(k, f"botset qbitvar {k}")
         if state == "view":

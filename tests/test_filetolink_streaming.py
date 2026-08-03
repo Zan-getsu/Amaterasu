@@ -15,6 +15,9 @@ import pytest
 SOURCE_PATH = Path(__file__).parents[1] / "web" / "wserver.py"
 BOT_SETTINGS_PATH = Path(__file__).parents[1] / "bot" / "modules" / "bot_settings.py"
 STARTUP_PATH = Path(__file__).parents[1] / "bot" / "core" / "startup.py"
+TORRENT_MANAGER_PATH = (
+    Path(__file__).parents[1] / "bot" / "core" / "torrent_manager.py"
+)
 TG_CLIENT_PATH = Path(__file__).parents[1] / "bot" / "core" / "tg_client.py"
 FILETOLINK_MODULE_PATH = Path(__file__).parents[1] / "bot" / "modules" / "filetolink.py"
 MESSAGE_UTILS_PATH = (
@@ -675,3 +678,118 @@ def test_progressive_cache_promotes_only_complete_files(tmp_path):
     assert cache_path.read_bytes() == b"12345"
     assert not temp_path.exists()
     assert not namespace["_filetolink_cache_writers"]
+
+
+@pytest.mark.asyncio
+async def test_saved_qbit_options_are_ignored_when_torrents_are_disabled():
+    password_calls = []
+
+    async def ensure_password():
+        password_calls.append(True)
+
+    tree = ast.parse(STARTUP_PATH.read_text(encoding="utf-8"))
+    function = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.AsyncFunctionDef)
+        and node.name == "update_qb_options"
+    )
+    namespace = {
+        "Config": SimpleNamespace(DISABLE_TORRENTS=True),
+        "LOGGER": logging.getLogger(__name__),
+        "TorrentManager": SimpleNamespace(qbittorrent=None),
+        "_ensure_qbit_web_password": ensure_password,
+        "qbit_options": {"saved": True},
+    }
+    exec(
+        compile(ast.Module([function], type_ignores=[]), str(STARTUP_PATH), "exec"),
+        namespace,
+    )
+
+    await namespace["update_qb_options"]()
+
+    assert namespace["qbit_options"] == {"saved": True}
+    assert password_calls == []
+
+
+def test_disabled_torrents_do_not_create_qbit_settings_in_mongodb():
+    source = STARTUP_PATH.read_text(encoding="utf-8")
+    save_settings = source[
+        source.index("async def save_settings") : source.index(
+            "async def update_variables"
+        )
+    ]
+
+    assert "not Config.DISABLE_TORRENTS" in save_settings
+    disabled_guard = save_settings.index("not Config.DISABLE_TORRENTS")
+    save_qbit = save_settings.index("await database.save_qbit_settings()")
+    assert disabled_guard < save_qbit
+
+
+def test_disabled_qbit_settings_ui_has_no_live_client_actions():
+    settings_source = BOT_SETTINGS_PATH.read_text(encoding="utf-8")
+    qbit_page = settings_source[
+        settings_source.index('    elif key == "qbit":') : settings_source.index(
+            '    elif key == "nzb":'
+        )
+    ]
+
+    assert "if Config.DISABLE_TORRENTS:" in qbit_page
+    assert "return msg, buttons.build_menu(2)" in qbit_page
+    restart_vars = settings_source[
+        settings_source.index("RESTART_VARS") : settings_source.index("HIDDEN_VARS")
+    ]
+    assert '"DISABLE_TORRENTS"' in restart_vars
+
+
+def test_qbit_restart_paths_enforce_the_disabled_setting():
+    source = TORRENT_MANAGER_PATH.read_text(encoding="utf-8")
+    ensure_start = source.index("    async def ensure_qbit")
+    restart_start = source.index("    async def _start_qbit")
+    next_method = source.index("    @classmethod", restart_start + 1)
+
+    ensure_source = source[ensure_start:restart_start]
+    restart_source = source[restart_start:next_method]
+    assert "if Config.DISABLE_TORRENTS:" in ensure_source
+    assert "if Config.DISABLE_TORRENTS:" in restart_source
+    assert ensure_source.index("if Config.DISABLE_TORRENTS:") < ensure_source.index(
+        "if cls.qbittorrent is None:"
+    )
+    assert restart_source.index("if Config.DISABLE_TORRENTS:") < restart_source.index(
+        "create_subprocess_exec("
+    )
+
+
+def test_web_lifespan_skips_qbit_connection_and_close_when_disabled():
+    source = SOURCE_PATH.read_text(encoding="utf-8")
+    lifespan = source[source.index("async def lifespan") : source.index("app = FastAPI")]
+
+    disabled_guard = lifespan.index("if Config.DISABLE_TORRENTS:")
+    connect = lifespan.index('await create_client("http://localhost:8090/api/v2/")')
+    assert disabled_guard < connect
+    assert "qbittorrent = None" in lifespan[disabled_guard:connect]
+    assert "if qbittorrent is not None:\n            await qbittorrent.close()" in lifespan
+
+
+def test_disabled_qbit_web_routes_return_service_unavailable():
+    class HTTPException(Exception):
+        def __init__(self, status_code, detail):
+            self.status_code = status_code
+            self.detail = detail
+
+    tree = ast.parse(SOURCE_PATH.read_text(encoding="utf-8"))
+    function = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef) and node.name == "_require_qbittorrent"
+    )
+    namespace = {"HTTPException": HTTPException, "qbittorrent": None}
+    exec(
+        compile(ast.Module([function], type_ignores=[]), str(SOURCE_PATH), "exec"),
+        namespace,
+    )
+
+    with pytest.raises(HTTPException) as raised:
+        namespace["_require_qbittorrent"]()
+
+    assert raised.value.status_code == 503

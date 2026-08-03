@@ -62,15 +62,18 @@ async def _ensure_qbit_web_password():
 
 
 async def update_qb_options():
+    if Config.DISABLE_TORRENTS:
+        LOGGER.info("Torrents are disabled. Skipping qBittorrent options update.")
+        return
     LOGGER.info("Get qBittorrent options from server")
+    if not TorrentManager.qbittorrent:
+        LOGGER.warning(
+            "qBittorrent is not initialized. Skipping qBittorrent options update."
+        )
+        return
     options_were_empty = not qbit_options
     pwd = await _ensure_qbit_web_password()
     if options_were_empty:
-        if not TorrentManager.qbittorrent:
-            LOGGER.warning(
-                "qBittorrent is not initialized. Skipping qBittorrent options update."
-            )
-            return
         opt = await TorrentManager.qbittorrent.app.preferences()
         qbit_options.update(opt)
         del qbit_options["listen_port"]
@@ -212,7 +215,8 @@ async def load_settings():
 
         if qbit_opt:
             qbit_options.update(qbit_opt)
-            await _ensure_qbit_web_password()
+            if not Config.DISABLE_TORRENTS:
+                await _ensure_qbit_web_password()
 
         if nzb_opt:
             if await aiopath.exists("configs/sabnzbd/SABnzbd.ini.bak"):
@@ -341,7 +345,10 @@ async def save_settings():
         await database.db.settings.aria2c.update_one(
             deploy_filter, {"$set": aria2_options}, upsert=True
         )
-    if await database.db.settings.qbittorrent.find_one(deploy_filter) is None:
+    if (
+        not Config.DISABLE_TORRENTS
+        and await database.db.settings.qbittorrent.find_one(deploy_filter) is None
+    ):
         await database.save_qbit_settings()
     if await database.db.settings.nzb.find_one(deploy_filter) is None:
         async with aiopen("configs/sabnzbd/SABnzbd.ini", "rb+") as pf:

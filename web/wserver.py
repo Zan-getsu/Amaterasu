@@ -168,6 +168,15 @@ SERVICES = {
 }
 
 
+def _require_qbittorrent():
+    if qbittorrent is None:
+        raise HTTPException(
+            status_code=503,
+            detail="qBittorrent is unavailable because torrents are disabled.",
+        )
+    return qbittorrent
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global aria2, qbittorrent
@@ -200,7 +209,11 @@ async def lifespan(app: FastAPI):
         await TgClient.start_stream_clients()
             
     aria2 = Aria2HttpClient("http://localhost:6800/jsonrpc")
-    qbittorrent = await create_client("http://localhost:8090/api/v2/")
+    if Config.DISABLE_TORRENTS:
+        qbittorrent = None
+        LOGGER.info("Torrents are disabled. Skipping web qBittorrent client.")
+    else:
+        qbittorrent = await create_client("http://localhost:8090/api/v2/")
     if Config.BOT_TOKEN:
         status_publisher = create_task(_filetolink_status_publisher())
     try:
@@ -212,7 +225,8 @@ async def lifespan(app: FastAPI):
                 await status_publisher
             await _publish_filetolink_status(state="stopped")
         await aria2.close()
-        await qbittorrent.close()
+        if qbittorrent is not None:
+            await qbittorrent.close()
         if Config.BOT_TOKEN:
             await TgClient.stop()
         await database.disconnect()
@@ -515,9 +529,10 @@ async def _read_profile_data(request: Request) -> dict:
 
 
 async def re_verify(paused, resumed, hash_id):
+    qbit = _require_qbittorrent()
     k = 0
     while True:
-        res = await qbittorrent.torrents.files(hash_id)
+        res = await qbit.torrents.files(hash_id)
         verify = True
         for i in res:
             if i.index in paused and i.priority != 0:
@@ -532,14 +547,14 @@ async def re_verify(paused, resumed, hash_id):
         await sleep(0.5)
         if paused:
             try:
-                await qbittorrent.torrents.file_prio(
+                await qbit.torrents.file_prio(
                     hash=hash_id, id=paused, priority=0
                 )
             except (ClientError, TimeoutError, Exception, AQError) as e:
                 LOGGER.error(f"{e} Errored in reverification paused!")
         if resumed:
             try:
-                await qbittorrent.torrents.file_prio(
+                await qbit.torrents.file_prio(
                     hash=hash_id, id=resumed, priority=1
                 )
             except (ClientError, TimeoutError, Exception, AQError) as e:
@@ -1149,7 +1164,7 @@ async def handle_torrent(request: Request):
                 res = await sabnzbd_client.get_files(gid)
                 content = make_tree(res, "sabnzbd")
             elif len(gid) > 20:
-                res = await qbittorrent.torrents.files(gid)
+                res = await _require_qbittorrent().torrents.files(gid)
                 content = make_tree(res, "qbittorrent")
             else:
                 res = await aria2.getFiles(gid)
@@ -1281,12 +1296,13 @@ async def handle_rclone(request: Request):
 
 async def handle_rename(gid, data):
     try:
+        qbit = _require_qbittorrent()
         _type = data["type"]
         del data["type"]
         if _type == "file":
-            await qbittorrent.torrents.rename_file(hash=gid, **data)
+            await qbit.torrents.rename_file(hash=gid, **data)
         else:
-            await qbittorrent.torrents.rename_folder(hash=gid, **data)
+            await qbit.torrents.rename_folder(hash=gid, **data)
     except (ClientError, TimeoutError, Exception, AQError) as e:
         LOGGER.error(f"{e} Errored in renaming")
 
@@ -1297,16 +1313,17 @@ async def set_sabnzbd(gid, unselected_files):
 
 
 async def set_qbittorrent(gid, selected_files, unselected_files):
+    qbit = _require_qbittorrent()
     if unselected_files:
         try:
-            await qbittorrent.torrents.file_prio(
+            await qbit.torrents.file_prio(
                 hash=gid, id=unselected_files, priority=0
             )
         except (ClientError, TimeoutError, Exception, AQError) as e:
             LOGGER.error(f"{e} Errored in paused")
     if selected_files:
         try:
-            await qbittorrent.torrents.file_prio(
+            await qbit.torrents.file_prio(
                 hash=gid, id=selected_files, priority=1
             )
         except (ClientError, TimeoutError, Exception, AQError) as e:
@@ -1587,6 +1604,7 @@ async def sabnzbd_proxy(path: str = "", request: Request = None):
 
 @app.api_route("/qbit/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH"])
 async def qbittorrent_proxy(path: str = "", request: Request = None):
+    _require_qbittorrent()
     password = request.query_params.get("pass") or request.cookies.get("qbit_pass")
     if not password:
         raise HTTPException(status_code=403, detail="Missing password")

@@ -146,6 +146,8 @@ class TorrentManager:
 
     @classmethod
     async def ensure_qbit(cls):
+        if Config.DISABLE_TORRENTS:
+            return False
         if cls.qbittorrent is None:
             return await cls._start_qbit()
         try:
@@ -156,6 +158,8 @@ class TorrentManager:
 
     @classmethod
     async def _start_qbit(cls):
+        if Config.DISABLE_TORRENTS:
+            return False
         now = time()
         if now - cls._last_qbit_restart < cls._restart_debounce:
             return False
