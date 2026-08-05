@@ -155,9 +155,16 @@ user_settings_text = {
         "\n┖ <b>Time Left :</b> <code>60 sec</code>",
     ),
     "LEECH_CAPTION": (
-        "",
-        "",
-        "Send Leech Caption. You can add HTML tags. Example: <code>@mychannel</code>.</i> \n┖ <b>Time Left :</b> <code>60 sec</code>",
+        "String",
+        "Custom Telegram caption template for leeched files.",
+        "Send a leech caption template. Supports HTML and: "
+        "<code>{filename}</code>, <code>{size}</code>, "
+        "<code>{duration}</code>, <code>{quality}</code>, "
+        "<code>{languages}</code>, <code>{subtitles}</code>, "
+        "<code>{md5_hash}</code>, <code>{mime_type}</code>, "
+        "<code>{prefilename}</code>, and <code>{precaption}</code>."
+        "\nExample: <code>{filename} {quality}</code>"
+        "\n┖ <b>Time Left :</b> <code>60 sec</code>",
     ),
     "THUMBNAIL_LAYOUT": (
         "",
@@ -1095,7 +1102,7 @@ async def get_user_settings(from_user, stype="main"):
             "YT Cookie File", f"userset {user_id} menu USER_COOKIE_FILE"
         )
 
-        if user_dict.get("AUTO_FILETOLINK", True):
+        if user_dict.get("AUTO_FILETOLINK", False):
             buttons.data_button("Disable Auto FileToLink", f"userset {user_id} tog AUTO_FILETOLINK f")
             auto_ftl = "Enabled"
         else:

@@ -31,7 +31,7 @@ async def change_category(client, message):
     user_id = message.from_user.id
 
     text = message.text.split("\n")
-    input_list = text[0].split(" ")
+    input_list = text[0].split()
 
     arg_base = {"link": "", "-id": "", "-index": ""}
     arg_parser(input_list[1:], arg_base)
@@ -157,6 +157,5 @@ async def confirm_category(client, query):
         f"<b>Timeout:</b> 60 sec",
         buttons.build_menu(3),
     )
-
 
 

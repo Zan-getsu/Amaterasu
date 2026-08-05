@@ -1,6 +1,6 @@
 # ruff: noqa: F403, F405
 
-from pyrogram.filters import channel, command, regex, private
+from pyrogram.filters import bot, channel, command, incoming, regex, private
 from pyrogram.handlers import CallbackQueryHandler, EditedMessageHandler, MessageHandler
 
 from .. import LOGGER
@@ -535,14 +535,14 @@ async def add_handlers():
     TgClient.bot.add_handler(
         MessageHandler(
             private_media_handler,
-            filters=private & CustomFilters.authorized,
+            filters=private & incoming & ~bot & CustomFilters.authorized,
         ),
         group=1,
     )
     TgClient.bot.add_handler(
         MessageHandler(
             channel_media_handler,
-            filters=channel,
+            filters=channel & incoming & ~bot,
         ),
         group=1,
     )

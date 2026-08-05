@@ -223,7 +223,11 @@ DEFAULT_DESP = {
     "LINKS_LOG_ID": "Chat ID for link logging.",
     "MIRROR_LOG_ID": "Chat ID(s) for mirror logs. Space-separated for multiple.",
     "LEECH_PREFIX": "Prefix added to leeched file names.",
-    "LEECH_CAPTION": "Custom caption for leeched files. Supports HTML.",
+    "LEECH_CAPTION": (
+        "Custom caption for leeched files. Supports HTML and variables such as "
+        "{filename}, {size}, {duration}, {quality}, {languages}, {subtitles}, "
+        "{md5_hash}, {mime_type}, {prefilename}, and {precaption}."
+    ),
     "LEECH_SUFFIX": "Suffix added to leeched file names.",
     "LEECH_FONT": "Font style for captions: b, i, u, s, code, spoiler.",
     "LEECH_SPLIT_SIZE": "Split size for Telegram uploads in bytes. Default: 2GB (4GB for premium).",

@@ -27,6 +27,10 @@ MESSAGE_UTILS_PATH = (
     / "telegram_helper"
     / "message_utils.py"
 )
+HANDLERS_PATH = Path(__file__).parents[1] / "bot" / "core" / "handlers.py"
+USER_SETTINGS_PATH = (
+    Path(__file__).parents[1] / "bot" / "modules" / "users_settings.py"
+)
 
 
 def load_functions(names, namespace):
@@ -569,6 +573,57 @@ def test_filetolink_tuning_is_wired_to_bsettings_and_web_process():
         assert f'proc_env["{key}"]' in startup_source
 
     assert "_apply_filetolink_web_tuning" in settings_source
+
+
+def test_automatic_filetolink_rejects_outgoing_and_bot_media():
+    tree = ast.parse(FILETOLINK_MODULE_PATH.read_text(encoding="utf-8"))
+    function = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef)
+        and node.name == "_is_automatic_media_candidate"
+    )
+    namespace = {"get_media": lambda message: getattr(message, "media", None)}
+    exec(
+        compile(
+            ast.Module([function], type_ignores=[]),
+            str(FILETOLINK_MODULE_PATH),
+            "exec",
+        ),
+        namespace,
+    )
+    candidate = namespace["_is_automatic_media_candidate"]
+    human = SimpleNamespace(is_bot=False, is_self=False)
+    bot_user = SimpleNamespace(is_bot=True, is_self=False)
+
+    assert candidate(SimpleNamespace(media=object(), outgoing=False, from_user=human))
+    assert not candidate(
+        SimpleNamespace(media=object(), outgoing=True, from_user=human)
+    )
+    assert not candidate(
+        SimpleNamespace(media=object(), outgoing=False, from_user=bot_user)
+    )
+    assert not candidate(
+        SimpleNamespace(media=None, outgoing=False, from_user=human)
+    )
+    assert not candidate(
+        SimpleNamespace(media=object(), outgoing=False, from_user=None),
+        require_user=True,
+    )
+
+
+def test_automatic_filetolink_is_opt_in_and_handlers_are_incoming_only():
+    filetolink_source = FILETOLINK_MODULE_PATH.read_text(encoding="utf-8")
+    settings_source = USER_SETTINGS_PATH.read_text(encoding="utf-8")
+    handlers_source = HANDLERS_PATH.read_text(encoding="utf-8")
+
+    assert 'user_dict.get("AUTO_FILETOLINK", False)' in filetolink_source
+    assert 'user_dict.get("AUTO_FILETOLINK", False)' in settings_source
+    assert (
+        "filters=private & incoming & ~bot & CustomFilters.authorized"
+        in handlers_source
+    )
+    assert "filters=channel & incoming & ~bot" in handlers_source
 
 
 def test_filetolink_prewarm_builds_the_native_download_session_pool():

@@ -379,15 +379,20 @@ def arg_parser(items, arg_base):
             continue
 
         if part in _OPTIONAL_VALUE_ARGS:
+            values = []
             next_index = i + 1
-            if (
-                next_index < total
-                and items[next_index] not in arg_base
-                and not _looks_like_download_input(items[next_index])
-            ):
-                arg_base[part] = items[next_index]
+            while next_index < total:
+                value = items[next_index]
+                if value in arg_base or _looks_like_download_input(value):
+                    break
+                values.append(value)
                 consumed[next_index] = True
-                i += 2
+                next_index += 1
+                if part not in ("-e", "-z"):
+                    break
+            if values:
+                arg_base[part] = " ".join(values)
+                i = next_index
             else:
                 arg_base[part] = True
                 i += 1

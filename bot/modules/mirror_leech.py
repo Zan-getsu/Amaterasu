@@ -263,7 +263,7 @@ class Mirror(TaskListener):
 
 
         text = self.message.text.split("\n")
-        input_list = text[0].split(" ")
+        input_list = text[0].split()
 
         check_msg, check_button = await pre_task_check(self.message)
         if check_msg:

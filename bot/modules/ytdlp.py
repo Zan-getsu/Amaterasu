@@ -289,7 +289,7 @@ class YtDlp(TaskListener):
 
     async def new_event(self):
         text = self.message.text.split("\n")
-        input_list = text[0].split(" ")
+        input_list = text[0].split()
         qual = ""
 
         check_msg, check_button = await pre_task_check(self.message)

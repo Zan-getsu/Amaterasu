@@ -967,7 +967,9 @@ class TaskConfig:
     async def proceed_extract(self, dl_path, gid):
         pswd = self.extract if isinstance(self.extract, str) else ""
         self.files_to_proceed = []
-        if self.is_file and is_archive(dl_path):
+        if self.is_file and (
+            is_archive(dl_path) or is_first_archive_split(dl_path)
+        ):
             self.files_to_proceed.append(dl_path)
         else:
             for dirpath, _, files in await sync_to_async(walk, dl_path, topdown=False):
@@ -981,16 +983,28 @@ class TaskConfig:
                         self.files_to_proceed.append(f_path)
 
         if not self.files_to_proceed:
+            LOGGER.warning(
+                "Extraction requested but no supported archive was found: %s",
+                dl_path,
+            )
+            await send_message(
+                self.message,
+                "<b>Extraction skipped:</b> No supported archive or first "
+                "multipart volume was found.",
+            )
             return dl_path
         sevenz = SevenZ(self)
         LOGGER.info(f"Extracting: {self.name}")
         async with task_dict_lock:
             task_dict[self.mid] = SevenZStatus(self, sevenz, gid, "Extract")
         t_path = dl_path
+        extraction_failed = False
         for dirpath, _, files in await sync_to_async(
             walk, self.up_dir or self.dir, topdown=False
         ):
             code = 0
+            directory_processed = False
+            directory_failed = False
             for file_ in files:
                 if self.is_cancelled:
                     return False
@@ -999,15 +1013,19 @@ class TaskConfig:
                     or is_archive(file_)
                     and not file_.strip().lower().endswith(".rar")
                 ):
+                    directory_processed = True
                     self.proceed_count += 1
                     f_path = ospath.join(dirpath, file_)
                     t_path = get_base_name(f_path) if self.is_file else dirpath
                     if not self.is_file:
                         self.subname = file_
                     code = await sevenz.extract(f_path, t_path, pswd)
+                    if code != 0:
+                        directory_failed = True
+                        extraction_failed = True
             if self.is_cancelled:
                 return code
-            if code == 0:
+            if directory_processed and not directory_failed:
                 for file_ in files:
                     if is_archive_split(file_) or is_archive(file_):
                         del_path = ospath.join(dirpath, file_)
@@ -1015,7 +1033,14 @@ class TaskConfig:
                             await remove(del_path)
                         except Exception:
                             self.is_cancelled = True
-        return t_path if self.is_file and code == 0 else dl_path
+        if extraction_failed:
+            await send_message(
+                self.message,
+                "<b>Extraction failed:</b> The original archive will be "
+                "uploaded. Check that every multipart volume is present and "
+                "that the extraction password is correct.",
+            )
+        return t_path if self.is_file and not extraction_failed else dl_path
 
     async def proceed_ffmpeg(self, dl_path, gid):
         checked = False

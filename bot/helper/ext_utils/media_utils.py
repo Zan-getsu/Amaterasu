@@ -195,6 +195,35 @@ async def download_custom_thumb(url):
     return await download_image_thumb(url)
 
 
+def _get_media_quality(streams):
+    """Return the display quality of the first real video stream."""
+    image_codecs = {"bmp", "gif", "mjpeg", "png", "webp"}
+    image_quality = ""
+    for stream in streams or []:
+        if stream.get("codec_type") != "video":
+            continue
+        disposition = stream.get("disposition") or {}
+        codec = str(stream.get("codec_name") or "").lower()
+        if disposition.get("attached_pic"):
+            continue
+        try:
+            height = int(stream.get("height") or 0)
+        except (TypeError, ValueError):
+            continue
+        if height <= 0:
+            continue
+        for quality in (480, 540, 720, 1080, 2160, 4320):
+            if height <= quality:
+                quality = f"{quality}p"
+                break
+        else:
+            quality = "8640p"
+        if codec not in image_codecs:
+            return quality
+        image_quality = image_quality or quality
+    return image_quality
+
+
 async def get_media_info(path, extra_info=False):
     try:
         result = await cmd_exec(
@@ -242,27 +271,24 @@ async def get_media_info(path, extra_info=False):
                         break
         duration = round(duration)
         if extra_info:
-            lang, qual, stitles = "", "", ""
-            if (streams := ffresult.get("streams")) and streams[0].get(
-                "codec_type"
-            ) == "video":
-                qual = int(streams[0].get("height"))
-                qual = f"{480 if qual <= 480 else 540 if qual <= 540 else 720 if qual <= 720 else 1080 if qual <= 1080 else 2160 if qual <= 2160 else 4320 if qual <= 4320 else 8640}p"
-                for stream in streams:
-                    if stream.get("codec_type") == "audio" and (
-                        lc := stream.get("tags", {}).get("language")
-                    ):
-                        with suppress(Exception):
-                            lc = Language.get(lc).display_name()
-                        if lc not in lang:
-                            lang += f"{lc}, "
-                    if stream.get("codec_type") == "subtitle" and (
-                        st := stream.get("tags", {}).get("language")
-                    ):
-                        with suppress(Exception):
-                            st = Language.get(st).display_name()
-                        if st not in stitles:
-                            stitles += f"{st}, "
+            lang, stitles = "", ""
+            streams = ffresult.get("streams") or []
+            qual = _get_media_quality(streams)
+            for stream in streams:
+                if stream.get("codec_type") == "audio" and (
+                    lc := stream.get("tags", {}).get("language")
+                ):
+                    with suppress(Exception):
+                        lc = Language.get(lc).display_name()
+                    if lc not in lang:
+                        lang += f"{lc}, "
+                if stream.get("codec_type") == "subtitle" and (
+                    st := stream.get("tags", {}).get("language")
+                ):
+                    with suppress(Exception):
+                        st = Language.get(st).display_name()
+                    if st not in stitles:
+                        stitles += f"{st}, "
             return duration, qual, lang[:-2], stitles[:-2]
         tags = fields.get("tags", {})
         artist = tags.get("artist") or tags.get("ARTIST") or tags.get("Artist")

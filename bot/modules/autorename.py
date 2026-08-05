@@ -13,8 +13,13 @@ from bot.helper.telegram_helper.message_utils import (
     delete_message,
 )
 from bot.helper.telegram_helper.bot_commands import BotCommands
-from bot.helper.ext_utils.bot_utils import update_user_ldata
-from bot.helper.ext_utils.status_utils import get_readable_file_size
+from bot.helper.ext_utils.bot_utils import sync_to_async, update_user_ldata
+from bot.helper.ext_utils.files_utils import get_mime_type
+from bot.helper.ext_utils.media_utils import get_md5_hash, get_media_info
+from bot.helper.ext_utils.status_utils import (
+    get_readable_file_size,
+    get_readable_time,
+)
 from bot.core.config_manager import Config
 
 from bot.helper.ext_utils.autorename_utils import apply_autorename_template
@@ -189,11 +194,35 @@ async def auto_rename_handler(client, message):
         user_caption = user_dict.get("LEECH_CAPTION") or (
             Config.LEECH_CAPTION if hasattr(Config, "LEECH_CAPTION") else ""
         )
+        media_duration = 0
         if user_caption:
             try:
-                custom_caption = user_caption.format(filename=new_name)
-            except Exception:
-                pass
+                media_duration, quality, languages, subtitles = (
+                    await get_media_info(local_path, True)
+                )
+
+                class SafeDict(dict):
+                    def __missing__(self, key):
+                        return f"{{{key}}}"
+
+                custom_caption = user_caption.format_map(
+                    SafeDict(
+                        filename=new_name,
+                        size=get_readable_file_size(os.path.getsize(local_path)),
+                        duration=get_readable_time(media_duration),
+                        quality=quality,
+                        languages=languages,
+                        subtitles=subtitles,
+                        md5_hash=await sync_to_async(get_md5_hash, local_path),
+                        mime_type=await sync_to_async(get_mime_type, local_path),
+                        prefilename=file_name,
+                        precaption=getattr(message, "caption", None) or "",
+                    )
+                )
+            except Exception as error:
+                LOGGER.warning(
+                    "Failed to render auto-rename leech caption: %s", error
+                )
 
         last_up_edit = 0
 
@@ -216,7 +245,7 @@ async def auto_rename_handler(client, message):
                 pass
 
         # Extract duration for video/audio
-        duration = 0
+        duration = media_duration
         if upload_type in ("video", "audio"):
             try:
                 from hachoir.metadata import extractMetadata
