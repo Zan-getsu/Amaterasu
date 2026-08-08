@@ -1,8 +1,8 @@
 from asyncio import TimeoutError, create_subprocess_exec, gather, sleep
 from contextlib import suppress
 from inspect import iscoroutinefunction
+from os import environ
 from pathlib import Path
-from os import environ, getcwd
 from time import time
 
 from aioaria2 import Aria2WebsocketClient
@@ -18,6 +18,7 @@ from tenacity import (
 from .. import LOGGER, aria2_options
 from ..helper.ext_utils.bot_utils import derive_service_password
 from .config_manager import BinConfig, Config
+from .runtime_paths import ensure_qbittorrent_runtime_profile
 
 
 def wrap_with_retry(obj, max_retries=3):
@@ -117,8 +118,9 @@ class TorrentManager:
                 LOGGER.info("Torrents are disabled.")
                 return
 
+            qbit_profile = ensure_qbittorrent_runtime_profile()
             cls._qbit_process = await create_subprocess_exec(
-                BinConfig.QBIT_NAME, "-d", f"--profile={getcwd()}/configs/qbittorrent"
+                BinConfig.QBIT_NAME, "-d", f"--profile={qbit_profile}"
             )
             await sleep(2)
             LOGGER.info("qBittorrent started !")
@@ -172,8 +174,9 @@ class TorrentManager:
                 except Exception:
                     pass
                 cls.qbittorrent = None
+            qbit_profile = ensure_qbittorrent_runtime_profile()
             cls._qbit_process = await create_subprocess_exec(
-                BinConfig.QBIT_NAME, "-d", f"--profile={getcwd()}/configs/qbittorrent"
+                BinConfig.QBIT_NAME, "-d", f"--profile={qbit_profile}"
             )
             await sleep(3)
             cls.qbittorrent = await create_client("http://localhost:8090/api/v2/")

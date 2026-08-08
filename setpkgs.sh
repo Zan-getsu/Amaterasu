@@ -14,6 +14,7 @@ ARIA2C=$1
 SERVICE_CORES=${2:-}
 CPU_LIMIT=${3:-20}
 SABNZBDPLUS=$4
+SABNZBD_CONFIG=${5:-configs/sabnzbd/SABnzbd.ini}
 
 # Detect whether taskset and cpulimit actually work for us.
 _have_taskset=0
@@ -62,5 +63,5 @@ if [ "$ARIA2C" != "EXTERNAL_ARIA2" ]; then
 fi
 
 if [ -n "$SABNZBDPLUS" ]; then
-    $SAB_CMD -f configs/sabnzbd/SABnzbd.ini -s :::8070 -b 0 -d -c -l 0 --console
+    $SAB_CMD -f "$SABNZBD_CONFIG" -s :::8070 -b 0 -d -c -l 0 --console
 fi

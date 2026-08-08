@@ -1,3 +1,4 @@
+from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
 from re import compile as re_compile
 from subprocess import PIPE, run
@@ -203,3 +204,82 @@ def test_updater_contains_no_destructive_git_commands():
     assert '"reset", "--hard"' not in source
     assert '"clean", "-fd"' not in source
     assert 'rmtree(".git"' not in source
+
+
+def _load_runtime_paths(monkeypatch, runtime_dir):
+    monkeypatch.setenv("AMATERASU_RUNTIME_DIR", str(runtime_dir))
+    module_path = ROOT / "bot/core/runtime_paths.py"
+    spec = spec_from_file_location("runtime_paths_under_test", module_path)
+    module = module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_engine_runtime_configs_are_outside_checkout_and_preserved(
+    tmp_path, monkeypatch
+):
+    runtime_dir = tmp_path / "runtime"
+    runtime_paths = _load_runtime_paths(monkeypatch, runtime_dir)
+
+    config_path = runtime_paths.ensure_sabnzbd_runtime_config()
+    assert config_path == runtime_dir / "sabnzbd/SABnzbd.ini"
+    assert config_path.read_bytes() == runtime_paths.SABNZBD_TEMPLATE_PATH.read_bytes()
+
+    config_path.write_text("operator runtime configuration\n", encoding="utf-8")
+    runtime_paths.ensure_sabnzbd_runtime_config()
+    assert config_path.read_text(encoding="utf-8") == (
+        "operator runtime configuration\n"
+    )
+
+    qbit_profile = runtime_paths.ensure_qbittorrent_runtime_profile()
+    qbit_config = qbit_profile / "qBittorrent/config/qBittorrent.conf"
+    assert qbit_profile == runtime_dir / "qbittorrent"
+    assert qbit_config.read_bytes() == (
+        runtime_paths.QBITTORRENT_TEMPLATE_PATH.read_bytes()
+    )
+
+    qbit_config.write_text("operator qBittorrent configuration\n", encoding="utf-8")
+    runtime_paths.ensure_qbittorrent_runtime_profile()
+    assert qbit_config.read_text(encoding="utf-8") == (
+        "operator qBittorrent configuration\n"
+    )
+
+
+def test_startup_does_not_modify_tracked_sabnzbd_or_script_files():
+    startup = (ROOT / "bot/core/startup.py").read_text(encoding="utf-8")
+    db_handler = (ROOT / "bot/helper/ext_utils/db_handler.py").read_text(
+        encoding="utf-8"
+    )
+    bot_init = (ROOT / "bot/__init__.py").read_text(encoding="utf-8")
+    setpkgs = (ROOT / "setpkgs.sh").read_text(encoding="utf-8")
+    torrent_manager = (ROOT / "bot/core/torrent_manager.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert "chmod +x setpkgs.sh" not in startup
+    assert 'create_subprocess_exec(*setpkgs_args)' in startup
+    assert 'configs/sabnzbd/SABnzbd.ini", "rb+"' not in startup
+    assert 'configs/sabnzbd/SABnzbd.ini", "rb+"' not in db_handler
+    assert 'open("configs/sabnzbd/SABnzbd.ini"' not in bot_init
+    assert '-f "$SABNZBD_CONFIG"' in setpkgs
+    assert "getcwd()}/configs/qbittorrent" not in torrent_manager
+    assert "ensure_qbittorrent_runtime_profile" in torrent_manager
+
+
+def test_runtime_artifacts_are_git_ignored():
+    generated_paths = (
+        ".runtime/sabnzbd/SABnzbd.ini",
+        ".restartmsg",
+        ".restartmsg.tmp",
+        "latestversion.py",
+        "rclone_sa/remote.conf",
+        "rclone_select_deadbeef.txt",
+        "terabox.txt",
+        "terabox_cookies/123.txt",
+        "configs/sabnzbd/logs/sabnzbd.log",
+        "configs/qbittorrent/qBittorrent/cache/runtime",
+        "configs/qbittorrent/qBittorrent/data/logs/qbittorrent.log",
+        "configs/qbittorrent/qBittorrent/GeoDB/GeoLite2-Country.mmdb",
+    )
+    for path in generated_paths:
+        assert _git(ROOT, "check-ignore", path) == path

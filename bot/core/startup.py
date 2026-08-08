@@ -11,7 +11,6 @@ from aioshutil import rmtree
 
 from .. import (
     LOGGER,
-    bot_loop,
     aria2_options,
     auth_chats,
     categories_dict,
@@ -33,6 +32,10 @@ from ..helper.ext_utils.bot_utils import cmd_exec, derive_service_password
 from ..helper.ext_utils.db_handler import database
 from .config_manager import Config, BinConfig
 from .cloudflare_tunnel import cloudflare_tunnel_booter
+from .runtime_paths import (
+    SABNZBD_RUNTIME_DIR,
+    ensure_sabnzbd_runtime_config,
+)
 from .tg_client import TgClient, db_partition_id
 from .torrent_manager import TorrentManager
 
@@ -219,12 +222,14 @@ async def load_settings():
                 await _ensure_qbit_web_password()
 
         if nzb_opt:
-            if await aiopath.exists("configs/sabnzbd/SABnzbd.ini.bak"):
-                await remove("configs/sabnzbd/SABnzbd.ini.bak")
+            await makedirs(SABNZBD_RUNTIME_DIR, exist_ok=True)
+            backup_path = SABNZBD_RUNTIME_DIR / "SABnzbd.ini.bak"
+            if await aiopath.exists(backup_path):
+                await remove(backup_path)
             for key, value in nzb_opt.items():
                 if value:
                     file_ = key.replace("__", ".")
-                    async with aiopen(f"configs/sabnzbd/{file_}", "wb+") as f:
+                    async with aiopen(SABNZBD_RUNTIME_DIR / file_, "wb+") as f:
                         await f.write(value)
             LOGGER.info("Loaded.. Sabnzbd Data from MongoDB")
 
@@ -351,7 +356,8 @@ async def save_settings():
     ):
         await database.save_qbit_settings()
     if await database.db.settings.nzb.find_one(deploy_filter) is None:
-        async with aiopen("configs/sabnzbd/SABnzbd.ini", "rb+") as pf:
+        sabnzbd_config = ensure_sabnzbd_runtime_config()
+        async with aiopen(sabnzbd_config, "rb+") as pf:
             nzb_conf = await pf.read()
         await database.db.settings.nzb.update_one(
             deploy_filter, {"$set": {"SABnzbd__ini": nzb_conf}}, upsert=True
@@ -505,26 +511,34 @@ async def load_configurations():
     # && chain short-circuits — setpkgs.sh never runs, aria2c never
     # starts, and the bot crashes with 'Cannot connect to host
     # localhost:6800'.
-    from os import path as _ospath, environ as _environ, getuid as _getuid
+    from os import environ as _environ, getuid as _getuid
     from pwd import getpwuid as _getpwuid
     try:
         _home = _environ.get("HOME") or _getpwuid(_getuid()).pw_dir
     except Exception:
         _home = _environ.get("HOME", "/root")
-    # Use ';' instead of '&&' so a failed cp (e.g. /home/amaterasu
-    # already has a .netrc) doesn't prevent setpkgs.sh from running.
-    # The aria2/sabnzbd daemons are the critical part; .netrc is only
-    # used by rclone for some auth flows.
+    # A failed .netrc copy must not prevent the download services from
+    # starting. Launch setpkgs.sh separately through bash so startup never
+    # changes the executable bit of this tracked file.
     aria2_bin = "EXTERNAL_ARIA2" if _environ.get("ARIA2_RPC_URL") else BinConfig.ARIA2_NAME
-    cmd = (
+    netrc_cmd = (
         f"chmod 600 .netrc; "
-        f"cp .netrc '{_home}/.netrc' 2>/dev/null || true; "
-        f"chmod +x setpkgs.sh && ./setpkgs.sh {aria2_bin} "
-        f"\"{service_cores}\" {Config.CPU_LIMIT}"
+        f"cp .netrc '{_home}/.netrc' 2>/dev/null || true"
     )
+    netrc_proc = await create_subprocess_shell(netrc_cmd)
+    await netrc_proc.wait()
+
+    setpkgs_args = [
+        "bash",
+        "setpkgs.sh",
+        aria2_bin,
+        str(service_cores),
+        str(Config.CPU_LIMIT),
+    ]
     if not Config.DISABLE_NZB:
-        cmd += f" {BinConfig.SABNZBD_NAME}"
-    proc = await create_subprocess_shell(cmd)
+        sabnzbd_config = ensure_sabnzbd_runtime_config()
+        setpkgs_args.extend([BinConfig.SABNZBD_NAME, str(sabnzbd_config)])
+    proc = await create_subprocess_exec(*setpkgs_args)
     if await proc.wait() != 0:
         raise RuntimeError("setpkgs.sh failed to start required download services")
 

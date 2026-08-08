@@ -205,7 +205,15 @@ def _update_sabnzbd_ini(api_key):
     manually or migrate from a custom config. The default (False) keeps
     the strict safety behavior — refuse to start on default creds.
     """
-    from re import compile as _re, MULTILINE
+    from re import MULTILINE, compile as _re
+
+    from .core.runtime_paths import ensure_sabnzbd_runtime_config
+
+    try:
+        sabnzbd_config = ensure_sabnzbd_runtime_config()
+    except Exception as e:
+        LOGGER.error(f"Could not prepare SABnzbd runtime configuration: {e}")
+        return False
 
     # Phase 0.3 — bypass check. Read Config lazily to avoid import cycle.
     skip_check = getattr(Config, "SKIP_SABNZBD_INI_CHECK", False)
@@ -217,7 +225,7 @@ def _update_sabnzbd_ini(api_key):
         )
         # Still attempt the substitution best-effort, but never fail.
         try:
-            with open("configs/sabnzbd/SABnzbd.ini", "r+") as f:
+            with sabnzbd_config.open("r+") as f:
                 content = f.read()
                 pat_key = _re(r"^api_key\s*=.*$", MULTILINE)
                 pat_pwd = _re(r'^password\s*=.*$', MULTILINE)
@@ -240,7 +248,7 @@ def _update_sabnzbd_ini(api_key):
     # Known-bad credentials that must NEVER be left in the ini at boot:
     _BAD_MARKERS = ("sabpassword", "REPLACED_AT_BOOT_BY_AMATERASU", "CHANGEME")
     try:
-        with open("configs/sabnzbd/SABnzbd.ini", "r+") as f:
+        with sabnzbd_config.open("r+") as f:
             content = f.read()
             new = content
             new = pat_key.sub(f"api_key = {api_key}", new)
@@ -260,8 +268,8 @@ def _update_sabnzbd_ini(api_key):
                         LOGGER.error(
                             f"SABnzbd.ini still contains the marker '{marker}' "
                             "but the regex pattern didn't match — refusing to "
-                            "start SABnzbd. Delete configs/sabnzbd/SABnzbd.ini "
-                            "and redeploy to regenerate from the template, or "
+                            f"start SABnzbd. Delete {sabnzbd_config} and restart "
+                            "to regenerate it from the tracked template, or "
                             "set SKIP_SABNZBD_INI_CHECK=True to bypass (not "
                             "recommended)."
                         )
@@ -274,8 +282,8 @@ def _update_sabnzbd_ini(api_key):
             return True
     except FileNotFoundError:
         LOGGER.error(
-            "configs/sabnzbd/SABnzbd.ini not found. Refusing to start SABnzbd "
-            "with default credentials. Restore the file from the repo, or set "
+            f"{sabnzbd_config} not found. Refusing to start SABnzbd with "
+            "default credentials. Restore the tracked template, or set "
             "SKIP_SABNZBD_INI_CHECK=True to bypass (not recommended)."
         )
         return False

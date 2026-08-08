@@ -10,6 +10,7 @@ from pymongo.server_api import ServerApi
 
 from ... import LOGGER, qbit_options, rss_dict, user_data
 from ...core.config_manager import Config
+from ...core.runtime_paths import ensure_sabnzbd_runtime_config
 from ...core.tg_client import TgClient, db_partition_id
 
 INCOMPLETE_TASK_SCHEMA = 2
@@ -261,7 +262,8 @@ class DbManager:
     async def update_nzb_config(self):
         if self._return:
             return
-        async with aiopen("configs/sabnzbd/SABnzbd.ini", "rb+") as pf:
+        sabnzbd_config = ensure_sabnzbd_runtime_config()
+        async with aiopen(sabnzbd_config, "rb+") as pf:
             nzb_conf = await pf.read()
         await self.db.settings.nzb.replace_one(
             {"_id": _part()}, {"SABnzbd__ini": nzb_conf}, upsert=True
@@ -798,7 +800,7 @@ class DbManager:
         (check on next request, not via cron)."""
         if self._return:
             return
-        from datetime import datetime, timezone, timedelta
+        from datetime import datetime, timezone
         now = datetime.now(timezone.utc)
         try:
             doc = await self.db.user_stats.find_one({"user_id": user_id})

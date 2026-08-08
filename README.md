@@ -411,7 +411,7 @@ start.sh → update.py → python3 -m bot
 | **7. Ready** | Registers command handlers and begins responding to Telegram messages |
 
 > [!NOTE]
-> Automatic Git updates are opt-in. The recommended Docker workflow is `git pull` on the host followed by `docker compose up -d`. If you explicitly set `AUTO_UPDATE=true`, startup and Telegram hard/soft restarts use the same guarded fast-forward-only updater.
+> Automatic Git updates are opt-in. With `AUTO_UPDATE=false`, update on the host with `git pull` and then run `docker compose up -d`. With `AUTO_UPDATE=true`, container startup and Telegram hard/soft restarts fetch and fast-forward automatically whenever the checkout is clean and aligned with `UPSTREAM_BRANCH`.
 
 ---
 
@@ -872,6 +872,10 @@ For an additional layer of protection on the web UI itself (beyond the file-down
 `AUTO_UPDATE=false` applies to every update entry point: initial container boot, hard restart, scheduled restart, and soft reload. `UPDATE_PKGS` is independent and controls only Python package updates.
 
 With `AUTO_UPDATE=true`, Amaterasu never runs `git reset --hard`, `git clean`, or an automatic checkout over local work. It checks `git status` before and after fetching, requires the current branch to equal `UPSTREAM_BRANCH`, and applies only a fast-forward. Git child processes use the numeric UID/GID that owns the mounted project directory, derived at runtime; no host username, path, UID, or GID is hardcoded. If an existing installation was already damaged by an older image, repair that ownership once before using the new updater—the new startup flow will not apply `chown` or conceal existing permission damage.
+
+SABnzbd and qBittorrent mutable configuration, logs, and engine state are kept outside the Git checkout. Docker deployments use `/data/amaterasu` on the existing `tunnel_data` volume; non-Docker runs use the ignored `.runtime` directory. The files under `configs/sabnzbd` and `configs/qbittorrent` are immutable seed templates. Startup invokes `setpkgs.sh` through `bash` and never changes the tracked script's executable bit. `AMATERASU_RUNTIME_DIR` can override the runtime root for non-standard deployments without depending on a host username, UID, GID, or installation path.
+
+An installation upgrading from an older release may need one manual cleanup because the old startup code already modified `setpkgs.sh`, `configs/sabnzbd/SABnzbd.ini`, `configs/qbittorrent/qBittorrent/config/qBittorrent.conf`, or created engine logs/state below those directories. Stop the container, inspect `git diff` carefully, back up any runtime data you need, restore only the known generated tracked changes, move legacy untracked runtime data outside the checkout, and run `git pull --ff-only`. This is a one-time migration; do not restore files containing intentional source changes. Once the runtime-state fix is installed, `AUTO_UPDATE=true` can update on subsequent restarts without normal startup dirtying the repository.
 
 Docker build contexts exclude `.git` and deployment secrets. A container started without a Git checkout mounted at the application directory therefore skips `AUTO_UPDATE=true` safely; update that deployment by pulling/rebuilding the image instead. The standard Compose checkout mount remains available for `config.py` and private runtime files, but startup does not write its Git metadata unless an operator explicitly opts into a safe update or confirms the bot-settings upstream-push action.
 

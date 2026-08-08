@@ -7,18 +7,32 @@ rclone.conf
 .netrc
 log.txt
 rlog.txt
+latestversion.py
 cfg.zip
 accounts/*
 thumbnails/*
 rclone/*
 tokens/*
 cookies/*
+terabox.txt
+terabox_cookies/*
 mediainfo/*
 list_drives.txt
 shortener.txt
 categories.txt
 cookies.txt
 downloads/*
+rclone_sa/
+rclone_select_*.txt
+.restartmsg
+.restartmsg.tmp
+.runtime/
+# Legacy location used by older releases before SABnzbd runtime state moved to /data.
+configs/sabnzbd/logs/
+# Legacy qBittorrent profile state from releases that wrote under configs/.
+configs/qbittorrent/qBittorrent/cache/
+configs/qbittorrent/qBittorrent/data/
+configs/qbittorrent/qBittorrent/GeoDB/
 .github/instructions/*
 .github/skills/*
 .github/agents/*
