@@ -1,4 +1,5 @@
 from asyncio import Lock, gather, get_event_loop, sleep
+from contextlib import suppress
 from datetime import datetime
 from html import escape
 from importlib import reload as reload_module
@@ -9,6 +10,7 @@ from aiofiles import open as aiopen
 from aiofiles.os import path as aiopath, remove
 from pytz import timezone
 from pyrogram.enums import ButtonStyle
+from pyrogram.errors import QueryIdInvalid
 from datetime import timezone as dt_timezone
 
 from bot.version import get_version
@@ -925,7 +927,11 @@ async def scheduled_restart():
 
 @new_task
 async def confirm_restart(_, query):
-    await query.answer()
+    # Telegram callback IDs can expire while a busy event loop is processing
+    # transfer work. The acknowledgement is cosmetic; a stale acknowledgement
+    # must not prevent the already-received restart confirmation from running.
+    with suppress(QueryIdInvalid):
+        await query.answer()
     data = query.data.split()
     message = query.message
     reply_to = message.reply_to_message or message.chat.id
