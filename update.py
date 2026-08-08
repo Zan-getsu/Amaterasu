@@ -2,23 +2,24 @@ from asyncio import run
 from hashlib import sha256
 from importlib import import_module
 from logging import (
+    ERROR,
+    INFO,
     FileHandler,
     StreamHandler,
-    INFO,
     basicConfig,
     getLogger,
-    ERROR,
 )
 from os import environ, path, remove
-from os.path import isdir
 from pathlib import Path
-from shutil import rmtree
+from re import compile as re_compile
+from subprocess import run as srun
+from sys import exit
+
 from pymongo import AsyncMongoClient
 from pymongo.errors import PyMongoError
 from pymongo.server_api import ServerApi
-from subprocess import run as srun, PIPE
-from sys import exit
-from re import compile as re_compile
+
+from git_runtime import git_command
 
 getLogger("pymongo").setLevel(ERROR)
 
@@ -139,6 +140,7 @@ _VAR_LIST = [
     "BASE_URL",
     "UPSTREAM_REPO",
     "UPSTREAM_BRANCH",
+    "AUTO_UPDATE",
     "UPDATE_PKGS",
 ]
 
@@ -242,10 +244,28 @@ def _fetch_config_from_db(config_file, db_part):
     config_file.update(env_keys)
 
 
+def _run_git(*args):
+    """Run Git as the working directory's numeric owner."""
+    return srun(git_command(*args), capture_output=True, text=True)
+
+
+def _git_error(action, result):
+    detail = (result.stderr or result.stdout or "unknown Git error").strip()
+    _LOGGER.error("Auto-update could not %s: %s", action, detail)
+
+
+def _working_tree_changes():
+    status = _run_git("status", "--porcelain=v1", "--untracked-files=normal")
+    if status.returncode != 0:
+        _git_error("inspect the working tree", status)
+        return None
+    return status.stdout.strip()
+
+
 def _run_update(upstream_repo, upstream_branch, version):
     if not upstream_repo:
         _LOGGER.info("No UPSTREAM_REPO set, skipping git update")
-        return
+        return False
 
     # Check against the configurable allowlist (Phase 0.2). Operators can
     # add their own fork URL via UPSTREAM_ALLOWLIST env var or config.py.
@@ -258,53 +278,125 @@ def _run_update(upstream_repo, upstream_branch, version):
             "config.py as a comma-separated list of regex patterns. "
             "Example: UPSTREAM_ALLOWLIST=\"^https://github\\.com/yourname/Amaterasu/?$\""
         )
-        exit(1)
+        return False
 
-    if path.exists(".git"):
-        rmtree(".git", ignore_errors=True)
+    if not _BRANCH_RE.fullmatch(upstream_branch) or any(
+        marker in upstream_branch for marker in ("..", "//", "@{")
+    ):
+        _LOGGER.error("Invalid UPSTREAM_BRANCH %r; auto-update skipped", upstream_branch)
+        return False
 
-    commands = [
-        ["git", "init", "-q"],
-        ["git", "config", "--global", "user.email", "AmaterasuBot@users.noreply.github.com"],
-        ["git", "config", "--global", "user.name", "Amaterasu"],
-        ["git", "add", "."],
-        ["git", "commit", "-sm", "update", "-q"],
-        ["git", "remote", "add", "origin", upstream_repo],
-        ["git", "fetch", "origin", "-q"],
-        ["git", "reset", "--hard", f"origin/{upstream_branch}", "-q"],
-    ]
-    update_code = 0
-    for command in commands:
-        update = srun(command, stdout=PIPE, stderr=PIPE, text=True)
-        update_code = update.returncode
-        if update_code != 0:
-            _LOGGER.error(f"Command '{' '.join(command)}' failed with error:\n{update.stderr}")
-            break
+    repository = _run_git("rev-parse", "--is-inside-work-tree")
+    if repository.returncode != 0 or repository.stdout.strip() != "true":
+        _LOGGER.warning(
+            "AUTO_UPDATE=true, but the application directory is not a Git working tree; "
+            "leaving application files unchanged"
+        )
+        return False
+
+    current_branch = _run_git("symbolic-ref", "--quiet", "--short", "HEAD")
+    if current_branch.returncode != 0:
+        _LOGGER.warning("Auto-update skipped because Git HEAD is detached")
+        return False
+    if current_branch.stdout.strip() != upstream_branch:
+        _LOGGER.warning(
+            "Auto-update skipped: current branch is %s, configured branch is %s",
+            current_branch.stdout.strip(),
+            upstream_branch,
+        )
+        return False
+
+    changes = _working_tree_changes()
+    if changes is None:
+        return False
+    if changes:
+        _LOGGER.warning(
+            "Auto-update skipped: the Git working tree has local changes. "
+            "Commit, stash, or discard them explicitly before updating.\n%s",
+            changes,
+        )
+        return False
+
+    update_ref = f"refs/remotes/amaterasu-update/{upstream_branch}"
+    fetch = _run_git(
+        "fetch",
+        "--quiet",
+        "--no-tags",
+        upstream_repo,
+        f"+refs/heads/{upstream_branch}:{update_ref}",
+    )
+    if fetch.returncode != 0:
+        _git_error("fetch the configured upstream", fetch)
+        return False
+
+    # A file can change while the network fetch is in progress. Protect that
+    # race by checking the tree again immediately before applying anything.
+    changes = _working_tree_changes()
+    if changes is None:
+        return False
+    if changes:
+        _LOGGER.warning(
+            "Auto-update stopped after fetch because local changes appeared. "
+            "No update was applied.\n%s",
+            changes,
+        )
+        return False
+
+    local_head = _run_git("rev-parse", "HEAD")
+    remote_head = _run_git("rev-parse", update_ref)
+    if local_head.returncode != 0 or remote_head.returncode != 0:
+        _git_error(
+            "resolve update revisions",
+            local_head if local_head.returncode != 0 else remote_head,
+        )
+        return False
+    if local_head.stdout.strip() == remote_head.stdout.strip():
+        _LOGGER.info("Already running the latest configured revision")
+        return True
+
+    counts = _run_git("rev-list", "--left-right", "--count", f"HEAD...{update_ref}")
+    if counts.returncode != 0:
+        _git_error("compare local and upstream revisions", counts)
+        return False
+    try:
+        ahead, behind = (int(value) for value in counts.stdout.split())
+    except (TypeError, ValueError):
+        _git_error("compare local and upstream revisions", counts)
+        return False
+
+    if ahead:
+        if behind:
+            reason = "the local and upstream branches have diverged"
+        else:
+            reason = "the local branch contains commits not present upstream"
+        _LOGGER.warning("Auto-update skipped: %s; no files were changed", reason)
+        return False
+    if not behind:
+        _LOGGER.info("Already running the latest configured revision")
+        return True
+
+    merge = _run_git("merge", "--ff-only", "--no-edit", update_ref)
+    if merge.returncode != 0:
+        _git_error("fast-forward the working tree", merge)
+        return False
 
     display_repo = "/".join(upstream_repo.split("/")[-2:])
-    if update_code == 0:
-        _LOGGER.info("Successfully updated with Latest Updates !")
-    else:
-        _LOGGER.error("Something went Wrong! Recheck your details or Ask Support!")
+    _LOGGER.info("Successfully fast-forwarded to the latest configured revision")
     _LOGGER.info(f"UPSTREAM_REPO: {display_repo} | UPSTREAM_BRANCH: {upstream_branch} | VERSION: {version}")
+    return True
 
 def _update_packages(update_pkgs):
     if as_bool(update_pkgs):
         _LOGGER.info("Updating Packages...")
-        pkg_update = srun(["uv", "pip", "install", "--system", "-U", "-r", "requirements.txt"], stdout=PIPE, stderr=PIPE, text=True)
+        pkg_update = srun(
+            ["uv", "pip", "install", "--system", "-U", "-r", "requirements.txt"],
+            capture_output=True,
+            text=True,
+        )
         if pkg_update.returncode == 0:
             _LOGGER.info("Successfully Updated all the Packages !")
         else:
             _LOGGER.error(f"Failed to update packages: {pkg_update.stderr}")
-
-
-def _cleanup():
-    for d in ["gen_scripts", ".github"]:
-        if isdir(d):
-            rmtree(d, ignore_errors=True)
-    for f in ["README.md", "LICENSE", "Dockerfile", "docker-compose.yml"]:
-        if path.exists(f):
-            remove(f)
 
 
 def main():
@@ -337,9 +429,16 @@ def main():
     upstream_repo = config_file.get("UPSTREAM_REPO", "").strip()
     upstream_branch = config_file.get("UPSTREAM_BRANCH", "").strip() or "main"
 
-    _run_update(upstream_repo, upstream_branch, version)
+    auto_update = config_file.get("AUTO_UPDATE", False)
+    if as_bool(auto_update):
+        _run_update(upstream_repo, upstream_branch, version)
+    else:
+        _LOGGER.info(
+            "Automatic Git updates are disabled (AUTO_UPDATE=false); "
+            "the working tree will not be modified"
+        )
 
-    update_pkgs = config_file.get("UPDATE_PKGS", "True")
+    update_pkgs = config_file.get("UPDATE_PKGS", False)
     _update_packages(update_pkgs)
 
 

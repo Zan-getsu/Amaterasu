@@ -8,7 +8,6 @@ from functools import partial
 from html import escape
 from io import BytesIO
 from os import environ, getcwd
-from shlex import quote as shlex_quote
 from time import time
 
 from aiofiles import open as aiopen
@@ -18,6 +17,8 @@ from aioshutil import rmtree
 from pyrogram.filters import create
 from pyrogram.handlers import MessageHandler
 from pyrogram.enums import ButtonStyle
+
+from git_runtime import git_command
 
 from .. import (
     LOGGER,
@@ -106,6 +107,7 @@ DEFAULT_VALUES = {
     "PROGRESS_BAR": "█:░",
     "SEARCH_LIMIT": 0,
     "UPSTREAM_BRANCH": "main",
+    "AUTO_UPDATE": False,
     "DEFAULT_UPLOAD": "rc",
     "BOT_MAX_TASKS": 0,
     "QUEUE_ALL": 0,
@@ -277,8 +279,9 @@ DEFAULT_DESP = {
     "USER_TIME_INTERVAL": "Cooldown between tasks per user in seconds. 0 = disabled.",
     "UPLOAD_PATHS": "Custom upload paths per extension. Dict format.",
     "UPSTREAM_REPO": "GitHub repo URL for bot updates.",
-    "UPSTREAM_BRANCH": "Branch for updates. Default: master.",
-    "UPDATE_PKGS": "Update pip packages on restart. Default: True.",
+    "UPSTREAM_BRANCH": "Branch for updates. Default: main.",
+    "AUTO_UPDATE": "Opt in to safe Git fast-forward updates. Default: False.",
+    "UPDATE_PKGS": "Update pip packages on restart. Default: False.",
     "USENET_SERVERS": "Usenet server configurations. List of dicts.",
     "USER_SESSION_STRING": "Pyrogram session string for user account tasks.",
     "TRANSMISSION_MODE": "Transmission mode: bot, user, or both. Default: both.",
@@ -332,7 +335,7 @@ PROTECTED_VARS = {
 RESTART_VARS = {
     "CMD_SUFFIX", "OWNER_ID", "USER_SESSION_STRING", "TELEGRAM_HASH", "TELEGRAM_API", "BOT_TOKEN",
     "TG_PROXY", "AUTHORIZED_CHATS", "DATABASE_URL", "AUTO_PROVISION_STREAM_BOTS",
-    "DISABLE_TORRENTS"
+    "AUTO_UPDATE", "DISABLE_TORRENTS"
 }
 
 HIDDEN_VARS = {"PORT"}
@@ -619,6 +622,7 @@ CONFIG_CATEGORIES = {
             "INCOMPLETE_TASK_TTL",
             "UPSTREAM_REPO",
             "UPSTREAM_BRANCH",
+            "AUTO_UPDATE",
             "UPDATE_PKGS",
             "LOG_FORMAT",
             "SLEEP_THRESHOLD",
@@ -1981,8 +1985,6 @@ async def edit_bot_settings(client, query):
     elif data[1] == "push":
         await query.answer()
         filename = data[2].rsplit(".zip", 1)[0]
-        safe_filename = shlex_quote(filename)
-        safe_branch = shlex_quote(Config.UPSTREAM_BRANCH)
         if await aiopath.exists(filename):
             commands = [
                 ("git", "add", "-f", "--", filename),
@@ -1996,7 +1998,10 @@ async def edit_bot_settings(client, query):
                 ("git", "push", "origin", Config.UPSTREAM_BRANCH, "-qf"),
             ]
         for command in commands:
-            proc = await create_subprocess_exec(*command)
+            # The app itself needs root for media-engine capabilities, but Git
+            # metadata belongs to the host project owner. The wrapper derives
+            # that numeric UID/GID from the bind mount for this child only.
+            proc = await create_subprocess_exec(*git_command(*command[1:]))
             if await proc.wait() != 0:
                 break
         await delete_message(message.reply_to_message)

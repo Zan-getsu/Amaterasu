@@ -163,6 +163,7 @@ var_list = [
     "CLOUDFLARE_TUNNEL_AUTO_FQDN",
     "UPSTREAM_REPO",
     "UPSTREAM_BRANCH",
+    "AUTO_UPDATE",
     "UPDATE_PKGS",
 ]
 auth_chats = {}

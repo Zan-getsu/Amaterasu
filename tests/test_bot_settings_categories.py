@@ -113,6 +113,10 @@ def test_every_visible_config_variable_has_one_explicit_canonical_home():
     ]
     assert len(explicit_keys) == len(set(explicit_keys))
 
+    system_keys = categories["system"][2]
+    assert "AUTO_UPDATE" in system_keys
+    assert "AUTO_UPDATE" in namespace["RESTART_VARS"]
+
     visible_keys = {
         key
         for key in Config.get_all()

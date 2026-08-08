@@ -8,7 +8,12 @@ elif [ -d ".venv" ]; then
     source .venv/bin/activate
 fi
 
-git config --global --add safe.directory /usr/src/app 2>/dev/null || true
+# Let runtime status/version commands read the bind-mounted checkout without
+# writing a root-owned /root/.gitconfig. All Git writes use the owner-dropping
+# wrapper in git_runtime.py.
+export GIT_CONFIG_COUNT=1
+export GIT_CONFIG_KEY_0=safe.directory
+export GIT_CONFIG_VALUE_0=/usr/src/app
 
 # ── Sanitise config.py encoding (permanent fix for non-UTF-8 files) ──
 # If the user saved config.py with a Windows editor (CP1252/Latin-1),

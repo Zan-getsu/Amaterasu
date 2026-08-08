@@ -46,3 +46,4 @@ tests/*
 !tests/test_filetolink_streaming.py
 !tests/test_hyperdl_routing.py
 !tests/test_bot_settings_categories.py
+!tests/test_update_safety.py

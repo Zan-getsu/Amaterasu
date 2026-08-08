@@ -259,6 +259,9 @@ CPU_LIMIT = 20
 THROTTLE_SERVICES = "auto"
 UPSTREAM_REPO = "https://github.com/Zan-getsu/Amaterasu"
 UPSTREAM_BRANCH = "main"
+# Opt-in. When enabled, updates only fast-forward a clean working tree.
+# Dirty, ahead, or diverged repositories are preserved and skipped.
+AUTO_UPDATE = False
 UPDATE_PKGS = False
 # Comma-separated regex patterns for allowed UPSTREAM_REPO URLs.
 # Default (empty) uses the built-in 3-pattern allowlist:

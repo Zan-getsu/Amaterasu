@@ -344,6 +344,7 @@ The `docker-compose.yml` is pre-configured with:
 - **`network_mode: host`** — the container shares your server's network stack directly (no port mapping needed, qBittorrent/Aria2c work without extra config).
 - **`restart: always`** — auto-restarts on crash or server reboot.
 - **Volume mount** (`.:/usr/src/app:z`) — your local `config.py`, `token.pickle`, etc. are live-synced into the container.
+- **Safe update default** (`AUTO_UPDATE=false`) — container startup does not modify the bind-mounted Git checkout. Compose passes `AUTO_UPDATE` through only when it is explicitly set, so an unset environment does not override `config.py` or the System & Automation setting saved in MongoDB. The entry in `.env.example` is intentionally commented; uncomment it only when an environment-level override is desired.
 
 #### Method B: Docker (Manual)
 
@@ -401,7 +402,7 @@ start.sh → update.py → python3 -m bot
 
 | Step | What It Does |
 |---|---|
-| **1. Auto-Update** | Pulls the latest code from `UPSTREAM_REPO` / `UPSTREAM_BRANCH` (resets local changes to match remote) |
+| **1. Safe Update Check** | Does not touch Git by default. With `AUTO_UPDATE=true`, fetches and fast-forwards only a clean, matching branch; dirty, ahead, detached, or diverged trees are skipped unchanged |
 | **2. Package Update** | Runs `uv pip install -U -r requirements.txt` to sync Python dependencies (disable with `UPDATE_PKGS = False`) |
 | **3. Config Import** | Loads `config.py` → merges with saved config from MongoDB → environment variables override both |
 | **4. Engine Boot** | Starts Aria2c (with auto-fetched tracker lists), qBittorrent-nox, Sabnzbd, and JDownloader (if configured) |
@@ -410,7 +411,7 @@ start.sh → update.py → python3 -m bot
 | **7. Ready** | Registers command handlers and begins responding to Telegram messages |
 
 > [!NOTE]
-> Because of Step 1, the bot **automatically updates itself** on every restart. If you push a commit to your `UPSTREAM_REPO`, simply restart the bot (or send `/restart` in Telegram) and it will pull the latest changes.
+> Automatic Git updates are opt-in. The recommended Docker workflow is `git pull` on the host followed by `docker compose up -d`. If you explicitly set `AUTO_UPDATE=true`, startup and Telegram hard/soft restarts use the same guarded fast-forward-only updater.
 
 ---
 
@@ -548,7 +549,7 @@ Troubleshooting:
 | **Disk Cleanup** | `sudo docker system prune -af` | `sudo podman system prune -af` | `sudo docker system prune -af` |
 
 > [!TIP]
-> **Quick Update Workflow**: You don't need to rebuild the container to update the bot. Simply restart it — the auto-update system (`update.py`) pulls the latest code from your `UPSTREAM_REPO` on every boot. Only rebuild if you've changed the `Dockerfile`, `requirements.txt`, or system-level dependencies.
+> **Safe Update Workflow**: Run `git pull` as the host user, then `docker compose up -d`. A plain container restart never rewrites the checkout when `AUTO_UPDATE=false` (the default). Rebuild the local image when application files, `Dockerfile`, or dependencies change; the published-image Compose file pulls the published image according to its pull policy.
 
 ---
 
@@ -864,17 +865,25 @@ For an additional layer of protection on the web UI itself (beyond the file-down
 |---|---|---|---|
 | `UPSTREAM_REPO` | `str` | `https://github.com/Zan-getsu/Amaterasu` | Git repo URL for auto-update. Empty disables auto-update |
 | `UPSTREAM_BRANCH` | `str` | `"main"` | Branch to track |
+| `AUTO_UPDATE` | `bool` | `False` | Opt in to Git updates. A clean matching branch is fast-forwarded; dirty, ahead, detached, or diverged repositories are skipped without changing files |
 | `UPDATE_PKGS` | `bool` | `False` | Run `uv pip install -U -r requirements.txt` on every boot. Off by default to avoid surprises — pin and update explicitly |
 | `UPSTREAM_ALLOWLIST` | `str` | (3 default patterns) | Comma-separated regex patterns for allowed `UPSTREAM_REPO` URLs. Default allows `github.com`, `raw.githubusercontent.com`, and `git.nbmirror.qzz.io`. Add your own fork URL here to enable auto-update from a custom fork |
+
+`AUTO_UPDATE=false` applies to every update entry point: initial container boot, hard restart, scheduled restart, and soft reload. `UPDATE_PKGS` is independent and controls only Python package updates.
+
+With `AUTO_UPDATE=true`, Amaterasu never runs `git reset --hard`, `git clean`, or an automatic checkout over local work. It checks `git status` before and after fetching, requires the current branch to equal `UPSTREAM_BRANCH`, and applies only a fast-forward. Git child processes use the numeric UID/GID that owns the mounted project directory, derived at runtime; no host username, path, UID, or GID is hardcoded. If an existing installation was already damaged by an older image, repair that ownership once before using the new updater—the new startup flow will not apply `chown` or conceal existing permission damage.
+
+Docker build contexts exclude `.git` and deployment secrets. A container started without a Git checkout mounted at the application directory therefore skips `AUTO_UPDATE=true` safely; update that deployment by pulling/rebuilding the image instead. The standard Compose checkout mount remains available for `config.py` and private runtime files, but startup does not write its Git metadata unless an operator explicitly opts into a safe update or confirms the bot-settings upstream-push action.
 
 #### Self-Update from a Custom Fork
 
 By default, `update.py` only accepts `UPSTREAM_REPO` URLs matching one of three patterns: `github.com`, `raw.githubusercontent.com`, or `git.nbmirror.qzz.io`. This prevents arbitrary-repo fetch but breaks fork workflows — operators who fork Amaterasu to their own GitHub cannot auto-update.
 
-To enable auto-update from your own fork, set `UPSTREAM_ALLOWLIST` in your `.env` file or `config.py`:
+To enable auto-update from your own fork, set `AUTO_UPDATE=true` and `UPSTREAM_ALLOWLIST` in your `.env` file or `config.py`:
 
 ```bash
 # .env file
+AUTO_UPDATE=true
 UPSTREAM_ALLOWLIST=^https://github\.com/yourname/Amaterasu/?$
 ```
 
@@ -903,9 +912,10 @@ Each pattern is a Python regex. Invalid patterns are skipped with a warning. If 
 | `DISABLE_BULK` | `bool` | `False` | Disable bulk download feature |
 | `DISABLE_MULTI` | `bool` | `False` | Disable multi-link feature |
 | `DISABLE_FF_MODE` | `bool` | `False` | Disable FFmpeg processing |
-| `UPSTREAM_REPO` | `str` | `https://github.com/Zan-getsu/Amaterasu` | Repository URL for auto-updates on restart. Leave empty to skip code reset/update. Allowed hosts: `github.com`, `raw.githubusercontent.com`, `git.nbmirror.qzz.io` |
-| `UPSTREAM_BRANCH` | `str` | `main` | Branch to pull updates from |
-| `UPDATE_PKGS` | `bool` | `True` | Auto-update pip packages on restart |
+| `UPSTREAM_REPO` | `str` | `https://github.com/Zan-getsu/Amaterasu` | Repository URL used only when `AUTO_UPDATE=true`. Allowed hosts: `github.com`, `raw.githubusercontent.com`, `git.nbmirror.qzz.io` |
+| `UPSTREAM_BRANCH` | `str` | `main` | Branch eligible for a safe fast-forward update |
+| `AUTO_UPDATE` | `bool` | `False` | Opt in to safe, clean-tree-only Git updates on boot or bot restart |
+| `UPDATE_PKGS` | `bool` | `False` | Auto-update pip packages on restart |
 | `RSS_DELAY` | `int` | `0` | Seconds between RSS feed checks |
 | `RSS_CHAT` | `str` | `""` | Chat ID for RSS notifications |
 | `RSS_SIZE_LIMIT` | `int` | `0` | Max file size for RSS auto-downloads |
@@ -1198,7 +1208,7 @@ expose credentials.
 | `/shell` | — | Sudo | Execute a shell command on the server |
 | `/exec` | — | Sudo | Execute synchronous Python code |
 | `/aexec` | — | Sudo | Execute asynchronous Python code |
-| `/restart` | `/r` | Sudo | Restart the bot (pulls updates if `UPSTREAM_REPO` is set) |
+| `/restart` | `/r` | Sudo | Restart the bot (runs the guarded updater only when `AUTO_UPDATE=true`) |
 | `/restartses` | `/rses` | Sudo | Restart all user/helper sessions |
 | `/purge` | `/clear_drive` | Sudo | Scan and bulk-delete contents from a Google Drive folder |
 | `/rss` | — | Authorized | Open the RSS feed management panel |

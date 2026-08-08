@@ -7,6 +7,9 @@ services:
     environment:
       - TZ=Asia/Dhaka
       - BIND_TO_LOOPBACK=${BIND_TO_LOOPBACK:-true}
+      # Pass through only when explicitly set in the shell or .env. Otherwise
+      # config.py / MongoDB / the built-in False default remain authoritative.
+      - AUTO_UPDATE
     ports:
       - "82:8080"
     volumes:

@@ -198,6 +198,7 @@ class Config:
     DRIVE_CATEGORY_SA = ""
     UPSTREAM_REPO = "https://github.com/Zan-getsu/Amaterasu"
     UPSTREAM_BRANCH = "main"
+    AUTO_UPDATE = False  # opt-in; never modify a deployment checkout by default
     UPDATE_PKGS = False  # default off — pin and update explicitly to avoid surprises
     USENET_SERVERS = []
     USER_SESSION_STRING = ""

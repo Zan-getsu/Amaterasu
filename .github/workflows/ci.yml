@@ -35,7 +35,7 @@ jobs:
 
       - name: Compile Python sources
         run: |
-          paths="bot web config_sample.py cron_boot.py update.py"
+          paths="bot web config_sample.py cron_boot.py update.py git_runtime.py scripts/git_as_repo_owner.py"
           if [ -d tests ]; then
             paths="$paths tests"
           fi
