@@ -1704,7 +1704,7 @@ Every mirror/leech command supports powerful inline arguments. Combine them free
 | `-z [password]` | Compress into ZIP (optional password) | `/mirror link -z mypassword` |
 | `-up [dest]` | Override upload destination | `/mirror link -up gdl` or `-up rc` or `-up @channel` |
 | `-s` | Show quality/file selection, including supported multi-file TeraBox shares | `/ytdl link -s` or `/leech terabox-link -s` |
-| `-i [count]` | Multi-link: process N consecutive messages | `/mirror -i 5` |
+| `-i [count]` | Multi-link: process N consecutive messages. Leech commands send one combined file-list summary after the whole batch finishes. | `/leech -i 5`, `/qbleech -i 5`, `/jdleech -i 5` |
 | `-b` | Bulk: process links from a text file/message | `/leech -b` |
 | `-m [folder]` | Move all downloads into a single folder | `/mirror -i 3 -m MyFolder` |
 | `-j` | Join split files before processing | `/mirror link -j` |

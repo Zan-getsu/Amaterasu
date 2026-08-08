@@ -844,14 +844,31 @@ class TaskConfig:
                     return candidate
         return None
 
+    async def _record_unstarted_multi_leech(self, summary, count, error):
+        if summary is None:
+            return
+        snapshot = await summary.record_unstarted(
+            count,
+            summary.total - self.multi + 2,
+            error,
+            self.tag,
+        )
+        if snapshot is not None:
+            send_summary = getattr(self, "_send_multi_leech_summary", None)
+            if send_summary is not None:
+                await send_summary(snapshot)
+
     @new_task
     async def run_multi(self, input_list, obj):
         await sleep(7)
+        multi_leech_summary = getattr(self, "multi_leech_summary", None)
         if not self.multi_tag and self.multi > 1:
             self.multi_tag = token_hex(3)
             multi_tags.add(self.multi_tag)
         elif self.multi <= 1:
-            if self.multi_tag in multi_tags:
+            # A multi-leech owns its tag until the shared completion summary
+            # has been emitted. Other multi-task modes keep the old lifecycle.
+            if multi_leech_summary is None and self.multi_tag in multi_tags:
                 multi_tags.discard(self.multi_tag)
             return
         if self.multi_tag and self.multi_tag not in multi_tags:
@@ -862,6 +879,11 @@ class TaskConfig:
             async with task_dict_lock:
                 for fd_name in self.same_dir:
                     self.same_dir[fd_name]["total"] -= self.multi
+            await self._record_unstarted_multi_leech(
+                multi_leech_summary,
+                self.multi - 1,
+                "Multi Task was cancelled before this item started.",
+            )
             return
         if len(self.bulk) != 0:
             msg = input_list[:1]
@@ -877,6 +899,11 @@ class TaskConfig:
             next_source = await self._get_next_multi_source()
             if not isinstance(next_source, Message):
                 multi_tags.discard(self.multi_tag)
+                await self._record_unstarted_multi_leech(
+                    multi_leech_summary,
+                    self.multi - 1,
+                    "The next file/link could not be found.",
+                )
                 await send_message(
                     self.message,
                     "Multi Task stopped: I could not find the next file/link after "
@@ -888,16 +915,37 @@ class TaskConfig:
                 msgts += f"\n• <b>Cancel Multi:</b> <i>/{BotCommands.CancelTaskCommand[1]}_{self.multi_tag}</i>"
             nextmsg = await send_message(next_source, msgts)
         if not isinstance(nextmsg, Message):
+            await self._record_unstarted_multi_leech(
+                multi_leech_summary,
+                self.multi - 1,
+                "The next multi-task command could not be created.",
+            )
             return
         nextmsg = await self.client.get_messages(
             chat_id=self.message.chat.id, message_ids=nextmsg.id
         )
+        if not isinstance(nextmsg, Message):
+            await self._record_unstarted_multi_leech(
+                multi_leech_summary,
+                self.multi - 1,
+                "The next multi-task command could not be loaded.",
+            )
+            return
         if self.message.from_user:
             nextmsg.from_user = self.user
         else:
             nextmsg.sender_chat = self.user
         if intervals["stopAll"]:
+            await self._record_unstarted_multi_leech(
+                multi_leech_summary,
+                self.multi - 1,
+                "The bot stopped before this item started.",
+            )
             return
+
+        next_task_kwargs = {}
+        if multi_leech_summary is not None:
+            next_task_kwargs["multi_leech_summary"] = multi_leech_summary
 
         await obj(
             client=self.client,
@@ -911,6 +959,7 @@ class TaskConfig:
             bulk=self.bulk,
             multi_tag=self.multi_tag,
             options=self.options,
+            **next_task_kwargs,
         ).new_event()
 
     async def init_bulk(self, input_list, bulk_start, bulk_end, obj):
@@ -940,10 +989,16 @@ class TaskConfig:
             nextmsg = await self.client.get_messages(
                 chat_id=self.message.chat.id, message_ids=nextmsg.id
             )
+            if not isinstance(nextmsg, Message):
+                return
             if self.message.from_user:
                 nextmsg.from_user = self.user
             else:
                 nextmsg.sender_chat = self.user
+
+            next_task_kwargs = {}
+            if multi_leech_summary := getattr(self, "multi_leech_summary", None):
+                next_task_kwargs["multi_leech_summary"] = multi_leech_summary
 
             await obj(
                 client=self.client,
@@ -957,6 +1012,7 @@ class TaskConfig:
                 bulk=self.bulk,
                 multi_tag=self.multi_tag,
                 options=self.options,
+                **next_task_kwargs,
             ).new_event()
         except Exception:
             await send_message(

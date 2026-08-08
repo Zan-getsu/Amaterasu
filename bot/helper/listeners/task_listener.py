@@ -23,6 +23,7 @@ from ... import (
     queue_dict_lock,
     same_directory_lock,
     DOWNLOAD_DIR,
+    multi_tags,
 )
 from ...modules.metadata import apply_metadata_title
 from ..common import TaskConfig
@@ -43,6 +44,7 @@ from ..ext_utils.files_utils import (
 )
 from ..ext_utils.links_utils import is_gdrive_id
 from ..ext_utils.media_utils import download_custom_thumb
+from ..ext_utils.multi_leech_utils import paginate_text_blocks
 from ..ext_utils.status_utils import get_readable_file_size, get_readable_time
 from ..ext_utils.task_manager import check_running_tasks, start_from_queued
 from ..mirror_leech_utils.uphoster_utils.multi_upload import MultiUphosterUpload
@@ -594,6 +596,187 @@ class TaskListener(TaskConfig):
             del RCTransfer
         return
 
+    def _multi_leech_remaining(self):
+        try:
+            remaining = int(self.multi or 0)
+        except (TypeError, ValueError):
+            remaining = 0
+        if remaining > 0:
+            return remaining
+        text = getattr(self.message, "text", "") or ""
+        tokens = text.split("\n", 1)[0].split()
+        with suppress(ValueError, IndexError, TypeError):
+            index = tokens.index("-i")
+            return max(1, int(tokens[index + 1]))
+        return 1
+
+    def _multi_leech_position(self):
+        summary = getattr(self, "multi_leech_summary", None)
+        if summary is None:
+            return 1
+        remaining = self._multi_leech_remaining()
+        return max(1, summary.total - remaining + 1)
+
+    async def _record_multi_leech_success(self, files, corrupted):
+        summary = getattr(self, "multi_leech_summary", None)
+        if summary is None:
+            return None
+        return await summary.record_success(
+            self.mid,
+            self._multi_leech_position(),
+            self.name,
+            self.size,
+            files,
+            corrupted,
+            self.tag,
+        )
+
+    async def _record_multi_leech_failure(self, error):
+        summary = getattr(self, "multi_leech_summary", None)
+        if summary is None:
+            return None
+        return await summary.record_failure(
+            self.mid,
+            self._multi_leech_position(),
+            self.name,
+            error,
+            self.tag,
+        )
+
+    def _multi_leech_file_block(self, index, link, name):
+        is_pm = "pm" in link
+        try:
+            chat_id, msg_id = link.split("/")[-2:]
+        except ValueError:
+            return f"╰─ <b>FILE {index:02d}</b> : <a href='{link}'>{escape(name)}</a>\n\n"
+
+        c_id = chat_id if is_pm else (
+            f"-100{chat_id}" if chat_id.isdigit() else chat_id
+        )
+        file_actions = []
+        if Config.BASE_URL:
+            try:
+                stream_token = _stream_route_token(c_id, msg_id)
+            except (TypeError, ValueError):
+                LOGGER.warning(
+                    "Skipping FileToLink URL for non-numeric chat/message "
+                    f"reference: {c_id}/{msg_id}"
+                )
+            else:
+                base_url = Config.BASE_URL.rstrip("/")
+                file_actions.extend(
+                    (
+                        ("Stream", f"<a href='{base_url}/watch/{stream_token}'>Online</a>"),
+                        (
+                            "Download",
+                            f"<a href='{base_url}/dl/{stream_token}'>Direct Link</a>",
+                        ),
+                    )
+                )
+        if Config.MEDIA_STORE and (self.is_super_chat or Config.LEECH_DUMP_CHAT):
+            flink = (
+                f"https://t.me/{TgClient.BNAME}?start="
+                f"{encode_slink('file' + c_id + '&&' + msg_id)}"
+            )
+            file_actions.extend(
+                (
+                    ("Get Media", f"<a href='{flink}'>Store Link</a>"),
+                    (
+                        "Share",
+                        f"<a href='https://t.me/share/url?url={flink}'>Share Link</a>",
+                    ),
+                )
+            )
+
+        branch = "╭─" if file_actions else "╰─"
+        block = (
+            f"{branch} <b>FILE {index:02d}</b> : "
+            f"<a href='{link}'>{escape(str(name))}</a>\n"
+        )
+        for action_index, (label, value) in enumerate(file_actions):
+            block += _premium_row(
+                label,
+                value,
+                code=False,
+                branch="╰─" if action_index == len(file_actions) - 1 else "├─",
+            )
+        return block + "\n"
+
+    async def _send_multi_leech_summary(self, snapshot):
+        multi_tags.discard(self.multi_tag)
+        header = _completion_header(
+            "MULTI LEECH COMPLETE", f"{snapshot.total} leech tasks", "📤"
+        )
+        header += _premium_row("Completed Tasks", snapshot.succeeded)
+        header += _premium_row("Failed Tasks", snapshot.failed)
+        header += _premium_row("Total Files", len(snapshot.files))
+        header += _premium_row(
+            "Total Size", get_readable_file_size(snapshot.total_size)
+        )
+        if snapshot.corrupted:
+            header += _premium_row("Corrupted Files", snapshot.corrupted)
+        header += _premium_row("Time Taken", get_readable_time(snapshot.elapsed))
+        header += _premium_row(
+            "Task By", snapshot.tag or self.tag, code=False, branch="╰─"
+        )
+
+        blocks = []
+        if snapshot.failures:
+            blocks.append("\n<b>✦ FAILED TASKS</b>\n\n")
+            for failure in snapshot.failures:
+                task_name = escape(failure.name[:200])
+                error = escape(failure.error[:300])
+                blocks.append(
+                    f"╭─ <b>TASK {failure.position:02d}</b> : <code>{task_name}</code>\n"
+                    f"╰─ <b>Reason</b> : <i>{error}</i>\n\n"
+                )
+
+        blocks.append("\n<b>✦ FILES LIST</b>\n\n")
+        if not snapshot.files:
+            blocks.append("╰─ <i>No files were uploaded successfully.</i>\n")
+        for index, item in enumerate(snapshot.files, start=1):
+            blocks.append(self._multi_leech_file_block(index, item.link, item.name))
+
+        pages = paginate_text_blocks(
+            header,
+            blocks,
+            "<b>✦ MULTI LEECH COMPLETE — CONTINUED</b>\n\n",
+        )
+
+        target = self.user_id if self.bot_pm else getattr(
+            self.multi_leech_summary, "anchor_message", self.message
+        )
+        for page_index, page in enumerate(pages):
+            await send_message(target, page)
+            if page_index < len(pages) - 1:
+                await sleep(1)
+
+        if self.bot_pm and self.is_super_chat:
+            await send_message(
+                getattr(self.multi_leech_summary, "anchor_message", self.message),
+                (
+                    "<b>✦ MULTI LEECH COMPLETE</b>\n\n"
+                    f"╭─ <b>Completed Tasks</b> : <code>{snapshot.succeeded}</code>\n"
+                    f"├─ <b>Failed Tasks</b> : <code>{snapshot.failed}</code>\n"
+                    "╰─ <b>Result</b> : <i>File list has been sent to User PM</i>\n"
+                ),
+            )
+
+    async def on_multi_leech_task_error(self, error, abort_remaining=False):
+        snapshot = await self._record_multi_leech_failure(error)
+        summary = getattr(self, "multi_leech_summary", None)
+        if abort_remaining and summary is not None:
+            remaining = self._multi_leech_remaining()
+            unstarted_snapshot = await summary.record_unstarted(
+                remaining - 1,
+                self._multi_leech_position() + 1,
+                "The multi-leech chain stopped before this item started.",
+                self.tag,
+            )
+            snapshot = snapshot or unstarted_snapshot
+        if snapshot is not None:
+            await self._send_multi_leech_summary(snapshot)
+
     async def on_upload_complete(
         self, link, files, folders, mime_type, rclone_path="", dir_id=""
     ):
@@ -661,8 +844,14 @@ class TaskListener(TaskConfig):
                 msg += _premium_row("Corrupted Files", mime_type)
             msg += _premium_row("Task By", self.tag, code=False, branch="╰─")
             msg += "\n"
+            multi_leech_summary = getattr(self, "multi_leech_summary", None)
+            multi_snapshot = None
+            if multi_leech_summary is not None:
+                multi_snapshot = await self._record_multi_leech_success(
+                    files, mime_type
+                )
 
-            if self.bot_pm:
+            if multi_leech_summary is None and self.bot_pm:
                 pmsg = msg
                 pmsg += "<b>✦ ACTION PERFORMED</b>\n\n"
                 pmsg += (
@@ -672,7 +861,10 @@ class TaskListener(TaskConfig):
                 if self.is_super_chat:
                     await send_message(self.message, pmsg)
 
-            if not files and not self.is_super_chat:
+            if multi_leech_summary is not None:
+                if multi_snapshot is not None:
+                    await self._send_multi_leech_summary(multi_snapshot)
+            elif not files and not self.is_super_chat:
                 await send_message(self.message, msg, photo=self.thumb or "IMAGES")
             else:
                 log_chat = self.user_id if self.bot_pm else self.message
@@ -871,6 +1063,7 @@ class TaskListener(TaskConfig):
 
     async def on_download_error(self, error, button=None, is_limit=False):
         await self.remove_processing()
+        multi_snapshot = await self._record_multi_leech_failure(error)
         async with task_dict_lock:
             if self.mid in task_dict:
                 del task_dict[self.mid]
@@ -909,6 +1102,8 @@ class TaskListener(TaskConfig):
         )
 
         await send_message(self.message, msg, button)
+        if multi_snapshot is not None:
+            await self._send_multi_leech_summary(multi_snapshot)
         if count == 0:
             await self.clean()
         else:
@@ -945,6 +1140,7 @@ class TaskListener(TaskConfig):
 
     async def on_upload_error(self, error):
         await self.remove_processing()
+        multi_snapshot = await self._record_multi_leech_failure(error)
         async with task_dict_lock:
             if self.mid in task_dict:
                 del task_dict[self.mid]
@@ -967,6 +1163,8 @@ class TaskListener(TaskConfig):
             )
         )
         await send_message(self.message, msg)
+        if multi_snapshot is not None:
+            await self._send_multi_leech_summary(multi_snapshot)
         if count == 0:
             await self.clean()
         else:

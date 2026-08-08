@@ -47,3 +47,4 @@ tests/*
 !tests/test_hyperdl_routing.py
 !tests/test_bot_settings_categories.py
 !tests/test_update_safety.py
+!tests/test_multi_leech_summary.py

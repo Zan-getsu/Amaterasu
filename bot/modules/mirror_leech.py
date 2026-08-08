@@ -15,6 +15,10 @@ from ..helper.ext_utils.bot_utils import (
     sync_to_async,
 )
 from ..helper.ext_utils.exceptions import DirectDownloadLinkException
+from ..helper.ext_utils.multi_leech_utils import (
+    MultiLeechSummary,
+    should_collect_multi_leech,
+)
 from ..helper.ext_utils.links_utils import (
     is_gdrive_id,
     is_gdrive_link,
@@ -96,6 +100,7 @@ class Mirror(TaskListener):
         bulk=None,
         multi_tag=None,
         options="",
+        multi_leech_summary=None,
         **kwargs,
     ):
         if same_dir is None:
@@ -108,6 +113,7 @@ class Mirror(TaskListener):
         self.options = options
         self.same_dir = same_dir
         self.bulk = bulk
+        self.multi_leech_summary = multi_leech_summary
         super().__init__()
         self.is_qbit = is_qbit
         self.is_leech = is_leech
@@ -267,6 +273,7 @@ class Mirror(TaskListener):
 
         check_msg, check_button = await pre_task_check(self.message)
         if check_msg:
+            await self.on_multi_leech_task_error(check_msg, abort_remaining=True)
             await delete_links(self.message)
             await auto_delete_message(
                 await send_message(self.message, check_msg, check_button)
@@ -436,6 +443,13 @@ class Mirror(TaskListener):
         ytdlp_fallback_name = ""
 
         self.multi = multi_count
+        if self.multi_leech_summary is None and should_collect_multi_leech(
+            self.is_leech,
+            self.multi,
+            self.folder_name,
+            self.is_yt,
+        ):
+            self.multi_leech_summary = MultiLeechSummary(self.multi, self.message)
 
         try:
             if args["-ff"]:
@@ -512,6 +526,7 @@ class Mirror(TaskListener):
             try:
                 reply_to, session = await get_tg_link_message(self.link)
             except Exception as e:
+                await self.on_multi_leech_task_error(e)
                 await send_message(self.message, f"ERROR: {e}")
                 await self.remove_from_same_dir()
                 await delete_links(self.message)
@@ -531,17 +546,18 @@ class Mirror(TaskListener):
             else:
                 nextmsg.sender_chat = self.user
             await Mirror(
-                self.client,
-                nextmsg,
-                self.is_qbit,
-                self.is_leech,
-                self.is_jd,
-                self.is_nzb,
-                self.is_uphoster,
-                self.same_dir,
-                self.bulk,
-                self.multi_tag,
-                self.options,
+                client=self.client,
+                message=nextmsg,
+                is_qbit=self.is_qbit,
+                is_leech=self.is_leech,
+                is_jd=self.is_jd,
+                is_nzb=self.is_nzb,
+                is_uphoster=self.is_uphoster,
+                same_dir=self.same_dir,
+                bulk=self.bulk,
+                multi_tag=self.multi_tag,
+                options=self.options,
+                multi_leech_summary=self.multi_leech_summary,
             ).new_event()
             return
 
@@ -587,6 +603,7 @@ class Mirror(TaskListener):
             and not is_terabox_link(self.link)
             and self.link != "tbx"
         ):
+            await self.on_multi_leech_task_error("Invalid or missing download source.")
             await send_message(
                 self.message, COMMAND_USAGE["mirror"][0], COMMAND_USAGE["mirror"][1]
             )
@@ -600,6 +617,7 @@ class Mirror(TaskListener):
         try:
             await self.before_start()
         except Exception as e:
+            await self.on_multi_leech_task_error(e)
             await send_message(self.message, e)
             await self.remove_from_same_dir()
             await delete_links(self.message)
@@ -651,6 +669,7 @@ class Mirror(TaskListener):
                 except DirectDownloadLinkException as e:
                     e = str(e)
                     if "This link requires a password!" in e:
+                        await self.on_multi_leech_task_error(e)
                         await send_message(self.message, e)
                         await self.remove_from_same_dir()
                         await delete_links(self.message)
@@ -667,6 +686,7 @@ class Mirror(TaskListener):
                     retry_aria2_after_generic = no_direct_link or content_type is None
                     ytdlp_fallback_error = e
                 except Exception as e:
+                    await self.on_multi_leech_task_error(e)
                     await send_message(self.message, e)
                     await self.remove_from_same_dir()
                     await delete_links(self.message)

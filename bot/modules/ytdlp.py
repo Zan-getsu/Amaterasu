@@ -18,6 +18,10 @@ from ..helper.ext_utils.bot_utils import (
     sync_to_async,
 )
 from ..helper.ext_utils.links_utils import is_url
+from ..helper.ext_utils.multi_leech_utils import (
+    MultiLeechSummary,
+    should_collect_multi_leech,
+)
 from ..helper.ext_utils.task_manager import pre_task_check
 from ..helper.ext_utils.status_utils import get_readable_file_size, get_readable_time
 from ..helper.listeners.task_listener import TaskListener
@@ -271,6 +275,7 @@ class YtDlp(TaskListener):
         bulk=None,
         multi_tag=None,
         options="",
+        multi_leech_summary=None,
         **kwargs,
     ):
         if same_dir is None:
@@ -283,6 +288,7 @@ class YtDlp(TaskListener):
         self.options = options
         self.same_dir = same_dir
         self.bulk = bulk
+        self.multi_leech_summary = multi_leech_summary
         super().__init__()
         self.is_ytdlp = True
         self.is_leech = is_leech
@@ -294,6 +300,7 @@ class YtDlp(TaskListener):
 
         check_msg, check_button = await pre_task_check(self.message)
         if check_msg:
+            await self.on_multi_leech_task_error(check_msg, abort_remaining=True)
             await delete_links(self.message)
             await auto_delete_message(
                 await send_message(self.message, check_msg, check_button)
@@ -425,6 +432,11 @@ class YtDlp(TaskListener):
                 self.default_metadata_dict, self.metadata_processor.parse_string(meta)
             )
 
+        if self.multi_leech_summary is None and should_collect_multi_leech(
+            self.is_leech, self.multi, self.folder_name
+        ):
+            self.multi_leech_summary = MultiLeechSummary(self.multi, self.message)
+
         is_bulk = args["-b"]
 
         bulk_start = 0
@@ -484,6 +496,9 @@ class YtDlp(TaskListener):
                 self.link = reply_to.text.split("\n", 1)[0].strip()
 
         if not is_url(self.link):
+            await self.on_multi_leech_task_error(
+                "Invalid or missing yt-dlp URL.", abort_remaining=True
+            )
             await send_message(
                 self.message, COMMAND_USAGE["yt"][0], COMMAND_USAGE["yt"][1]
             )
@@ -497,6 +512,7 @@ class YtDlp(TaskListener):
         try:
             await self.before_start()
         except Exception as e:
+            await self.on_multi_leech_task_error(e, abort_remaining=True)
             await send_message(self.message, e)
             await self.remove_from_same_dir()
             await delete_links(self.message)
@@ -532,6 +548,7 @@ class YtDlp(TaskListener):
             result = await sync_to_async(extract_info, self.link, options)
         except Exception as e:
             msg = format_ytdlp_error(e, self.link)
+            await self.on_multi_leech_task_error(msg)
             await send_message(self.message, f"{self.tag} {msg}")
             await self.remove_from_same_dir()
             await delete_links(self.message)
@@ -542,6 +559,9 @@ class YtDlp(TaskListener):
         if not qual:
             qual = await YtSelection(self).get_quality(result)
             if qual is None:
+                await self.on_multi_leech_task_error(
+                    "The yt-dlp quality selection was cancelled."
+                )
                 await self.remove_from_same_dir()
                 return
 

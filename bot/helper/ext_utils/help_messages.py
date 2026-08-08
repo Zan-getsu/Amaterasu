@@ -29,7 +29,9 @@ Note: Doesn't work with torrents"""
 
 multi_link = """<b>Multi links only by replying to first link/file</b>: -i
 
-/cmd -i 10(number of links/files)"""
+/cmd -i 10(number of links/files)
+
+Leech commands collect the uploaded file information and send one combined completion summary after all -i tasks finish."""
 
 same_dir = """<b>Move file(s)/folder(s) to new folder</b>: -m
 
