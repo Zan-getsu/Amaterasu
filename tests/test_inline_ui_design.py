@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
+from re import findall
 from sys import modules
 from types import ModuleType, SimpleNamespace
 from unittest.mock import AsyncMock
@@ -227,6 +228,81 @@ def test_image_commands_are_available_to_command_sync():
     menu_commands = {item.command for item in build_bot_command_menu()}
     assert "addimage" in menu_commands
     assert "images" in menu_commands
+
+
+def test_every_registered_command_family_is_available_to_command_sync():
+    from bot.helper.telegram_helper.bot_commands import BotCommands
+    from bot.helper.telegram_helper.command_sync import build_bot_command_menu
+
+    BotCommands.refresh_commands()
+    menu_commands = {item.command for item in build_bot_command_menu()}
+    expected = set()
+    for key in ("Start", "Login", *BotCommands.get_commands()):
+        configured = getattr(BotCommands, f"{key}Command")
+        expected.add(configured[0] if isinstance(configured, list) else configured)
+
+    assert expected <= menu_commands
+    assert len(menu_commands) <= 100
+
+
+def test_every_static_command_handler_is_exposed_in_the_telegram_menu():
+    from bot.helper.telegram_helper.bot_commands import BotCommands
+    from bot.helper.telegram_helper.command_sync import build_bot_command_menu
+
+    handler_attributes = set()
+    pattern = r"command\(\s*BotCommands\.(\w+Command)"
+    for path in (ROOT / "bot").rglob("*.py"):
+        handler_attributes.update(findall(pattern, path.read_text(encoding="utf-8")))
+
+    menu_commands = {item.command for item in build_bot_command_menu()}
+    missing = set()
+    for attribute in handler_attributes:
+        configured = getattr(BotCommands, attribute)
+        primary = configured[0] if isinstance(configured, list) else configured
+        if primary not in menu_commands:
+            missing.add(primary)
+
+    assert not missing
+
+
+def test_generated_telegram_commands_meet_bot_api_limits():
+    from bot.helper.telegram_helper.command_sync import build_bot_command_menu
+
+    menu = build_bot_command_menu()
+    commands = [item.command for item in menu]
+
+    assert len(commands) == len(set(commands))
+    assert len(commands) <= 100
+    assert all(1 <= len(command) <= 32 for command in commands)
+    assert all(3 <= len(item.description) <= 256 for item in menu)
+
+
+@pytest.mark.asyncio
+async def test_command_sync_sets_and_reads_back_the_complete_menu(monkeypatch):
+    from bot.helper.telegram_helper import command_sync
+
+    class FakeBot:
+        def __init__(self):
+            self.registered = []
+
+        async def set_bot_commands(self, commands):
+            self.registered = list(commands)
+            return True
+
+        async def get_bot_commands(self):
+            return self.registered
+
+    async def resilient(operation, *args, **_kwargs):
+        return await operation(*args)
+
+    fake_bot = FakeBot()
+    monkeypatch.setattr(command_sync.TgClient, "bot", fake_bot)
+    monkeypatch.setattr(command_sync, "resilient_tg_operation", resilient)
+
+    count = await command_sync.sync_bot_commands()
+
+    assert count == 61
+    assert len(fake_bot.registered) == 61
 
 
 def test_filetolink_caption_icons_match_buttons():

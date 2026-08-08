@@ -52,6 +52,7 @@ from ..helper.mirror_leech_utils.download_utils.terabox_download import (
 from ..helper.telegram_helper.message_utils import (
     auto_delete_message,
     delete_links,
+    delete_message,
     get_tg_link_message,
     send_message,
 )
@@ -204,6 +205,7 @@ class Uphoster(TaskListener):
         ratio = None
         seed_time = None
         reply_to = None
+        direct_media_reply = False
         file_ = None
         session = ""
 
@@ -275,9 +277,11 @@ class Uphoster(TaskListener):
         path = f"{DOWNLOAD_DIR}{self.mid}{self.folder_name}"
 
         if not self.link and (reply_to := self.message.reply_to_message):
+            direct_media_reply = True
             if reply_to.text:
                 self.link = reply_to.text.split("\n", 1)[0].strip()
         if is_telegram_link(self.link):
+            direct_media_reply = False
             try:
                 reply_to, session = await get_tg_link_message(self.link)
             except Exception as e:
@@ -412,12 +416,17 @@ class Uphoster(TaskListener):
                     await delete_links(self.message)
                     return
 
-        await delete_links(self.message)
+        preserve_reply = direct_media_reply and file_ is not None
+        await delete_links(self.message, preserve_reply=preserve_reply)
 
         if file_ is not None:
-            await TelegramDownloadHelper(self).add_download(
-                reply_to, f"{path}/", session
-            )
+            try:
+                await TelegramDownloadHelper(self).add_download(
+                    reply_to, f"{path}/", session
+                )
+            finally:
+                if preserve_reply and Config.DELETE_LINKS:
+                    await delete_message(reply_to)
         elif isinstance(self.link, dict):
             await add_direct_download(self, path)
         elif self.is_jd:

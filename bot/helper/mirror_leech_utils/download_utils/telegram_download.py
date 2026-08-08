@@ -83,6 +83,9 @@ class TelegramDownloadHelper:
         self._download_engine = "WZGram"
         self._standard_session = ""
         self._hyper_dl_instance = None
+        self._source_message = None
+        self._source_chat_id = None
+        self._source_message_id = None
 
     def _hyper_capacity(self):
         mode = self._listener.transmission_mode
@@ -114,7 +117,9 @@ class TelegramDownloadHelper:
         if self._start_time <= 1:
             return
         elapsed = max(time() - self._start_time, 0.001)
-        transferred = self._processed_bytes or self._listener.size or 0
+        transferred = self._processed_bytes
+        if outcome == "completed" and not transferred:
+            transferred = self._listener.size or 0
         speed_mib = transferred / elapsed / (1024 * 1024)
         LOGGER.info(
             "Telegram download performance: name=%s outcome=%s engine=%s "
@@ -228,6 +233,84 @@ class TelegramDownloadHelper:
             )
         )
 
+    @staticmethod
+    def _message_identity(message):
+        chat = getattr(message, "chat", None)
+        return getattr(chat, "id", None), getattr(message, "id", None)
+
+    def _remember_source_message(self, message):
+        if not self._has_downloadable_media(message):
+            return
+        chat_id, message_id = self._message_identity(message)
+        if chat_id is not None and message_id is not None:
+            self._source_chat_id = chat_id
+            self._source_message_id = message_id
+            self._source_message = message
+
+    async def _refresh_source_message(self, client, label):
+        if client is None:
+            return None
+        if self._source_chat_id is None or self._source_message_id is None:
+            LOGGER.warning(
+                "Telegram %s message refresh skipped: source identity is missing",
+                label,
+            )
+            return None
+        try:
+            refreshed = await client.get_messages(
+                chat_id=self._source_chat_id,
+                message_ids=self._source_message_id,
+            )
+        except Exception as e:
+            LOGGER.warning(f"Telegram {label} message refresh failed: {e}")
+            return None
+        refreshed_chat_id, refreshed_message_id = self._message_identity(refreshed)
+        if (
+            not self._has_downloadable_media(refreshed)
+            or refreshed_chat_id is None
+            or refreshed_message_id is None
+        ):
+            LOGGER.warning(
+                "Telegram %s message refresh returned no downloadable media; "
+                "preserving the original source message",
+                label,
+            )
+            return None
+        self._remember_source_message(refreshed)
+        return refreshed
+
+    async def _message_after_queue(self, message):
+        clients = []
+        if self.session == "bot":
+            clients.append(("listener", self._listener.client))
+        elif TgClient.user:
+            clients.extend(
+                (
+                    ("user", TgClient.user),
+                    ("listener", self._listener.client),
+                )
+            )
+        else:
+            clients.append(("listener", self._listener.client))
+
+        seen = set()
+        for label, client in clients:
+            if client is None or id(client) in seen:
+                continue
+            seen.add(id(client))
+            refreshed = await self._refresh_source_message(client, label)
+            if refreshed is not None:
+                return refreshed
+
+        original = self._source_message
+        if self._has_downloadable_media(original):
+            LOGGER.warning(
+                "Telegram queued message could not be refreshed safely; "
+                "continuing with the preserved original source message"
+            )
+            return original
+        return message
+
     async def _standard_download(
         self, message, path, fallback_message=None, serialize=False
     ):
@@ -237,39 +320,35 @@ class TelegramDownloadHelper:
                     message, path, fallback_message=fallback_message
                 )
 
+        if self._has_downloadable_media(message):
+            self._remember_source_message(message)
+        elif self._has_downloadable_media(self._source_message):
+            message = self._source_message
+
         candidates = []
         if fallback_message is not None:
             candidates.append(("hyper-dump", fallback_message))
         candidates.append(("current", message))
 
         if self._listener.transmission_mode in ("user", "both") and TgClient.user:
-            try:
-                user_message = await TgClient.user.get_messages(
-                    chat_id=message.chat.id,
-                    message_ids=message.id,
-                )
-                candidates.insert(0, ("user", user_message))
-            except Exception as e:
-                LOGGER.warning(f"Telegram user fallback message refresh failed: {e}")
-
-        try:
-            fresh_message = await self._listener.client.get_messages(
-                chat_id=message.chat.id,
-                message_ids=message.id,
+            user_message = await self._refresh_source_message(
+                TgClient.user, "user fallback"
             )
+            if user_message is not None:
+                candidates.insert(0, ("user", user_message))
+
+        fresh_message = await self._refresh_source_message(
+            self._listener.client, "listener fallback"
+        )
+        if fresh_message is not None:
             candidates.append(("listener", fresh_message))
-        except Exception as e:
-            LOGGER.warning(f"Telegram listener fallback message refresh failed: {e}")
 
         if TgClient.bot:
-            try:
-                bot_message = await TgClient.bot.get_messages(
-                    chat_id=message.chat.id,
-                    message_ids=message.id,
-                )
+            bot_message = await self._refresh_source_message(
+                TgClient.bot, "bot fallback"
+            )
+            if bot_message is not None:
                 candidates.append(("bot", bot_message))
-            except Exception as e:
-                LOGGER.warning(f"Telegram bot fallback message refresh failed: {e}")
 
         tried = set()
         for label, candidate in candidates:
@@ -354,14 +433,23 @@ class TelegramDownloadHelper:
         if download is not None:
             await self._on_download_complete()
         elif not self._listener.is_cancelled:
-            await self._on_download_error(
-                "Download failed: HypertgDL produced an incomplete file and "
-                "the standard Pyrogram fallback also failed. Try again, or "
-                "ask the bot owner to check the logs."
-            )
+            if self._hyper_dl_instance is not None:
+                error = (
+                    "Download failed: HypertgDL produced an incomplete file and "
+                    "the standard Pyrogram fallback also failed. Try again, or "
+                    "ask the bot owner to check the logs."
+                )
+            else:
+                error = (
+                    "Download failed: the standard Pyrogram downloader could not "
+                    "retrieve a complete file. Try again, or ask the bot owner to "
+                    "check the logs."
+                )
+            await self._on_download_error(error)
         return
 
     async def add_download(self, message, path, session):
+        self._remember_source_message(message)
         self.session = session
         if not self.session:
             if self._hyper_dl:
@@ -379,9 +467,18 @@ class TelegramDownloadHelper:
                 else:
                     self.session = "user"
                     try:
-                        message = await TgClient.user.get_messages(
+                        user_message = await TgClient.user.get_messages(
                             chat_id=message.chat.id, message_ids=message.id
                         )
+                        if self._has_downloadable_media(user_message):
+                            message = user_message
+                            self._remember_source_message(message)
+                        else:
+                            LOGGER.warning(
+                                "Telegram initial user message refresh returned "
+                                "no downloadable media; downloading with bot session"
+                            )
+                            self.session = "bot"
                     except (PeerIdInvalid, ChannelInvalid):
                         LOGGER.warning(
                             "User session is not in this chat, downloading with bot session"
@@ -426,23 +523,7 @@ class TelegramDownloadHelper:
                     if self._listener.multi <= 1:
                         await send_status_message(self._listener.message)
                     await event.wait()
-                    if self.session == "bot":
-                        message = await self._listener.client.get_messages(
-                            chat_id=message.chat.id, message_ids=message.id
-                        )
-                    elif TgClient.user:
-                        try:
-                            message = await TgClient.user.get_messages(
-                                chat_id=message.chat.id, message_ids=message.id
-                            )
-                        except (PeerIdInvalid, ChannelInvalid):
-                            message = await self._listener.client.get_messages(
-                                chat_id=message.chat.id, message_ids=message.id
-                            )
-                    else:
-                        message = await self._listener.client.get_messages(
-                            chat_id=message.chat.id, message_ids=message.id
-                        )
+                    message = await self._message_after_queue(message)
                     if self._listener.is_cancelled:
                         async with global_lock:
                             if self._id in GLOBAL_GID:

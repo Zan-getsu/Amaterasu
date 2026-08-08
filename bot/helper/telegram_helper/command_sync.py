@@ -4,7 +4,6 @@ from re import compile as re_compile
 from pyrogram.types import BotCommand
 
 from ... import LOGGER
-from ...core.config_manager import Config
 from ...core.tg_client import TgClient, resilient_tg_operation
 from ..ext_utils.help_messages import get_bot_commands
 from .bot_commands import BotCommands
@@ -18,15 +17,9 @@ def build_bot_command_menu():
     """
     BotCommands.refresh_commands()
     descriptions = get_bot_commands()
-
-    if Config.JD_EMAIL and Config.JD_PASS:
-        descriptions["JdMirror"] = "[link/file] Mirror to Upload Destination using JDownloader"
-        descriptions["JdLeech"] = "[link/file] Leech files to Upload to Telegram using JDownloader"
-    if Config.USENET_SERVERS:
-        descriptions["NzbMirror"] = "[nzb] Mirror to Upload Destination using Sabnzbd"
-        descriptions["NzbLeech"] = "[nzb] Leech files to Upload to Telegram using Sabnzbd"
-    if Config.LOGIN_PASS:
-        descriptions["Login"] = "[password] Login to Bot"
+    command_families = {"Start": None, "Login": None, **BotCommands.get_commands()}
+    for key in command_families:
+        descriptions.setdefault(key, f"{key} command")
 
     menu = []
     invalid = []
@@ -45,8 +38,8 @@ def build_bot_command_menu():
         seen.add(command)
 
         description = " ".join(str(description).split()).strip()
-        if not description:
-            description = key
+        if len(description) < 3:
+            description = f"{key} command"
         # Telegram accepts descriptions up to 256 characters. Truncating a
         # plugin description keeps the rest of the menu available.
         menu.append(BotCommand(command, description[:256]))

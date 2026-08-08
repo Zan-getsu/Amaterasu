@@ -464,9 +464,12 @@ async def delete_message(*args):
                 LOGGER.error(err_msg)
 
 
-async def delete_links(message):
+async def delete_links(message, preserve_reply=False):
     if Config.DELETE_LINKS:
-        await delete_message(message, message.reply_to_message)
+        if preserve_reply:
+            await delete_message(message)
+        else:
+            await delete_message(message, message.reply_to_message)
 
 
 async def auto_delete_message(*args, stime=90):

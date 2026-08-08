@@ -30,6 +30,11 @@ TELEGRAM_UPLOADER_SOURCE = (
     / "upload_utils"
     / "telegram_uploader.py"
 )
+MESSAGE_UTILS_SOURCE = (
+    ROOT / "bot" / "helper" / "telegram_helper" / "message_utils.py"
+)
+MIRROR_SOURCE = ROOT / "bot" / "modules" / "mirror_leech.py"
+UPHOSTER_SOURCE = ROOT / "bot" / "modules" / "uphoster.py"
 
 
 def load_top_level_functions(path, names, namespace):
@@ -510,3 +515,182 @@ def test_download_routes_hyperdl_first_and_wzgram_for_overflow():
 
     assert "Telegram download route: HyperDL primary lane" in source
     assert "Telegram download route: WZGram overflow lane" in source
+
+
+def test_failed_download_performance_does_not_report_expected_size_as_transferred():
+    records = []
+    log_performance = load_method(
+        DOWNLOAD_SOURCE,
+        "TelegramDownloadHelper",
+        "_log_performance",
+        {
+            "LOGGER": SimpleNamespace(info=lambda *args: records.append(args)),
+            "time": lambda: 10.0,
+        },
+    )
+    helper = SimpleNamespace(
+        _start_time=9.0,
+        _processed_bytes=0,
+        _download_engine="WZGram",
+        _listener=SimpleNamespace(name="queued.mkv", size=500_000_000),
+    )
+
+    log_performance(helper, "failed")
+
+    assert records[0][4] == 0
+    assert records[0][6] == 0
+
+
+@pytest.mark.asyncio
+async def test_delete_links_can_preserve_media_reply_until_download_finishes():
+    deleted = []
+
+    async def delete_message(*messages):
+        deleted.append(messages)
+
+    delete_links = load_top_level_functions(
+        MESSAGE_UTILS_SOURCE,
+        {"delete_links"},
+        {
+            "Config": SimpleNamespace(DELETE_LINKS=True),
+            "delete_message": delete_message,
+        },
+    )["delete_links"]
+    reply = object()
+    command = SimpleNamespace(reply_to_message=reply)
+
+    await delete_links(command, preserve_reply=True)
+    await delete_links(command)
+
+    assert deleted == [(command,), (command, reply)]
+
+
+def test_direct_media_source_cleanup_is_deferred_in_both_command_paths():
+    for path in (MIRROR_SOURCE, UPHOSTER_SOURCE):
+        source = path.read_text(encoding="utf-8")
+
+        assert "direct_media_reply = True" in source
+        assert "preserve_reply = direct_media_reply and file_ is not None" in source
+        assert "delete_links(self.message, preserve_reply=preserve_reply)" in source
+        assert "if preserve_reply and Config.DELETE_LINKS:" in source
+        assert "await delete_message(reply_to)" in source
+
+
+def _queued_message_helper(tg_client):
+    namespace = {
+        "LOGGER": logging.getLogger(__name__),
+        "TgClient": tg_client,
+    }
+    methods = {}
+    for name in (
+        "_has_downloadable_media",
+        "_message_identity",
+        "_remember_source_message",
+        "_refresh_source_message",
+        "_message_after_queue",
+        "_standard_download",
+    ):
+        methods[name] = load_method(
+            DOWNLOAD_SOURCE,
+            "TelegramDownloadHelper",
+            name,
+            namespace,
+        )
+    return type("QueuedMessageHelper", (), methods)
+
+
+def _telegram_message(message_id, *, has_media=True):
+    document = object() if has_media else None
+    return SimpleNamespace(
+        chat=SimpleNamespace(id=-100123) if has_media else None,
+        id=message_id if has_media else None,
+        media=SimpleNamespace(value="document") if has_media else None,
+        document=document,
+    )
+
+
+@pytest.mark.asyncio
+async def test_queued_download_preserves_original_when_refresh_has_no_media():
+    original = _telegram_message(77)
+    empty_refresh = _telegram_message(None, has_media=False)
+
+    class Client:
+        async def get_messages(self, *, chat_id, message_ids):
+            assert (chat_id, message_ids) == (-100123, 77)
+            return empty_refresh
+
+    client = Client()
+    helper_class = _queued_message_helper(SimpleNamespace(user=None))
+    helper = helper_class()
+    helper.session = "bot"
+    helper._listener = SimpleNamespace(client=client)
+    helper._source_message = None
+    helper._source_chat_id = None
+    helper._source_message_id = None
+    helper._remember_source_message(original)
+
+    result = await helper._message_after_queue(original)
+
+    assert result is original
+    assert helper._source_message is original
+
+
+@pytest.mark.asyncio
+async def test_queued_download_uses_valid_refreshed_media_message():
+    original = _telegram_message(77)
+    refreshed = _telegram_message(77)
+
+    class Client:
+        async def get_messages(self, *, chat_id, message_ids):
+            assert (chat_id, message_ids) == (-100123, 77)
+            return refreshed
+
+    client = Client()
+    helper_class = _queued_message_helper(SimpleNamespace(user=None))
+    helper = helper_class()
+    helper.session = "bot"
+    helper._listener = SimpleNamespace(client=client)
+    helper._source_message = None
+    helper._source_chat_id = None
+    helper._source_message_id = None
+    helper._remember_source_message(original)
+
+    result = await helper._message_after_queue(original)
+
+    assert result is refreshed
+    assert helper._source_message is refreshed
+
+
+@pytest.mark.asyncio
+async def test_standard_fallback_uses_preserved_source_identity_safely():
+    original = _telegram_message(77)
+    empty_message = _telegram_message(None, has_media=False)
+    attempted = []
+
+    class Client:
+        async def get_messages(self, *, chat_id, message_ids):
+            assert (chat_id, message_ids) == (-100123, 77)
+            return empty_message
+
+    async def standard_download_once(candidate, _path, label):
+        attempted.append((label, candidate))
+        return "downloaded.bin"
+
+    tg_client = SimpleNamespace(user=None, bot=None)
+    helper_class = _queued_message_helper(tg_client)
+    helper = helper_class()
+    helper._listener = SimpleNamespace(
+        client=Client(),
+        is_cancelled=False,
+        transmission_mode="bot",
+    )
+    helper._source_message = None
+    helper._source_chat_id = None
+    helper._source_message_id = None
+    helper._standard_download_once = standard_download_once
+    helper._remember_source_message(original)
+
+    result = await helper._standard_download(empty_message, "downloads/")
+
+    assert result == "downloaded.bin"
+    assert attempted == [("current", original)]
