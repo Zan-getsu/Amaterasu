@@ -123,7 +123,6 @@ class Config:
     MEGA_PASSWORD = ""
     DISABLE_MEGA = False
     TERABOX_ENABLED = True
-    TERABOX_UPLOAD_PATH = ""
     DIRECT_LIMIT = 0
     MEGA_LIMIT = 0
     TERABOX_LIMIT = 0
@@ -373,9 +372,7 @@ class Config:
     @staticmethod
     def _normalize_default_upload(value):
         value = str(value or "").strip().lower()
-        if value == "tb":
-            return "tbx"
-        if value in {"gd", "rc", "tbx", "mega"}:
+        if value in {"gd", "rc", "mega"}:
             return value
         return "rc"
 

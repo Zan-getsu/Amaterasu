@@ -71,10 +71,6 @@ upload = """<b>Upload Destination</b>: -up
 You can directly add the upload path: -up remote:dir/subdir or -up Gdrive_id or -up id/username (telegram) or -up id/username|topic_id (telegram)
 If DEFAULT_UPLOAD is `rc` then you can pass up: `gd` to upload using gdrive tools to GDRIVE_ID.
 If DEFAULT_UPLOAD is `gd` then you can pass up: `rc` to upload to RCLONE_PATH.
-Use <code>-up tbx</code> for your TeraBox root or
-<code>-up tbx:/Folder</code> for a specific folder. This requires a private
-TeraBox cookies.txt file in User Settings or the owner's private files.
-
 If you want to add path or gdrive manually from your config/token (UPLOADED FROM USETTING) add mrcc: for rclone and mtp: before the path/gdrive_id without space.
 /cmd link -up mrcc:main:dump or -up mtp:gdrive_id <strong>or you can simply edit upload using owner/user token/config from usetting without adding mtp: or mrcc: before the upload path/id</strong>
 
@@ -133,7 +129,7 @@ You can simply edit using owner/user config from usetting without adding mrcc: b
 terabox_dl = """<b>TeraBox</b>:
 
 Use a public TeraBox share link like any other mirror/leech source.
-Use <code>/mirror tbx</code> or <code>/leech tbx</code> to browse your account.
+Use <code>/mirror tbx</code> or <code>/leech tbx</code> to browse and download from your account.
 Add <code>-s</code> to folders to select files in the signed web selector.
 
 Requires a private TeraBox cookies.txt file in User Settings or the owner's

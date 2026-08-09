@@ -1,59 +1,41 @@
-"""Amaterasu's source-based TeraBox compatibility layer.
+"""Source-visible, download-only TeraBox integration for Amaterasu.
 
-The pinned Apache-2.0 ``aioterabox`` package supplies reusable account and HTTP
-primitives.  Current regional routing and write-auth/upload behavior live here
-as ordinary Python so the complete runtime path remains inspectable.  Public
-share links reuse Amaterasu's existing resolver, keeping this package portable
-across Python versions and CPU architectures.
+The Apache-2.0 ``aioterabox`` package supplies authenticated account and HTTP
+primitives. Regional routing, public-share resolution, account browsing,
+resilient direct-link downloads, and cancellation remain ordinary Python.
+TeraBox upload support is intentionally not provided.
 """
 
 from __future__ import annotations
 
 import json
 import os
-from asyncio import (
-    FIRST_COMPLETED,
-    CancelledError,
-    Event,
-    create_task,
-    sleep,
-    to_thread,
-    wait,
-)
-from asyncio import gather as asyncio_gather
+from asyncio import Event, Lock, sleep, to_thread
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
-from hashlib import md5
 from http.cookiejar import MozillaCookieJar
+from ipaddress import ip_address
+from logging import getLogger
 from pathlib import Path
-from re import DOTALL
+from re import DOTALL, IGNORECASE
 from re import compile as re_compile
 from urllib.parse import urlsplit
 
 import aiohttp
 from aiofiles import open as aiopen
-from aiofiles import tempfile as aiotempfile
 from aiofiles.os import makedirs
-from aioterabox.api import CHUNK_SIZE as _SDK_CHUNK_SIZE
-from aioterabox.api import MAX_UNCHUNKED_FILE_SIZE as _SDK_UNCHUNKED_LIMIT
+from aioterabox.api import FileInfo as _AccountFileInfo
 from aioterabox.api import TeraboxClient as _AccountClient
-from aioterabox.exceptions import TeraboxApiError as _SdkApiError
-from aioterabox.exceptions import TeraboxNotFoundError as _SdkNotFoundError
 from aioterabox.exceptions import TeraboxUnauthorizedError as _SdkUnauthorizedError
 
-__version__ = "1.0.9-amaterasu"
+__version__ = "2.0.0-amaterasu"
+
+_LOGGER = getLogger(__name__)
 
 _DEFAULT_ACCOUNT_BASE_URL = "https://www.terabox.com"
 _REGION_PREFIX = re_compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
 _NON_REGIONAL_COOKIE_PREFIXES = {"www", "d", "data", "s3", "static"}
 _REGIONAL_ACCOUNT_DOMAINS = ("terabox.com", "1024terabox.com")
-_FREE_MAX_FILE_SIZE = 4 * 1024**3
-_VIP_MAX_FILE_SIZE = 20 * 1024**3 - 1
-_UPLOAD_CONTROL_TIMEOUT = 30
-_UPLOAD_FINALIZE_TIMEOUT = 30
-_UPLOAD_NETWORK_ATTEMPTS = 3
-_UPLOAD_AUTH_ERROR_CODES = {-6, 4000020, 4000023}
-_REMOTE_SNAPSHOT_UNKNOWN = object()
 _TEMPLATE_DATA = re_compile(
     r"<script>\s*var\s+templateData\s*=\s*(\{.*?\})\s*;</script>",
     DOTALL,
@@ -62,7 +44,18 @@ _ENCODED_JS_TOKEN = re_compile(r"%28%22(.*?)%22%29")
 _PAGE_JS_TOKEN = re_compile(
     r"window\.jsToken%20%3D%20a%7D%3Bfn%28%22(.*?)%22%29"
 )
-_INVALID_REMOTE_NAME = re_compile(r'[\\:*?"<>|\x00-\x1f]')
+_CONTENT_RANGE_TOTAL = re_compile(r"/([0-9]+)$")
+_CONTENT_RANGE = re_compile(
+    r"bytes\s+([0-9]+)-([0-9]+)/([0-9]+|\*)$",
+    IGNORECASE,
+)
+_DOWNLOAD_ATTEMPTS = 4
+_DOWNLOAD_CHUNK_SIZE = 1024 * 1024
+_DOWNLOAD_TIMEOUT = aiohttp.ClientTimeout(total=None, connect=30, sock_read=90)
+_RETRYABLE_HTTP = {408, 425, 429, 500, 502, 503, 504}
+_EXPIRED_LINK_HTTP = {401, 403, 404, 410}
+_ACCOUNT_PAGE_SIZE = 1000
+_ACCOUNT_ENTRY_LIMIT = 100_000
 
 
 class TeraboxError(Exception):
@@ -77,43 +70,12 @@ class TeraboxCancelled(TeraboxError):
     pass
 
 
-class _UploadAuthRejected(_SdkUnauthorizedError):
-    """A sanitized write-auth rejection with no cookie or token material."""
-
-    def __init__(self, stage: str, code, message: str):
-        super().__init__(f"TeraBox rejected upload {stage} auth")
-        self.code = code
-        self.api_message = message[:120]
-
-
 class _SessionRejected(_SdkUnauthorizedError):
     """An authenticated read rejection that may still be a route mismatch."""
 
     def __init__(self, location: str):
         super().__init__(f"TeraBox rejected session validation on {location}")
         self.location = location
-
-
-class _UploadHttpRejected(TeraboxError):
-    """A final-create HTTP rejection safe to expose and conditionally retry."""
-
-    def __init__(self, status: int):
-        super().__init__(f"TeraBox upload finalization returned HTTP {status}")
-        self.status = status
-
-
-class _UploadApiRejected(_SdkApiError):
-    """A sanitized create rejection retaining only useful diagnostics."""
-
-    def __init__(self, code, message: str, status: int | None = None):
-        self.code = code
-        self.api_message = message[:120]
-        self.status = status
-        status_detail = f", HTTP {status}" if status and status >= 400 else ""
-        super().__init__(
-            f"TeraBox file create failed (errno={code}, "
-            f"message={self.api_message or 'unknown'}{status_detail})"
-        )
 
 
 class _CookieData(dict):
@@ -132,7 +94,7 @@ class TeraboxFile:
     size: int = 0
     is_dir: bool = False
     url: str = ""
-    headers: list[str] = field(default_factory=list)
+    headers: list[str] | dict[str, str] | str = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -164,19 +126,15 @@ def _read_cookie_file(cookie_file: str) -> dict[str, str]:
             (cookies[name] for name in names if cookies.get(name)),
             "",
         )
-    # aioterabox requires all four keys to exist. Browser cookie exports commonly
-    # omit the page-derived values, so only the authentication cookie itself must
-    # be non-empty before the explicit bootstrap performed by login().
     if not normalized["ndus"]:
         raise TeraboxError("TeraBox cookie is missing the required ndus value")
     return normalized
 
 
 def _cookie_region_hint(records) -> str | None:
-    """Infer a safe regional prefix from cookie domains without reading values."""
     for cookie in records:
         domain = str(getattr(cookie, "domain", "") or "").lstrip(".").lower()
-        for root in ("terabox.com", "1024terabox.com"):
+        for root in _REGIONAL_ACCOUNT_DOMAINS:
             suffix = "." + root
             if not domain.endswith(suffix):
                 continue
@@ -194,7 +152,6 @@ def _regional_base_url(
     prefix: str | None,
     domain: str = _REGIONAL_ACCOUNT_DOMAINS[0],
 ) -> str | None:
-    """Return a safe account API origin from TeraBox's regional-prefix header."""
     normalized = (prefix or "").strip().lower()
     if domain not in _REGIONAL_ACCOUNT_DOMAINS or not _REGION_PREFIX.fullmatch(
         normalized
@@ -204,7 +161,6 @@ def _regional_base_url(
 
 
 def _account_base_url(value: str) -> str | None:
-    """Return a safe TeraBox account origin from a final response URL."""
     parsed = urlsplit(value)
     if (
         parsed.scheme.lower() != "https"
@@ -265,25 +221,6 @@ def _bootstrap_failure_reason(error: Exception) -> str:
     return "SDK bootstrap request failed"
 
 
-def _upload_rejection_reason(error: Exception) -> str:
-    if not isinstance(error, _UploadAuthRejected):
-        return ""
-    return f"errno={error.code}, message={error.api_message or 'unknown'}"
-
-
-def _finalization_rejection_reason(error: Exception) -> str:
-    if isinstance(error, _UploadHttpRejected):
-        return f"HTTP {error.status}"
-    if isinstance(error, _UploadApiRejected):
-        details = []
-        if error.status and error.status >= 400:
-            details.append(f"HTTP {error.status}")
-        details.append(f"errno={error.code}")
-        details.append(f"message={error.api_message or 'unknown'}")
-        return ", ".join(details)
-    return "API rejection"
-
-
 def _terabox_proxy_url() -> str | None:
     proxy_url = os.getenv("TERABOX_PROXY", "").strip()
     if not proxy_url:
@@ -294,21 +231,8 @@ def _terabox_proxy_url() -> str | None:
     return None
 
 
-def sanitize_remote_path(remote_path: str) -> str:
-    """Make every TeraBox path component portable without losing Unicode."""
-    components = []
-    for component in str(remote_path or "").split("/"):
-        if not component:
-            continue
-        safe = _INVALID_REMOTE_NAME.sub("_", component).rstrip(" .")
-        if safe in {"", ".", ".."}:
-            safe = "_"
-        components.append(safe)
-    return "/" + "/".join(components) if components else "/"
-
-
 def _page_auth_data(page: str) -> dict[str, str]:
-    """Extract non-cookie write tokens from an authenticated account page."""
+    """Extract page-derived session tokens from an account page."""
     match = _TEMPLATE_DATA.search(page)
     template = json.loads(match.group(1)) if match else {}
     js_token = str(template.get("jsToken") or "")
@@ -320,10 +244,69 @@ def _page_auth_data(page: str) -> dict[str, str]:
         raise ValueError("TeraBox account page did not contain authentication data")
     return {
         "jstoken": js_token,
-        "bdstoken": str(template.get("bdstoken") or ""),
         "csrfToken": str(template.get("csrf") or ""),
-        "pcftoken": str(template.get("pcftoken") or ""),
     }
+
+
+def _headers_dict(headers) -> dict[str, str]:
+    if isinstance(headers, dict):
+        return {str(key): str(value) for key, value in headers.items()}
+    if isinstance(headers, str):
+        headers = headers.splitlines()
+    result = {}
+    for header in headers or []:
+        if ":" in header:
+            key, value = header.split(":", 1)
+            result[key.strip()] = value.strip()
+    return result
+
+
+def _validated_download_url(value: str, *, account_only: bool = False) -> str:
+    normalized = str(value or "").strip()
+    parsed = urlsplit(normalized)
+    if (
+        parsed.scheme.lower() not in ({"https"} if account_only else {"http", "https"})
+        or not parsed.hostname
+        or parsed.username is not None
+        or parsed.password is not None
+    ):
+        raise TeraboxError("TeraBox returned an invalid download URL")
+    hostname = parsed.hostname.rstrip(".").lower()
+    if hostname == "localhost" or hostname.endswith((".localhost", ".local")):
+        raise TeraboxError("TeraBox returned a blocked local download URL")
+    try:
+        address = ip_address(hostname)
+    except ValueError:
+        address = None
+    if address is not None and not address.is_global:
+        raise TeraboxError("TeraBox returned a blocked private download URL")
+    if account_only and not any(
+        hostname == domain or hostname.endswith(f".{domain}")
+        for domain in _REGIONAL_ACCOUNT_DOMAINS
+    ):
+        raise TeraboxError("TeraBox returned an untrusted account download host")
+    return normalized
+
+
+def _response_total(headers, fallback: int = 0) -> int:
+    content_range = str(headers.get("Content-Range", ""))
+    if match := _CONTENT_RANGE_TOTAL.search(content_range):
+        return int(match.group(1))
+    return int(headers.get("Content-Length", fallback) or fallback)
+
+
+def _safe_transfer_reason(error: Exception) -> str:
+    if isinstance(error, aiohttp.ClientResponseError):
+        return f"HTTP {error.status}"
+    if isinstance(error, TimeoutError):
+        return "request timed out"
+    if isinstance(error, aiohttp.ClientError):
+        return "network connection failed"
+    if isinstance(error, OSError):
+        return "local file operation failed"
+    if isinstance(error, TeraboxError):
+        return str(error)[:160]
+    return type(error).__name__
 
 
 class _RegionalAccountClient(_AccountClient):
@@ -334,9 +317,6 @@ class _RegionalAccountClient(_AccountClient):
         self.base_url = _DEFAULT_ACCOUNT_BASE_URL
         self.detected_region_prefix: str | None = None
         self.proxy_url = _terabox_proxy_url()
-        self.bds_token = ""
-        self.pcf_token = ""
-        self.dp_logid = ""
 
     def _set_account_base_url(self, base_url: str) -> bool:
         if base_url == self.base_url:
@@ -382,21 +362,13 @@ class _RegionalAccountClient(_AccountClient):
             headers=rewritten_headers,
             **kwargs,
         ) as response:
-            headers = response.headers
-            self._remember_region(headers.get("Url-Domain-Prefix"))
-            if logid := headers.get("logid") or headers.get("dp-logid"):
-                self.dp_logid = str(logid)
+            self._remember_region(response.headers.get("Url-Domain-Prefix"))
             if response_url := getattr(response, "url", None):
                 if account_base := _account_base_url(str(response_url)):
                     self._set_account_base_url(account_base)
             yield response
 
-    async def get_max_file_size(self) -> int:
-        """Correct aioterabox 0.2.3's reversed free/VIP size limits."""
-        return _VIP_MAX_FILE_SIZE if await self.check_vip_status() else _FREE_MAX_FILE_SIZE
-
     async def refresh_cookies(self) -> dict:
-        """Refresh cookies and retain the page-derived upload tokens."""
         async with self._request(
             "GET",
             f"{_DEFAULT_ACCOUNT_BASE_URL}/main",
@@ -412,524 +384,91 @@ class _RegionalAccountClient(_AccountClient):
             if auth_data[key]
         }
         self._update_session(session_cookies, derived_cookies)
-        self.bds_token = auth_data["bdstoken"]
-        self.pcf_token = auth_data["pcftoken"]
-        return {
-            "bdstoken": self.bds_token,
-            "pcftoken": self.pcf_token,
-            "jstoken": self.js_token,
-            "cookies": session_cookies,
-        }
+        return {"jstoken": self.js_token, "cookies": session_cookies}
 
-    async def upload_file(self, filename: str, destination_path: str) -> dict:
-        """Upload every chunk, including the SDK's previously omitted remainder."""
-        destination_path = sanitize_remote_path(destination_path)
-        file_size = await to_thread(os.path.getsize, filename)
-        local_mtime = int(await to_thread(os.path.getmtime, filename))
-        max_file_size = await self._run_precontent_network_stage(
-            "membership check",
-            self.get_max_file_size,
-        )
-        if file_size > max_file_size:
-            raise ValueError(
-                f"File size {file_size} exceeds maximum allowed size of "
-                f"{max_file_size} bytes."
+    async def list_remote_directory(self, remote_dir: str) -> list[_AccountFileInfo]:
+        """List every page instead of silently truncating directories at 1,000."""
+        entries = []
+        previous_signature = None
+        page = 1
+        while True:
+            async with self._request(
+                "GET",
+                f"{_DEFAULT_ACCOUNT_BASE_URL}/api/list",
+                params={
+                    "app_id": "250528",
+                    "web": "1",
+                    "channel": "dubox",
+                    "clienttype": "5",
+                    "jsToken": self.js_token,
+                    "dir": f"/{remote_dir.lstrip('/')}",
+                    "num": str(_ACCOUNT_PAGE_SIZE),
+                    "page": str(page),
+                    "order": "time",
+                    "desc": "1",
+                    "showempty": "0",
+                },
+                timeout=10,
+            ) as response:
+                data = await response.json()
+            if not isinstance(data, dict):
+                raise TeraboxError("Account listing returned an invalid response")
+            errno = data.get("errno", 0)
+            if errno in {-7, -9}:
+                raise TeraboxError("Remote directory was not found")
+            if errno == -6:
+                raise _SessionRejected("regional endpoint")
+            if errno != 0:
+                raise TeraboxError(f"Account listing failed (errno={errno})")
+            items = data.get("list") or []
+            if not isinstance(items, list):
+                raise TeraboxError("Account listing returned an invalid file list")
+            signature = tuple(
+                (str(item.get("path", "")), str(item.get("fs_id", "")))
+                for item in items
+                if isinstance(item, dict)
             )
-
-        async with aiotempfile.TemporaryDirectory() as tmpdir:
-            chunks = []
-            async with aiopen(filename, "rb") as source:
-                if file_size > _SDK_UNCHUNKED_LIMIT:
-                    index = 0
-                    while data := await source.read(_SDK_CHUNK_SIZE):
-                        chunk_path = os.path.join(
-                            tmpdir,
-                            f"{os.path.basename(destination_path)}.part{index:03d}",
-                        )
-                        async with aiopen(chunk_path, "wb") as chunk_file:
-                            await chunk_file.write(data)
-                        chunks.append(
-                            (
-                                chunk_path,
-                                len(data),
-                                md5(data, usedforsecurity=False).hexdigest(),
-                            )
-                        )
-                        index += 1
-                else:
-                    chunks.append(
-                        (filename, file_size, await self.file_md5(source))
+            if signature and signature == previous_signature:
+                raise TeraboxError("Account listing repeated a page; pagination stopped")
+            previous_signature = signature
+            for entry in items:
+                if not isinstance(entry, dict):
+                    continue
+                entries.append(
+                    _AccountFileInfo(
+                        name=str(entry.get("server_filename") or "unnamed"),
+                        path=str(entry.get("path") or ""),
+                        size=int(entry.get("size") or 0),
+                        is_dir=bool(entry.get("isdir")),
                     )
-
-            if sum(chunk_size for _path, chunk_size, _digest in chunks) != file_size:
-                raise TeraboxError(
-                    "TeraBox upload preparation did not preserve the complete file"
                 )
-
-            upload_host = await self._run_precontent_network_stage(
-                "host discovery",
-                self._locate_upload_host,
-            )
-            md5_list = [digest for _path, _size, digest in chunks]
-            upload_id = await self._run_precontent_network_stage(
-                "precreate",
-                self._precreate_file,
-                destination_path,
-                file_size,
-                md5_list,
-            )
-
-            await self._upload_chunks(
-                upload_host=upload_host,
-                remote_path=destination_path,
-                uploadid=upload_id,
-                file_chunks_md5=chunks,
-            )
-            previous_remote = await self._remote_file_snapshot(destination_path)
-            try:
-                return await self._run_upload_stage_with_auth_refresh(
-                    "finalization",
-                    self._postcreate_file,
-                    remote_path=destination_path,
-                    uploadid=upload_id,
-                    file_size=file_size,
-                    md5_list_json=md5_list,
-                    local_mtime=local_mtime,
-                )
-            except (_UploadHttpRejected, _SdkApiError) as primary_rejection:
-                if recovered := await self._recover_finalization_timeout(
-                    destination_path,
-                    file_size,
-                    previous_remote,
-                ):
-                    return recovered
-                try:
-                    return await self._run_upload_stage_with_auth_refresh(
-                        "finalization compatibility",
-                        self._postcreate_file,
-                        remote_path=destination_path,
-                        uploadid=upload_id,
-                        file_size=file_size,
-                        md5_list_json=md5_list,
-                        local_mtime=local_mtime,
-                        compatibility=True,
+                if len(entries) > _ACCOUNT_ENTRY_LIMIT:
+                    raise TeraboxError(
+                        f"Account directory exceeds {_ACCOUNT_ENTRY_LIMIT:,} entries"
                     )
-                except (TimeoutError, aiohttp.ClientError, OSError) as error:
-                    if recovered := await self._recover_finalization_timeout(
-                        destination_path,
-                        file_size,
-                        previous_remote,
-                    ):
-                        return recovered
-                    raise TeraboxError(
-                        "TeraBox upload compatibility finalization failed "
-                        f"({_bootstrap_failure_reason(error)}); it was not retried "
-                        "because remote completion could not be verified"
-                    ) from None
-                except _UploadHttpRejected as fallback_rejection:
-                    if recovered := await self._recover_finalization_timeout(
-                        destination_path,
-                        file_size,
-                        previous_remote,
-                    ):
-                        return recovered
-                    raise TeraboxError(
-                        "TeraBox upload finalization rejected both supported "
-                        "protocols "
-                        f"(primary={_finalization_rejection_reason(primary_rejection)}; "
-                        "compatibility="
-                        f"{_finalization_rejection_reason(fallback_rejection)}); chunks "
-                        "were uploaded but remote completion was not reported"
-                    ) from None
-                except _SdkApiError as fallback_rejection:
-                    if recovered := await self._recover_finalization_timeout(
-                        destination_path,
-                        file_size,
-                        previous_remote,
-                    ):
-                        return recovered
-                    raise TeraboxError(
-                        "TeraBox upload finalization rejected both supported API "
-                        "protocols "
-                        f"(primary={_finalization_rejection_reason(primary_rejection)}; "
-                        "compatibility="
-                        f"{_finalization_rejection_reason(fallback_rejection)}); chunks "
-                        "were uploaded but remote completion was not reported"
-                    ) from None
-            except (TimeoutError, aiohttp.ClientError, OSError) as error:
-                if recovered := await self._recover_finalization_timeout(
-                    destination_path,
-                    file_size,
-                    previous_remote,
-                ):
-                    return recovered
-                raise TeraboxError(
-                    "TeraBox upload finalization failed "
-                    f"({_bootstrap_failure_reason(error)}); the request was not "
-                    "retried because remote completion could not be verified and "
-                    "a retry could create a duplicate"
-                ) from None
-
-    async def _run_precontent_network_stage(
-        self,
-        stage: str,
-        operation,
-        *args,
-        **kwargs,
-    ):
-        """Retry transport failures only before any file content is uploaded."""
-        last_error = None
-        for _attempt in range(_UPLOAD_NETWORK_ATTEMPTS):
-            try:
-                return await self._run_upload_stage_with_auth_refresh(
-                    stage,
-                    operation,
-                    *args,
-                    **kwargs,
-                )
-            except (TimeoutError, aiohttp.ClientError, OSError) as error:
-                last_error = error
-        raise TeraboxError(
-            f"TeraBox upload {stage} failed after {_UPLOAD_NETWORK_ATTEMPTS} "
-            f"network attempts ({_bootstrap_failure_reason(last_error)}); no file "
-            "content was sent"
-        ) from None
-
-    async def _run_upload_stage_with_auth_refresh(
-        self,
-        stage: str,
-        operation,
-        *args,
-        **kwargs,
-    ):
-        """Retry one rejected write request after refreshing derived tokens."""
-        try:
-            return await operation(*args, **kwargs)
-        except Exception as first_error:
-            if not _is_rejected_session(first_error):
-                raise
-        try:
-            await self.refresh_cookies()
-        except Exception as refresh_error:
-            raise TeraboxError(
-                f"TeraBox upload {stage} rejected the session and token refresh "
-                f"failed ({_bootstrap_failure_reason(refresh_error)})"
-            ) from None
-        try:
-            return await operation(*args, **kwargs)
-        except Exception as retry_error:
-            if _is_rejected_session(retry_error):
-                reason = _upload_rejection_reason(retry_error)
-                detail = f" ({reason})" if reason else ""
-                guidance = ""
-                if isinstance(retry_error, _UploadAuthRejected) and (
-                    retry_error.code == 4000023
-                ):
-                    guidance = (
-                        "; TeraBox requires browser verification for this network, "
-                        "so authenticate through the bot server's public IP or its "
-                        "configured proxy and export cookies from that same route"
-                    )
-                raise TeraboxError(
-                    f"TeraBox upload {stage} rejected the refreshed session; the "
-                    "cookie is accepted for account reads but not for uploads"
-                    f"{detail}{guidance}"
-                ) from None
-            raise
-
-    async def _upload_chunks(
-        self,
-        *,
-        upload_host: str,
-        remote_path: str,
-        uploadid: str,
-        file_chunks_md5: list[tuple[str, int, str]],
-        concurrency: int = 1,
-    ) -> list[dict]:
-        """Upload chunks without leaving SDK-created child tasks behind.
-
-        aioterabox 0.2.3 creates one task per chunk with ``asyncio.gather``.
-        When a child fails, other children can outlive the caller, temporary
-        chunk directory, and HTTP session.  Keep the transfer sequential so a
-        failure or cancellation is fully settled before cleanup can begin.
-        """
-        del concurrency
-        results = []
-        for partseq, (chunk_path, chunk_size, chunk_md5) in enumerate(
-            file_chunks_md5
-        ):
-            if not await to_thread(os.path.isfile, chunk_path):
-                raise TeraboxError(
-                    f"Prepared TeraBox upload chunk {partseq + 1} is no longer "
-                    "available; the transfer was stopped before cleanup"
-                )
-            try:
-                result = await self._run_upload_stage_with_auth_refresh(
-                    f"chunk {partseq + 1}",
-                    self._upload_file_chunk,
-                    upload_host=upload_host,
-                    filename=chunk_path,
-                    filesize=chunk_size,
-                    remote_path=remote_path,
-                    chunk_md5=chunk_md5,
-                    uploadid=uploadid,
-                    partseq=partseq,
-                )
-            except TeraboxError:
-                raise
-            except Exception as error:
-                if isinstance(error, TimeoutError):
-                    reason = "request timed out after the SDK's bounded retries"
-                elif isinstance(error, aiohttp.ClientError):
-                    reason = "network request failed after the SDK's bounded retries"
-                elif isinstance(error, _SdkApiError):
-                    reason = "the upload service rejected the chunk or retries expired"
-                elif isinstance(error, OSError):
-                    reason = "chunk transport or local file access failed"
-                else:
-                    reason = f"unexpected {type(error).__name__}"
-                raise TeraboxError(
-                    f"TeraBox upload chunk {partseq + 1} failed ({reason}); later "
-                    "chunks and finalization were not started"
-                ) from None
-            results.append(result)
-        return results
-
-    async def _remote_file_snapshot(self, remote_path: str):
-        """Return sanitized metadata for timeout recovery without changing state."""
-        remote_dir = os.path.dirname(remote_path).rstrip("/") or "/"
-        try:
-            metadata = await self.list_remote_directory(remote_dir)
-        except _SdkNotFoundError:
-            return None
-        except Exception:
-            return _REMOTE_SNAPSHOT_UNKNOWN
-        for item in metadata if isinstance(metadata, list) else []:
-            if isinstance(item, dict):
-                item_path = str(item.get("path") or "")
-                item_size = int(item.get("size") or 0)
-                item_id = str(item.get("fs_id") or item_path)
-                item_mtime = int(item.get("server_mtime") or 0)
-            else:
-                item_path = str(getattr(item, "path", "") or "")
-                item_size = int(getattr(item, "size", 0) or 0)
-                item_id = str(getattr(item, "fs_id", "") or item_path)
-                item_mtime = int(getattr(item, "server_mtime", 0) or 0)
-            if item_path != remote_path:
-                continue
-            return (
-                item_id,
-                item_size,
-                item_mtime,
-            )
-        return None
-
-    async def _recover_finalization_timeout(
-        self,
-        remote_path: str,
-        file_size: int,
-        previous_remote,
-    ) -> dict | None:
-        """Confirm a lost final-create response through read-only metadata calls."""
-        for delay in (0, 2, 5):
-            if delay:
-                await sleep(delay)
-            current = await self._remote_file_snapshot(remote_path)
-            if current in {None, _REMOTE_SNAPSHOT_UNKNOWN}:
-                continue
-            if current[1] != file_size:
-                continue
-            if previous_remote is _REMOTE_SNAPSHOT_UNKNOWN:
-                continue
-            if previous_remote is None or current != previous_remote:
-                return {
-                    "errno": 0,
-                    "fs_id": current[0] or remote_path,
-                    "path": remote_path,
-                    "verified_after_timeout": True,
-                }
-        return None
-
-    def _upload_auth_params(
-        self,
-        *,
-        include_bdstoken: bool = False,
-        include_dp_logid: bool = True,
-    ) -> dict[str, str]:
-        params = {
-            "app_id": "250528",
-            "web": "1",
-            "channel": "dubox",
-            "clienttype": "0",
-            "jsToken": self.js_token,
-        }
-        if include_dp_logid and self.dp_logid:
-            params["dp-logid"] = self.dp_logid
-        if include_bdstoken and self.bds_token:
-            params["bdstoken"] = self.bds_token
-        return params
-
-    async def _locate_upload_host(self) -> str:
-        """Resolve the upload host through the active regional account origin."""
-        async with self._request(
-            "GET",
-            f"{_DEFAULT_ACCOUNT_BASE_URL}/rest/2.0/pcs/file",
-            params={"method": "locateupload"},
-            timeout=_UPLOAD_CONTROL_TIMEOUT,
-        ) as response:
-            result = await response.json(content_type=None)
-        raw_host = str(result.get("host") or "").strip()
-        parsed_host = urlsplit(
-            raw_host if "://" in raw_host else f"//{raw_host}"
-        )
-        if (
-            parsed_host.hostname
-            and parsed_host.scheme in {"", "https"}
-            and parsed_host.username is None
-            and parsed_host.password is None
-        ):
-            return parsed_host.netloc
-        code = result.get("errno", result.get("error_code", "unknown"))
-        message = str(result.get("errmsg") or result.get("error_msg") or "unknown")
-        if code in _UPLOAD_AUTH_ERROR_CODES or "need verify" in message.lower():
-            raise _UploadAuthRejected("host discovery", code, message)
-        raise _SdkApiError(
-            f"TeraBox upload-host discovery failed (errno={code}, "
-            f"message={message[:120]})"
-        )
-
-    async def _precreate_file(
-        self,
-        remote_path: str,
-        file_size: int,
-        md5_list_json: list[str],
-    ) -> str:
-        """Initialize the current web upload protocol using query auth tokens."""
-        data = {
-            "path": remote_path,
-            "autoinit": "1",
-            "size": str(file_size),
-            "file_limit_switch_v34": "true",
-            "rtype": "2",
-            "target_path": os.path.dirname(remote_path).rstrip("/") or "/",
-            "block_list": json.dumps(md5_list_json),
-        }
-        async with self._request(
-            "POST",
-            f"{_DEFAULT_ACCOUNT_BASE_URL}/api/precreate",
-            headers={"Content-Type": "application/x-www-form-urlencoded"},
-            params=self._upload_auth_params(),
-            data=data,
-            timeout=_UPLOAD_CONTROL_TIMEOUT,
-        ) as response:
-            result = await response.json()
-        if result.get("errno") == 0 and result.get("uploadid"):
-            return result["uploadid"]
-        code = result.get("errno", "unknown")
-        message = str(result.get("errmsg") or result.get("msg") or "unknown")[:120]
-        if code in _UPLOAD_AUTH_ERROR_CODES:
-            raise _UploadAuthRejected("precreate", code, message)
-        raise _SdkApiError(
-            f"TeraBox file precreate failed (errno={code}, message={message})"
-        )
-
-    async def _postcreate_file(
-        self,
-        remote_path: str,
-        uploadid: str,
-        file_size: int,
-        md5_list_json: list[str],
-        local_mtime: int | None = None,
-        compatibility: bool = False,
-    ) -> dict:
-        """Finalize with a matched modern or AList-compatible protocol."""
-        remote_dir = os.path.dirname(remote_path).rstrip("/") or "/"
-        data = {
-            "path": remote_path,
-            "uploadid": uploadid,
-            "size": str(file_size),
-            "block_list": json.dumps(md5_list_json),
-        }
-        if compatibility:
-            # AList pairs its legacy precreate shape with rtype=1 at create.
-            # Keep the metadata in the body and web authentication in the
-            # query, matching that public implementation exactly.
-            data["target_path"] = remote_dir
-            if local_mtime is not None:
-                data["local_mtime"] = str(local_mtime)
-            params = self._upload_auth_params(
-                include_bdstoken=True,
-                include_dp_logid=False,
-            )
-            params.update({"isdir": "0", "rtype": "1"})
-        else:
-            # The modern public TeraBox transport uses rtype=2 for both
-            # precreate and create, with create controls in the form body.
-            data.update({"isdir": "0", "rtype": "2"})
-            # TeraBox's current web client injects its page-derived bdstoken
-            # into the /api/create query.  Our regional probe observed errno
-            # 31832 when both create variants omitted it, after precreate and
-            # every chunk had succeeded.  The errno itself is undocumented,
-            # so retain the observed facts rather than assigning it a meaning.
-            params = self._upload_auth_params(
-                include_bdstoken=True,
-                include_dp_logid=False,
-            )
-        async with self._request(
-            "POST",
-            f"{_DEFAULT_ACCOUNT_BASE_URL}/api/create",
-            headers={"Content-Type": "application/x-www-form-urlencoded"},
-            params=params,
-            data=data,
-            timeout=_UPLOAD_FINALIZE_TIMEOUT,
-        ) as response:
-            status = int(getattr(response, "status", 200) or 200)
-            try:
-                result = await response.json(content_type=None)
-            except (TypeError, ValueError):
-                if status >= 400:
-                    raise _UploadHttpRejected(status) from None
-                raise _SdkApiError(
-                    "TeraBox file create returned an unrecognized response"
-                ) from None
-        if not isinstance(result, dict):
-            if status >= 400:
-                raise _UploadHttpRejected(status)
-            raise _SdkApiError("TeraBox file create returned an invalid response")
-        if result.get("errno") == 0:
-            return result
-        code = result.get("errno", "unknown")
-        message = str(result.get("errmsg") or result.get("msg") or "unknown")[:120]
-        if code in _UPLOAD_AUTH_ERROR_CODES or "need verify" in message.lower():
-            raise _UploadAuthRejected("finalization", code, message)
-        raise _UploadApiRejected(code, message, status)
-
-
-def _headers_dict(headers: list[str] | None) -> dict[str, str]:
-    if isinstance(headers, str):
-        headers = headers.splitlines()
-    result = {}
-    for header in headers or []:
-        if ":" in header:
-            key, value = header.split(":", 1)
-            result[key.strip()] = value.strip()
-    return result
+            if len(items) < _ACCOUNT_PAGE_SIZE:
+                return entries
+            page += 1
 
 
 class TeraboxClient:
-    def __init__(self, cookie_file: str, session_path: str | None = None):
+    def __init__(self, cookie_file: str = "", session_path: str | None = None):
         del session_path
         self.cookie_file = cookie_file
+        self.proxy_url = _terabox_proxy_url()
         self._session: aiohttp.ClientSession | None = None
         self._client: _AccountClient | None = None
-        self._created_directories: set[str] = set()
+        self._share_link = ""
+        self._resolve_lock = Lock()
 
     async def _ensure_session(self):
         if self._session is None or self._session.closed:
-            self._session = aiohttp.ClientSession()
+            self._session = aiohttp.ClientSession(timeout=_DOWNLOAD_TIMEOUT)
         return self._session
 
     async def login(self):
+        if not self.cookie_file:
+            raise TeraboxError("A TeraBox cookie file is required for account browsing")
         cookies = await to_thread(_read_cookie_file, self.cookie_file)
         region_hint = getattr(cookies, "region_hint", None)
         await self._ensure_session()
@@ -995,9 +534,7 @@ class TeraboxClient:
 
     async def _bootstrap_alternate_regional_session(self, prefix: str):
         if not self._client.use_region(prefix, alternate=True):
-            raise TeraboxError(
-                "TeraBox alternate regional endpoint was already exhausted"
-            )
+            raise TeraboxError("TeraBox alternate regional endpoint was exhausted")
         await self._bootstrap_session(regional=True, alternate=True)
 
     async def _bootstrap_session(
@@ -1009,12 +546,13 @@ class TeraboxClient:
         try:
             await self._client.refresh_cookies()
         except Exception as error:
-            if alternate:
-                endpoint = "alternate regional TeraBox endpoint"
-            elif regional:
-                endpoint = "regional TeraBox endpoint"
-            else:
-                endpoint = "TeraBox"
+            endpoint = (
+                "alternate regional TeraBox endpoint"
+                if alternate
+                else "regional TeraBox endpoint"
+                if regional
+                else "TeraBox"
+            )
             raise TeraboxError(
                 f"TeraBox session bootstrap failed on the {endpoint} "
                 f"({_bootstrap_failure_reason(error)}). The cookie file was parsed "
@@ -1040,37 +578,44 @@ class TeraboxClient:
             )
         return quota
 
-    async def ensure_upload_ready(self):
+    async def list_account_dir(self, path: str):
         if self._client is None:
             await self.login()
-        return await self._client.get_storage_quota()
-
-    async def list_account_dir(self, path: str):
         try:
-            entries = await self._client.list_remote_directory(path)
+            entries = await self._client.list_remote_directory(path or "/")
             return [
                 TeraboxFile(
                     name=entry.name,
                     path=entry.path,
-                    fs_id=entry.path,
+                    fs_id=str(getattr(entry, "fs_id", "") or entry.path),
                     size=int(entry.size or 0),
                     is_dir=bool(entry.is_dir),
                 )
                 for entry in entries
             ]
+        except TeraboxError:
+            raise
         except Exception as error:
-            raise TeraboxError(str(error)) from error
+            raise TeraboxError(
+                f"Account listing failed ({_safe_transfer_reason(error)})"
+            ) from None
 
     async def walk_account_dir(self, path: str):
         files = []
         pending = [path or "/"]
+        visited = set()
         while pending:
             current = pending.pop()
+            if current in visited:
+                continue
+            visited.add(current)
             for entry in await self.list_account_dir(current):
                 if entry.is_dir:
                     pending.append(entry.path)
                 else:
                     files.append(entry)
+                if len(files) + len(pending) > 100_000:
+                    raise TeraboxError("Account selection exceeds 100,000 entries")
         name = os.path.basename((path or "/").rstrip("/")) or "TeraBox"
         return ResolveResult(name, files, True)
 
@@ -1086,77 +631,184 @@ class TeraboxClient:
             for entry in await self.list_account_dir(path)
         ]
 
-    async def resolve(self, link: str, recursive: bool = True):
-        del recursive
-        await self._ensure_session()
+    async def _resolve_public_share(self, link: str) -> ResolveResult:
         try:
             from bot.helper.mirror_leech_utils.download_utils.direct_link_generator import (
                 terabox as resolve_share,
             )
 
-            resolved = await to_thread(resolve_share, link, self.cookie_file)
+            resolved = await to_thread(
+                resolve_share,
+                link,
+                self.cookie_file,
+                structured=True,
+            )
         except Exception as error:
-            if "password" in str(error).lower():
-                raise TeraboxPasswordError(str(error)) from error
-            raise TeraboxError(str(error)) from error
+            message = str(error)
+            if "password" in message.lower() or "passcode" in message.lower():
+                raise TeraboxPasswordError(
+                    "TeraBox rejected the share password or requires a valid password"
+                ) from None
+            if type(error).__name__ == "DirectDownloadLinkException":
+                raise TeraboxError(message[:240] or "Public share resolution failed") from None
+            raise TeraboxError(
+                f"Public share resolution failed ({type(error).__name__})"
+            ) from None
+        return await self._normalize_resolved(resolved)
 
+    async def _normalize_resolved(self, resolved) -> ResolveResult:
         if isinstance(resolved, str):
+            resolved = _validated_download_url(resolved)
             name = Path(resolved.split("?", 1)[0]).name or "TeraBox"
             size = await self._remote_size(resolved)
-            files = [TeraboxFile(name, name, name, size=size, url=resolved)]
-            return ResolveResult(name, files, False)
-        if isinstance(resolved, tuple):
+            return ResolveResult(
+                name,
+                [TeraboxFile(name, f"/{name}", name, size=size, url=resolved)],
+                False,
+            )
+        if isinstance(resolved, tuple) and len(resolved) == 2:
             url, headers = resolved
+            url = _validated_download_url(str(url))
             name = Path(str(url).split("?", 1)[0]).name or "TeraBox"
-            size = await self._remote_size(url, headers)
-            files = [
-                TeraboxFile(
-                    name,
-                    name,
-                    name,
-                    size=size,
-                    url=url,
-                    headers=headers,
-                )
-            ]
-            return ResolveResult(name, files, False)
-
-        contents = resolved.get("contents", [])
-        root = resolved.get("title") or "TeraBox"
+            size = await self._remote_size(str(url), headers)
+            return ResolveResult(
+                name,
+                [
+                    TeraboxFile(
+                        name,
+                        f"/{name}",
+                        name,
+                        size=size,
+                        url=str(url),
+                        headers=headers,
+                    )
+                ],
+                False,
+            )
+        if not isinstance(resolved, dict):
+            raise TeraboxError("TeraBox resolver returned an unsupported response")
+        contents = resolved.get("contents")
+        if not isinstance(contents, list):
+            raise TeraboxError("TeraBox resolver returned no file list")
+        root = str(resolved.get("title") or "TeraBox").strip("/") or "TeraBox"
         files = []
         for index, item in enumerate(contents):
-            name = item.get("filename") or f"file_{index + 1}"
+            if not isinstance(item, dict):
+                continue
+            name = str(item.get("filename") or f"file_{index + 1}")
             path = "/".join(
                 part.strip("/")
-                for part in (item.get("path", ""), name)
+                for part in (str(item.get("path") or ""), name)
                 if part and part.strip("/")
             )
+            url = str(item.get("url") or "")
+            if not url:
+                raise TeraboxError("A selected share file has no resolved download URL")
+            url = _validated_download_url(url)
             files.append(
                 TeraboxFile(
                     name=name,
                     path=f"/{path}",
-                    fs_id=str(index),
-                    size=int(item.get("size", 0) or 0),
-                    url=item.get("url", ""),
+                    fs_id=str(item.get("fs_id") or index),
+                    size=int(item.get("size") or 0),
+                    url=url,
                     headers=item.get("headers") or resolved.get("header") or [],
                 )
             )
-        return ResolveResult(root, files, len(files) > 1)
+        if not files:
+            raise TeraboxError("TeraBox share contains no downloadable files")
+        is_folder = bool(resolved.get("is_folder", len(files) > 1))
+        return ResolveResult(root, files, is_folder)
+
+    async def resolve(self, link: str, recursive: bool = True):
+        del recursive
+        await self._ensure_session()
+        normalized = str(link or "").strip()
+        if not normalized:
+            raise TeraboxError("TeraBox link is empty")
+        async with self._resolve_lock:
+            result = await self._resolve_public_share(normalized)
+            self._share_link = normalized
+            return result
 
     async def _remote_size(self, url: str, headers=None) -> int:
+        request_headers = _headers_dict(headers)
+        request_headers.setdefault("Accept-Encoding", "identity")
         try:
             async with self._session.head(
                 url,
-                headers=_headers_dict(headers),
+                headers=request_headers,
                 allow_redirects=True,
+                timeout=_DOWNLOAD_TIMEOUT,
+                proxy=self.proxy_url,
             ) as response:
-                return int(response.headers.get("Content-Length", 0) or 0)
-        except Exception:
-            return 0
+                if response.status < 400:
+                    size = _response_total(response.headers)
+                    if size:
+                        return size
+        except Exception as error:
+            _LOGGER.debug("TeraBox size HEAD failed: %s", type(error).__name__)
+        try:
+            request_headers = {**request_headers, "Range": "bytes=0-0"}
+            async with self._session.get(
+                url,
+                headers=request_headers,
+                allow_redirects=True,
+                timeout=_DOWNLOAD_TIMEOUT,
+                proxy=self.proxy_url,
+            ) as response:
+                if response.status in {200, 206}:
+                    return _response_total(response.headers)
+        except Exception as error:
+            _LOGGER.debug("TeraBox size range probe failed: %s", type(error).__name__)
+        return 0
 
     async def reserve_files(self, destinations):
+        seen = set()
         for destination, _size in destinations:
-            await makedirs(os.path.dirname(destination), exist_ok=True)
+            absolute = os.path.abspath(destination)
+            if absolute in seen:
+                raise TeraboxError(f"Multiple files resolve to {os.path.basename(destination)}")
+            seen.add(absolute)
+            await makedirs(os.path.dirname(absolute), exist_ok=True)
+
+    async def _account_download_url(self, file: TeraboxFile) -> str:
+        if self._client is None:
+            raise TeraboxError("No authenticated account download session is available")
+        metadata = await self._client.get_files_meta([file.path])
+        if not metadata:
+            raise TeraboxError("TeraBox returned no metadata for the selected account file")
+        first = metadata[0]
+        url = first.get("dlink", "") if isinstance(first, dict) else getattr(first, "dlink", "")
+        if not url:
+            raise TeraboxError("TeraBox returned no download URL for the account file")
+        return _validated_download_url(str(url), account_only=True)
+
+    async def _refresh_file_url(self, file: TeraboxFile) -> bool:
+        if not self._share_link:
+            try:
+                file.url = await self._account_download_url(file)
+                return True
+            except Exception:
+                return False
+        async with self._resolve_lock:
+            refreshed = await self._resolve_public_share(self._share_link)
+            match = next(
+                (
+                    candidate
+                    for candidate in refreshed.file_entries
+                    if candidate.path == file.path
+                    or candidate.fs_id == file.fs_id
+                    or candidate.name == file.name
+                ),
+                None,
+            )
+            if not match:
+                return False
+            file.url = match.url
+            file.headers = match.headers
+            file.size = match.size or file.size
+            return bool(file.url)
 
     async def download_file(
         self,
@@ -1166,115 +818,150 @@ class TeraboxClient:
         progress_cb=None,
         cancel_event: Event | None = None,
     ):
-        try:
-            url = file.url
-            if not url:
-                metadata = await self._client.get_files_meta([file.path])
-                if not metadata:
-                    raise TeraboxError(f"No download URL for {file.name}")
-                url = metadata[0]["dlink"]
-            headers = _headers_dict(file.headers)
-            async with self._session.get(url, headers=headers) as response:
-                response.raise_for_status()
-                total = int(response.headers.get("Content-Length", file.size) or 0)
-                done = 0
-                async with aiopen(destination, "wb") as output:
-                    async for chunk in response.content.iter_chunked(1024 * 1024):
-                        if cancel_event and cancel_event.is_set():
-                            raise TeraboxCancelled("Transfer cancelled")
-                        await output.write(chunk)
-                        done += len(chunk)
-                        if progress_cb:
-                            progress_cb(done, total)
-        except TeraboxCancelled:
-            raise
-        except Exception as error:
-            raise TeraboxError(str(error)) from error
-
-    async def upload_file(
-        self,
-        local_path: str,
-        remote_path: str,
-        *,
-        progress_cb=None,
-        cancel_event: Event | None = None,
-    ):
-        remote_path = sanitize_remote_path(remote_path)
-        remote_dir = os.path.dirname(remote_path).replace("\\", "/")
-        if remote_dir and remote_dir != "/" and remote_dir not in self._created_directories:
-            try:
-                await self._client.create_directory(remote_dir)
-            except Exception as error:
-                # TeraBox reports an error when the directory already exists.
-                # Confirm that case by listing the parent instead of hiding
-                # unrelated permission or API failures.
-                parent = os.path.dirname(remote_dir.rstrip("/")) or "/"
-                directory_name = os.path.basename(remote_dir.rstrip("/"))
-                try:
-                    entries = await self._client.list_remote_directory(parent)
-                except Exception:
-                    raise TeraboxError(
-                        f"Unable to create TeraBox directory {remote_dir}: {error}"
-                    ) from error
-                if not any(
-                    entry.is_dir and entry.name == directory_name for entry in entries
-                ):
-                    raise TeraboxError(
-                        f"Unable to create TeraBox directory {remote_dir}: {error}"
-                    ) from error
-            self._created_directories.add(remote_dir)
-
-        task = create_task(self._client.upload_file(local_path, remote_path))
-        cancel_task = None
-        if cancel_event:
-            cancel_task = create_task(cancel_event.wait())
-            done, _ = await wait(
-                (task, cancel_task),
-                return_when=FIRST_COMPLETED,
-            )
-            if cancel_task in done and cancel_event.is_set() and not task.done():
-                task.cancel()
-                await asyncio_gather(task, return_exceptions=True)
+        await self._ensure_session()
+        destination = os.path.abspath(destination)
+        partial = destination + ".part"
+        await makedirs(os.path.dirname(destination), exist_ok=True)
+        last_error: Exception | None = None
+        refreshed = False
+        for attempt in range(_DOWNLOAD_ATTEMPTS):
+            if cancel_event and cancel_event.is_set():
                 raise TeraboxCancelled("Transfer cancelled")
-            cancel_task.cancel()
-        try:
-            result = await task
-        except CancelledError as error:
-            raise TeraboxCancelled("Transfer cancelled") from error
-        except TeraboxError:
-            raise
-        except ValueError as error:
-            raise TeraboxError(str(error)) from None
-        except Exception as error:
-            if _is_rejected_session(error):
-                raise TeraboxError(
-                    "TeraBox rejected the upload session; authenticate again using "
-                    "the bot server's network"
-                ) from None
-            raise TeraboxError(
-                f"TeraBox upload API failed ({type(error).__name__}); no remote "
-                "completion was reported"
-            ) from None
-        finally:
-            if cancel_task and not cancel_task.done():
-                cancel_task.cancel()
-            if cancel_task:
-                await asyncio_gather(cancel_task, return_exceptions=True)
-        if progress_cb:
-            size = os.path.getsize(local_path)
-            progress_cb(size, size)
-        return result
-
-    async def create_share_link(self, file_ids, paths):
-        del file_ids, paths
-        return ""
+            try:
+                if not file.url:
+                    file.url = await self._account_download_url(file)
+                file.url = _validated_download_url(
+                    file.url,
+                    account_only=self._client is not None and not self._share_link,
+                )
+                offset = (
+                    await to_thread(os.path.getsize, partial)
+                    if os.path.exists(partial)
+                    else 0
+                )
+                if file.size and offset == file.size:
+                    await to_thread(os.replace, partial, destination)
+                    if progress_cb:
+                        progress_cb(file.size, file.size)
+                    return
+                if file.size and offset > file.size:
+                    await to_thread(os.remove, partial)
+                    offset = 0
+                headers = _headers_dict(file.headers)
+                headers.setdefault("Accept-Encoding", "identity")
+                if offset:
+                    headers["Range"] = f"bytes={offset}-"
+                account_cookies = (
+                    self._client.request_cookies
+                    if self._client is not None and not self._share_link
+                    else None
+                )
+                if account_cookies:
+                    base_headers = getattr(self._client, "_base_headers", {})
+                    headers.setdefault(
+                        "User-Agent",
+                        str(base_headers.get("User-Agent") or "Mozilla/5.0"),
+                    )
+                    headers.setdefault(
+                        "Referer",
+                        str(
+                            base_headers.get("Referer")
+                            or getattr(self._client, "base_url", _DEFAULT_ACCOUNT_BASE_URL)
+                            + "/main"
+                        ),
+                    )
+                async with self._session.get(
+                    file.url,
+                    headers=headers,
+                    cookies=account_cookies,
+                    allow_redirects=True,
+                    timeout=_DOWNLOAD_TIMEOUT,
+                    proxy=self.proxy_url,
+                ) as response:
+                    if response.status == 416 and file.size and offset == file.size:
+                        await to_thread(os.replace, partial, destination)
+                        if progress_cb:
+                            progress_cb(file.size, file.size)
+                        return
+                    if response.status in _EXPIRED_LINK_HTTP and not refreshed:
+                        refreshed = await self._refresh_file_url(file)
+                        if refreshed:
+                            continue
+                    if response.status in _RETRYABLE_HTTP:
+                        raise aiohttp.ClientResponseError(
+                            response.request_info,
+                            response.history,
+                            status=response.status,
+                            message="retryable TeraBox response",
+                            headers=response.headers,
+                        )
+                    response.raise_for_status()
+                    if offset and response.status != 206:
+                        offset = 0
+                    elif offset and response.status == 206:
+                        content_range = str(response.headers.get("Content-Range", ""))
+                        if (
+                            (range_match := _CONTENT_RANGE.fullmatch(content_range))
+                            and int(range_match.group(1)) != offset
+                        ):
+                            await to_thread(os.remove, partial)
+                            raise TeraboxError(
+                                "The server returned a mismatched resume range"
+                            )
+                    mode = "ab" if offset and response.status == 206 else "wb"
+                    total = _response_total(response.headers, file.size)
+                    if response.status == 206 and not response.headers.get(
+                        "Content-Range"
+                    ):
+                        remaining = int(response.headers.get("Content-Length", 0) or 0)
+                        total = offset + remaining if remaining else file.size
+                    content_type = str(response.headers.get("Content-Type", "")).lower()
+                    if content_type.startswith("text/html"):
+                        raise TeraboxError("The direct link returned an HTML error page")
+                    written = offset
+                    if progress_cb:
+                        progress_cb(written, total)
+                    async with aiopen(partial, mode) as output:
+                        async for chunk in response.content.iter_chunked(
+                            _DOWNLOAD_CHUNK_SIZE
+                        ):
+                            if cancel_event and cancel_event.is_set():
+                                raise TeraboxCancelled("Transfer cancelled")
+                            if not chunk:
+                                continue
+                            await output.write(chunk)
+                            written += len(chunk)
+                            if progress_cb:
+                                progress_cb(written, total)
+                actual = await to_thread(os.path.getsize, partial)
+                expected = file.size or total
+                if expected and actual != expected:
+                    raise TeraboxError(
+                        f"Incomplete transfer: received {actual} of {expected} bytes"
+                    )
+                await to_thread(os.replace, partial, destination)
+                file.size = expected or actual
+                if progress_cb:
+                    progress_cb(file.size, file.size)
+                return
+            except TeraboxCancelled:
+                raise
+            except Exception as error:
+                last_error = error
+                if not refreshed and isinstance(error, TeraboxError):
+                    refreshed = await self._refresh_file_url(file)
+                if attempt + 1 < _DOWNLOAD_ATTEMPTS:
+                    await sleep(min(2**attempt, 8))
+        raise TeraboxError(
+            f"Download failed after {_DOWNLOAD_ATTEMPTS} attempts "
+            f"({_safe_transfer_reason(last_error or TeraboxError('unknown error'))})"
+        ) from None
 
     async def aclose(self):
         if self._session and not self._session.closed:
             await self._session.close()
         self._session = None
         self._client = None
-        self._created_directories.clear()
 
 
 __all__ = [
@@ -1285,5 +972,4 @@ __all__ = [
     "TeraboxFile",
     "TeraboxPasswordError",
     "__version__",
-    "sanitize_remote_path",
 ]

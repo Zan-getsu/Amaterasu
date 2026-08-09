@@ -113,7 +113,7 @@ user_settings_text = {
     ),
     "TERABOX_COOKIE": (
         "File",
-        "Your private TeraBox session cookie for account browsing, downloads, and uploads.",
+        "Your private TeraBox session cookie for account browsing and downloads.",
         "<i>Send a cookies.txt export from a logged-in TeraBox browser session.</i> "
         "\n┖ <b>Time Left :</b> <code>60 sec</code>",
     ),
@@ -440,13 +440,12 @@ async def get_user_settings(from_user, stype="main"):
         btns = buttons.build_menu(2)
 
     elif stype == "general":
-        if user_dict.get("DEFAULT_UPLOAD", ""):
-            default_upload = user_dict["DEFAULT_UPLOAD"]
-        elif "DEFAULT_UPLOAD" not in user_dict:
-            default_upload = Config.DEFAULT_UPLOAD
-        _du_names = {"gd": "GDRIVE API", "rc": "RCLONE", "tbx": "TERABOX"}
+        default_upload = Config._normalize_default_upload(
+            user_dict.get("DEFAULT_UPLOAD") or Config.DEFAULT_UPLOAD
+        )
+        _du_names = {"gd": "GDRIVE API", "rc": "RCLONE", "mega": "MEGA"}
         du = _du_names.get(default_upload, "RCLONE")
-        next_upload = {"rc": "gd", "gd": "tbx", "tbx": "rc"}.get(
+        next_upload = {"rc": "gd", "gd": "mega", "mega": "rc"}.get(
             default_upload, "rc"
         )
         dur = _du_names[next_upload]
@@ -1876,9 +1875,9 @@ async def edit_user_settings(client, query):
     elif data[2] == "view":
         await query.answer()
         await send_file(message, thumb_path, name)
-    elif data[2] in ["gd", "rc", "tbx"]:
+    elif data[2] in ["gd", "rc", "mega"]:
         await query.answer()
-        du = {"rc": "gd", "gd": "tbx", "tbx": "rc"}.get(data[2], "rc")
+        du = {"rc": "gd", "gd": "mega", "mega": "rc"}.get(data[2], "rc")
         update_user_ldata(user_id, "DEFAULT_UPLOAD", du)
         await update_user_settings(query, stype="general")
         await database.update_user_data(user_id)

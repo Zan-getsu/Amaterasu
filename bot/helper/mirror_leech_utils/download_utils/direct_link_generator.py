@@ -3,7 +3,7 @@ from hashlib import sha256
 from http.cookiejar import MozillaCookieJar
 from json import loads
 from lxml.etree import HTML
-from os import path as ospath
+from os import getenv, path as ospath
 from re import findall, match, search
 from niquests import Session, post, get
 from niquests.adapters import HTTPAdapter
@@ -1268,7 +1268,7 @@ def uploadee(url):
         raise DirectDownloadLinkException("ERROR: Direct Link not found")
 
 
-def terabox(url, cookie_file="cookies.txt"):
+def terabox(url, cookie_file="cookies.txt", *, structured=False):
     if "/file/" in url:
         return url
 
@@ -1294,6 +1294,18 @@ def terabox(url, cookie_file="cookies.txt"):
         "channel": "dubox",
         "clienttype": "0",
     }
+    proxy_url = getenv("TERABOX_PROXY", "").strip()
+    parsed_proxy = urlparse(proxy_url)
+    proxies = (
+        {"http": proxy_url, "https": proxy_url}
+        if parsed_proxy.scheme.lower() in {"http", "https"}
+        and parsed_proxy.hostname
+        else {}
+    )
+
+    def __configure_session(session):
+        if proxies and hasattr(session, "proxies"):
+            session.proxies.update(proxies)
 
     def __load_cookies():
         if not ospath.isfile(cookie_file):
@@ -1345,6 +1357,15 @@ def terabox(url, cookie_file="cookies.txt"):
         except Exception as e:
             raise DirectDownloadLinkException(f"ERROR: {e.__class__.__name__}") from e
         html_text = resp.text
+        response_url = urlparse(str(resp.url))
+        response_host = (response_url.hostname or "").lower()
+        if not any(
+            response_host == domain or response_host.endswith(f".{domain}")
+            for domain in ("terabox.com", "1024terabox.com")
+        ):
+            origin = "https://www.terabox.com"
+        else:
+            origin = f"https://{response_host}"
         m = search(r"fn%28%22([0-9A-F]+)%22%29", html_text) or search(
             r'fn\("([0-9A-F]+)"\)', html_text
         )
@@ -1358,7 +1379,7 @@ def terabox(url, cookie_file="cookies.txt"):
         if password:
             try:
                 v = session.post(
-                    f"https://{resp.url.split('/')[2]}/share/verify",
+                    f"{origin}/share/verify",
                     params={**API_PARAMS, "surl": surl},
                     data={"pwd": password},
                     timeout=30,
@@ -1374,10 +1395,19 @@ def terabox(url, cookie_file="cookies.txt"):
                 raise DirectDownloadLinkException(
                     f"ERROR: {e.__class__.__name__}"
                 ) from e
-        return js_token, pcftoken
+        return js_token, pcftoken, origin
 
     def __share_list(
-        session, surl, js_token, pcftoken, *, dir_path=None, root=False, page=1, num=200
+        session,
+        origin,
+        surl,
+        js_token,
+        pcftoken,
+        *,
+        dir_path=None,
+        root=False,
+        page=1,
+        num=200,
     ):
         params = {
             **API_PARAMS,
@@ -1396,7 +1426,7 @@ def terabox(url, cookie_file="cookies.txt"):
             params["dir"] = dir_path
         try:
             data = session.get(
-                "https://dm.terabox.com/share/list",
+                f"{origin}/share/list",
                 params=params,
                 timeout=30,
             ).json()
@@ -1408,10 +1438,10 @@ def terabox(url, cookie_file="cookies.txt"):
             )
         return data
 
-    def __shorturlinfo(session, surl, js_token):
+    def __shorturlinfo(session, origin, surl, js_token):
         try:
             data = session.get(
-                "https://www.terabox.com/api/shorturlinfo",
+                f"{origin}/api/shorturlinfo",
                 params={
                     **API_PARAMS,
                     "jsToken": js_token,
@@ -1430,12 +1460,12 @@ def terabox(url, cookie_file="cookies.txt"):
             )
         return data
 
-    def __resolve_dlinks(session, js_token, meta, fs_ids):
+    def __resolve_dlinks(session, origin, js_token, meta, fs_ids):
         out = {}
         for fid in fs_ids:
             try:
                 data = session.post(
-                    "https://www.terabox.com/share/download",
+                    f"{origin}/share/download",
                     params={
                         **API_PARAMS,
                         "jsToken": js_token,
@@ -1467,109 +1497,126 @@ def terabox(url, cookie_file="cookies.txt"):
 
     def __crawl_with_cookies(cookies):
         surl, password = __parse_share(url)
-        session = Session()
-        session.cookies.update(cookies)
-        session.headers.update(
-            {
-                "User-Agent": user_agent,
-                "Accept": "application/json, text/plain, */*",
-                "Accept-Language": "en-US,en;q=0.9",
-                "Referer": f"https://www.terabox.com/sharing/link?surl={surl}",
-            }
-        )
-        js_token, pcftoken = __bootstrap(session, surl, password)
-        info = __shorturlinfo(session, surl, js_token)
-        meta = {
-            "sign": info.get("sign", ""),
-            "timestamp": info.get("timestamp", ""),
-            "shareid": info.get("shareid") or info.get("share_id"),
-            "uk": info.get("uk"),
-        }
-        details = {"contents": [], "title": "", "total_size": 0}
-        pending = []
-
-        def __walk(dir_path=None, root=False):
-            page = 1
-            while True:
-                data = __share_list(
-                    session,
-                    surl,
-                    js_token,
-                    pcftoken,
-                    dir_path=dir_path,
-                    root=root,
-                    page=page,
-                    num=200,
-                )
-                if root and page == 1 and not details["title"]:
-                    details["title"] = (data.get("title") or surl).lstrip("/")
-                items = data.get("list") or []
-                if not items:
-                    break
-                for it in items:
-                    if int(it.get("isdir") or 0):
-                        __walk(dir_path=it["path"])
-                    else:
-                        entry = {
-                            "path": ospath.dirname(it.get("path", "")).lstrip("/"),
-                            "filename": it["server_filename"],
-                            "url": it.get("dlink", ""),
-                            "size": int(it.get("size") or 0),
-                        }
-                        details["contents"].append(entry)
-                        details["total_size"] += int(it.get("size") or 0)
-                        if not entry["url"]:
-                            pending.append(
-                                (int(it["fs_id"]), len(details["contents"]) - 1)
-                            )
-                if len(items) < 200:
-                    break
-                page += 1
-                sleep(0.3)
-
-        __walk(root=True)
-
-        if pending:
-            resolved = __resolve_dlinks(
-                session, js_token, meta, [fid for fid, _ in pending]
+        with Session() as session:
+            __configure_session(session)
+            session.cookies.update(cookies)
+            session.headers.update(
+                {
+                    "User-Agent": user_agent,
+                    "Accept": "application/json, text/plain, */*",
+                    "Accept-Language": "en-US,en;q=0.9",
+                    "Referer": f"https://www.terabox.com/sharing/link?surl={surl}",
+                }
             )
-            for fid, idx in pending:
-                if fid in resolved:
-                    details["contents"][idx]["url"] = resolved[fid]
-            missing = [
-                details["contents"][idx]["filename"]
-                for fid, idx in pending
-                if fid not in resolved
-            ]
-            if missing:
-                raise DirectDownloadLinkException(
-                    f"ERROR: failed to resolve dlink for {len(missing)} "
-                    f"file(s); first: {missing[0]}"
+            js_token, pcftoken, origin = __bootstrap(session, surl, password)
+            info = __shorturlinfo(session, origin, surl, js_token)
+            meta = {
+                "sign": info.get("sign", ""),
+                "timestamp": info.get("timestamp", ""),
+                "shareid": info.get("shareid") or info.get("share_id"),
+                "uk": info.get("uk"),
+            }
+            details = {
+                "contents": [],
+                "title": "",
+                "total_size": 0,
+                "is_folder": False,
+            }
+            pending = []
+
+            def __walk(dir_path=None, root=False):
+                page = 1
+                while True:
+                    data = __share_list(
+                        session,
+                        origin,
+                        surl,
+                        js_token,
+                        pcftoken,
+                        dir_path=dir_path,
+                        root=root,
+                        page=page,
+                        num=200,
+                    )
+                    if root and page == 1 and not details["title"]:
+                        details["title"] = (data.get("title") or surl).lstrip("/")
+                    items = data.get("list") or []
+                    if not items:
+                        break
+                    for it in items:
+                        if int(it.get("isdir") or 0):
+                            details["is_folder"] = True
+                            __walk(dir_path=it["path"])
+                        else:
+                            entry = {
+                                "path": ospath.dirname(it.get("path", "")).lstrip("/"),
+                                "filename": it["server_filename"],
+                                "fs_id": str(it.get("fs_id") or ""),
+                                "url": it.get("dlink", ""),
+                                "size": int(it.get("size") or 0),
+                            }
+                            details["contents"].append(entry)
+                            details["total_size"] += int(it.get("size") or 0)
+                            if not entry["url"]:
+                                pending.append(
+                                    (int(it["fs_id"]), len(details["contents"]) - 1)
+                                )
+                    if len(items) < 200:
+                        break
+                    page += 1
+                    sleep(0.3)
+
+            __walk(root=True)
+
+            if pending:
+                resolved = __resolve_dlinks(
+                    session, origin, js_token, meta, [fid for fid, _ in pending]
                 )
+                for fid, idx in pending:
+                    if fid in resolved:
+                        details["contents"][idx]["url"] = resolved[fid]
+                missing = [
+                    details["contents"][idx]["filename"]
+                    for fid, idx in pending
+                    if fid not in resolved
+                ]
+                if missing:
+                    raise DirectDownloadLinkException(
+                        f"ERROR: failed to resolve dlink for {len(missing)} "
+                        f"file(s); first: {missing[0]}"
+                    )
 
-        if not details["contents"]:
-            raise DirectDownloadLinkException("ERROR: Empty share or invalid cookies")
-        if not details["title"]:
-            details["title"] = details["contents"][0]["filename"]
+            if not details["contents"]:
+                raise DirectDownloadLinkException("ERROR: Empty share or invalid cookies")
+            if not details["title"]:
+                details["title"] = details["contents"][0]["filename"]
+            if len(details["contents"]) > 1:
+                details["is_folder"] = True
 
-        cookie_header = "; ".join(f"{k}={v}" for k, v in cookies.items())
-        details["header"] = (
-            f"Cookie: {cookie_header}\n"
-            f"User-Agent: {user_agent}\n"
-            f"Referer: https://www.terabox.com/"
-        )
-        if len(details["contents"]) == 1:
-            return details["contents"][0]["url"], details["header"]
-        return details
+            header_lines = [
+                f"User-Agent: {user_agent}",
+                f"Referer: {origin}/",
+            ]
+            if cookie_header := "; ".join(
+                f"{key}={value}" for key, value in cookies.items()
+            ):
+                header_lines.insert(0, f"Cookie: {cookie_header}")
+            details["header"] = "\n".join(header_lines)
+            if len(details["contents"]) == 1 and not structured:
+                return details["contents"][0]["url"], details["header"]
+            return details
 
-    cookies = __load_cookies()
-    if cookies:
-        try:
-            return __crawl_with_cookies(cookies)
-        except DirectDownloadLinkException:
+    cookies = __load_cookies() or {}
+    official_error = None
+    try:
+        return __crawl_with_cookies(cookies)
+    except DirectDownloadLinkException as error:
+        official_error = error
+        _surl, password = __parse_share(url)
+        if password or "password" in str(error).lower():
             raise
-        except Exception:
-            pass
+    except Exception as error:
+        official_error = error
 
     api_url = "https://teraboxdl.site/api/proxy"
     headers = {"Referer": "https://teraboxdl.site/", "User-Agent": user_agent}
@@ -1577,30 +1624,50 @@ def terabox(url, cookie_file="cookies.txt"):
 
     try:
         with Session() as session:
+            __configure_session(session)
             req = session.post(
                 api_url, json=payload, headers=headers, timeout=30
             ).json()
     except Exception as e:
+        if official_error:
+            raise DirectDownloadLinkException(
+                "ERROR: Official TeraBox resolution and public fallback both failed "
+                f"({e.__class__.__name__})"
+            ) from e
         raise DirectDownloadLinkException(f"ERROR: {e.__class__.__name__}") from e
 
-    details = {"contents": [], "title": "", "total_size": 0}
+    details = {
+        "contents": [],
+        "title": "",
+        "total_size": 0,
+        "is_folder": False,
+    }
 
     if req.get("errno") != 0 or not req.get("list"):
+        if official_error:
+            raise DirectDownloadLinkException(
+                "ERROR: Official TeraBox resolution and public fallback both "
+                "rejected the share"
+            ) from official_error
         raise DirectDownloadLinkException("ERROR: File not found!")
 
     for data in req["list"]:
         item = {
-            "path": data.get("path", ""),
+            "path": ospath.dirname(data.get("path", "")).lstrip("/"),
             "filename": data["server_filename"],
+            "fs_id": str(data.get("fs_id") or ""),
             "url": data["direct_link"],
             "size": int(data.get("size") or 0),
         }
         details["contents"].append(item)
-        details["total_size"] += data.get("size", 0)
+        details["total_size"] += int(data.get("size") or 0)
 
     details["title"] = req["list"][0]["server_filename"]
+    details["is_folder"] = len(details["contents"]) > 1 or any(
+        item["path"] for item in details["contents"]
+    )
 
-    if len(details["contents"]) == 1:
+    if len(details["contents"]) == 1 and not structured:
         return details["contents"][0]["url"]
     return details
 

@@ -2,6 +2,7 @@ import os
 import posixpath
 import re
 from asyncio import Lock, sleep
+from html import escape
 from secrets import token_hex
 from time import time
 
@@ -144,14 +145,37 @@ async def _download_files(
             return
         except TeraboxError as error:
             failures.append(f"{file.name}: {error}")
-            if await aiopath.exists(destination):
-                await remove(destination)
+            for failed_path in (destination, destination + ".part"):
+                if not await aiopath.exists(failed_path):
+                    continue
+                try:
+                    await remove(failed_path)
+                except OSError as cleanup_error:
+                    LOGGER.warning(
+                        "Could not remove failed TeraBox artifact %s: %s",
+                        failed_path,
+                        cleanup_error,
+                    )
     if tracker.is_cancelled or listener.is_cancelled:
         return
     if not completed:
         await listener.on_download_error(
             f"All TeraBox files failed. {'; '.join(failures[:5])}"
         )
+        return
+    if failures:
+        notice = (
+            f"TeraBox downloaded {completed} file(s), but {len(failures)} failed. "
+            f"Continuing with the completed files. {'; '.join(failures[:5])}"
+        )
+        try:
+            await send_message(
+                listener.message,
+                f"<b>Partial TeraBox download</b>\n{escape(notice)}",
+            )
+        except Exception as error:
+            LOGGER.warning("Could not send TeraBox partial-download notice: %s", error)
+        await listener.on_download_complete()
         return
     await listener.on_download_complete()
 
@@ -303,8 +327,6 @@ async def add_terabox_download(listener, path):
         client = TeraboxClient(
             cookie_file=os.path.abspath(cookie) if cookie else "",
         )
-        if cookie:
-            await client.login()
         result = await client.resolve(listener.link, recursive=True)
         files = list(result.file_entries)
         if not files:

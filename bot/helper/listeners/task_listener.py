@@ -51,7 +51,6 @@ from ..mirror_leech_utils.uphoster_utils.multi_upload import MultiUphosterUpload
 from ..mirror_leech_utils.gdrive_utils.upload import GoogleDriveUpload
 from ..mirror_leech_utils.rclone_utils.transfer import RcloneTransferHelper
 from ..mirror_leech_utils.upload_utils.mega_upload import add_mega_upload
-from ..mirror_leech_utils.upload_utils.terabox_upload import TeraboxUpload
 from ..mirror_leech_utils.status_utils.uphoster_status import UphosterStatus
 from ..mirror_leech_utils.status_utils.gdrive_status import (
     GoogleDriveStatus,
@@ -59,7 +58,6 @@ from ..mirror_leech_utils.status_utils.gdrive_status import (
 from ..mirror_leech_utils.status_utils.queue_status import QueueStatus
 from ..mirror_leech_utils.status_utils.rclone_status import RcloneStatus
 from ..mirror_leech_utils.status_utils.telegram_status import TelegramStatus
-from ..mirror_leech_utils.status_utils.terabox_upload_status import TeraboxUploadStatus
 from ..mirror_leech_utils.status_utils.yt_status import YtStatus
 from ..mirror_leech_utils.upload_utils.telegram_uploader import TelegramUploader
 from ..mirror_leech_utils.youtube_utils.youtube_upload import YouTubeUpload
@@ -557,18 +555,6 @@ class TaskListener(TaskConfig):
                 ddl.upload(),
             )
             del ddl
-        elif self.is_terabox_upload:
-            LOGGER.info(f"TeraBox Upload Name: {self.name}")
-            terabox = TeraboxUpload(self, up_path)
-            async with task_dict_lock:
-                task_dict[self.mid] = TeraboxUploadStatus(
-                    self, terabox, gid, "up"
-                )
-            await gather(
-                update_status_message(self.message.chat.id),
-                terabox.upload(),
-            )
-            del terabox
         elif is_gdrive_id(self.up_dest):
             LOGGER.info(f"Gdrive Upload Name: {self.name}")
             drive = GoogleDriveUpload(self, up_path)

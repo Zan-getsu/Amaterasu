@@ -128,7 +128,6 @@ class TaskConfig:
         self.is_qbit = False
         self.is_mega = False
         self.is_terabox = False
-        self.is_terabox_upload = False
         self.is_terabox_account = False
         self.is_nzb = False
         self.is_jd = False
@@ -186,7 +185,6 @@ class TaskConfig:
         self.terabox_cookie = ""
         self.terabox_cookie_source = ""
         self.terabox_cookie_error = ""
-        self.terabox_upload_path = ""
         self.file_details = {}
         self.mode = tuple()
 
@@ -201,7 +199,7 @@ class TaskConfig:
             )
         )
 
-        out_mode = f"#{'Leech' if self.is_leech else 'UphosterUpload' if self.is_uphoster else 'Clone' if self.is_clone else 'TeraBox' if self.is_terabox_upload else 'Mega' if self.up_dest in ('mega', 'mega:') else 'RClone' if self.up_dest.startswith('mrcc:') or is_rclone_path(self.up_dest) else 'GDrive' if self.up_dest.startswith(('mtp:', 'tp:', 'sa:')) or is_gdrive_id(self.up_dest) else 'UpHosters'}"
+        out_mode = f"#{'Leech' if self.is_leech else 'UphosterUpload' if self.is_uphoster else 'Clone' if self.is_clone else 'Mega' if self.up_dest in ('mega', 'mega:') else 'RClone' if self.up_dest.startswith('mrcc:') or is_rclone_path(self.up_dest) else 'GDrive' if self.up_dest.startswith(('mtp:', 'tp:', 'sa:')) or is_gdrive_id(self.up_dest) else 'UpHosters'}"
         out_mode += " (Zip)" if self.compress else " (Unzip)" if self.extract else ""
 
         self.is_rclone = is_rclone_path(self.link)
@@ -428,32 +426,20 @@ class TaskConfig:
                 and Config.STOP_DUPLICATE
             )
             if not gc_used:
-                default_upload = (
+                configured_upload = (
                     self.user_dict.get("DEFAULT_UPLOAD", "") or Config.DEFAULT_UPLOAD
                 )
+                default_upload = Config._normalize_default_upload(configured_upload)
                 up_dest_text = self.up_dest if isinstance(self.up_dest, str) else ""
                 if not self.is_uphoster and (
-                    (not self.up_dest and default_upload in ("tb", "tbx"))
-                    or up_dest_text in ("tb", "tbx")
+                    up_dest_text in ("tb", "tbx")
                     or up_dest_text.startswith(("tb:", "tbx:"))
                 ):
-                    self.is_terabox_upload = True
-                    folder = (
-                        up_dest_text.split(":", 1)[1]
-                        if ":" in up_dest_text
-                        else ""
+                    raise ValueError(
+                        "TeraBox upload is not supported. Choose Google Drive, "
+                        "rclone, Mega, Telegram, or a DDL hoster."
                     )
-                    self.terabox_upload_path = (
-                        folder or Config.TERABOX_UPLOAD_PATH or "/"
-                    )
-                    self.terabox_cookie = await self._terabox_cookie_path("Upload")
-                    if not self.terabox_cookie:
-                        raise ValueError(
-                            self.terabox_cookie_error
-                            or "No TeraBox cookie found for upload."
-                        )
-                    self.up_dest = "tbx"
-                elif not self.is_uphoster and (
+                if not self.is_uphoster and (
                     (not self.up_dest and default_upload == "rc") or self.up_dest == "rc"
                 ):
                     self.up_dest = self.user_dict.get("RCLONE_PATH") or Config.RCLONE_PATH
@@ -502,9 +488,7 @@ class TaskConfig:
                     "or set a default via /userset."
                 )
 
-            if self.is_terabox_upload:
-                pass
-            elif is_gdrive_id(self.up_dest):
+            if is_gdrive_id(self.up_dest):
                 if not self.up_dest.startswith(
                     ("mtp:", "tp:", "sa:")
                 ) and (
@@ -559,7 +543,6 @@ class TaskConfig:
                 self.up_dest not in ["rcl", "gdl"]
                 and not self.is_uphoster
                 and self.up_dest != "mega:"
-                and not self.is_terabox_upload
             ):
                 await self.is_token_exists(self.up_dest, "up")
 
