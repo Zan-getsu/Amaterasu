@@ -1,12 +1,16 @@
 from cloudscraper import create_scraper
 from hashlib import sha256
 from http.cookiejar import MozillaCookieJar
-from json import loads
+from json import JSONDecodeError, loads
 from lxml.etree import HTML
 from os import getenv, path as ospath
 from re import DOTALL, findall, match, search
 from niquests import Session, post, get
 from niquests.adapters import HTTPAdapter
+from niquests.exceptions import (
+    ConnectionError as NiquestsConnectionError,
+    Timeout as NiquestsTimeout,
+)
 from time import sleep, time
 from urllib.parse import parse_qs, urlparse, unquote
 from urllib3.util.retry import Retry
@@ -1321,6 +1325,61 @@ def _terabox_fallback_reason(response, error):
     return f"HTTP {status}; {response_kind}" if status is not None else response_kind
 
 
+_TERABOX_RESOLVE_ATTEMPTS = 5
+_TERABOX_RETRYABLE_HTTP = {408, 425, 429, 500, 502, 503, 504}
+_TERABOX_TRANSIENT_ERRORS = (
+    NiquestsConnectionError,
+    NiquestsTimeout,
+    ConnectionError,
+    TimeoutError,
+)
+
+
+def _terabox_request_with_retry(
+    session,
+    method,
+    url,
+    *,
+    expect_json=False,
+    **kwargs,
+):
+    last_error = None
+    for attempt in range(_TERABOX_RESOLVE_ATTEMPTS):
+        try:
+            response = getattr(session, method)(url, **kwargs)
+        except _TERABOX_TRANSIENT_ERRORS as error:
+            last_error = error
+        else:
+            status = getattr(response, "status_code", None)
+            if status in _TERABOX_RETRYABLE_HTTP:
+                if attempt + 1 < _TERABOX_RESOLVE_ATTEMPTS:
+                    sleep(min(0.5 * (2**attempt), 2.0))
+                    continue
+                raise DirectDownloadLinkException(
+                    "ERROR: TeraBox request failed after "
+                    f"{_TERABOX_RESOLVE_ATTEMPTS} attempts (HTTP {status})"
+                )
+            if not expect_json:
+                return response
+            try:
+                return response.json()
+            except (JSONDecodeError, ValueError) as error:
+                last_error = error
+                if status not in (None, 200):
+                    raise
+                if attempt + 1 >= _TERABOX_RESOLVE_ATTEMPTS:
+                    raise DirectDownloadLinkException(
+                        "ERROR: TeraBox request failed after "
+                        f"{_TERABOX_RESOLVE_ATTEMPTS} attempts (invalid JSON)"
+                    ) from error
+        if attempt + 1 < _TERABOX_RESOLVE_ATTEMPTS:
+            sleep(min(0.5 * (2**attempt), 2.0))
+    raise DirectDownloadLinkException(
+        "ERROR: TeraBox request failed after "
+        f"{_TERABOX_RESOLVE_ATTEMPTS} attempts ({last_error.__class__.__name__})"
+    ) from last_error
+
+
 def terabox(url, cookie_file="cookies.txt", *, structured=False):
     if "/file/" in url:
         return url
@@ -1402,11 +1461,15 @@ def terabox(url, cookie_file="cookies.txt", *, structured=False):
 
     def __bootstrap(session, surl, password):
         try:
-            resp = session.get(
+            resp = _terabox_request_with_retry(
+                session,
+                "get",
                 f"https://www.terabox.com/sharing/link?surl={surl}",
                 timeout=30,
                 allow_redirects=True,
             )
+        except DirectDownloadLinkException:
+            raise
         except Exception as e:
             raise DirectDownloadLinkException(f"ERROR: {e.__class__.__name__}") from e
         html_text = resp.text
@@ -1422,12 +1485,15 @@ def terabox(url, cookie_file="cookies.txt", *, structured=False):
         js_token, pcftoken = _terabox_page_tokens(html_text)
         if password:
             try:
-                v = session.post(
+                v = _terabox_request_with_retry(
+                    session,
+                    "post",
                     f"{origin}/share/verify",
+                    expect_json=True,
                     params={**API_PARAMS, "surl": surl},
                     data={"pwd": password},
                     timeout=30,
-                ).json()
+                )
                 if v.get("errno") != 0:
                     raise DirectDownloadLinkException(
                         f"ERROR: Share password verification failed "
@@ -1469,11 +1535,16 @@ def terabox(url, cookie_file="cookies.txt", *, structured=False):
         if dir_path is not None:
             params["dir"] = dir_path
         try:
-            data = session.get(
+            data = _terabox_request_with_retry(
+                session,
+                "get",
                 f"{origin}/share/list",
+                expect_json=True,
                 params=params,
                 timeout=30,
-            ).json()
+            )
+        except DirectDownloadLinkException:
+            raise
         except Exception as e:
             raise DirectDownloadLinkException(f"ERROR: {e.__class__.__name__}") from e
         if data.get("errno") not in (0, None):
@@ -1484,8 +1555,11 @@ def terabox(url, cookie_file="cookies.txt", *, structured=False):
 
     def __shorturlinfo(session, origin, surl, js_token):
         try:
-            data = session.get(
+            data = _terabox_request_with_retry(
+                session,
+                "get",
                 f"{origin}/api/shorturlinfo",
+                expect_json=True,
                 params={
                     **API_PARAMS,
                     "jsToken": js_token,
@@ -1495,7 +1569,9 @@ def terabox(url, cookie_file="cookies.txt", *, structured=False):
                     "num": "20",
                 },
                 timeout=30,
-            ).json()
+            )
+        except DirectDownloadLinkException:
+            raise
         except Exception as e:
             raise DirectDownloadLinkException(f"ERROR: {e.__class__.__name__}") from e
         if data.get("errno") not in (0, None):
@@ -1508,8 +1584,11 @@ def terabox(url, cookie_file="cookies.txt", *, structured=False):
         out = {}
         for fid in fs_ids:
             try:
-                data = session.post(
+                data = _terabox_request_with_retry(
+                    session,
+                    "post",
                     f"{origin}/share/download",
+                    expect_json=True,
                     params={
                         **API_PARAMS,
                         "jsToken": js_token,
@@ -1525,7 +1604,9 @@ def terabox(url, cookie_file="cookies.txt", *, structured=False):
                         "type": "nolimit",
                     },
                     timeout=30,
-                ).json()
+                )
+            except DirectDownloadLinkException:
+                raise
             except Exception as e:
                 raise DirectDownloadLinkException(
                     f"ERROR: {e.__class__.__name__}"

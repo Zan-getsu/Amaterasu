@@ -267,7 +267,7 @@ def test_amaterasu_terabox_adapter_exports_sdk_surface():
     assert TeraboxFile
     assert issubclass(TeraboxCancelled, TeraboxError)
     assert issubclass(TeraboxPasswordError, TeraboxError)
-    assert __version__ == "2.0.1-amaterasu"
+    assert __version__ == "2.0.3-amaterasu"
 
 
 
@@ -467,6 +467,128 @@ def test_public_terabox_fallback_error_is_safe_and_actionable():
 
     assert reason == "HTTP 503; non-JSON response"
     assert secret_body not in reason
+
+
+def test_public_terabox_request_retries_transient_connection_failure(monkeypatch):
+    from niquests.exceptions import ConnectionError
+
+    from bot.helper.mirror_leech_utils.download_utils import direct_link_generator
+
+    response = SimpleNamespace(status_code=200)
+    session = SimpleNamespace(
+        get=MagicMock(side_effect=[ConnectionError("temporary"), response])
+    )
+    retry_sleep = MagicMock()
+    monkeypatch.setattr(direct_link_generator, "sleep", retry_sleep)
+
+    result = direct_link_generator._terabox_request_with_retry(
+        session,
+        "get",
+        "https://www.terabox.com/sharing/link?surl=example",
+        timeout=30,
+    )
+
+    assert result is response
+    assert session.get.call_count == 2
+    retry_sleep.assert_called_once_with(0.5)
+
+
+def test_public_terabox_request_reports_exhausted_retries(monkeypatch):
+    from niquests.exceptions import ConnectionError
+
+    from bot.helper.ext_utils.exceptions import DirectDownloadLinkException
+    from bot.helper.mirror_leech_utils.download_utils import direct_link_generator
+
+    session = SimpleNamespace(
+        get=MagicMock(side_effect=ConnectionError("temporary"))
+    )
+    retry_sleep = MagicMock()
+    monkeypatch.setattr(direct_link_generator, "sleep", retry_sleep)
+
+    with pytest.raises(
+        DirectDownloadLinkException,
+        match=r"failed after 5 attempts \(ConnectionError\)",
+    ):
+        direct_link_generator._terabox_request_with_retry(
+            session,
+            "get",
+            "https://www.terabox.com/sharing/link?surl=example",
+        )
+
+    assert session.get.call_count == 5
+    assert [call.args for call in retry_sleep.call_args_list] == [
+        (0.5,),
+        (1.0,),
+        (2.0,),
+        (2.0,),
+    ]
+
+
+def test_public_terabox_request_retries_service_unavailable(monkeypatch):
+    from bot.helper.mirror_leech_utils.download_utils import direct_link_generator
+
+    unavailable = SimpleNamespace(status_code=503)
+    available = SimpleNamespace(status_code=200)
+    session = SimpleNamespace(
+        get=MagicMock(side_effect=[unavailable, available])
+    )
+    retry_sleep = MagicMock()
+    monkeypatch.setattr(direct_link_generator, "sleep", retry_sleep)
+
+    result = direct_link_generator._terabox_request_with_retry(
+        session,
+        "get",
+        "https://www.terabox.com/sharing/link?surl=example",
+    )
+
+    assert result is available
+    assert session.get.call_count == 2
+    retry_sleep.assert_called_once_with(0.5)
+
+
+def test_public_terabox_request_reports_exhausted_http_retries(monkeypatch):
+    from bot.helper.ext_utils.exceptions import DirectDownloadLinkException
+    from bot.helper.mirror_leech_utils.download_utils import direct_link_generator
+
+    session = SimpleNamespace(
+        get=MagicMock(return_value=SimpleNamespace(status_code=503))
+    )
+    monkeypatch.setattr(direct_link_generator, "sleep", MagicMock())
+
+    with pytest.raises(
+        DirectDownloadLinkException,
+        match=r"failed after 5 attempts \(HTTP 503\)",
+    ):
+        direct_link_generator._terabox_request_with_retry(
+            session,
+            "get",
+            "https://www.terabox.com/sharing/link?surl=example",
+        )
+
+    assert session.get.call_count == 5
+
+
+def test_public_terabox_request_does_not_retry_forbidden_response(monkeypatch):
+    from bot.helper.mirror_leech_utils.download_utils import direct_link_generator
+
+    response = SimpleNamespace(
+        status_code=403,
+        json=MagicMock(side_effect=ValueError("forbidden HTML")),
+    )
+    session = SimpleNamespace(get=MagicMock(return_value=response))
+    retry_sleep = MagicMock()
+    monkeypatch.setattr(direct_link_generator, "sleep", retry_sleep)
+
+    with pytest.raises(ValueError, match="forbidden HTML"):
+        direct_link_generator._terabox_request_with_retry(
+            session,
+            "get",
+            "https://www.terabox.com/api/shorturlinfo",
+            expect_json=True,
+        )
+
+    session.get.assert_called_once()
+    retry_sleep.assert_not_called()
 
 
 async def test_terabox_refresh_retains_current_page_session_tokens():

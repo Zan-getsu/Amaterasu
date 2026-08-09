@@ -28,7 +28,7 @@ from aioterabox.api import FileInfo as _AccountFileInfo
 from aioterabox.api import TeraboxClient as _AccountClient
 from aioterabox.exceptions import TeraboxUnauthorizedError as _SdkUnauthorizedError
 
-__version__ = "2.0.1-amaterasu"
+__version__ = "2.0.3-amaterasu"
 
 _LOGGER = getLogger(__name__)
 
