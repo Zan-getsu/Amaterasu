@@ -523,6 +523,122 @@ async def test_legacy_gallery_animation_document_id_falls_back(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_send_message_does_not_retry_an_unknown_peer(monkeypatch):
+    from pyrogram.errors import PeerIdInvalid
+
+    from bot.core.tg_client import TgClient
+    from bot.helper.telegram_helper.message_utils import send_message
+
+    bot = SimpleNamespace(send_message=AsyncMock(side_effect=PeerIdInvalid()))
+    monkeypatch.setattr(TgClient, "bot", bot)
+
+    result = await send_message(3766303560, "This peer is not in the session cache")
+
+    assert bot.send_message.await_count == 1
+    assert "PEER_ID_INVALID" in result
+
+
+@pytest.mark.asyncio
+async def test_send_message_bounds_persistent_length_failures(monkeypatch):
+    from pyrogram.errors import MessageTooLong
+
+    from bot.core.tg_client import TgClient
+    from bot.helper.telegram_helper.message_utils import send_message
+
+    bot = SimpleNamespace(send_message=AsyncMock(side_effect=MessageTooLong()))
+    monkeypatch.setattr(TgClient, "bot", bot)
+
+    result = await send_message(123, "x" * 5000)
+
+    assert bot.send_message.await_count == 3
+    assert "MESSAGE_TOO_LONG" in result
+
+
+@pytest.mark.asyncio
+async def test_send_message_entity_fallback_reaches_integer_chat_target(monkeypatch):
+    from pyrogram.enums import ParseMode
+    from pyrogram.errors import EntityBoundsInvalid
+
+    from bot.core.tg_client import TgClient
+    from bot.helper.telegram_helper.message_utils import send_message
+
+    delivered = SimpleNamespace(id=99)
+    bot = SimpleNamespace(
+        send_message=AsyncMock(side_effect=[EntityBoundsInvalid(), delivered])
+    )
+    monkeypatch.setattr(TgClient, "bot", bot)
+
+    result = await send_message(123, "broken <b>entities</b>")
+
+    assert result is delivered
+    assert bot.send_message.await_count == 2
+    assert bot.send_message.await_args_list[1].kwargs["parse_mode"] == ParseMode.DISABLED
+
+
+@pytest.mark.asyncio
+async def test_edit_message_bounds_persistent_markup_failures():
+    from pyrogram.errors import ReplyMarkupInvalid
+
+    from bot.helper.telegram_helper.message_utils import edit_message
+
+    message = SimpleNamespace(
+        media=None,
+        edit=AsyncMock(side_effect=ReplyMarkupInvalid()),
+    )
+
+    result = await edit_message(message, "status", buttons=object())
+
+    assert message.edit.await_count == 3
+    assert "REPLY_MARKUP_INVALID" in result
+
+
+@pytest.mark.asyncio
+async def test_other_message_helpers_bound_flood_retries_and_keep_buttons(
+    monkeypatch,
+):
+    from bot.core.tg_client import TgClient
+    from bot.helper.telegram_helper import message_utils
+
+    class RetryFlood(Exception):
+        value = 0
+
+    pause = AsyncMock()
+    monkeypatch.setattr(message_utils, "FloodWait", RetryFlood)
+    monkeypatch.setattr(message_utils, "sleep", pause)
+
+    markup_message = SimpleNamespace(
+        edit_reply_markup=AsyncMock(side_effect=RetryFlood())
+    )
+    await message_utils.edit_reply_markup(markup_message, object())
+    assert markup_message.edit_reply_markup.await_count == 3
+
+    buttons = object()
+    file_message = SimpleNamespace(
+        id=42,
+        reply_document=AsyncMock(side_effect=RetryFlood()),
+    )
+    await message_utils.send_file(
+        file_message,
+        "report.txt",
+        "Report",
+        buttons,
+    )
+    assert file_message.reply_document.await_count == 3
+    assert all(
+        call.kwargs["reply_markup"] is buttons
+        for call in file_message.reply_document.await_args_list
+    )
+
+    bot = SimpleNamespace(send_message=AsyncMock(side_effect=RetryFlood()))
+    monkeypatch.setattr(TgClient, "user", None)
+    monkeypatch.setattr(TgClient, "bot", bot)
+    await message_utils.send_rss("RSS update", 123, 7)
+    assert bot.send_message.await_count == 3
+
+    assert pause.await_count == 6
+
+
+@pytest.mark.asyncio
 async def test_rendered_task_card_preserves_fields_and_metrics(monkeypatch):
     from bot.helper.ext_utils import status_utils
     from bot.helper.ext_utils.status_utils import MirrorStatus

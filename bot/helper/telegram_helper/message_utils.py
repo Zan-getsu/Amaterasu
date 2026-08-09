@@ -17,7 +17,6 @@ from pyrogram.errors import (
     MessageNotModified,
     MessageEmpty,
     MessageTooLong,
-    MessageDeleteForbidden,
     ReplyMarkupInvalid,
     PhotoInvalidDimensions,
     WebpageCurlFailed,
@@ -45,6 +44,7 @@ from .inline_ui import style_inline_text
 
 GALLERY_ANIMATION_PREFIX = "animation:"
 GALLERY_DOCUMENT_PREFIX = "document:"
+_MAX_TELEGRAM_ATTEMPTS = 3
 
 
 def gallery_animation(media):
@@ -108,6 +108,12 @@ def _shorten_caption(text, limit=900):
 
 
 async def _send_text(message, text, buttons=None, **kwargs):
+    send_options = {
+        "disable_web_page_preview": True,
+        "disable_notification": True,
+        "reply_markup": buttons,
+        **kwargs,
+    }
     if isinstance(message, (int, str)):
         try:
             chat_id = int(message)
@@ -116,21 +122,27 @@ async def _send_text(message, text, buttons=None, **kwargs):
         return await TgClient.bot.send_message(
             chat_id=chat_id,
             text=text,
-            disable_web_page_preview=True,
-            disable_notification=True,
-            reply_markup=buttons,
+            **send_options,
         )
+    send_options.setdefault(
+        "reply_parameters",
+        ReplyParameters(message_id=message.id),
+    )
     return await message.reply(
         text=text,
-        disable_web_page_preview=True,
-        disable_notification=True,
-        reply_parameters=ReplyParameters(message_id=message.id),
-        reply_markup=buttons,
-        **kwargs,
+        **send_options,
     )
 
 
-async def send_message(message, text, buttons=None, block=True, photo=None, **kwargs):
+async def send_message(
+    message,
+    text,
+    buttons=None,
+    block=True,
+    photo=None,
+    _attempt=1,
+    **kwargs,
+):
     text = style_inline_text(text, has_buttons=buttons is not None)
     original_media = photo
     try:
@@ -174,19 +186,29 @@ async def send_message(message, text, buttons=None, block=True, photo=None, **kw
                     raise
             except FloodWait as f:
                 LOGGER.warning(str(f))
-                if not block:
+                if not block or _attempt >= _MAX_TELEGRAM_ATTEMPTS:
                     return str(f)
                 await sleep(f.value * 1.2)
                 return await send_message(
-                    message, text, buttons, block, original_media
+                    message,
+                    text,
+                    buttons,
+                    block,
+                    original_media,
+                    _attempt=_attempt + 1,
+                    **kwargs,
                 )
             except MediaCaptionTooLong:
+                if _attempt >= _MAX_TELEGRAM_ATTEMPTS:
+                    return "Telegram rejected the shortened media caption"
                 return await send_message(
                     message,
                     _shorten_caption(text),
                     buttons,
                     block,
                     original_media,
+                    _attempt=_attempt + 1,
+                    **kwargs,
                 )
             except (
                 PhotoInvalidDimensions,
@@ -216,6 +238,8 @@ async def send_message(message, text, buttons=None, block=True, photo=None, **kw
                             buttons,
                             block,
                             fallback_media,
+                            _attempt=_attempt + 1,
+                            **kwargs,
                         )
                         from aiofiles.os import remove as aioremove
 
@@ -231,40 +255,81 @@ async def send_message(message, text, buttons=None, block=True, photo=None, **kw
         return await _send_text(message, text, buttons, **kwargs)
     except FloodWait as f:
         LOGGER.warning(str(f))
-        if not block:
+        if not block or _attempt >= _MAX_TELEGRAM_ATTEMPTS:
             return str(f)
         await sleep(f.value * 1.2)
-        return await send_message(message, text, buttons)
+        return await send_message(
+            message,
+            text,
+            buttons,
+            block,
+            original_media,
+            _attempt=_attempt + 1,
+            **kwargs,
+        )
     except ReplyMarkupInvalid as rmi:
         LOGGER.warning(str(rmi))
-        return await send_message(message, text, None)
-    except MessageTooLong:
+        if _attempt >= _MAX_TELEGRAM_ATTEMPTS:
+            return str(rmi)
         return await send_message(
-            message, text[:4096], buttons, block, original_media
+            message,
+            text,
+            None,
+            block,
+            original_media,
+            _attempt=_attempt + 1,
+            **kwargs,
         )
-    except (MessageEmpty, EntityBoundsInvalid):
-        return await send_message(message, text, parse_mode=ParseMode.DISABLED)
-    except PeerIdInvalid:
-        LOGGER.warning(f"PeerIdInvalid {type(message)}") # My Debug Style
-        if isinstance(message, (int, str)):
-            return await send_message(
-                int(message), text, buttons, block, original_media
-            )
+    except MessageTooLong as error:
+        if _attempt >= _MAX_TELEGRAM_ATTEMPTS:
+            return str(error)
+        return await send_message(
+            message,
+            text[:3900],
+            buttons,
+            block,
+            original_media,
+            _attempt=_attempt + 1,
+            **kwargs,
+        )
+    except MessageEmpty as error:
+        LOGGER.warning("Telegram rejected an empty message for %r", message)
+        return str(error)
+    except EntityBoundsInvalid as error:
+        if _attempt >= _MAX_TELEGRAM_ATTEMPTS:
+            return str(error)
+        retry_kwargs = {**kwargs, "parse_mode": ParseMode.DISABLED}
+        return await send_message(
+            message,
+            text,
+            buttons,
+            block,
+            original_media,
+            _attempt=_attempt + 1,
+            **retry_kwargs,
+        )
+    except PeerIdInvalid as error:
+        LOGGER.warning("Telegram peer is unknown or invalid: %r", message)
+        return str(error)
     except ConnectionError:
         return
     except Exception as e:
-        if "PeerIdInvalid" in str(type(e).__name__):
-            LOGGER.warning(f"PeerIdInvalid {type(message)}")
-            if isinstance(message, (int, str)):
-                return await send_message(
-                    int(message), text, buttons, block, original_media
-                )
+        if type(e).__name__ == "PeerIdInvalid":
+            LOGGER.warning("Telegram peer is unknown or invalid: %r", message)
+            return str(e)
         LOGGER.error(str(e), exc_info=True)
         return str(e)
 
 
 
-async def edit_message(message, text, buttons=None, block=True, photo=None):
+async def edit_message(
+    message,
+    text,
+    buttons=None,
+    block=True,
+    photo=None,
+    _attempt=1,
+):
     text = style_inline_text(text, has_buttons=buttons is not None)
     original_media = photo
     try:
@@ -374,16 +439,28 @@ async def edit_message(message, text, buttons=None, block=True, photo=None):
         )
     except ReplyMarkupInvalid as rmi:
         LOGGER.warning(str(rmi))
+        if _attempt >= _MAX_TELEGRAM_ATTEMPTS:
+            return str(rmi)
         return await edit_message(
-            message, text, None, block, original_media
+            message,
+            text,
+            None,
+            block,
+            original_media,
+            _attempt=_attempt + 1,
         )
     except FloodWait as f:
         LOGGER.warning(str(f))
-        if not block:
+        if not block or _attempt >= _MAX_TELEGRAM_ATTEMPTS:
             return str(f)
         await sleep(f.value * 1.2)
         return await edit_message(
-            message, text, buttons, block, original_media
+            message,
+            text,
+            buttons,
+            block,
+            original_media,
+            _attempt=_attempt + 1,
         )
     except OSError:
         return
@@ -392,15 +469,21 @@ async def edit_message(message, text, buttons=None, block=True, photo=None):
         return str(e)
 
 
-async def edit_reply_markup(message, buttons):
+async def edit_reply_markup(message, buttons, _attempt=1):
     try:
         return await message.edit_reply_markup(reply_markup=buttons)
     except (MessageNotModified, MessageIdInvalid):
         pass
     except FloodWait as f:
         LOGGER.warning(str(f))
+        if _attempt >= _MAX_TELEGRAM_ATTEMPTS:
+            return str(f)
         await sleep(f.value * 1.2)
-        return await edit_reply_markup(message, buttons)
+        return await edit_reply_markup(
+            message,
+            buttons,
+            _attempt=_attempt + 1,
+        )
     except OSError:
         return
     except Exception as e:
@@ -408,7 +491,7 @@ async def edit_reply_markup(message, buttons):
         return str(e)
 
 
-async def send_file(message, file, caption="", buttons=None):
+async def send_file(message, file, caption="", buttons=None, _attempt=1):
     caption = style_inline_text(caption, has_buttons=buttons is not None)
     try:
         return await message.reply_document(
@@ -420,8 +503,16 @@ async def send_file(message, file, caption="", buttons=None):
         )
     except FloodWait as f:
         LOGGER.warning(str(f))
+        if _attempt >= _MAX_TELEGRAM_ATTEMPTS:
+            return str(f)
         await sleep(f.value * 1.2)
-        return await send_file(message, file, caption)
+        return await send_file(
+            message,
+            file,
+            caption,
+            buttons,
+            _attempt=_attempt + 1,
+        )
     except ConnectionError:
         return
     except Exception as e:
@@ -429,7 +520,7 @@ async def send_file(message, file, caption="", buttons=None):
         return str(e)
 
 
-async def send_rss(text, chat_id, thread_id):
+async def send_rss(text, chat_id, thread_id, _attempt=1):
     try:
         app = TgClient.user or TgClient.bot
         return await app.send_message(
@@ -441,8 +532,15 @@ async def send_rss(text, chat_id, thread_id):
         )
     except (FloodWait, FloodPremiumWait) as f:
         LOGGER.warning(str(f))
+        if _attempt >= _MAX_TELEGRAM_ATTEMPTS:
+            return str(f)
         await sleep(f.value * 1.2)
-        return await send_rss(text, chat_id, thread_id)
+        return await send_rss(
+            text,
+            chat_id,
+            thread_id,
+            _attempt=_attempt + 1,
+        )
     except ConnectionError:
         return
     except Exception as e:
