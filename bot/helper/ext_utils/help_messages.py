@@ -473,7 +473,7 @@ def get_bot_commands():
         "CategorySelect": "Select an upload destination category",
         "GDClean": "[SUDO] Clean duplicate or unwanted Drive files",
         "Plugins": "[SUDO] Manage bot plugins",
-        "SpeedTest": "Check Bot Speed using Speedtest.com",
+        "SpeedTest": "Test server download, upload, ping, and network details",
         "Telegraph": "[reply] Upload Image/Video (under 5MB) to Telegraph",
         "FileToLink": "[reply/batch] Generate direct stream and download links for media files",
         "AutoRename": "[reply] Auto-Rename a file based on your template",
@@ -526,7 +526,9 @@ def get_help_string():
             cmd_str = f"/{cmd_attr}"
 
         if key == "SpeedTest" and key in BOT_COMMANDS:
-            help_lines.append(f"{cmd_str}: Check Bot Speed using Speedtest.com")
+            help_lines.append(
+                f"{cmd_str}: Test server download, upload, ping, and network details"
+            )
         elif key == "Telegraph" and key in BOT_COMMANDS:
             help_lines.append(f"{cmd_str}: Upload Image/Video (under 5MB) to Telegraph.")
         elif key == "Mirror":
@@ -673,8 +675,10 @@ def get_help_string():
 
     return (
         "<b>✦ COMMAND DIRECTORY</b>\n"
-        "<i>Tap a command to use it, or send it without arguments for details.</i>"
-        "\n\n"
+        "<i>Browse the control surface or search with /help query.</i>\n\n"
+        f"╭─ <b>Commands</b> : <code>{len(entries)}</code>\n"
+        "├─ <b>Search</b> : <code>/help mirror</code>\n"
+        "╰─ <b>Usage</b> : <code>Send a command without arguments</code>\n\n"
         + "\n".join(entries)
     )
 

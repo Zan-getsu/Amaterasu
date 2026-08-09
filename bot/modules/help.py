@@ -2,17 +2,17 @@ from html import escape
 
 from ..helper.ext_utils.bot_utils import COMMAND_USAGE, new_task
 from ..helper.ext_utils.help_messages import (
-    YT_HELP_DICT,
-    MIRROR_HELP_DICT,
     CLONE_HELP_DICT,
+    MIRROR_HELP_DICT,
+    YT_HELP_DICT,
+    help_string,
 )
 from ..helper.telegram_helper.button_build import ButtonMaker
 from ..helper.telegram_helper.message_utils import (
-    edit_message,
     delete_message,
+    edit_message,
     send_message,
 )
-from ..helper.ext_utils.help_messages import help_string
 
 
 @new_task
@@ -63,8 +63,10 @@ async def bot_help(_, message):
                 await send_message(
                     message,
                     "<b>✦ NO COMMAND FOUND</b>\n"
-                    f"<i>Nothing matched “{escape(query)}”.</i>\n\n"
-                    "Use /help to browse the command directory.",
+                    "<i>The command directory did not find a close match.</i>\n\n"
+                    f"╭─ <b>Query</b> : <code>{escape(query)}</code>\n"
+                    "├─ <b>Status</b> : <code>No match</code>\n"
+                    "╰─ <b>Next</b> : <code>/help</code>",
                 )
             return
     # No query — show full help
@@ -78,7 +80,11 @@ def _fuzzy_search_command(query):
     Uses rapidfuzz if available; falls back to simple substring search.
     """
     from ..helper.ext_utils.help_messages import help_string
-    lines = [l.strip() for l in help_string.split("\n") if l.strip() and "/" in l]
+    lines = [
+        line.strip()
+        for line in help_string.split("\n")
+        if line.strip() and "/" in line
+    ]
     try:
         from rapidfuzz import fuzz
         # Search each line for the query — match against the command
@@ -98,19 +104,23 @@ def _fuzzy_search_command(query):
         if best_match and best_score > 60:
             return (
                 "<b>✦ COMMAND MATCH</b>\n"
-                f"<i>Match confidence : {best_score}%</i>\n\n"
-                f"{best_match}\n\n"
-                "Use /help to browse every command."
+                "<i>Closest command found from the directory.</i>\n\n"
+                f"╭─ <b>Query</b> : <code>{escape(query)}</code>\n"
+                f"├─ <b>Confidence</b> : <code>{best_score}%</code>\n"
+                f"╰─ <b>Command</b> : {best_match}\n\n"
+                "<i>Use /help to browse every command.</i>"
             )
         return ""
     except ImportError:
         # rapidfuzz not installed — fall back to substring search
         query_lower = query.lower()
-        matches = [l for l in lines if query_lower in l.lower()]
+        matches = [line for line in lines if query_lower in line.lower()]
         if matches:
             return (
                 "<b>✦ COMMAND MATCH</b>\n\n"
-                f"{matches[0]}\n\n"
-                "Use /help to browse every command."
+                f"╭─ <b>Query</b> : <code>{escape(query)}</code>\n"
+                "├─ <b>Confidence</b> : <code>substring</code>\n"
+                f"╰─ <b>Command</b> : {matches[0]}\n\n"
+                "<i>Use /help to browse every command.</i>"
             )
         return ""

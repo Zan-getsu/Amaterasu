@@ -1,28 +1,18 @@
-"""Phase 5.8 — Interactive setup wizard.
+"""Owner-only setup review wizard."""
 
-/Setup command — owner only. Step-by-step inline keyboard wizard:
-  1. Set DOWNLOAD_DIR (ask for path, validate it exists and is writable)
-  2. Configure GDrive (show current status; link to instructions)
-  3. Configure Rclone (show current status; link to instructions)
-  4. Set OWNER_ID confirmation
-  5. Summary screen with Apply button
+from html import escape
 
-Each step has a Skip button. Does NOT replace .env/MongoDB config —
-it's a guided overlay for first-time setup.
-"""
-
-from .. import LOGGER, DOWNLOAD_DIR
+from .. import DOWNLOAD_DIR
 from ..core.config_manager import Config
 from ..helper.ext_utils.bot_utils import new_task
 from ..helper.telegram_helper.bot_commands import BotCommands
 from ..helper.telegram_helper.button_build import ButtonMaker
 from ..helper.telegram_helper.message_utils import (
-    send_message,
-    edit_message,
     delete_message,
+    edit_message,
+    send_message,
 )
 from ..version import get_version
-
 
 _SETUP_STEPS = [
     "download_dir",
@@ -41,74 +31,98 @@ _STEP_LABELS = {
 }
 
 
-def _setup_message(step, state):
+def _primary_command(command):
+    return command[0] if isinstance(command, list) else command
+
+
+def _status_label(configured):
+    return "Ready" if configured else "Needs setup"
+
+
+def _setup_header(step):
+    step_idx = _SETUP_STEPS.index(step) + 1
+    title = _STEP_LABELS[step].upper()
+    return (
+        f"<b>✦ SETUP CONTROL</b>\n"
+        f"<i>Step {step_idx}/{len(_SETUP_STEPS)} - {_STEP_LABELS[step]}</i>\n\n"
+        f"╭─ <b>Step</b> : <code>{step_idx}/{len(_SETUP_STEPS)}</code>\n"
+        f"├─ <b>Panel</b> : <code>{escape(title)}</code>"
+    )
+
+
+def _setup_message(step, state=None):
     """Build the setup message for the current step."""
+    del state
     if step == "download_dir":
-        current = getattr(Config, "DOWNLOAD_DIR", DOWNLOAD_DIR)
+        current = escape(str(getattr(Config, "DOWNLOAD_DIR", DOWNLOAD_DIR)))
+        default_dir = escape(str(DOWNLOAD_DIR))
         return (
-            "<b>✦ Setup — Step 1/5: Download Directory</b>\n\n"
-            f"<b>Current:</b> <code>{current}</code>\n\n"
-            "<i>This is where downloaded files are stored. Ensure the "
-            "path exists and is writable. The default "
-            f"<code>{DOWNLOAD_DIR}</code> works for Docker deployments.</i>\n\n"
-            "<b>To change:</b> Set <code>DOWNLOAD_DIR</code> in your "
-            "config.py or environment, then restart. Or skip if the "
-            "default is fine."
+            f"{_setup_header(step)}\n"
+            f"├─ <b>Current</b> : <code>{current}</code>\n"
+            f"╰─ <b>Default</b> : <code>{default_dir}</code>\n\n"
+            "<i>Downloads are staged here before upload or streaming. Keep the "
+            "path writable inside the container. Change DOWNLOAD_DIR in config "
+            "or environment, then restart.</i>"
         )
     elif step == "gdrive":
         configured = bool(
             getattr(Config, "GDRIVE_ID", "")
             or getattr(Config, "USE_SERVICE_ACCOUNTS", False)
         )
-        status = "✅ Configured" if configured else "❌ Not configured"
+        target = escape(str(getattr(Config, "GDRIVE_ID", "") or "Not set"))
+        mode = (
+            "Service Accounts"
+            if getattr(Config, "USE_SERVICE_ACCOUNTS", False)
+            else "Token"
+        )
+        token_cmd = _primary_command(BotCommands.TokenGenCommand)
         return (
-            "<b>✦ Setup — Step 2/5: Google Drive</b>\n\n"
-            f"<b>Status:</b> {status}\n\n"
-            "<i>To configure GDrive as an upload destination:\n"
-            "1. Run <code>/tokengen</code> and open your private web link\n"
-            "2. Generate a token, then choose Use in Amaterasu\n"
-            "3. Set GDRIVE_ID to your destination folder ID\n\n"
-            "Or skip if you don't need GDrive uploads.</i>"
+            f"{_setup_header(step)}\n"
+            f"├─ <b>Status</b> : <code>{_status_label(configured)}</code>\n"
+            f"├─ <b>Mode</b> : <code>{mode}</code>\n"
+            f"╰─ <b>Target</b> : <code>{target}</code>\n\n"
+            f"<i>Use /{token_cmd} to generate a private Drive token, then set "
+            "GDRIVE_ID to the destination folder. Skip this if you only leech "
+            "to Telegram or use Rclone.</i>"
         )
     elif step == "rclone":
         configured = bool(getattr(Config, "RCLONE_PATH", ""))
-        status = "✅ Configured" if configured else "❌ Not configured"
+        target = escape(str(getattr(Config, "RCLONE_PATH", "") or "Not set"))
         return (
-            "<b>✦ Setup — Step 3/5: Rclone</b>\n\n"
-            f"<b>Status:</b> {status}\n\n"
-            "<i>To configure Rclone:\n"
-            "1. Run <code>rclone config</code> inside the container\n"
-            "2. Add a remote (gdrive, dropbox, s3, etc.)\n"
-            "3. Set RCLONE_PATH to your destination remote:path\n\n"
-            "Or skip if you don't need Rclone uploads.</i>"
+            f"{_setup_header(step)}\n"
+            f"├─ <b>Status</b> : <code>{_status_label(configured)}</code>\n"
+            f"╰─ <b>Target</b> : <code>{target}</code>\n\n"
+            "<i>Configure a remote with rclone config, then set RCLONE_PATH "
+            "to remote:path. Skip this if Rclone is not part of your upload "
+            "flow.</i>"
         )
     elif step == "owner_id":
-        oid = getattr(Config, "OWNER_ID", 0)
+        oid = escape(str(getattr(Config, "OWNER_ID", 0)))
         return (
-            "<b>✦ Setup — Step 4/5: Owner Confirmation</b>\n\n"
-            f"<b>Current OWNER_ID:</b> <code>{oid}</code>\n\n"
-            "<i>This is your Telegram user ID. You received this setup "
-            "message because you are the owner. If this ID is correct, "
-            "continue. If not, set OWNER_ID in your config and restart.</i>"
+            f"{_setup_header(step)}\n"
+            f"├─ <b>Status</b> : <code>Owner verified</code>\n"
+            f"╰─ <b>OWNER_ID</b> : <code>{oid}</code>\n\n"
+            "<i>This wizard is owner-only. If the ID is wrong, update "
+            "OWNER_ID in config or environment, then restart.</i>"
         )
     elif step == "summary":
-        gdrive_status = "✅" if (
+        gdrive_configured = bool(
             getattr(Config, "GDRIVE_ID", "")
             or getattr(Config, "USE_SERVICE_ACCOUNTS", False)
-        ) else "❌"
-        rclone_status = "✅" if getattr(Config, "RCLONE_PATH", "") else "❌"
-        return (
-            "<b>✦ Setup — Step 5/5: Summary</b>\n\n"
-            f"<code>┌─ Download Dir : {getattr(Config, 'DOWNLOAD_DIR', DOWNLOAD_DIR)}\n"
-            f"├─ Google Drive  : {gdrive_status}\n"
-            f"├─ Rclone        : {rclone_status}\n"
-            f"├─ Owner ID      : {getattr(Config, 'OWNER_ID', 0)}\n"
-            f"└─ Version       : {get_version()}</code>\n\n"
-            "<i>Setup is complete! The bot is ready to use.\n"
-            "Use /help to see all commands.\n"
-            "Use /usetting to configure per-user settings.</i>"
         )
-    return "<b>Setup</b>"
+        rclone_configured = bool(getattr(Config, "RCLONE_PATH", ""))
+        user_settings_cmd = _primary_command(BotCommands.UserSetCommand)
+        return (
+            f"{_setup_header(step)}\n"
+            f"├─ <b>Download Dir</b> : <code>{escape(str(getattr(Config, 'DOWNLOAD_DIR', DOWNLOAD_DIR)))}</code>\n"
+            f"├─ <b>Google Drive</b> : <code>{_status_label(gdrive_configured)}</code>\n"
+            f"├─ <b>Rclone</b> : <code>{_status_label(rclone_configured)}</code>\n"
+            f"├─ <b>Owner ID</b> : <code>{escape(str(getattr(Config, 'OWNER_ID', 0)))}</code>\n"
+            f"╰─ <b>Version</b> : <code>{escape(str(get_version()))}</code>\n\n"
+            "<i>Review complete. Use /help for commands or "
+            f"/{user_settings_cmd} for per-user storage settings.</i>"
+        )
+    return "<b>✦ SETUP CONTROL</b>\n<i>Unknown setup step.</i>"
 
 
 def _setup_buttons(step, user_id):
@@ -119,7 +133,10 @@ def _setup_buttons(step, user_id):
         buttons.data_button("Next →", f"setup next {user_id} {step_idx + 1}")
     if step_idx > 0:
         buttons.data_button("← Back", f"setup next {user_id} {step_idx - 1}")
-    buttons.data_button("Skip", f"setup skip {user_id} {step_idx}")
+    if step_idx < len(_SETUP_STEPS) - 1:
+        buttons.data_button("Skip", f"setup skip {user_id} {step_idx + 1}")
+    else:
+        buttons.data_button("Done", f"setup close {user_id}")
     buttons.data_button("Close", f"setup close {user_id}", "footer")
     return buttons.build_menu(2)
 
@@ -129,7 +146,11 @@ async def setup_wizard(_, message):
     """Phase 5.8 — /setup command. Owner only."""
     user = message.from_user or message.sender_chat
     if user is None or user.id != Config.OWNER_ID:
-        await send_message(message, "This command is for the bot owner only.")
+        await send_message(
+            message,
+            "<b>✦ SETUP LOCKED</b>\n"
+            "<i>This command is only available to the bot owner.</i>",
+        )
         return
     step = _SETUP_STEPS[0]
     msg = _setup_message(step, {})
@@ -141,10 +162,14 @@ async def setup_wizard(_, message):
 async def setup_callback(_, query):
     """Handle setup wizard inline button callbacks."""
     data = query.data.split()
-    if len(data) < 4:
+    if len(data) < 3:
         await query.answer("Invalid callback.", show_alert=True)
         return
-    user_id = int(data[2])
+    try:
+        user_id = int(data[2])
+    except ValueError:
+        await query.answer("Invalid callback.", show_alert=True)
+        return
     if query.from_user.id != user_id:
         await query.answer("Not authorized.", show_alert=True)
         return
@@ -153,7 +178,14 @@ async def setup_callback(_, query):
         await query.answer()
         await delete_message(query.message)
         return
-    step_idx = int(data[3])
+    if action not in {"next", "skip"} or len(data) < 4:
+        await query.answer("Invalid callback.", show_alert=True)
+        return
+    try:
+        step_idx = int(data[3])
+    except ValueError:
+        await query.answer("Invalid step.", show_alert=True)
+        return
     if step_idx < 0 or step_idx >= len(_SETUP_STEPS):
         await query.answer("Invalid step.", show_alert=True)
         return

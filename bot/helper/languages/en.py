@@ -1,6 +1,9 @@
-START_MSG = """
-This bot can mirror from links|tgfiles|torrents|nzb|rclone-cloud to any rclone cloud, Google Drive or to telegram.
-Type /{cmd} to get a list of available commands
-"""
+START_MSG = """<b>✦ AMATERASU ONLINE</b>
+<i>Mirror, leech, stream, and manage transfers from one Telegram control panel.</i>
+
+╭─ <b>Status</b> : <code>Ready</code>
+├─ <b>Sources</b> : <code>Links | Telegram | Torrents | NZB | Rclone | TeraBox</code>
+├─ <b>Outputs</b> : <code>Telegram | Google Drive | Rclone</code>
+╰─ <b>Commands</b> : /{cmd}"""
 START_BUTTON1 = "Git Repo"
 START_BUTTON2 = "Updates"

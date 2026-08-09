@@ -32,6 +32,16 @@ _SPACEBIN_URL = "https://spaceb.in/"
 _SPACEBIN_TIMEOUT = (10, 30)
 
 
+def _build_start_message(help_cmd):
+    return f"""<b>✦ AMATERASU ONLINE</b>
+<i>Mirror, leech, stream, and manage transfers from one Telegram control panel.</i>
+
+╭─ <b>Status</b> : <code>Ready</code>
+├─ <b>Sources</b> : <code>Links | Telegram | Torrents | NZB | Rclone | TeraBox</code>
+├─ <b>Outputs</b> : <code>Telegram | Google Drive | Rclone</code>
+╰─ <b>Commands</b> : /{help_cmd}"""
+
+
 def _upload_log_to_spacebin(headers, data):
     """Upload redacted log content without blocking the asyncio event loop."""
     with create_scraper() as scraper:
@@ -115,21 +125,27 @@ async def start(_, message):
             return await send_message(message, msg, reply_markup)
 
     if await CustomFilters.authorized(_, message):
-        start_string = lang.START_MSG.format(
-            cmd=BotCommands.HelpCommand[0],
-        )
+        start_string = _build_start_message(BotCommands.HelpCommand[0])
         await send_message(message, start_string, reply_markup, photo="IMAGES")
     elif Config.BOT_PM:
         await send_message(
             message,
-            "<i>Now, Bot will send you all your files and links here. Start Using Now...</i>",
+            "<b>✦ PRIVATE MODE READY</b>\n"
+            "<i>Amaterasu can now send your files and links here.</i>\n\n"
+            "╭─ <b>Status</b> : <code>Ready</code>\n"
+            "├─ <b>Destination</b> : <code>Private Chat</code>\n"
+            f"╰─ <b>Commands</b> : /{BotCommands.HelpCommand[0]}",
             reply_markup,
             photo="IMAGES",
         )
     else:
         await send_message(
             message,
-            "<i>Bot can mirror/leech from links|tgfiles|torrents|nzb|rclone-cloud to any rclone cloud, Google Drive or to telegram.\n\n⚠️ You Are not authorized user! Deploy your own Amaterasu bot</i>",
+            "<b>✦ ACCESS REQUIRED</b>\n"
+            "<i>You are not authorized to use this Amaterasu instance.</i>\n\n"
+            "╭─ <b>Status</b> : <code>Blocked</code>\n"
+            "├─ <b>Scope</b> : <code>Private deployment</code>\n"
+            "╰─ <b>Action</b> : <code>Deploy your own bot or ask the owner</code>",
             reply_markup,
             photo="IMAGES",
         )

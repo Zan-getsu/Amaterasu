@@ -1,3 +1,4 @@
+import ast
 from datetime import datetime, timezone
 from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
@@ -13,10 +14,15 @@ INLINE_UI_PATH = ROOT / "bot" / "helper" / "telegram_helper" / "inline_ui.py"
 BUTTON_BUILD_PATH = ROOT / "bot" / "helper" / "telegram_helper" / "button_build.py"
 MESSAGE_UTILS_PATH = ROOT / "bot" / "helper" / "telegram_helper" / "message_utils.py"
 STATUS_UTILS_PATH = ROOT / "bot" / "helper" / "ext_utils" / "status_utils.py"
+HELP_MESSAGES_PATH = ROOT / "bot" / "helper" / "ext_utils" / "help_messages.py"
 STATUS_PATH = ROOT / "bot" / "modules" / "status.py"
 MEGA_SDK_PATH = ROOT / "bot" / "helper" / "ext_utils" / "mega_sdk.py"
 FILETOLINK_PATH = ROOT / "bot" / "modules" / "filetolink.py"
 BOT_SETTINGS_PATH = ROOT / "bot" / "modules" / "bot_settings.py"
+EN_LANGUAGE_PATH = ROOT / "bot" / "helper" / "languages" / "en.py"
+SERVICES_PATH = ROOT / "bot" / "modules" / "services.py"
+SETUP_PATH = ROOT / "bot" / "modules" / "setup.py"
+SPEEDTEST_PATH = ROOT / "bot" / "modules" / "speedtest.py"
 
 
 def _load_inline_ui():
@@ -41,7 +47,10 @@ def test_inline_button_labels_use_the_amaterasu_design_language():
         "Edit": "✦ EDIT",
         "View": "✦ VIEW",
         "Reset": "↻ RESET",
+        "Skip": "↷ SKIP",
         "⚙ Packages": "✦ PACKAGES",
+        "Git Repo": "✦ GIT REPO",
+        "Updates": "✦ UPDATES",
     }
 
     for original, styled in expected.items():
@@ -209,6 +218,333 @@ def test_main_status_has_filetolink_navigation_and_auto_refresh():
     assert 'get("view", "tasks") == "filetolink"' in message_utils_source
     assert "page_no=status_dict[sid].get(\"filetolink_page\", 1)" in message_utils_source
     assert "get_idle_status_message(sid)" in message_utils_source
+
+
+def test_start_message_uses_status_panel_design():
+    source = SERVICES_PATH.read_text(encoding="utf-8")
+    en_source = EN_LANGUAGE_PATH.read_text(encoding="utf-8")
+
+    assert 'return f"""<b>✦ AMATERASU ONLINE</b>' in source
+    assert 'START_MSG = """<b>✦ AMATERASU ONLINE</b>' in en_source
+    for label in ("Status", "Sources", "Outputs", "Commands"):
+        assert f"<b>{label}</b> : " in source
+    assert "/{help_cmd}" in source
+
+
+def test_help_message_uses_status_panel_design():
+    source = HELP_MESSAGES_PATH.read_text(encoding="utf-8")
+
+    assert "<b>✦ COMMAND DIRECTORY</b>" in source
+    for label in ("Commands", "Search", "Usage"):
+        assert f"<b>{label}</b> : " in source
+
+
+def test_setup_wizard_uses_status_panel_design_and_fixed_callbacks():
+    source = SETUP_PATH.read_text(encoding="utf-8")
+
+    assert "<b>✦ SETUP CONTROL</b>" in source
+    for label in ("Step", "Panel", "Status", "Download Dir", "Version"):
+        assert f"<b>{label}</b> : " in source
+    assert 'buttons.data_button("Skip", f"setup skip {user_id} {step_idx + 1}")' in source
+    assert "if len(data) < 3:" in source
+    assert 'if action not in {"next", "skip"} or len(data) < 4:' in source
+    assert source.count("except ValueError:") >= 2
+    assert "escape(str(" in source
+
+
+def test_setup_buttons_generate_working_skip_and_close_callbacks():
+    tree = ast.parse(SETUP_PATH.read_text(encoding="utf-8"))
+    selected_nodes = [
+        node
+        for node in tree.body
+        if (
+            isinstance(node, ast.Assign)
+            and any(
+                isinstance(target, ast.Name) and target.id == "_SETUP_STEPS"
+                for target in node.targets
+            )
+        )
+        or (isinstance(node, ast.FunctionDef) and node.name == "_setup_buttons")
+    ]
+
+    class FakeButtonMaker:
+        def __init__(self):
+            self.callbacks = []
+
+        def data_button(self, _label, data, _position=None):
+            self.callbacks.append(data)
+
+        def build_menu(self, *_args, **_kwargs):
+            return self.callbacks
+
+    namespace = {"ButtonMaker": FakeButtonMaker}
+    exec(
+        compile(ast.Module(selected_nodes, type_ignores=[]), str(SETUP_PATH), "exec"),
+        namespace,
+    )
+
+    first_callbacks = namespace["_setup_buttons"]("download_dir", 42)
+    summary_callbacks = namespace["_setup_buttons"]("summary", 42)
+
+    assert "setup skip 42 1" in first_callbacks
+    assert "setup close 42" in first_callbacks
+    assert "setup close 42" in summary_callbacks
+
+
+@pytest.mark.asyncio
+async def test_setup_callback_rejects_malformed_numbers_and_closes_cleanly():
+    tree = ast.parse(SETUP_PATH.read_text(encoding="utf-8"))
+    callback_node = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.AsyncFunctionDef) and node.name == "setup_callback"
+    )
+    callback_node = ast.fix_missing_locations(callback_node)
+    callback_node.decorator_list = []
+    delete = AsyncMock()
+    namespace = {
+        "delete_message": delete,
+        "edit_message": AsyncMock(),
+        "_SETUP_STEPS": ["download_dir"],
+        "_setup_message": lambda *_args: "message",
+        "_setup_buttons": lambda *_args: [],
+    }
+    exec(
+        compile(ast.Module([callback_node], type_ignores=[]), str(SETUP_PATH), "exec"),
+        namespace,
+    )
+
+    bad_user = SimpleNamespace(
+        data="setup close invalid",
+        from_user=SimpleNamespace(id=42),
+        message=SimpleNamespace(),
+        answer=AsyncMock(),
+    )
+    await namespace["setup_callback"](None, bad_user)
+    bad_user.answer.assert_awaited_once_with("Invalid callback.", show_alert=True)
+
+    bad_step = SimpleNamespace(
+        data="setup next 42 invalid",
+        from_user=SimpleNamespace(id=42),
+        message=SimpleNamespace(),
+        answer=AsyncMock(),
+    )
+    await namespace["setup_callback"](None, bad_step)
+    bad_step.answer.assert_awaited_once_with("Invalid step.", show_alert=True)
+
+    close = SimpleNamespace(
+        data="setup close 42",
+        from_user=SimpleNamespace(id=42),
+        message=SimpleNamespace(),
+        answer=AsyncMock(),
+    )
+    await namespace["setup_callback"](None, close)
+    close.answer.assert_awaited_once_with()
+    delete.assert_awaited_once_with(close.message)
+
+
+def test_speedtest_ports_neo_result_features_in_amaterasu_style():
+    source = SPEEDTEST_PATH.read_text(encoding="utf-8")
+
+    for heading in (
+        "✦ NETWORK DIAGNOSTIC",
+        "✦ SPEEDTEST COMPLETE",
+        "✦ TEST SERVER",
+        "✦ CLIENT NETWORK",
+    ):
+        assert heading in source
+    for label in (
+        "Download",
+        "Upload",
+        "Ping",
+        "Received",
+        "Sent",
+        "Provider",
+        "ISP Rating",
+    ):
+        assert f"<b>{label}</b> : " in source
+
+    assert "speed_results.results.share" in source
+    assert "await sync_to_async(speed_results.results.share)" in source
+    assert 'photo = result.get("share") or share_url' in source
+    assert "IP Address" not in source
+    assert "client.get('ip')" not in source
+    assert "_SPEEDTEST_LOCK.locked()" in source
+    assert "if not isinstance(result, dict):" in source
+    assert "The test completed, but its result data was invalid" in source
+
+
+def test_speedtest_result_formatter_handles_missing_and_unsafe_service_data():
+    tree = ast.parse(SPEEDTEST_PATH.read_text(encoding="utf-8"))
+    helper_names = {
+        "_safe_text",
+        "_readable_size",
+        "_readable_rate",
+        "_decimal",
+        "_result_message",
+    }
+    selected_nodes = [
+        node
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef) and node.name in helper_names
+    ]
+
+    def readable_size(value):
+        return f"{float(value):.2f}B"
+
+    namespace = {
+        "escape": lambda value: (
+            str(value).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        ),
+        "get_readable_file_size": readable_size,
+    }
+    exec(
+        compile(ast.Module(selected_nodes, type_ignores=[]), str(SPEEDTEST_PATH), "exec"),
+        namespace,
+    )
+
+    text = namespace["_result_message"](
+        {
+            "download": 80,
+            "upload": 40,
+            "ping": 12.345,
+            "server": {"name": "<unsafe>", "country": "BD", "cc": "BD"},
+            "client": {"ip": "203.0.113.1", "isp": "Example & Co"},
+        }
+    )
+
+    assert "10.00B/s" in text
+    assert "5.00B/s" in text
+    assert "12.35 ms" in text
+    assert "&lt;unsafe&gt;" in text
+    assert "Example &amp; Co" in text
+    assert "203.0.113.1" not in text
+    assert "Unknown" in text
+
+
+@pytest.mark.asyncio
+async def test_speedtest_share_failure_keeps_text_result_and_never_exposes_ip():
+    from asyncio import Lock
+    from copy import deepcopy
+    from html import escape
+
+    tree = ast.parse(SPEEDTEST_PATH.read_text(encoding="utf-8"))
+    helper_names = {
+        "_safe_text",
+        "_readable_size",
+        "_readable_rate",
+        "_decimal",
+        "_progress_message",
+        "_result_message",
+        "_failure_message",
+        "speedtest",
+    }
+    selected_nodes = []
+    for node in tree.body:
+        if (
+            isinstance(node, ast.Assign)
+            and any(
+                isinstance(target, ast.Name) and target.id == "_SPEEDTEST_LOCK"
+                for target in node.targets
+            )
+        ) or (
+            isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and node.name in helper_names
+        ):
+            copied = deepcopy(node)
+            if isinstance(copied, ast.AsyncFunctionDef):
+                copied.decorator_list = []
+            selected_nodes.append(copied)
+
+    public_ip = "203.0.113.55"
+
+    class FakeResults:
+        def share(self):
+            raise RuntimeError("share service unavailable")
+
+        def dict(self):
+            return {
+                "download": 80_000_000,
+                "upload": 40_000_000,
+                "ping": 9.5,
+                "bytes_received": 1_000,
+                "bytes_sent": 500,
+                "timestamp": "2026-08-10T12:00:00Z",
+                "server": {
+                    "name": "Dhaka",
+                    "country": "Bangladesh",
+                    "cc": "BD",
+                    "sponsor": "Example",
+                    "latency": 9.5,
+                    "d": 2.5,
+                    "lat": "23.8",
+                    "lon": "90.4",
+                },
+                "client": {
+                    "ip": public_ip,
+                    "isp": "Example ISP",
+                    "country": "BD",
+                    "lat": "23.8",
+                    "lon": "90.4",
+                    "isprating": "5",
+                },
+            }
+
+    class FakeSpeedtest:
+        results = FakeResults()
+
+        def get_best_server(self):
+            return {"name": "Dhaka"}
+
+        def download(self):
+            return 80_000_000
+
+        def upload(self):
+            return 40_000_000
+
+    async def run_sync(function, *args):
+        return function(*args)
+
+    status_message = SimpleNamespace(id=1)
+    result_message = SimpleNamespace(id=2)
+    send = AsyncMock(side_effect=[status_message, result_message])
+    edit = AsyncMock()
+    delete = AsyncMock()
+    logger = SimpleNamespace(
+        warning=lambda *_args, **_kwargs: None,
+        error=lambda *_args, **_kwargs: None,
+    )
+
+    class FakeSpeedtestError(Exception):
+        pass
+
+    namespace = {
+        "Lock": Lock,
+        "escape": escape,
+        "ConfigRetrievalError": FakeSpeedtestError,
+        "SpeedtestException": FakeSpeedtestError,
+        "Speedtest": FakeSpeedtest,
+        "LOGGER": logger,
+        "sync_to_async": run_sync,
+        "get_readable_file_size": lambda value: f"{float(value):.2f}B",
+        "send_message": send,
+        "edit_message": edit,
+        "delete_message": delete,
+    }
+    exec(
+        compile(ast.Module(selected_nodes, type_ignores=[]), str(SPEEDTEST_PATH), "exec"),
+        namespace,
+    )
+
+    await namespace["speedtest"](None, SimpleNamespace())
+
+    assert send.await_count == 2
+    final_text = send.await_args_list[1].args[1]
+    assert "✦ SPEEDTEST COMPLETE" in final_text
+    assert "Example ISP" in final_text
+    assert public_ip not in final_text
+    assert send.await_args_list[1].kwargs["photo"] is None
+    delete.assert_awaited_once_with(status_message)
 
 
 def test_port_is_hidden_from_telegram_settings():
