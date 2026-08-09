@@ -267,7 +267,7 @@ def test_amaterasu_terabox_adapter_exports_sdk_surface():
     assert TeraboxFile
     assert issubclass(TeraboxCancelled, TeraboxError)
     assert issubclass(TeraboxPasswordError, TeraboxError)
-    assert __version__ == "2.0.0-amaterasu"
+    assert __version__ == "2.0.1-amaterasu"
 
 
 
@@ -434,6 +434,39 @@ def test_terabox_page_auth_parser_supports_encoded_page_fallback():
         "jstoken": "fallback-page-token",
         "csrfToken": "",
     }
+
+
+def test_public_terabox_page_parser_supports_current_template_tokens():
+    from bot.helper.mirror_leech_utils.download_utils import direct_link_generator
+
+    page = (
+        '<script>var templateData = {"jsToken":'
+        '"prefix%28%22mixed-Page_Token%22%29",'
+        '"pcftoken":"pcf.Token-2"};</script>'
+    )
+
+    assert direct_link_generator._terabox_page_tokens(page) == (
+        "mixed-Page_Token",
+        "pcf.Token-2",
+    )
+
+
+def test_public_terabox_fallback_error_is_safe_and_actionable():
+    from bot.helper.mirror_leech_utils.download_utils import direct_link_generator
+
+    response = SimpleNamespace(
+        status_code=503,
+        headers={"Content-Type": "text/html; charset=utf-8"},
+    )
+    secret_body = "private upstream maintenance page"
+
+    reason = direct_link_generator._terabox_fallback_reason(
+        response,
+        ValueError(secret_body),
+    )
+
+    assert reason == "HTTP 503; non-JSON response"
+    assert secret_body not in reason
 
 
 async def test_terabox_refresh_retains_current_page_session_tokens():
@@ -1307,7 +1340,10 @@ class _DownloadSession:
 
     def get(self, url, **kwargs):
         self.calls.append((url, kwargs))
-        return self.responses.pop(0)
+        response = self.responses.pop(0)
+        if isinstance(response, BaseException):
+            raise response
+        return response
 
 
 @pytest.mark.asyncio
@@ -1425,6 +1461,56 @@ async def test_terabox_download_refreshes_expired_direct_link_once(tmp_path):
     assert destination.read_bytes() == b"fresh"
     assert [call[0] for call in session.calls] == [
         "https://d.example/expired",
+        "https://d.example/refreshed",
+    ]
+    client._refresh_file_url.assert_awaited_once_with(file)
+
+
+@pytest.mark.asyncio
+async def test_terabox_download_refreshes_direct_link_after_connection_failure(
+    monkeypatch,
+    tmp_path,
+):
+    aiohttp = pytest.importorskip("aiohttp")
+    pytest.importorskip("aioterabox")
+    import terabox
+
+    destination = tmp_path / "reconnected.bin"
+    session = _DownloadSession(
+        [
+            aiohttp.ServerDisconnectedError(),
+            _DownloadResponse(
+                200,
+                [b"fresh"],
+                {
+                    "Content-Length": "5",
+                    "Content-Type": "application/octet-stream",
+                },
+            ),
+        ]
+    )
+    client = terabox.TeraboxClient()
+    client._session = session
+    file = terabox.TeraboxFile(
+        "reconnected.bin",
+        "/reconnected.bin",
+        "1",
+        size=5,
+        url="https://d.example/stale",
+    )
+
+    async def refresh(target):
+        target.url = "https://d.example/refreshed"
+        return True
+
+    client._refresh_file_url = AsyncMock(side_effect=refresh)
+    monkeypatch.setattr(terabox, "sleep", AsyncMock())
+
+    await client.download_file(file, str(destination))
+
+    assert destination.read_bytes() == b"fresh"
+    assert [call[0] for call in session.calls] == [
+        "https://d.example/stale",
         "https://d.example/refreshed",
     ]
     client._refresh_file_url.assert_awaited_once_with(file)

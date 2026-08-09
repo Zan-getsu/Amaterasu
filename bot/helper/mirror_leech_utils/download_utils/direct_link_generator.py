@@ -4,7 +4,7 @@ from http.cookiejar import MozillaCookieJar
 from json import loads
 from lxml.etree import HTML
 from os import getenv, path as ospath
-from re import findall, match, search
+from re import DOTALL, findall, match, search
 from niquests import Session, post, get
 from niquests.adapters import HTTPAdapter
 from time import sleep, time
@@ -1268,6 +1268,59 @@ def uploadee(url):
         raise DirectDownloadLinkException("ERROR: Direct Link not found")
 
 
+def _terabox_page_tokens(html_text):
+    template_data = {}
+    if template_match := search(
+        r"<script[^>]*>\s*var\s+templateData\s*=\s*(\{.*?\})\s*;</script>",
+        html_text,
+        DOTALL,
+    ):
+        try:
+            template_data = loads(template_match.group(1))
+        except Exception:
+            template_data = {}
+
+    js_token = str(template_data.get("jsToken") or "")
+    if token_match := search(r"%28%22(.*?)%22%29", js_token):
+        js_token = token_match.group(1)
+    if not js_token:
+        token_match = search(r"fn%28%22(.*?)%22%29", html_text) or search(
+            r'fn\("([^"]+)"\)', html_text
+        )
+        js_token = token_match.group(1) if token_match else ""
+    if not js_token:
+        raise DirectDownloadLinkException(
+            "ERROR: jsToken not found in TeraBox share page"
+        )
+
+    pcftoken = str(template_data.get("pcftoken") or "")
+    if not pcftoken:
+        pcf_match = search(
+            r'pcftoken["\']?\s*[:=]\s*["\']([^"\']+)', html_text
+        )
+        pcftoken = pcf_match.group(1) if pcf_match else "0"
+    return js_token, pcftoken
+
+
+def _terabox_resolution_reason(error):
+    if isinstance(error, DirectDownloadLinkException):
+        reason = str(error).removeprefix("ERROR: ")
+        return " ".join(reason.split())[:160]
+    return error.__class__.__name__
+
+
+def _terabox_fallback_reason(response, error):
+    if response is None:
+        return error.__class__.__name__
+    status = getattr(response, "status_code", None)
+    headers = getattr(response, "headers", {}) or {}
+    content_type = str(headers.get("Content-Type", "")).lower()
+    response_kind = (
+        "non-JSON response" if "json" not in content_type else "invalid JSON response"
+    )
+    return f"HTTP {status}; {response_kind}" if status is not None else response_kind
+
+
 def terabox(url, cookie_file="cookies.txt", *, structured=False):
     if "/file/" in url:
         return url
@@ -1366,16 +1419,7 @@ def terabox(url, cookie_file="cookies.txt", *, structured=False):
             origin = "https://www.terabox.com"
         else:
             origin = f"https://{response_host}"
-        m = search(r"fn%28%22([0-9A-F]+)%22%29", html_text) or search(
-            r'fn\("([0-9A-F]+)"\)', html_text
-        )
-        if not m:
-            raise DirectDownloadLinkException(
-                "ERROR: jsToken not found (login expired?)"
-            )
-        js_token = m.group(1)
-        pcf = search(r'pcftoken["\']?\s*[:=]\s*["\']([0-9a-f]+)', html_text)
-        pcftoken = pcf[1] if pcf else "0"
+        js_token, pcftoken = _terabox_page_tokens(html_text)
         if password:
             try:
                 v = session.post(
@@ -1622,17 +1666,20 @@ def terabox(url, cookie_file="cookies.txt", *, structured=False):
     headers = {"Referer": "https://teraboxdl.site/", "User-Agent": user_agent}
     payload = {"url": url}
 
+    fallback_response = None
     try:
         with Session() as session:
             __configure_session(session)
-            req = session.post(
+            fallback_response = session.post(
                 api_url, json=payload, headers=headers, timeout=30
-            ).json()
+            )
+            req = fallback_response.json()
     except Exception as e:
         if official_error:
             raise DirectDownloadLinkException(
-                "ERROR: Official TeraBox resolution and public fallback both failed "
-                f"({e.__class__.__name__})"
+                "ERROR: Official TeraBox resolver failed "
+                f"({_terabox_resolution_reason(official_error)}); public fallback "
+                f"was unavailable ({_terabox_fallback_reason(fallback_response, e)})"
             ) from e
         raise DirectDownloadLinkException(f"ERROR: {e.__class__.__name__}") from e
 
@@ -1641,6 +1688,7 @@ def terabox(url, cookie_file="cookies.txt", *, structured=False):
         "title": "",
         "total_size": 0,
         "is_folder": False,
+        "header": f"User-Agent: {user_agent}\nReferer: https://www.terabox.com/",
     }
 
     if req.get("errno") != 0 or not req.get("list"):

@@ -28,7 +28,7 @@ from aioterabox.api import FileInfo as _AccountFileInfo
 from aioterabox.api import TeraboxClient as _AccountClient
 from aioterabox.exceptions import TeraboxUnauthorizedError as _SdkUnauthorizedError
 
-__version__ = "2.0.0-amaterasu"
+__version__ = "2.0.1-amaterasu"
 
 _LOGGER = getLogger(__name__)
 
@@ -300,6 +300,10 @@ def _safe_transfer_reason(error: Exception) -> str:
         return f"HTTP {error.status}"
     if isinstance(error, TimeoutError):
         return "request timed out"
+    if isinstance(error, aiohttp.ClientConnectorError):
+        return "could not connect to the download host"
+    if isinstance(error, (aiohttp.ServerDisconnectedError, aiohttp.ClientPayloadError)):
+        return "the download server disconnected"
     if isinstance(error, aiohttp.ClientError):
         return "network connection failed"
     if isinstance(error, OSError):
@@ -463,7 +467,11 @@ class TeraboxClient:
 
     async def _ensure_session(self):
         if self._session is None or self._session.closed:
-            self._session = aiohttp.ClientSession(timeout=_DOWNLOAD_TIMEOUT)
+            connector = aiohttp.TCPConnector(resolver=aiohttp.ThreadedResolver())
+            self._session = aiohttp.ClientSession(
+                connector=connector,
+                timeout=_DOWNLOAD_TIMEOUT,
+            )
         return self._session
 
     async def login(self):
@@ -791,24 +799,31 @@ class TeraboxClient:
                 return True
             except Exception:
                 return False
-        async with self._resolve_lock:
-            refreshed = await self._resolve_public_share(self._share_link)
-            match = next(
-                (
-                    candidate
-                    for candidate in refreshed.file_entries
-                    if candidate.path == file.path
-                    or candidate.fs_id == file.fs_id
-                    or candidate.name == file.name
-                ),
-                None,
+        try:
+            async with self._resolve_lock:
+                refreshed = await self._resolve_public_share(self._share_link)
+                match = next(
+                    (
+                        candidate
+                        for candidate in refreshed.file_entries
+                        if candidate.path == file.path
+                        or candidate.fs_id == file.fs_id
+                        or candidate.name == file.name
+                    ),
+                    None,
+                )
+                if not match:
+                    return False
+                file.url = match.url
+                file.headers = match.headers
+                file.size = match.size or file.size
+                return bool(file.url)
+        except Exception as error:
+            _LOGGER.warning(
+                "Could not refresh TeraBox direct link (%s)",
+                _safe_transfer_reason(error),
             )
-            if not match:
-                return False
-            file.url = match.url
-            file.headers = match.headers
-            file.size = match.size or file.size
-            return bool(file.url)
+            return False
 
     async def download_file(
         self,
@@ -823,7 +838,7 @@ class TeraboxClient:
         partial = destination + ".part"
         await makedirs(os.path.dirname(destination), exist_ok=True)
         last_error: Exception | None = None
-        refreshed = False
+        refresh_attempted = False
         for attempt in range(_DOWNLOAD_ATTEMPTS):
             if cancel_event and cancel_event.is_set():
                 raise TeraboxCancelled("Transfer cancelled")
@@ -883,9 +898,9 @@ class TeraboxClient:
                         if progress_cb:
                             progress_cb(file.size, file.size)
                         return
-                    if response.status in _EXPIRED_LINK_HTTP and not refreshed:
-                        refreshed = await self._refresh_file_url(file)
-                        if refreshed:
+                    if response.status in _EXPIRED_LINK_HTTP and not refresh_attempted:
+                        refresh_attempted = True
+                        if await self._refresh_file_url(file):
                             continue
                     if response.status in _RETRYABLE_HTTP:
                         raise aiohttp.ClientResponseError(
@@ -948,8 +963,12 @@ class TeraboxClient:
                 raise
             except Exception as error:
                 last_error = error
-                if not refreshed and isinstance(error, TeraboxError):
-                    refreshed = await self._refresh_file_url(file)
+                if not refresh_attempted and isinstance(
+                    error,
+                    (TeraboxError, aiohttp.ClientError, TimeoutError),
+                ):
+                    refresh_attempted = True
+                    await self._refresh_file_url(file)
                 if attempt + 1 < _DOWNLOAD_ATTEMPTS:
                     await sleep(min(2**attempt, 8))
         raise TeraboxError(
