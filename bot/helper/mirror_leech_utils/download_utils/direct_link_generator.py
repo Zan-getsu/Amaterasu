@@ -652,6 +652,14 @@ def direct_link_generator(link):
 
 _GDRIVE_FOLDER_MIME = "application/vnd.google-apps.folder"
 _INDEX_UNSAFE_NAME_CHARS = frozenset('/\\\x00:*?"<>|')
+_INDEX_RETRY_STATUSES = frozenset({429, 500, 502, 503, 504})
+_INDEX_REQUEST_ATTEMPTS = 4
+
+
+def is_google_drive_index_link(link):
+    """Return whether a URL uses the standard Drive Index /<drive>:/ folder path."""
+    path = urlparse(link).path
+    return path.endswith("/") and bool(match(r"^/\d+:(?:/|$)", path))
 
 
 def _index_safe_name(name):
@@ -699,6 +707,32 @@ def _index_error(data):
     return f"Google Drive Index API error: {error}"
 
 
+def _index_response_status(response):
+    try:
+        return int(getattr(response, "status_code", 200) or 200)
+    except (TypeError, ValueError):
+        return 200
+
+
+def _index_request(session, method, url, **kwargs):
+    """Retry transient connection and server failures from an index endpoint."""
+    last_error = None
+    response = None
+    for attempt in range(_INDEX_REQUEST_ATTEMPTS):
+        try:
+            response = getattr(session, method)(url, **kwargs)
+            if _index_response_status(response) not in _INDEX_RETRY_STATUSES:
+                return response
+        except Exception as e:
+            last_error = e
+        if attempt + 1 < _INDEX_REQUEST_ATTEMPTS:
+            sleep(2**attempt)
+
+    if response is not None:
+        return response
+    raise last_error
+
+
 def _index_list_folder(session, folder_url):
     """Yield every item in a Drive Index folder, including all pages."""
     page_token = ""
@@ -713,16 +747,15 @@ def _index_list_folder(session, folder_url):
             "page_token": page_token,
             "page_index": page_index,
         }
-        response = session.post(
+        response = _index_request(
+            session,
+            "post",
             folder_url,
             json=payload,
             headers={"Referer": folder_url, "User-Agent": user_agent},
             timeout=30,
         )
-        try:
-            status = int(getattr(response, "status_code", 200) or 200)
-        except (TypeError, ValueError):
-            status = 200
+        status = _index_response_status(response)
         if status == 401:
             raise DirectDownloadLinkException(
                 "ERROR: This Google Drive Index folder is password protected."
@@ -782,11 +815,18 @@ def google_drive_index(link):
 
     try:
         with Session() as session:
-            page = session.get(
+            page = _index_request(
+                session,
+                "get",
                 folder_url,
                 headers={"User-Agent": user_agent},
                 timeout=30,
             )
+            page_status = _index_response_status(page)
+            if page_status >= 400:
+                raise DirectDownloadLinkException(
+                    f"ERROR: Google Drive Index request failed with HTTP {page_status}."
+                )
             page_text = getattr(page, "text", "")
             if not _is_google_drive_index_page(page_text):
                 raise DirectDownloadLinkException(

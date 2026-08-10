@@ -17,9 +17,19 @@ class _Response:
 
 
 class _IndexSession:
-    def __init__(self, pages, *, html="<title>Google Drive Index</title>"):
+    def __init__(
+        self,
+        pages,
+        *,
+        html="<title>Google Drive Index</title>",
+        get_failures=0,
+        post_failures=None,
+    ):
         self.pages = pages
         self.html = html
+        self.get_failures = get_failures
+        self.post_failures = dict(post_failures or {})
+        self.get_calls = 0
         self.posts = []
 
     def __enter__(self):
@@ -29,11 +39,19 @@ class _IndexSession:
         return None
 
     def get(self, url, **_kwargs):
+        self.get_calls += 1
+        if self.get_failures:
+            self.get_failures -= 1
+            raise ConnectionError("network is unreachable")
         return _Response(text=self.html)
 
     def post(self, url, json, **_kwargs):
         self.posts.append((url, json.copy()))
-        return _Response(data=self.pages[(url, json["page_token"])])
+        key = (url, json["page_token"])
+        if self.post_failures.get(key, 0):
+            self.post_failures[key] -= 1
+            raise ConnectionError("network is unreachable")
+        return _Response(data=self.pages[key])
 
 
 def _page(files, *, next_token=None, page_index=0):
@@ -151,3 +169,48 @@ def test_dispatcher_checks_trailing_slash_urls_for_drive_index_folders():
         assert dlg.direct_link_generator(link) is manifest
 
     resolver.assert_called_once_with(link)
+
+
+def test_google_drive_index_retries_transient_get_and_folder_api_failures():
+    root = "https://index.example/0:/Collection/"
+    pages = {
+        (root, ""): _page(
+            [
+                {
+                    "name": "episode.mkv",
+                    "mimeType": "video/x-matroska",
+                    "size": "10",
+                    "link": "/download?temporary=1",
+                }
+            ]
+        )
+    }
+    session = _IndexSession(
+        pages,
+        get_failures=2,
+        post_failures={(root, ""): 2},
+    )
+
+    with (
+        patch.object(dlg, "Session", return_value=session),
+        patch.object(dlg, "sleep") as retry_sleep,
+    ):
+        result = dlg.google_drive_index(root)
+
+    assert len(result["contents"]) == 1
+    assert session.get_calls == 3
+    assert len(session.posts) == 3
+    assert retry_sleep.call_count == 4
+
+
+@pytest.mark.parametrize(
+    ("link", "expected"),
+    [
+        ("https://index.example/0:/Collection/", True),
+        ("https://index.example/12:/", True),
+        ("https://example.com/folder/", False),
+        ("https://index.example/0:/file.mkv", False),
+    ],
+)
+def test_google_drive_index_link_detection(link, expected):
+    assert dlg.is_google_drive_index_link(link) is expected

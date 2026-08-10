@@ -40,6 +40,7 @@ from ..helper.mirror_leech_utils.download_utils.direct_downloader import (
 )
 from ..helper.mirror_leech_utils.download_utils.direct_link_generator import (
     direct_link_generator,
+    is_google_drive_index_link,
 )
 from ..helper.mirror_leech_utils.download_utils.gd_download import add_gd_download
 from ..helper.mirror_leech_utils.download_utils.jd_download import add_jd_download
@@ -672,6 +673,12 @@ class Mirror(TaskListener):
                         LOGGER.info(f"Generated link: {self.link}")
                 except DirectDownloadLinkException as e:
                     e = str(e)
+                    if is_google_drive_index_link(self.link):
+                        await self.on_multi_leech_task_error(e)
+                        await send_message(self.message, e)
+                        await self.remove_from_same_dir()
+                        await delete_links(self.message)
+                        return
                     if "This link requires a password!" in e:
                         await self.on_multi_leech_task_error(e)
                         await send_message(self.message, e)
