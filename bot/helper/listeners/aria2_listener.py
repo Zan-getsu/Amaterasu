@@ -104,7 +104,10 @@ async def _on_download_complete(api, data):
             return
     except (TimeoutError, ClientError, Exception) as e:
         if "not found" in str(e):
-            LOGGER.warning(
+            # Direct multi-file downloads poll and remove each completed child
+            # result themselves. Their websocket completion event can arrive a
+            # moment later, so a missing GID here is expected and already handled.
+            LOGGER.debug(
                 f"onDownloadComplete: GID {gid} not found (already processed)"
             )
         else:

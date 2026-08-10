@@ -124,6 +124,7 @@ class Config:
     DISABLE_MEGA = False
     TERABOX_ENABLED = True
     DIRECT_LIMIT = 0
+    DIRECT_PARALLELISM = 4
     MEGA_LIMIT = 0
     TERABOX_LIMIT = 0
     TORRENT_LIMIT = 0
@@ -387,6 +388,8 @@ class Config:
                 value = cls._convert_env_type(key, value)
             if key == "FILETOLINK_GETFILE_CONCURRENCY":
                 value = min(max(int(value), 1), 32)
+            elif key == "DIRECT_PARALLELISM":
+                value = min(max(int(value), 1), 16)
             elif key == "FILETOLINK_PREFETCH_CHUNKS":
                 value = min(
                     max(int(value), 1),
@@ -478,6 +481,7 @@ class Config:
         cls.load_config()
         cls.load_env()
         cls._normalize_filetolink_tuning()
+        cls._normalize_direct_parallelism()
         cls._validate_required()
         cls.construct_base_url()
 
@@ -491,6 +495,10 @@ class Config:
             max(int(cls.FILETOLINK_PREFETCH_CHUNKS), 1),
             cls.FILETOLINK_GETFILE_CONCURRENCY,
         )
+
+    @classmethod
+    def _normalize_direct_parallelism(cls):
+        cls.DIRECT_PARALLELISM = min(max(int(cls.DIRECT_PARALLELISM), 1), 16)
 
     @classmethod
     def _validate_required(cls):
@@ -674,6 +682,7 @@ class Config:
         if has_auto_url:
             cls.CLOUDFLARE_TUNNEL_AUTO_FQDN = None
         cls._normalize_filetolink_tuning()
+        cls._normalize_direct_parallelism()
         cls._validate_required()
         cls.construct_base_url()
 

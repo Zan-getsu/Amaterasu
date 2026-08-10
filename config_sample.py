@@ -96,6 +96,7 @@ RCLONE_SERVE_PASS = ""
 # 7. DOWNLOAD ENGINE LIMITS & CONFIGS
 # ==========================================
 DIRECT_LIMIT = 0
+DIRECT_PARALLELISM = 4  # Concurrent files within multi-file direct/index downloads (1-16).
 MEGA_LIMIT = 0
 TERABOX_ENABLED = True
 TERABOX_LIMIT = 0

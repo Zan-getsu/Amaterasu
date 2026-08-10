@@ -730,6 +730,7 @@ All limits are in **GB**. Set `0` to disable the limit.
 | Variable | Description |
 |---|---|
 | `DIRECT_LIMIT` | Max size for direct link downloads |
+| `DIRECT_PARALLELISM` | Concurrent files within a multi-file direct/index download (`1`-`16`, default `4`) |
 | `MEGA_LIMIT` | Max size for Mega downloads |
 | `TERABOX_LIMIT` | Max size for TeraBox downloads in GB (`0` = unlimited) |
 | `TORRENT_LIMIT` | Max size for torrent downloads |
