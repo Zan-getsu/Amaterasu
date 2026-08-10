@@ -228,6 +228,136 @@ def test_leech_caption_quality_is_wired_to_media_probe():
     assert "quality=qual" in source
 
 
+def test_telegram_folder_uploads_bound_file_and_metadata_concurrency():
+    source = TELEGRAM_UPLOADER_SOURCE.read_text(encoding="utf-8")
+
+    assert "Semaphore(self._file_upload_parallelism)" in source
+    assert "async with self._file_upload_semaphore" in source
+    assert "return await self._upload_file_task_inner(" in source
+
+    upload_file_task = load_method(
+        TELEGRAM_UPLOADER_SOURCE,
+        "TelegramUploader",
+        "_upload_file_task",
+        {},
+    )
+
+    class DummyUploader:
+        _upload_file_task = upload_file_task
+
+        def __init__(self):
+            self._file_upload_semaphore = asyncio.Semaphore(3)
+            self._listener = SimpleNamespace(is_cancelled=False)
+            self.active = 0
+            self.max_active = 0
+
+        async def _upload_file_task_inner(self, *_args):
+            self.active += 1
+            self.max_active = max(self.max_active, self.active)
+            await asyncio.sleep(0)
+            self.active -= 1
+
+    async def run_uploads():
+        uploader = DummyUploader()
+        await asyncio.gather(
+            *(
+                uploader._upload_file_task("file", "path", "dir", False, index)
+                for index in range(1167)
+            )
+        )
+        return uploader.max_active
+
+    assert asyncio.run(run_uploads()) == 3
+
+
+def test_telegram_upload_parallelism_config_is_clamped(monkeypatch):
+    from bot.core.config_manager import Config
+
+    monkeypatch.setattr(Config, "UPLOAD_PARALLELISM", 3)
+    Config.set("UPLOAD_PARALLELISM", 0)
+    assert Config.UPLOAD_PARALLELISM == 1
+
+    Config.set("UPLOAD_PARALLELISM", 99)
+    assert Config.UPLOAD_PARALLELISM == 16
+
+
+def test_telegram_folder_upload_cancellation_stops_active_and_waiting_files():
+    upload_file_task = load_method(
+        TELEGRAM_UPLOADER_SOURCE,
+        "TelegramUploader",
+        "_upload_file_task",
+        {},
+    )
+    cancel_method = load_method(
+        TELEGRAM_UPLOADER_SOURCE,
+        "TelegramUploader",
+        "cancel_task",
+        {
+            "LOGGER": SimpleNamespace(info=lambda *_args: None, warning=lambda *_args: None),
+            "gather": asyncio.gather,
+        },
+    )
+
+    class DummyHyperUpload:
+        def __init__(self):
+            self.cancelled = 0
+
+        async def cancel(self):
+            self.cancelled += 1
+
+    class DummyListener:
+        def __init__(self):
+            self.is_cancelled = False
+            self.name = "Large folder"
+            self.errors = []
+
+        async def on_upload_error(self, error):
+            self.errors.append(str(error))
+
+    class DummyUploader:
+        _upload_file_task = upload_file_task
+        cancel_task = cancel_method
+
+        def __init__(self):
+            self._file_upload_semaphore = asyncio.Semaphore(3)
+            self._listener = DummyListener()
+            self._hu = DummyHyperUpload()
+            self._upload_tasks = []
+            self.active = 0
+            self.max_active = 0
+            self.started = asyncio.Event()
+            self.hold = asyncio.Event()
+
+        async def _upload_file_task_inner(self, *_args):
+            self.active += 1
+            self.max_active = max(self.max_active, self.active)
+            if self.active == 3:
+                self.started.set()
+            try:
+                await self.hold.wait()
+            finally:
+                self.active -= 1
+
+    async def run_and_cancel():
+        uploader = DummyUploader()
+        uploader._upload_tasks = [
+            asyncio.create_task(
+                uploader._upload_file_task("file", "path", "dir", False, index)
+            )
+            for index in range(1167)
+        ]
+        await asyncio.wait_for(uploader.started.wait(), timeout=1)
+        await uploader.cancel_task()
+        return uploader
+
+    uploader = asyncio.run(run_and_cancel())
+    assert uploader.max_active == 3
+    assert uploader.active == 0
+    assert all(task.done() for task in uploader._upload_tasks)
+    assert uploader._hu.cancelled == 1
+    assert uploader._listener.errors == ["your upload has been stopped!"]
+
+
 def test_autorename_caption_supports_quality_and_safe_unknown_variables():
     source = (ROOT / "bot" / "modules" / "autorename.py").read_text(
         encoding="utf-8"

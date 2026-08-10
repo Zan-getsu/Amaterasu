@@ -225,9 +225,9 @@ class Config:
     #   compatible — use if hardware drivers are flaky).
     FFMPEG_HW_ACCEL = "auto"
 
-    # Phase 3.5 — upload queue parallelism. Number of parallel uploads
-    # per bot. Default 3 — balances throughput with Telegram rate limits.
-    # Increase to 5-8 for premium bots with high FloodWait tolerance.
+    # Concurrent file pipelines within each Telegram leech task. This bounds
+    # MIME/ffprobe/thumbnail work and active transfers so large folders cannot
+    # exhaust the process file-descriptor limit.
     UPLOAD_PARALLELISM = 3
 
     # Phase 3.7 — yt-dlp playlist parallelism. Number of playlist items
@@ -390,6 +390,8 @@ class Config:
                 value = min(max(int(value), 1), 32)
             elif key == "DIRECT_PARALLELISM":
                 value = min(max(int(value), 1), 16)
+            elif key == "UPLOAD_PARALLELISM":
+                value = min(max(int(value), 1), 16)
             elif key == "FILETOLINK_PREFETCH_CHUNKS":
                 value = min(
                     max(int(value), 1),
@@ -482,6 +484,7 @@ class Config:
         cls.load_env()
         cls._normalize_filetolink_tuning()
         cls._normalize_direct_parallelism()
+        cls._normalize_upload_parallelism()
         cls._validate_required()
         cls.construct_base_url()
 
@@ -499,6 +502,10 @@ class Config:
     @classmethod
     def _normalize_direct_parallelism(cls):
         cls.DIRECT_PARALLELISM = min(max(int(cls.DIRECT_PARALLELISM), 1), 16)
+
+    @classmethod
+    def _normalize_upload_parallelism(cls):
+        cls.UPLOAD_PARALLELISM = min(max(int(cls.UPLOAD_PARALLELISM), 1), 16)
 
     @classmethod
     def _validate_required(cls):
@@ -683,6 +690,7 @@ class Config:
             cls.CLOUDFLARE_TUNNEL_AUTO_FQDN = None
         cls._normalize_filetolink_tuning()
         cls._normalize_direct_parallelism()
+        cls._normalize_upload_parallelism()
         cls._validate_required()
         cls.construct_base_url()
 

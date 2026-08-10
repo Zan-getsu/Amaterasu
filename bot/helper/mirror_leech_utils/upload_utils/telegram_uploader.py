@@ -1,4 +1,4 @@
-from asyncio import CancelledError, Lock, ensure_future, gather, sleep, wait_for
+from asyncio import CancelledError, Lock, Semaphore, ensure_future, gather, sleep, wait_for
 from logging import getLogger
 from os import path as ospath, walk
 from re import match as re_match, sub as re_sub
@@ -120,6 +120,12 @@ class TelegramUploader:
         self._hu: HypertgUpload | None = None
         self._error = ""
         self._upload_tasks = []
+        self._file_upload_parallelism = min(
+            max(int(getattr(Config, "UPLOAD_PARALLELISM", 3)), 1),
+            16,
+        )
+        self._file_upload_semaphore = Semaphore(self._file_upload_parallelism)
+        self._state_lock = Lock()
         self._hu = HypertgUpload(self) if Config.USE_HYPER and Config.LEECH_DUMP_CHAT else None
         self._upload_seq = []
         self._msg_to_seq = {}
@@ -603,6 +609,20 @@ class TelegramUploader:
                         LOGGER.error(f"Failed to forward to {dest_attr}: {e}")
 
     async def _upload_file_task(self, file_, f_path, dirpath, user_session, seq_idx):
+        # Large folders may contain thousands of files. Creating their tasks is
+        # cheap, but MIME probing, ffprobe, thumbnail generation and Telegram
+        # uploads all consume file descriptors. Keep that resource-heavy work
+        # bounded by the configured upload parallelism.
+        async with self._file_upload_semaphore:
+            if self._listener.is_cancelled:
+                return None
+            return await self._upload_file_task_inner(
+                file_, f_path, dirpath, user_session, seq_idx
+            )
+
+    async def _upload_file_task_inner(
+        self, file_, f_path, dirpath, user_session, seq_idx
+    ):
         up_path = None
         try:
             up_path, cap_mono = await self._prepare_file(file_, dirpath)
@@ -610,9 +630,11 @@ class TelegramUploader:
                 cap_mono, up_path, file_, seq_idx, user_session=user_session
             )
             if sent and not self._is_corrupted:
-                self._completed_bytes += await aiopath.getsize(up_path)
-                self._processed_bytes = self._completed_bytes
-                self._is_finalizing_upload = False
+                uploaded_size = await aiopath.getsize(up_path)
+                async with self._state_lock:
+                    self._completed_bytes += uploaded_size
+                    self._processed_bytes = self._completed_bytes
+                    self._is_finalizing_upload = False
                 if self._listener.is_super_chat or self._listener.up_dest:
                     if not self._is_private:
                         entry = self._upload_seq[seq_idx]
@@ -645,6 +667,10 @@ class TelegramUploader:
         if not res:
             return
         self._upload_tasks = []
+        LOGGER.info(
+            "Telegram file upload parallelism: %s",
+            self._file_upload_parallelism,
+        )
         seq_idx = 0
         for dirpath, _, files in natsorted(await sync_to_async(walk, self._path)):
             if dirpath.strip().endswith("/yt-dlp-thumb"):
