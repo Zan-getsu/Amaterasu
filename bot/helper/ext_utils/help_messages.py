@@ -8,7 +8,8 @@ mirror = """<b>Send link along with command line or </b>
 /cmd -n new name -e -up upload destination
 
 <b>NOTE:</b>
-1. Commands that start with <b>qb</b> are ONLY for torrents."""
+1. Commands that start with <b>qb</b> are ONLY for torrents.
+2. Google Drive Index folder links are downloaded recursively with their subfolders."""
 
 yt = """<b>Send link along with command line</b>:
 

@@ -12,7 +12,7 @@ from niquests.exceptions import (
     Timeout as NiquestsTimeout,
 )
 from time import sleep, time
-from urllib.parse import parse_qs, urlparse, unquote
+from urllib.parse import parse_qs, quote, unquote, urljoin, urlparse
 from urllib3.util.retry import Retry
 from uuid import uuid4
 from base64 import b64decode, b64encode
@@ -644,8 +644,207 @@ def direct_link_generator(link):
         ]
     ):
         raise DirectDownloadLinkException(f"ERROR: R.I.P {domain}")
+    elif urlparse(link).path.endswith("/"):
+        return google_drive_index(link)
     else:
         raise DirectDownloadLinkException(f"No Direct link function found for {link}")
+
+
+_GDRIVE_FOLDER_MIME = "application/vnd.google-apps.folder"
+_INDEX_UNSAFE_NAME_CHARS = frozenset('/\\\x00:*?"<>|')
+
+
+def _index_safe_name(name):
+    """Return a filesystem-safe index item name without changing its extension."""
+    cleaned = "".join(
+        "_" if char in _INDEX_UNSAFE_NAME_CHARS else char
+        for char in str(name or "unnamed")
+    ).strip()
+    cleaned = cleaned.rstrip(". ")
+    return cleaned if cleaned not in {"", ".", ".."} else "unnamed"
+
+
+def _index_child_url(folder_url, name, is_folder=False):
+    parsed = urlparse(folder_url)
+    base_url = parsed._replace(query="", fragment="").geturl()
+    child = quote(str(name), safe="")
+    suffix = "/" if is_folder else ""
+    child_url = urljoin(f"{base_url.rstrip('/')}/", f"{child}{suffix}")
+    if parsed.query:
+        child_url = urlparse(child_url)._replace(query=parsed.query).geturl()
+    return child_url
+
+
+def _is_google_drive_index_page(page_text):
+    return (
+        "Google Drive Index" in page_text
+        or "@googledrive/index" in page_text
+        or all(
+            marker in page_text
+            for marker in ("window.MODEL", "drive_names", "current_drive_order")
+        )
+    )
+
+
+def _index_error(data):
+    error = data.get("error") if isinstance(data, dict) else None
+    if not error:
+        return ""
+    if isinstance(error, dict):
+        code = error.get("code")
+        message = error.get("message") or error.get("status") or "Unknown error"
+        if str(code) == "401":
+            return "This Google Drive Index folder is password protected."
+        return f"Google Drive Index API error: {message}"
+    return f"Google Drive Index API error: {error}"
+
+
+def _index_list_folder(session, folder_url):
+    """Yield every item in a Drive Index folder, including all pages."""
+    page_token = ""
+    page_index = 0
+    seen_tokens = set()
+
+    while True:
+        payload = {
+            "id": "",
+            "type": "folder",
+            "password": "",
+            "page_token": page_token,
+            "page_index": page_index,
+        }
+        response = session.post(
+            folder_url,
+            json=payload,
+            headers={"Referer": folder_url, "User-Agent": user_agent},
+            timeout=30,
+        )
+        try:
+            status = int(getattr(response, "status_code", 200) or 200)
+        except (TypeError, ValueError):
+            status = 200
+        if status == 401:
+            raise DirectDownloadLinkException(
+                "ERROR: This Google Drive Index folder is password protected."
+            )
+        if status >= 400:
+            raise DirectDownloadLinkException(
+                f"ERROR: Google Drive Index request failed with HTTP {status}."
+            )
+
+        try:
+            data = response.json()
+        except Exception as e:
+            raise DirectDownloadLinkException(
+                "ERROR: Google Drive Index returned an invalid folder response."
+            ) from e
+
+        if error := _index_error(data):
+            raise DirectDownloadLinkException(f"ERROR: {error}")
+        try:
+            files = data["data"]["files"]
+        except (KeyError, TypeError) as e:
+            raise DirectDownloadLinkException(
+                "ERROR: Google Drive Index response did not contain a file list."
+            ) from e
+        if not isinstance(files, list):
+            raise DirectDownloadLinkException(
+                "ERROR: Google Drive Index returned an invalid file list."
+            )
+        yield from files
+
+        next_token = data.get("nextPageToken")
+        if next_token is None:
+            break
+        token_key = str(next_token)
+        if token_key in seen_tokens:
+            raise DirectDownloadLinkException(
+                "ERROR: Google Drive Index returned a repeated page token."
+            )
+        seen_tokens.add(token_key)
+        page_token = next_token
+        page_index = int(data.get("curPageIndex", page_index)) + 1
+
+
+def google_drive_index(link):
+    """Build a recursive direct-download manifest from a Google Drive Index folder."""
+    parsed_link = urlparse(link)
+    folder_url = parsed_link._replace(
+        path=f"{parsed_link.path.rstrip('/')}/", fragment=""
+    ).geturl()
+    details = {
+        "contents": [],
+        "title": _index_safe_name(
+            unquote(urlparse(folder_url).path.rstrip("/").rsplit("/", 1)[-1])
+        ),
+        "total_size": 0,
+    }
+
+    try:
+        with Session() as session:
+            page = session.get(
+                folder_url,
+                headers={"User-Agent": user_agent},
+                timeout=30,
+            )
+            page_text = getattr(page, "text", "")
+            if not _is_google_drive_index_page(page_text):
+                raise DirectDownloadLinkException(
+                    f"No Direct link function found for {link}"
+                )
+
+            visited = set()
+
+            def walk(current_url, path_parts):
+                if current_url in visited:
+                    return
+                visited.add(current_url)
+
+                for item in _index_list_folder(session, current_url):
+                    if not isinstance(item, dict):
+                        continue
+                    original_name = item.get("name")
+                    if not original_name:
+                        continue
+                    safe_name = _index_safe_name(original_name)
+                    if item.get("mimeType") == _GDRIVE_FOLDER_MIME:
+                        walk(
+                            _index_child_url(current_url, original_name, is_folder=True),
+                            (*path_parts, safe_name),
+                        )
+                        continue
+                    if not item.get("link"):
+                        continue
+
+                    try:
+                        size = max(0, int(item.get("size") or 0))
+                    except (TypeError, ValueError):
+                        size = 0
+                    details["contents"].append(
+                        {
+                            "path": "/".join(path_parts),
+                            "filename": safe_name,
+                            # The stable index path resolves a fresh download URL for
+                            # each file. API-provided links can expire before a large
+                            # folder reaches the end of the sequential download queue.
+                            "url": _index_child_url(current_url, original_name),
+                        }
+                    )
+                    details["total_size"] += size
+
+            walk(folder_url, ())
+    except DirectDownloadLinkException:
+        raise
+    except Exception as e:
+        raise DirectDownloadLinkException(
+            f"ERROR: Unable to read Google Drive Index folder: {type(e).__name__}: {e}"
+        ) from e
+
+    if not details["contents"]:
+        raise DirectDownloadLinkException(
+            "ERROR: No downloadable files were found in this Google Drive Index folder."
+        )
+    return details
 
 
 def get_captcha_token(session, params):

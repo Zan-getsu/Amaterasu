@@ -141,7 +141,7 @@ It converges five industrial download engines (Aria2c, qBittorrent, JDownloader,
 
 | Category | Features |
 |---|---|
-| **Download Sources** | Direct links, Torrents (magnet & .torrent), Mega, TeraBox, Google Drive, Rclone remotes, Usenet (NZB), JDownloader, YouTube & 1800+ yt-dlp sites, Telegram files & links |
+| **Download Sources** | Direct links, recursive Google Drive Index folders, Torrents (magnet & .torrent), Mega, TeraBox, Google Drive, Rclone remotes, Usenet (NZB), JDownloader, YouTube & 1800+ yt-dlp sites, Telegram files & links |
 | **Upload Destinations** | Google Drive, Rclone remotes (OneDrive, Dropbox, S3, etc.), Mega, Telegram (as document or media), DDL hosters (GoFile, BuzzHeavier, PixelDrain, DevUploads, VikingFile) |
 | **Leech Features** | Custom prefixes & suffixes, captions, auto-split for large files, hybrid leech (bot + user session), equal splits, media grouping, thumbnail layouts |
 | **Media Processing** | FFmpeg integration, audio/video conversion (`-ca`, `-cv`), custom metadata injection (`-meta`), sample video generation (`-sv`), screenshot extraction (`-ss`), MediaInfo reports |
