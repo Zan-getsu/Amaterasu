@@ -206,6 +206,13 @@ def test_updater_contains_no_destructive_git_commands():
     assert 'rmtree(".git"' not in source
 
 
+def test_rotated_application_logs_do_not_block_auto_update():
+    ignore_patterns = (ROOT / ".gitignore").read_text(encoding="utf-8").splitlines()
+
+    assert "log.txt" in ignore_patterns
+    assert "log.txt.*" in ignore_patterns
+
+
 def _load_runtime_paths(monkeypatch, runtime_dir):
     monkeypatch.setenv("AMATERASU_RUNTIME_DIR", str(runtime_dir))
     module_path = ROOT / "bot/core/runtime_paths.py"

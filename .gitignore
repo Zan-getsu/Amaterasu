@@ -6,6 +6,7 @@ credentials.json
 rclone.conf
 .netrc
 log.txt
+log.txt.*
 rlog.txt
 latestversion.py
 cfg.zip
