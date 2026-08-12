@@ -34,7 +34,180 @@ MESSAGE_UTILS_SOURCE = (
     ROOT / "bot" / "helper" / "telegram_helper" / "message_utils.py"
 )
 MIRROR_SOURCE = ROOT / "bot" / "modules" / "mirror_leech.py"
+COMMON_SOURCE = ROOT / "bot" / "helper" / "common.py"
 UPHOSTER_SOURCE = ROOT / "bot" / "modules" / "uphoster.py"
+TG_CLIENT_SOURCE = ROOT / "bot" / "core" / "tg_client.py"
+
+
+def test_task_identity_is_unique_across_chats_and_keeps_message_id_for_telegram():
+    common_source = COMMON_SOURCE.read_text(encoding="utf-8")
+    uploader_source = TELEGRAM_UPLOADER_SOURCE.read_text(encoding="utf-8")
+
+    assert "self.message_id = self.message.id" in common_source
+    assert 'self.mid = f"{self.message.chat.id}_{self.message_id}"' in common_source
+    assert "message_ids=self._listener.message_id" in uploader_source
+
+
+@pytest.mark.asyncio
+async def test_duplicate_task_update_is_ignored_while_startup_is_active():
+    started = 0
+    release = asyncio.Event()
+
+    class Task:
+        message = SimpleNamespace(
+            id=77,
+            chat=SimpleNamespace(id=-100123),
+        )
+
+        async def new_event(self):
+            nonlocal started
+            started += 1
+            await release.wait()
+
+    namespace = load_top_level_functions(
+        MIRROR_SOURCE,
+        {"_schedule_task_start"},
+        {
+            "_scheduled_task_starts": set(),
+            "LOGGER": SimpleNamespace(warning=lambda *_args: None),
+            "bot_loop": asyncio.get_running_loop(),
+        },
+    )
+    first = namespace["_schedule_task_start"](Task())
+    second = namespace["_schedule_task_start"](Task())
+    await asyncio.sleep(0)
+
+    assert second is None
+    assert started == 1
+
+    release.set()
+    await first
+    assert namespace["_scheduled_task_starts"] == set()
+
+
+@pytest.mark.asyncio
+async def test_equal_message_ids_from_different_chats_start_independently():
+    started = []
+
+    class Task:
+        def __init__(self, chat_id):
+            self.message = SimpleNamespace(id=77, chat=SimpleNamespace(id=chat_id))
+
+        async def new_event(self):
+            started.append(self.message.chat.id)
+
+    namespace = load_top_level_functions(
+        MIRROR_SOURCE,
+        {"_schedule_task_start"},
+        {
+            "_scheduled_task_starts": set(),
+            "LOGGER": SimpleNamespace(warning=lambda *_args: None),
+            "bot_loop": asyncio.get_running_loop(),
+        },
+    )
+    tasks = [
+        namespace["_schedule_task_start"](Task(-100123)),
+        namespace["_schedule_task_start"](Task(456)),
+    ]
+    await asyncio.gather(*tasks)
+
+    assert sorted(started) == [-100123, 456]
+
+
+def test_expired_callback_ack_is_not_reported_as_background_failure():
+    errors = []
+
+    class QueryIdInvalid(Exception):
+        pass
+
+    class FinishedTask:
+        def exception(self):
+            return QueryIdInvalid("expired")
+
+        def get_name(self):
+            return "callback"
+
+    namespace = load_top_level_functions(
+        BOT_UTILS_SOURCE,
+        {"_log_background_exception"},
+        {
+            "CancelledError": asyncio.CancelledError,
+            "LOGGER": SimpleNamespace(error=lambda *args, **kwargs: errors.append((args, kwargs))),
+        },
+    )
+    namespace["_log_background_exception"](FinishedTask())
+
+    assert errors == []
+
+
+@pytest.mark.asyncio
+async def test_expired_callback_ack_does_not_abort_the_callback_action():
+    class QueryIdInvalid(Exception):
+        pass
+
+    class Client:
+        async def invoke(self, *_args, **_kwargs):
+            return None
+
+    async def resilient_tg_operation(*_args, **_kwargs):
+        raise QueryIdInvalid("expired")
+
+    tree = ast.parse(TG_CLIENT_SOURCE.read_text(encoding="utf-8"))
+    class_node = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.ClassDef) and node.name == "WzgramClient"
+    )
+    namespace = {
+        "Client": Client,
+        "resilient_tg_operation": resilient_tg_operation,
+        "_query_name": lambda query: query.name,
+        "_query_is_idempotent": lambda _query: False,
+        "_get_stable_media_session_pool": lambda *_args: None,
+    }
+    exec(
+        compile(ast.Module([class_node], type_ignores=[]), str(TG_CLIENT_SOURCE), "exec"),
+        namespace,
+    )
+    client = namespace["WzgramClient"]()
+
+    result = await client.invoke(SimpleNamespace(name="messages.SetBotCallbackAnswer"))
+    assert result is None
+
+    with pytest.raises(QueryIdInvalid):
+        await client.invoke(SimpleNamespace(name="messages.SendMessage"))
+
+
+@pytest.mark.asyncio
+async def test_wzgram_username_storage_values_are_sqlite_safe():
+    stored = []
+
+    class Storage:
+        async def update_usernames(self, usernames):
+            stored.extend(usernames)
+
+    client = SimpleNamespace(storage=Storage())
+    namespace = load_top_level_functions(
+        TG_CLIENT_SOURCE,
+        {"_stabilize_peer_username_storage"},
+        {"LOGGER": SimpleNamespace(warning=lambda *_args: None)},
+    )
+    namespace["_stabilize_peer_username_storage"](client)
+
+    class IntLike:
+        def __int__(self):
+            return 123
+
+    class StringLike:
+        def __str__(self):
+            return "Alias"
+
+    await client.storage.update_usernames(
+        [(IntLike(), [StringLike(), None]), ("456", "SecondAlias")]
+    )
+
+    assert stored == [(123, ["Alias"]), (456, ["SecondAlias"])]
+    assert client.storage._amaterasu_usernames_stabilized is True
 
 
 def load_top_level_functions(path, names, namespace):

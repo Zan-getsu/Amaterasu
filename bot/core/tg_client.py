@@ -139,14 +139,26 @@ class WzgramClient(Client):
     """WZGram implementation behind Amaterasu's framework-neutral boundary."""
 
     async def invoke(self, query, *args, **kwargs):
-        return await resilient_tg_operation(
-            super().invoke,
-            query,
-            *args,
-            operation_name=_query_name(query),
-            idempotent=_query_is_idempotent(query),
-            **kwargs,
-        )
+        query_name = _query_name(query)
+        try:
+            return await resilient_tg_operation(
+                super().invoke,
+                query,
+                *args,
+                operation_name=query_name,
+                idempotent=_query_is_idempotent(query),
+                **kwargs,
+            )
+        except Exception as error:
+            # Telegram callback acknowledgements expire quickly.  Treat only
+            # this acknowledgement RPC as a no-op so the handler can still
+            # perform its real action (close, back, refresh, and so on).
+            if (
+                type(error).__name__ == "QueryIdInvalid"
+                and query_name.split(".")[-1] == "SetBotCallbackAnswer"
+            ):
+                return None
+            raise
 
     async def _get_media_session_pool(self, dc_id, requested_size):
         return await _get_stable_media_session_pool(
@@ -185,6 +197,41 @@ class TelegramClient:
             "crypto": get_crypto_backend(),
             "max_concurrent_transmissions": MAX_CONCURRENT_TRANSMISSIONS,
         }
+
+
+def _stabilize_peer_username_storage(client):
+    """Normalize WZGram peer aliases before SQLite parameter binding.
+
+    Telegram occasionally supplies integer/string wrapper objects which look
+    valid to Python but are rejected by sqlite3's parameter binder.  WZGram's
+    peer cache is disposable, but an uncaught binding error also aborts that
+    update-dispatch task.  Coercing the two persisted scalar types keeps the
+    normal storage implementation and transaction behavior intact.
+    """
+    storage = getattr(client, "storage", None)
+    if storage is None or getattr(storage, "_amaterasu_usernames_stabilized", False):
+        return client
+
+    update_usernames = storage.update_usernames
+
+    async def normalized_update_usernames(usernames):
+        normalized = []
+        for peer_id, aliases in usernames:
+            try:
+                peer_id = int(peer_id)
+            except (TypeError, ValueError, OverflowError):
+                LOGGER.warning("Skipping malformed Telegram peer id: %r", peer_id)
+                continue
+            if isinstance(aliases, str):
+                aliases = [aliases]
+            clean_aliases = [str(alias) for alias in aliases if alias is not None]
+            if clean_aliases:
+                normalized.append((peer_id, clean_aliases))
+        return await update_usernames(normalized)
+
+    storage.update_usernames = normalized_update_usernames
+    storage._amaterasu_usernames_stabilized = True
+    return client
 
 
 async def _get_stable_media_session_pool(client, dc_id, requested_size):
@@ -317,7 +364,9 @@ class TgClient:
         }.items():
             if param in signature(Client.__init__).parameters:
                 kwargs[param] = value
-        return TelegramClient.create(*args, **kwargs)
+        return _stabilize_peer_username_storage(
+            TelegramClient.create(*args, **kwargs)
+        )
 
     tgClient = AmaterasutgClient
 

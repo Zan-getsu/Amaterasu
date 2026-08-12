@@ -268,7 +268,7 @@ class TelegramUploader:
                 self._sent_msg = await _call_with_flood_retry(
                     self._listener.client.get_messages,
                     chat_id=self._listener.message.chat.id,
-                    message_ids=self._listener.mid,
+                    message_ids=self._listener.message_id,
                 )
             except Exception:
                 self._sent_msg = None

@@ -77,7 +77,12 @@ from .telegram_helper.message_utils import (
 
 class TaskConfig:
     def __init__(self):
-        self.mid = self.message.id
+        # Telegram message ids are only unique inside one chat.  Using the
+        # bare message id here allowed simultaneous commands from different
+        # chats to share a download directory and overwrite each other's
+        # task_dict entry.
+        self.message_id = self.message.id
+        self.mid = f"{self.message.chat.id}_{self.message_id}"
         self.user = self.message.from_user or self.message.sender_chat
         self.user_id = self.user.id
         self.user_dict = user_data.get(self.user_id, {})

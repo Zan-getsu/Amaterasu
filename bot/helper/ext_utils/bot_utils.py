@@ -139,6 +139,11 @@ def _log_background_exception(task):
     except Exception as error:
         LOGGER.error(f"Failed to read background task result: {error}")
         return
+    # Telegram callback ids expire quickly.  The requested action may already
+    # have completed when answering the button times out, so this is a benign
+    # UI acknowledgement failure rather than a failed background task.
+    if exc and type(exc).__name__ == "QueryIdInvalid":
+        return
     if exc:
         LOGGER.error(
             f"Background task failed: {task.get_name()}",

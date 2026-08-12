@@ -68,6 +68,30 @@ from ..helper.telegram_helper.message_utils import (
 )
 
 
+_scheduled_task_starts = set()
+
+
+def _schedule_task_start(task):
+    """Run one command update once while its startup path is active."""
+    key = (task.message.chat.id, task.message.id)
+    if key in _scheduled_task_starts:
+        LOGGER.warning(
+            "Ignoring duplicate task update for chat=%s message=%s",
+            task.message.chat.id,
+            task.message.id,
+        )
+        return None
+    _scheduled_task_starts.add(key)
+
+    async def runner():
+        try:
+            await task.new_event()
+        finally:
+            _scheduled_task_starts.discard(key)
+
+    return bot_loop.create_task(runner())
+
+
 def extract_ytdlp_info(link, options):
     with YoutubeDL(options) as ydl:
         result = ydl.extract_info(link, download=False)
@@ -803,18 +827,18 @@ class Mirror(TaskListener):
 
 
 async def mirror(client, message):
-    bot_loop.create_task(Mirror(client, message).new_event())
+    _schedule_task_start(Mirror(client, message))
 
 
 async def qb_mirror(client, message):
-    bot_loop.create_task(Mirror(client, message, is_qbit=True).new_event())
+    _schedule_task_start(Mirror(client, message, is_qbit=True))
 
 
 async def jd_mirror(client, message):
     if Config.DISABLE_JD:
         await message.reply("JDownloader is currently disabled by the Bot Owner.")
         return
-    bot_loop.create_task(Mirror(client, message, is_jd=True).new_event())
+    _schedule_task_start(Mirror(client, message, is_jd=True))
 
 
 async def nzb_mirror(client, message):
@@ -837,27 +861,25 @@ async def nzb_mirror(client, message):
     mirror_task = Mirror(client, message, is_nzb=True)
     if nzb_id:
         mirror_task.nzb_id = nzb_id
-    bot_loop.create_task(mirror_task.new_event())
+    _schedule_task_start(mirror_task)
 
 
 async def leech(client, message):
     if Config.DISABLE_LEECH:
         await message.reply("The Leech command is currently disabled.")
         return
-    bot_loop.create_task(Mirror(client, message, is_leech=True).new_event())
+    _schedule_task_start(Mirror(client, message, is_leech=True))
 
 
 async def qb_leech(client, message):
-    bot_loop.create_task(
-        Mirror(client, message, is_qbit=True, is_leech=True).new_event()
-    )
+    _schedule_task_start(Mirror(client, message, is_qbit=True, is_leech=True))
 
 
 async def jd_leech(client, message):
     if Config.DISABLE_JD:
         await message.reply("JDownloader is currently disabled by the Bot Owner.")
         return
-    bot_loop.create_task(Mirror(client, message, is_leech=True, is_jd=True).new_event())
+    _schedule_task_start(Mirror(client, message, is_leech=True, is_jd=True))
 
 
 async def nzb_leech(client, message):
@@ -880,8 +902,8 @@ async def nzb_leech(client, message):
     mirror_task = Mirror(client, message, is_leech=True, is_nzb=True)
     if nzb_id:
         mirror_task.nzb_id = nzb_id
-    bot_loop.create_task(mirror_task.new_event())
+    _schedule_task_start(mirror_task)
 
 
 async def uphoster(client, message):
-    bot_loop.create_task(Mirror(client, message, is_uphoster=True).new_event())
+    _schedule_task_start(Mirror(client, message, is_uphoster=True))
