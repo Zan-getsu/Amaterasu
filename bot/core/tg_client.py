@@ -161,11 +161,24 @@ class WzgramClient(Client):
             raise
 
     async def _get_media_session_pool(self, dc_id, requested_size):
-        return await _get_stable_media_session_pool(
-            self,
-            dc_id,
-            requested_size,
-        )
+        # WZGram 3.0.33 has its own adaptive, rate-aware media pool. Prefer it
+        # so Amaterasu benefits from upstream worker sizing and retry fixes.
+        # Retain the proven sequential constructor only as a recovery path for
+        # transient endpoint/session creation failures.
+        try:
+            return await super()._get_media_session_pool(dc_id, requested_size)
+        except Exception as error:
+            LOGGER.warning(
+                "WZGram native media pool failed for DC%s (%s); using "
+                "the stabilized fallback",
+                dc_id,
+                error,
+            )
+            return await _get_stable_media_session_pool(
+                self,
+                dc_id,
+                requested_size,
+            )
 
 
 class TelegramClient:
@@ -235,6 +248,7 @@ def _stabilize_peer_username_storage(client):
 
 
 async def _get_stable_media_session_pool(client, dc_id, requested_size):
+    """Construct a media pool sequentially when WZGram's native path fails."""
     lock = client._media_sessions_locks.setdefault(dc_id, Lock())
     async with lock:
         requested_size = max(1, int(requested_size))
@@ -248,8 +262,12 @@ async def _get_stable_media_session_pool(client, dc_id, requested_size):
             if session is not None:
                 try:
                     await session.stop()
-                except Exception:
-                    pass
+                except Exception as error:
+                    LOGGER.debug(
+                        "Unable to stop stale WZGram media session for DC%s: %s",
+                        dc_id,
+                        error,
+                    )
                 client.media_sessions.pop(dc_id, None)
             session = await client.get_session(dc_id, is_media=True)
         if session not in pool:
@@ -282,27 +300,16 @@ async def _get_stable_media_session_pool(client, dc_id, requested_size):
 
 
 def _report_wzgram_upload_pool():
-    """Build WZGram pools through its reliable media-endpoint resolver.
-
-    WZGram 3.0.23 downloads create their first media connection through
-    Client.get_session(), while uploads use a separate pool constructor. A
-    failure in that constructor occurs before the first progress callback and
-    Session.start retries silently, leaving every upload at zero percent.
-
-    Seed the pool with the proven cached media session and create additional
-    sessions through ``get_session(..., temporary=True)``.  That path resolves
-    WZGram's dynamic media-only endpoint while preserving its native four
-    upload sessions and four workers per session.
-    """
+    """Report the active native uploader without assuming fixed worker sizes."""
     try:
         save_file_module = import_module("pyrogram.methods.advanced.save_file")
     except (ImportError, AttributeError):
         return
 
     LOGGER.info(
-        "WZGram media pools stabilized: %s sessions x %s chunk workers",
+        "WZGram %s native adaptive media pools enabled (cap: %s sessions)",
+        WZGRAM_VERSION,
         getattr(save_file_module, "POOL_SIZE", 1),
-        getattr(save_file_module, "WORKERS_PER_SESSION", 1),
     )
 
 

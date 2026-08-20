@@ -13,15 +13,15 @@ from .chat_permission import (
     unauthorize,
 )
 from .clone import clone_node
+from .dump_select import select_leech_dumps
 from .exec import aioexecute, clear, execute
 from .file_selector import confirm_selection, select
 from .file_sorter import sort_command, sort_media_handler
-from .setup import setup_wizard, setup_callback  # Phase 5.8
 from .filetolink import channel_media_handler, link_command_handler, private_media_handler
 from .force_start import remove_from_queue
+from .gd_clean import confirm_drive_clean_cb, drive_clean
 from .gd_count import count_node
 from .gd_delete import delete_file
-from .gd_clean import drive_clean, confirm_drive_clean_cb
 from .gd_purge import purge_callback, purge_drive
 from .gd_search import gdrive_search, select_type
 from .gen_pyro_sess import gen_pyro_string
@@ -55,6 +55,7 @@ from .restart import (
 from .rss import get_rss_menu, rss_listener
 from .search import initiate_search_tools, torrent_search, torrent_search_update
 from .services import log, log_cb, login, ping, start, start_cb
+from .setup import setup_callback, setup_wizard  # Phase 5.8
 from .shell import run_shell
 from .speedtest import speedtest
 from .stats import bot_stats, get_packages_version, stats_pages
@@ -138,6 +139,7 @@ __all__ = [
     "run_shell",
     "select",
     "select_type",
+    "select_leech_dumps",
     "send_bot_settings",
     "send_user_settings",
     "single_delete_task",

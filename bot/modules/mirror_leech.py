@@ -1,11 +1,12 @@
 from ast import literal_eval
-from base64 import b64encode
 from asyncio import sleep
+from base64 import b64encode
 from re import match as re_match
 
 from aiofiles.os import path as aiopath
-from bot.core.config_manager import Config
 from yt_dlp import YoutubeDL
+
+from bot.core.config_manager import Config
 
 from .. import DOWNLOAD_DIR, LOGGER, bot_loop, task_dict_lock
 from ..helper.ext_utils.bot_utils import (
@@ -15,20 +16,20 @@ from ..helper.ext_utils.bot_utils import (
     sync_to_async,
 )
 from ..helper.ext_utils.exceptions import DirectDownloadLinkException
-from ..helper.ext_utils.multi_leech_utils import (
-    MultiLeechSummary,
-    should_collect_multi_leech,
-)
 from ..helper.ext_utils.links_utils import (
     is_gdrive_id,
     is_gdrive_link,
-    is_mega_link,
     is_magnet,
-    is_rclone_path,
+    is_mega_link,
     is_pixeldrain_link,
+    is_rclone_path,
     is_telegram_link,
     is_terabox_link,
     is_url,
+)
+from ..helper.ext_utils.multi_leech_utils import (
+    MultiLeechSummary,
+    should_collect_multi_leech,
 )
 from ..helper.ext_utils.task_manager import pre_task_check
 from ..helper.listeners.task_listener import TaskListener
@@ -51,12 +52,12 @@ from ..helper.mirror_leech_utils.download_utils.rclone_download import (
     add_rclone_download,
     add_rclone_web_selection,
 )
+from ..helper.mirror_leech_utils.download_utils.telegram_download import (
+    TelegramDownloadHelper,
+)
 from ..helper.mirror_leech_utils.download_utils.terabox_download import (
     add_terabox_account_download,
     add_terabox_download,
-)
-from ..helper.mirror_leech_utils.download_utils.telegram_download import (
-    TelegramDownloadHelper,
 )
 from ..helper.mirror_leech_utils.download_utils.yt_dlp_download import YoutubeDLHelper
 from ..helper.telegram_helper.message_utils import (
@@ -66,7 +67,6 @@ from ..helper.telegram_helper.message_utils import (
     get_tg_link_message,
     send_message,
 )
-
 
 _scheduled_task_starts = set()
 
@@ -127,6 +127,7 @@ class Mirror(TaskListener):
         multi_tag=None,
         options="",
         multi_leech_summary=None,
+        leech_dump_context=None,
         **kwargs,
     ):
         if same_dir is None:
@@ -141,6 +142,9 @@ class Mirror(TaskListener):
         self.bulk = bulk
         self.multi_leech_summary = multi_leech_summary
         super().__init__()
+        self.leech_dump_context = (
+            leech_dump_context if isinstance(leech_dump_context, dict) else {}
+        )
         self.is_qbit = is_qbit
         self.is_leech = is_leech
         self.is_jd = is_jd
@@ -333,6 +337,7 @@ class Mirror(TaskListener):
             "-m": "",
             "-meta": "",
             "-up": "",
+            "-ud": "",
             "-gc": "",
             "-rcf": "",
             "-au": "",
@@ -403,6 +408,7 @@ class Mirror(TaskListener):
         self.seed = args["-d"]
         self.name = args["-n"]
         self.up_dest = args["-up"]
+        self.user_dump_selection = args["-ud"]
         self.category = args["-gc"]
         self.rc_flags = args["-rcf"]
         self.link = args["link"]
@@ -587,6 +593,7 @@ class Mirror(TaskListener):
                 multi_tag=self.multi_tag,
                 options=self.options,
                 multi_leech_summary=self.multi_leech_summary,
+                leech_dump_context=self.leech_dump_context,
             ).new_event()
             return
 
@@ -804,7 +811,6 @@ class Mirror(TaskListener):
             from ..helper.mirror_leech_utils.rclone_utils.transfer import (
                 RcloneTransferHelper,
             )
-            dest = self.up_dest or self.link  # fallback to same remote if no dest
             # If up_dest is not set, we need a destination. For c2c, the
             # command format is: /mirror --c2c source_remote:path dest_remote:path
             # The link is the source; the second arg is in -up.

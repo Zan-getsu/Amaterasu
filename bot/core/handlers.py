@@ -1,6 +1,6 @@
 # ruff: noqa: F403, F405
 
-from pyrogram.filters import bot, channel, command, incoming, regex, private
+from pyrogram.filters import bot, channel, command, incoming, private, regex
 from pyrogram.handlers import CallbackQueryHandler, EditedMessageHandler, MessageHandler
 
 from .. import LOGGER
@@ -8,6 +8,7 @@ from ..core.config_manager import Config
 from ..helper.telegram_helper.bot_commands import BotCommands
 from ..helper.telegram_helper.command_sync import sync_bot_commands
 from ..helper.telegram_helper.filters import CustomFilters
+
 # Phase 3.9 — Lazy module loading deferred. The eager `from ..modules
 # import *` imports all 36 command modules at startup (~30-50% of boot
 # time). Converting to lazy loading (importlib.import_module on first
@@ -189,6 +190,9 @@ async def add_handlers():
         CallbackQueryHandler(select_type, filters=regex("^list_types"))
     )
     TgClient.bot.add_handler(CallbackQueryHandler(arg_usage, filters=regex("^help")))
+    TgClient.bot.add_handler(
+        CallbackQueryHandler(select_leech_dumps, filters=regex(r"^dsel "))
+    )
     TgClient.bot.add_handler(
         MessageHandler(
             mirror,

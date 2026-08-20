@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import re
+import runpy
 from contextlib import suppress
 from pathlib import Path
 from types import SimpleNamespace
@@ -35,9 +36,15 @@ MESSAGE_UTILS_SOURCE = (
     ROOT / "bot" / "helper" / "telegram_helper" / "message_utils.py"
 )
 MIRROR_SOURCE = ROOT / "bot" / "modules" / "mirror_leech.py"
+YTDLP_SOURCE = ROOT / "bot" / "modules" / "ytdlp.py"
 COMMON_SOURCE = ROOT / "bot" / "helper" / "common.py"
 UPHOSTER_SOURCE = ROOT / "bot" / "modules" / "uphoster.py"
 TG_CLIENT_SOURCE = ROOT / "bot" / "core" / "tg_client.py"
+TELEGRAM_DESTINATIONS_SOURCE = (
+    ROOT / "bot" / "helper" / "ext_utils" / "telegram_destinations.py"
+)
+USER_SETTINGS_SOURCE = ROOT / "bot" / "modules" / "users_settings.py"
+DUMP_SELECT_SOURCE = ROOT / "bot" / "modules" / "dump_select.py"
 
 
 def test_task_identity_is_unique_across_chats_and_keeps_message_id_for_telegram():
@@ -318,6 +325,24 @@ def load_media_quality():
     return namespace["_get_media_quality"]
 
 
+def load_leech_dump_destinations():
+    namespace = runpy.run_path(str(TELEGRAM_DESTINATIONS_SOURCE))
+    return (
+        namespace["parse_leech_dump_destinations"],
+        namespace["format_leech_dump_destinations"],
+    )
+
+
+def load_named_leech_dump_helpers():
+    namespace = runpy.run_path(str(TELEGRAM_DESTINATIONS_SOURCE))
+    return SimpleNamespace(
+        parse=namespace["parse_named_leech_dumps"],
+        format=namespace["format_named_leech_dumps"],
+        normalize=namespace["normalize_named_leech_dumps"],
+        select=namespace["select_named_leech_dumps"],
+    )
+
+
 def test_media_quality_finds_video_after_audio_stream():
     streams = [
         {"codec_type": "audio", "codec_name": "aac"},
@@ -555,10 +580,497 @@ def test_split_parts_upload_in_order_while_unrelated_files_remain_parallel():
     assert uploader.max_active == 2
 
 
+def test_multiple_leech_dump_destinations_support_chats_topics_pm_and_deduplication():
+    parse, _ = load_leech_dump_destinations()
+
+    destinations = parse(
+        "-1001111111111, @BackupChannel, -1002222222222|45, pm, @backupchannel",
+        user_id=777,
+    )
+
+    assert destinations == [
+        (-1001111111111, None),
+        ("@BackupChannel", None),
+        (-1002222222222, 45),
+        (777, None),
+    ]
+
+
+def test_legacy_leech_dump_mode_prefixes_are_accepted_and_normalized():
+    parse, formatter = load_leech_dump_destinations()
+
+    destinations = parse("b:-100123, u:@archive, h:pm")
+
+    assert destinations == [(-100123, None), ("@archive", None), ("pm", None)]
+    assert formatter(destinations) == "-100123, @archive, pm"
+
+
+@pytest.mark.parametrize(
+    "value",
+    (
+        "channel",
+        "@bad name",
+        "0",
+        "-100123|topic",
+        "-100123|0",
+        "pm|12",
+        "|12",
+    ),
+)
+def test_invalid_leech_dump_destinations_are_rejected(value):
+    parse, _ = load_leech_dump_destinations()
+
+    with pytest.raises(ValueError):
+        parse(value)
+
+
+def test_leech_dump_destination_count_is_bounded():
+    parse, _ = load_leech_dump_destinations()
+    value = ",".join(f"-100{index}" for index in range(11))
+
+    with pytest.raises(ValueError, match="maximum of 10"):
+        parse(value)
+
+
+def test_named_leech_dump_configuration_is_atomic_and_canonical():
+    helpers = load_named_leech_dump_helpers()
+
+    parsed = helpers.parse(
+        "Movies -1001111111111\n"
+        "Anime Backup @AnimeArchive\n"
+        "Requests -1002222222222|45\n"
+        "Personal pm"
+    )
+
+    assert helpers.format(parsed) == {
+        "Movies": "-1001111111111",
+        "Anime Backup": "@AnimeArchive",
+        "Requests": "-1002222222222|45",
+        "Personal": "pm",
+    }
+    with pytest.raises(ValueError, match="Line 2"):
+        helpers.parse("Movies -1001111111111\nBroken destination")
+    with pytest.raises(ValueError, match="already saved"):
+        helpers.parse("Movies -1001111111111\nBackup -1001111111111")
+
+
+def test_named_leech_dumps_support_legacy_values_and_intentional_select_all():
+    helpers = load_named_leech_dump_helpers()
+    dumps = helpers.normalize(
+        None,
+        "-1001111111111, -1002222222222|45, pm",
+        user_id=777,
+    )
+
+    assert dumps == [
+        ("Legacy 1", -1001111111111, None),
+        ("Legacy 2", -1002222222222, 45),
+        ("Legacy 3", 777, None),
+    ]
+    assert helpers.select(dumps, "all") == dumps
+    assert helpers.select(dumps, "legacy 1,Legacy 3") == [dumps[0], dumps[2]]
+
+    four_dumps = [
+        (f"Dump {index}", -1000000000000 - index, None)
+        for index in range(4)
+    ]
+    with pytest.raises(ValueError, match="at most 3"):
+        helpers.select(four_dumps, "Dump 0,Dump 1,Dump 2,Dump 3")
+    assert helpers.select(four_dumps, "all") == four_dumps
+    assert helpers.select(
+        four_dumps, "Dump 0,dump 0,Dump 1,Dump 1"
+    ) == [four_dumps[0], four_dumps[1]]
+
+
+def test_task_dump_selection_honors_mode_explicit_all_and_picker():
+    helpers = load_named_leech_dump_helpers()
+    picker_calls = []
+
+    async def open_picker(_message, dumps):
+        picker_calls.append(dumps)
+        return [dumps[1]], False
+
+    prepare = load_method(
+        COMMON_SOURCE,
+        "TaskConfig",
+        "_prepare_leech_dumps",
+        {
+            "normalize_named_leech_dumps": helpers.normalize,
+            "select_named_leech_dumps": helpers.select,
+            "open_leech_dump_btns": open_picker,
+        },
+    )
+
+    class Task:
+        _prepare_leech_dumps = prepare
+        is_leech = True
+        user_id = 777
+        message = SimpleNamespace()
+        is_cancelled = False
+
+        def __init__(self, requested="", dump_mode=True):
+            self.user_dict = {
+                "LEECH_DUMP": {
+                    "Movies": "-1001111111111",
+                    "Backup": "-1002222222222|45",
+                    "Personal": "pm",
+                },
+                "DUMP_MODE": dump_mode,
+            }
+            self.user_dump_selection = requested
+            self.selected_dumps = []
+            self.leech_dump_context = {}
+
+    all_task = Task("all")
+    asyncio.run(all_task._prepare_leech_dumps())
+    assert [item[0] for item in all_task.selected_dumps] == [
+        "Movies",
+        "Backup",
+        "Personal",
+    ]
+    assert picker_calls == []
+
+    picker_task = Task()
+    asyncio.run(picker_task._prepare_leech_dumps())
+    assert picker_task.selected_dumps == [("Backup", -1002222222222, 45)]
+    assert len(picker_calls) == 1
+
+    reused_task = Task()
+    reused_task.leech_dump_context = picker_task.leech_dump_context
+    asyncio.run(reused_task._prepare_leech_dumps())
+    assert reused_task.selected_dumps == picker_task.selected_dumps
+    assert len(picker_calls) == 1
+
+    with pytest.raises(ValueError, match="disabled"):
+        asyncio.run(Task("Movies", dump_mode=False)._prepare_leech_dumps())
+
+
+def test_command_leech_destination_is_resolved_once_for_reliable_deduplication():
+    namespace = runpy.run_path(str(TELEGRAM_DESTINATIONS_SOURCE))
+
+    class Bot:
+        @staticmethod
+        async def get_chat(chat_id):
+            assert chat_id == "@BackupChannel"
+            return SimpleNamespace(id=-1002222222222)
+
+    normalize = load_method(
+        COMMON_SOURCE,
+        "TaskConfig",
+        "_normalize_command_leech_destination",
+        {
+            "TgClient": SimpleNamespace(bot=Bot()),
+            "parse_leech_dump_destinations": namespace[
+                "parse_leech_dump_destinations"
+            ],
+            "format_leech_dump_destination": namespace[
+                "format_leech_dump_destination"
+            ],
+        },
+    )
+
+    class Task:
+        _normalize_command_leech_destination = normalize
+        user_id = 777
+
+        def __init__(self, destination):
+            self.cmd_up_dest = destination
+
+    task = Task("@BackupChannel|45")
+    asyncio.run(task._normalize_command_leech_destination())
+    assert task.cmd_up_dest == "-1002222222222|45"
+
+    with pytest.raises(ValueError, match="exactly one"):
+        asyncio.run(Task("-100111,-100222")._normalize_command_leech_destination())
+
+
+def test_uploader_combines_command_and_dump_destinations_without_duplicates():
+    parse, _ = load_leech_dump_destinations()
+    logger = SimpleNamespace(error=lambda *_args: None)
+    get_additional = load_method(
+        TELEGRAM_UPLOADER_SOURCE,
+        "TelegramUploader",
+        "_get_additional_copy_destinations",
+        {"LOGGER": logger, "parse_leech_dump_destinations": parse},
+    )
+
+    class DummyUploader:
+        _get_additional_copy_destinations = get_additional
+
+        def __init__(self):
+            self._listener = SimpleNamespace(
+                cmd_up_dest="-100111",
+                selected_dumps=[
+                    ("Duplicate", -100111, None),
+                    ("Backup", -100222, 9),
+                    ("Personal", 777, None),
+                ],
+                user_id=777,
+            )
+            self._additional_copy_destinations = None
+
+    uploader = DummyUploader()
+    destinations = uploader._get_additional_copy_destinations()
+
+    assert destinations == [
+        ("command destination", -100111, None),
+        ("Leech Dump 'Backup'", -100222, 9),
+        ("Leech Dump 'Personal'", 777, None),
+    ]
+    assert uploader._get_additional_copy_destinations() is destinations
+
+
+def test_leech_dump_copy_failures_are_isolated_and_topic_routing_is_preserved():
+    attempts = []
+    errors = []
+
+    class Bot:
+        @staticmethod
+        async def copy_message(**kwargs):
+            attempts.append(kwargs)
+            if kwargs["chat_id"] == -300:
+                raise RuntimeError("destination unavailable")
+            return SimpleNamespace(id=99, link="https://t.me/c/1/99")
+
+    async def call_with_flood_retry(method, *args, **kwargs):
+        return await method(*args, **kwargs)
+
+    async def send_message(*_args, **_kwargs):
+        return None
+
+    sequence_copies = load_method(
+        TELEGRAM_UPLOADER_SOURCE,
+        "TelegramUploader",
+        "_sequence_copies",
+        {
+            "LOGGER": SimpleNamespace(
+                error=lambda *args, **_kwargs: errors.append(args),
+                warning=lambda *_args, **_kwargs: None,
+            ),
+            "TgClient": SimpleNamespace(bot=Bot()),
+            "_call_with_flood_retry": call_with_flood_retry,
+            "_LEECH_DUMP_COPY_SEMAPHORE": asyncio.Semaphore(8),
+            "gather": asyncio.gather,
+            "html_escape": lambda value: value,
+            "send_message": send_message,
+        },
+    )
+
+    class DummyUploader:
+        _sequence_copies = sequence_copies
+
+        def __init__(self):
+            self._upload_seq = [
+                {
+                    "chat_id": -100,
+                    "msg_id": 11,
+                    "link": "https://t.me/c/1/11",
+                    "file_": "movie.mkv",
+                    "reply_markup": None,
+                },
+                {
+                    "chat_id": -100,
+                    "msg_id": 12,
+                    "link": "https://t.me/c/1/12",
+                    "file_": "movie-2.mkv",
+                    "reply_markup": None,
+                },
+            ]
+            self._listener = SimpleNamespace(
+                up_dest=-200,
+                chat_thread_id=7,
+                user_id=777,
+                pm_msg=None,
+                is_cancelled=False,
+            )
+            self._bot_pm = False
+            self._user_session = False
+            self._is_private = False
+
+        def _get_additional_copy_destinations(self):
+            return [
+                ("Leech Dump", -100, None),
+                ("Leech Dump", -200, 7),
+                ("Leech Dump", -300, None),
+                ("Leech Dump", -400, 9),
+            ]
+
+    uploader = DummyUploader()
+    asyncio.run(uploader._sequence_copies(SimpleNamespace(id=-100)))
+
+    broken_attempts = [attempt for attempt in attempts if attempt["chat_id"] == -300]
+    healthy_attempts = [attempt for attempt in attempts if attempt["chat_id"] == -400]
+    assert len(broken_attempts) == 1
+    assert [attempt["message_id"] for attempt in healthy_attempts] == [11, 12]
+    assert all(attempt["message_thread_id"] == 9 for attempt in healthy_attempts)
+    assert len(errors) == 1
+
+
+def test_dump_copy_skips_the_actual_source_topic_even_when_primary_uses_username():
+    attempts = []
+
+    class Bot:
+        @staticmethod
+        async def copy_message(**kwargs):
+            attempts.append(kwargs)
+
+    async def call_with_flood_retry(method, *args, **kwargs):
+        return await method(*args, **kwargs)
+
+    sequence_copies = load_method(
+        TELEGRAM_UPLOADER_SOURCE,
+        "TelegramUploader",
+        "_sequence_copies",
+        {
+            "LOGGER": SimpleNamespace(error=lambda *_args: None, warning=lambda *_args: None),
+            "TgClient": SimpleNamespace(bot=Bot()),
+            "_call_with_flood_retry": call_with_flood_retry,
+            "_LEECH_DUMP_COPY_SEMAPHORE": asyncio.Semaphore(8),
+            "gather": asyncio.gather,
+        },
+    )
+
+    class DummyUploader:
+        _sequence_copies = sequence_copies
+        _upload_seq = [
+            {
+                "chat_id": -500,
+                "msg_id": 21,
+                "thread_id": 45,
+                "reply_markup": None,
+            }
+        ]
+        _listener = SimpleNamespace(
+            up_dest="@PrimaryByUsername",
+            chat_thread_id=45,
+            user_id=777,
+            pm_msg=None,
+            is_cancelled=False,
+        )
+        _bot_pm = False
+        _user_session = False
+        _is_private = False
+
+        @staticmethod
+        def _get_additional_copy_destinations():
+            return [("Leech Dump 'Duplicate'", -500, 45)]
+
+    asyncio.run(DummyUploader()._sequence_copies(SimpleNamespace(id=-100)))
+    assert attempts == []
+
+
+def test_dump_forwarding_is_bounded_globally_and_ordered_per_destination():
+    active = 0
+    max_active = 0
+    copied = {}
+
+    class Bot:
+        @staticmethod
+        async def copy_message(**kwargs):
+            nonlocal active, max_active
+            active += 1
+            max_active = max(max_active, active)
+            try:
+                await asyncio.sleep(0.001)
+                copied.setdefault(kwargs["chat_id"], []).append(kwargs["message_id"])
+            finally:
+                active -= 1
+
+    async def call_with_flood_retry(method, *args, **kwargs):
+        return await method(*args, **kwargs)
+
+    sequence_copies = load_method(
+        TELEGRAM_UPLOADER_SOURCE,
+        "TelegramUploader",
+        "_sequence_copies",
+        {
+            "LOGGER": SimpleNamespace(error=lambda *_args: None, warning=lambda *_args: None),
+            "TgClient": SimpleNamespace(bot=Bot()),
+            "_call_with_flood_retry": call_with_flood_retry,
+            "_LEECH_DUMP_COPY_SEMAPHORE": asyncio.Semaphore(8),
+            "gather": asyncio.gather,
+        },
+    )
+
+    class DummyUploader:
+        _sequence_copies = sequence_copies
+        _upload_seq = [
+            {
+                "chat_id": -100,
+                "msg_id": message_id,
+                "thread_id": None,
+                "reply_markup": None,
+            }
+            for message_id in range(20)
+        ]
+        _listener = SimpleNamespace(
+            up_dest=-999,
+            chat_thread_id=None,
+            user_id=777,
+            pm_msg=None,
+            is_cancelled=False,
+        )
+        _bot_pm = False
+        _user_session = False
+        _is_private = False
+
+        @staticmethod
+        def _get_additional_copy_destinations():
+            return [
+                (f"Leech Dump {index}", -200 - index, None)
+                for index in range(10)
+            ]
+
+    asyncio.run(DummyUploader()._sequence_copies(SimpleNamespace(id=-100)))
+
+    assert max_active == 8
+    assert len(copied) == 10
+    assert all(message_ids == list(range(20)) for message_ids in copied.values())
+
+
+def test_leech_dump_ui_uses_clear_multiple_destination_guide():
+    source = USER_SETTINGS_SOURCE.read_text(encoding="utf-8")
+
+    assert 'buttons.data_button("✦ Leech Dump"' in source
+    assert "✦ Leech Destination" not in source
+    assert "Send one named destination per line" in source
+    assert "The complete list replaces the previous list" in source
+    assert "parse_named_leech_dumps(message.text)" in source
+    assert "await TgClient.bot.get_chat(chat_id)" in source
+    assert 'update_user_ldata(user_id, "LEECH_DUMP"' in source
+
+
+def test_leech_dump_selection_and_copy_routing_are_cached_and_topic_aware():
+    source = TELEGRAM_UPLOADER_SOURCE.read_text(encoding="utf-8")
+    common_source = COMMON_SOURCE.read_text(encoding="utf-8")
+    mirror_source = MIRROR_SOURCE.read_text(encoding="utf-8")
+    ytdlp_source = YTDLP_SOURCE.read_text(encoding="utf-8")
+    picker_source = DUMP_SELECT_SOURCE.read_text(encoding="utf-8")
+
+    assert 'getattr(\n            self._listener, "selected_dumps", []' in source
+    assert "if self._additional_copy_destinations is not None:" in source
+    assert "async def forward_destination(label, dest, thread_id):" in source
+    assert "message_thread_id=thread_id" in source
+    assert "(dest, thread_id) == (copy_from_chat, source_thread_id)" in source
+    assert '"thread_id": getattr(sent_msg, "message_thread_id", None)' in source
+    assert "_LEECH_DUMP_COPY_SEMAPHORE = Semaphore(8)" in source
+    assert 'self.selected_dumps = []' in common_source
+    assert 'next_task_kwargs["leech_dump_context"]' in common_source
+    assert '"selected_dumps" in self.leech_dump_context' in common_source
+    assert "select_named_leech_dumps(dumps, requested)" in common_source
+    assert "open_leech_dump_btns(" in common_source
+    assert '"-ud": ""' in mirror_source
+    assert '"-ud": ""' in ytdlp_source
+    assert 'if action == "all":' in picker_source
+    assert 'state["selected"] = set(range(len(state["dumps"])))' in picker_source
+    assert "MAX_MANUAL_LEECH_DUMPS" in picker_source
+
+
 def test_telegram_folder_uploads_bound_file_and_metadata_concurrency():
     source = TELEGRAM_UPLOADER_SOURCE.read_text(encoding="utf-8")
 
     assert "Semaphore(self._file_upload_parallelism)" in source
+    assert '_NORMAL_WZGRAM_UPLOAD_GATES = {"bot": Semaphore(2), "user": Semaphore(2)}' in source
     assert "async with self._file_upload_semaphore" in source
     assert "return await self._upload_file_task_inner(" in source
 

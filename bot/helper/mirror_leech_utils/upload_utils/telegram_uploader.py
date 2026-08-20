@@ -1,7 +1,11 @@
 from asyncio import CancelledError, Lock, Semaphore, ensure_future, gather, sleep, wait_for
+from functools import partial
+from html import escape as html_escape
 from logging import getLogger
-from os import path as ospath, walk
-from re import match as re_match, sub as re_sub
+from os import path as ospath
+from os import walk
+from re import match as re_match
+from re import sub as re_sub
 from time import monotonic, time
 
 from aioshutil import rmtree
@@ -10,17 +14,15 @@ from PIL import Image
 from pyrogram import StopTransmission
 from pyrogram.enums import ChatType
 from pyrogram.errors import BadRequest, FloodWait, RPCError
+
 try:
     from pyrogram.errors import FloodPremiumWait
 except ImportError:
     FloodPremiumWait = FloodWait
-from pyrogram.raw.types import (
-    DocumentAttributeAudio,
-    DocumentAttributeFilename,
-    DocumentAttributeVideo,
-)
 from aiofiles.os import (
     path as aiopath,
+)
+from aiofiles.os import (
     remove,
     rename,
 )
@@ -43,21 +45,21 @@ from ....core.config_manager import Config
 from ....core.tg_client import TgClient
 from ...ext_utils.bot_utils import sync_to_async
 from ...ext_utils.files_utils import get_base_name, is_archive
+from ...ext_utils.hyperul_utils import HypertgUpload
 from ...ext_utils.leech_font import apply_leech_font, resolve_leech_font
-from ...ext_utils.status_utils import get_readable_file_size, get_readable_time
-from ...telegram_helper.message_utils import send_message
 from ...ext_utils.media_utils import (
+    generate_telegraph_mediainfo,
     get_audio_thumbnail,
     get_document_type,
+    get_md5_hash,
     get_media_info,
     get_multiple_frames_thumbnail,
     get_video_thumbnail,
-    get_md5_hash,
-    generate_telegraph_mediainfo,
 )
+from ...ext_utils.status_utils import get_readable_file_size, get_readable_time
+from ...ext_utils.telegram_destinations import parse_leech_dump_destinations
 from ...telegram_helper.button_build import ButtonMaker
-from ...telegram_helper.message_utils import delete_message
-from ...ext_utils.hyperul_utils import HypertgUpload
+from ...telegram_helper.message_utils import delete_message, send_message
 
 LOGGER = getLogger(__name__)
 
@@ -73,13 +75,16 @@ async def _call_with_flood_retry(method, *args, **kwargs):
             await sleep(flood.value + 1)
 
 
-# Standard Pyrogram uploads end with a SendMedia RPC. Telegram rate-limits
-# that RPC per account, so overlapping normal uploads can all finish their
-# bytes and then repeatedly FloodWait at finalization. Keep each account's
-# normal transfer serial and share the cooldown with queued uploads. HyperTG
-# uses its own worker pool and is intentionally not gated here.
-_NORMAL_PYROGRAM_UPLOAD_LOCKS = {"bot": Lock(), "user": Lock()}
+# WZGram 3.0.33 performs its own rate-aware part dispatch and bounds active
+# transmissions. Allow two files per account to use that native parallelism,
+# while retaining a conservative outer gate and shared SendMedia cooldown to
+# avoid finalization bursts. HyperTG has its own worker pool and bypasses this.
+_NORMAL_WZGRAM_UPLOAD_GATES = {"bot": Semaphore(2), "user": Semaphore(2)}
 _NORMAL_PYROGRAM_FLOOD_UNTIL = {"bot": 0.0, "user": 0.0}
+# Bound copy bursts across all tasks. Each destination still has an independent
+# ordered worker, while this shared gate avoids triggering Telegram flood waits
+# when several large folder leeches finish uploading at the same time.
+_LEECH_DUMP_COPY_SEMAPHORE = Semaphore(8)
 
 
 class TelegramUploader:
@@ -128,6 +133,7 @@ class TelegramUploader:
         self._state_lock = Lock()
         self._split_quality_cache = {}
         self._split_upload_tails = {}
+        self._additional_copy_destinations = None
         self._hu = HypertgUpload(self) if Config.USE_HYPER and Config.LEECH_DUMP_CHAT else None
         self._upload_seq = []
         self._msg_to_seq = {}
@@ -169,7 +175,7 @@ class TelegramUploader:
 
     async def _run_normal_pyrogram_upload(self, upload_factory):
         client_name = "user" if self._user_session else "bot"
-        async with _NORMAL_PYROGRAM_UPLOAD_LOCKS[client_name]:
+        async with _NORMAL_WZGRAM_UPLOAD_GATES[client_name]:
             wait_time = max(
                 0.0, _NORMAL_PYROGRAM_FLOOD_UNTIL[client_name] - monotonic()
             )
@@ -242,25 +248,6 @@ class TelegramUploader:
                     )
                 else:
                     self._is_private = self._sent_msg.chat.type == ChatType.PRIVATE
-                if self._listener.leech_dest:
-                    try:
-                        leech_dest = self._listener.leech_dest
-                        if not isinstance(leech_dest, int):
-                            if "|" in str(leech_dest):
-                                leech_dest, _ = str(leech_dest).split("|", 1)
-                            if leech_dest.lstrip("-").isdigit():
-                                leech_dest = int(leech_dest)
-                        if self._log_msg.chat.id != leech_dest:
-                            await self._log_msg.copy(chat_id=leech_dest)
-                    except Exception as e:
-                        if not self._listener.is_cancelled:
-                            LOGGER.error(
-                                f"Failed to copy 'Leech Started' message to {self._listener.leech_dest}: {e}"
-                            )
-                            await send_message(
-                                self._listener.user_id,
-                                f"Failed to send 'Leech Started' message to {self._listener.leech_dest}\n{e}",
-                            )
             except Exception as e:
                 await self._listener.on_upload_error(str(e))
                 return False
@@ -293,6 +280,39 @@ class TelegramUploader:
             self._is_private = self._sent_msg.chat.type == ChatType.PRIVATE
 
         return True
+
+    def _get_additional_copy_destinations(self):
+        if self._additional_copy_destinations is not None:
+            return self._additional_copy_destinations
+        destinations = []
+        seen = set()
+        candidates = (("command destination", self._listener.cmd_up_dest),)
+        for label, value in candidates:
+            try:
+                parsed = parse_leech_dump_destinations(value, self._listener.user_id)
+            except ValueError as err:
+                LOGGER.error("Invalid %s: %s", label, err)
+                parsed = []
+            for chat_id, thread_id in parsed:
+                key = (
+                    chat_id.lower() if isinstance(chat_id, str) else chat_id,
+                    thread_id,
+                )
+                if key not in seen:
+                    seen.add(key)
+                    destinations.append((label, chat_id, thread_id))
+        for name, chat_id, thread_id in getattr(
+            self._listener, "selected_dumps", []
+        ):
+            key = (
+                chat_id.lower() if isinstance(chat_id, str) else chat_id,
+                thread_id,
+            )
+            if key not in seen:
+                seen.add(key)
+                destinations.append((f"Leech Dump '{name}'", chat_id, thread_id))
+        self._additional_copy_destinations = destinations
+        return self._additional_copy_destinations
 
     def _split_file_identity(self, file_path):
         """Return a stable family key and part number for supported split names."""
@@ -537,6 +557,8 @@ class TelegramUploader:
                         else new_msg.link
                     ),
                     "file_": self._upload_seq[seq_idx]["file_"],
+                    "reply_markup": self._upload_seq[seq_idx].get("reply_markup"),
+                    "thread_id": getattr(new_msg, "message_thread_id", None),
                 }
                 self._msg_to_seq[(new_msg.chat.id, new_msg.id)] = seq_idx
         self._sent_msg = msgs_list[-1]
@@ -569,6 +591,7 @@ class TelegramUploader:
                     LOGGER.error(f"Failed To Send in BotPM:\n{err_msg}")
 
     async def _sequence_copies(self, src_chat):
+        prepared_entries = []
         for entry in self._upload_seq:
             if entry is None:
                 continue
@@ -592,6 +615,9 @@ class TelegramUploader:
                     entry["chat_id"] = src_chat.id
                     entry["msg_id"] = bot_copy.id
                     entry["link"] = bot_copy.link
+                    entry["thread_id"] = getattr(
+                        bot_copy, "message_thread_id", None
+                    )
                 except Exception as e:
                     LOGGER.error(f"Failed to copy from dump_chat: {e}")
                     continue
@@ -609,6 +635,9 @@ class TelegramUploader:
                     entry["chat_id"] = src_chat.id
                     entry["msg_id"] = bot_copy.id
                     entry["link"] = bot_copy.link
+                    entry["thread_id"] = getattr(
+                        bot_copy, "message_thread_id", None
+                    )
                     try:
                         await TgClient.bot.delete_messages(
                             chat_id=chat_id, message_ids=msg_id
@@ -645,26 +674,82 @@ class TelegramUploader:
                             )
                         else:
                             LOGGER.error(f"Failed To Send in BotPM:\n{err_msg}")
-            for dest_attr in ("cmd_up_dest", "leech_dest"):
-                dest = getattr(self._listener, dest_attr, None)
-                if not dest or dest == self._listener.up_dest:
+            prepared_entries.append(
+                (
+                    copy_from_chat,
+                    copy_from_msg,
+                    entry.get("thread_id"),
+                    reply_markup,
+                )
+            )
+
+        primary_destination = (
+            self._listener.up_dest,
+            self._listener.chat_thread_id,
+        )
+        destinations = [
+            destination
+            for destination in self._get_additional_copy_destinations()
+            if (destination[1], destination[2]) != primary_destination
+            and not (
+                self._bot_pm
+                and destination[1] == self._listener.user_id
+                and destination[2] is None
+            )
+        ]
+
+        async def forward_destination(label, dest, thread_id):
+            for (
+                copy_from_chat,
+                copy_from_msg,
+                source_thread_id,
+                reply_markup,
+            ) in prepared_entries:
+                if self._listener.is_cancelled:
+                    return
+                if (dest, thread_id) == (copy_from_chat, source_thread_id):
                     continue
-                if not isinstance(dest, int):
-                    if "|" in str(dest):
-                        dest, _ = str(dest).split("|", 1)
-                    if str(dest).lstrip("-").isdigit():
-                        dest = int(dest)
                 try:
-                    await _call_with_flood_retry(
-                        TgClient.bot.copy_message,
-                        chat_id=dest,
-                        from_chat_id=copy_from_chat,
-                        message_id=copy_from_msg,
-                        reply_markup=reply_markup,
+                    async with _LEECH_DUMP_COPY_SEMAPHORE:
+                        await _call_with_flood_retry(
+                            TgClient.bot.copy_message,
+                            chat_id=dest,
+                            from_chat_id=copy_from_chat,
+                            message_id=copy_from_msg,
+                            message_thread_id=thread_id,
+                            reply_markup=reply_markup,
+                        )
+                except Exception as err:
+                    error = str(err) or repr(err)
+                    LOGGER.error(
+                        "Stopped forwarding to %s %s%s after message %s: %s",
+                        label,
+                        dest,
+                        f"|{thread_id}" if thread_id is not None else "",
+                        copy_from_msg,
+                        error,
                     )
-                except Exception as e:
-                    if not self._listener.is_cancelled:
-                        LOGGER.error(f"Failed to forward to {dest_attr}: {e}")
+                    try:
+                        await send_message(
+                            self._listener.user_id,
+                            f"Stopped copying this task to {html_escape(label)} "
+                            f"(<code>{dest}"
+                            f"{'|' + str(thread_id) if thread_id is not None else ''}"
+                            f"</code>) after an error:\n"
+                            f"<code>{html_escape(error)}</code>\n\n"
+                            "Other Leech Dumps will continue normally.",
+                        )
+                    except Exception as notify_error:
+                        LOGGER.warning(
+                            "Could not notify user about Leech Dump failure: %s",
+                            str(notify_error) or repr(notify_error),
+                        )
+                    return
+
+        if destinations and prepared_entries:
+            await gather(
+                *(forward_destination(*destination) for destination in destinations)
+            )
 
     async def _upload_file_task(self, file_, f_path, dirpath, user_session, seq_idx):
         # Large folders may contain thousands of files. Creating their tasks is
@@ -919,29 +1004,14 @@ class TelegramUploader:
     ):
         if self._listener.is_cancelled:
             raise StopTransmission()
-        attr_base = [DocumentAttributeFilename(file_name=file)]
         if key == "videos":
-            attrs = [
-                DocumentAttributeVideo(
-                    duration=duration or 0, w=width or 480, h=height or 320, supports_streaming=True
-                ),
-                *attr_base,
-            ]
             mtype = "video"
         elif key == "audios":
-            attrs = [
-                DocumentAttributeAudio(
-                    duration=duration or 0, performer=artist or "", title=title or ""
-                ),
-                *attr_base,
-            ]
             mtype = "audio"
         elif key == "documents":
-            attrs = attr_base
             mtype = "document"
         else:
             mtype = "photo"
-            attrs = None
         target_client = TgClient.user if self._user_session else self._listener.client
         upload_path = f_path or self._up_path
         transfer_started = monotonic()
@@ -956,7 +1026,8 @@ class TelegramUploader:
         try:
             if self._hu is None:
                 if key == "videos":
-                    upload_factory = lambda: target_client.send_video(
+                    upload_factory = partial(
+                        target_client.send_video,
                         chat_id=self._sent_msg.chat.id,
                         video=upload_path,
                         caption=cap_mono,
@@ -971,7 +1042,8 @@ class TelegramUploader:
                         reply_markup=reply_markup,
                     )
                 elif key == "audios":
-                    upload_factory = lambda: target_client.send_audio(
+                    upload_factory = partial(
+                        target_client.send_audio,
                         chat_id=self._sent_msg.chat.id,
                         audio=upload_path,
                         caption=cap_mono,
@@ -985,7 +1057,8 @@ class TelegramUploader:
                         reply_markup=reply_markup,
                     )
                 elif key == "documents":
-                    upload_factory = lambda: target_client.send_document(
+                    upload_factory = partial(
+                        target_client.send_document,
                         chat_id=self._sent_msg.chat.id,
                         document=upload_path,
                         caption=cap_mono,
@@ -997,7 +1070,8 @@ class TelegramUploader:
                         reply_markup=reply_markup,
                     )
                 else:
-                    upload_factory = lambda: target_client.send_photo(
+                    upload_factory = partial(
+                        target_client.send_photo,
                         chat_id=self._sent_msg.chat.id,
                         photo=upload_path,
                         caption=cap_mono,
@@ -1275,6 +1349,7 @@ class TelegramUploader:
                 "link": sent_msg.link,
                 "file_": file_,
                 "reply_markup": reply_markup,
+                "thread_id": getattr(sent_msg, "message_thread_id", None),
             }
             self._msg_to_seq[(sent_msg.chat.id, sent_msg.id)] = seq_idx
 
@@ -1323,7 +1398,7 @@ class TelegramUploader:
             raise
         except Exception as err:
             if self._listener.is_cancelled:
-                raise StopTransmission()
+                raise StopTransmission() from err
             if (
                 self._thumb is None
                 and thumb is not None

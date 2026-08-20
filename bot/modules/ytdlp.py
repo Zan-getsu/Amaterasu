@@ -1,13 +1,13 @@
-from asyncio import Event, wait_for
 from ast import literal_eval
+from asyncio import Event, wait_for
 from functools import partial
 from time import time
 
-from niquests import AsyncSession
 from aiofiles.os import path as aiopath
-from yt_dlp import YoutubeDL
+from niquests import AsyncSession
 from pyrogram.filters import regex, user
 from pyrogram.handlers import CallbackQueryHandler
+from yt_dlp import YoutubeDL
 
 from .. import DOWNLOAD_DIR, LOGGER, bot_loop, task_dict_lock
 from ..core.config_manager import Config
@@ -22,8 +22,8 @@ from ..helper.ext_utils.multi_leech_utils import (
     MultiLeechSummary,
     should_collect_multi_leech,
 )
-from ..helper.ext_utils.task_manager import pre_task_check
 from ..helper.ext_utils.status_utils import get_readable_file_size, get_readable_time
+from ..helper.ext_utils.task_manager import pre_task_check
 from ..helper.listeners.task_listener import TaskListener
 from ..helper.mirror_leech_utils.download_utils.yt_dlp_download import (
     YoutubeDLHelper,
@@ -206,7 +206,6 @@ class YtSelection:
         await edit_message(self._reply_to, msg, subbuttons)
 
     async def mp3_subbuttons(self):
-        i = "s" if self._is_playlist else ""
         buttons = ButtonMaker()
         audio_qualities = [64, 128, 320]
         for q in audio_qualities:
@@ -219,7 +218,6 @@ class YtSelection:
         await edit_message(self._reply_to, msg, subbuttons)
 
     async def audio_format(self):
-        i = "s" if self._is_playlist else ""
         buttons = ButtonMaker()
         for frmt in ["aac", "alac", "flac", "m4a", "opus", "vorbis", "wav"]:
             audio_format = f"ba/b-{frmt}-"
@@ -231,7 +229,6 @@ class YtSelection:
         await edit_message(self._reply_to, msg, subbuttons)
 
     async def audio_quality(self, format):
-        i = "s" if self._is_playlist else ""
         buttons = ButtonMaker()
         for qual in range(11):
             audio_format = f"{format}{qual}"
@@ -276,6 +273,7 @@ class YtDlp(TaskListener):
         multi_tag=None,
         options="",
         multi_leech_summary=None,
+        leech_dump_context=None,
         **kwargs,
     ):
         if same_dir is None:
@@ -290,6 +288,9 @@ class YtDlp(TaskListener):
         self.bulk = bulk
         self.multi_leech_summary = multi_leech_summary
         super().__init__()
+        self.leech_dump_context = (
+            leech_dump_context if isinstance(leech_dump_context, dict) else {}
+        )
         self.is_ytdlp = True
         self.is_leech = is_leech
 
@@ -329,6 +330,7 @@ class YtDlp(TaskListener):
             "-opt": {},
             "-n": "",
             "-up": "",
+            "-ud": "",
             "-gc": "",
             "-rcf": "",
             "-t": "",
@@ -400,6 +402,7 @@ class YtDlp(TaskListener):
         self.select = args["-s"]
         self.name = args["-n"]
         self.up_dest = args["-up"]
+        self.user_dump_selection = args["-ud"]
         self.category = args["-gc"]
         self.rc_flags = args["-rcf"]
         self.link = args["link"]

@@ -1,9 +1,28 @@
-from asyncio import sleep, gather
+from asyncio import gather, sleep
+from html import escape as html_escape
 from random import choice
-from re import match as re_match, search as re_search, sub
+from re import match as re_match
+from re import search as re_search
+from re import sub
 from time import time
 from urllib.parse import urlsplit
 
+from pyrogram.enums import ButtonStyle, ParseMode
+from pyrogram.errors import (
+    EntityBoundsInvalid,
+    FloodWait,
+    MediaCaptionTooLong,
+    MediaEmpty,
+    MessageEmpty,
+    MessageIdInvalid,
+    MessageNotModified,
+    MessageTooLong,
+    PeerIdInvalid,
+    PhotoInvalidDimensions,
+    ReplyMarkupInvalid,
+    WebpageCurlFailed,
+    WebpageMediaEmpty,
+)
 from pyrogram.types import (
     InputMediaAnimation,
     InputMediaDocument,
@@ -11,29 +30,22 @@ from pyrogram.types import (
     Message,
     ReplyParameters,
 )
-from pyrogram.enums import ButtonStyle, ParseMode
-from pyrogram.errors import (
-    FloodWait,
-    MessageNotModified,
-    MessageEmpty,
-    MessageTooLong,
-    ReplyMarkupInvalid,
-    PhotoInvalidDimensions,
-    WebpageCurlFailed,
-    WebpageMediaEmpty,
-    MediaEmpty,
-    MediaCaptionTooLong,
-    EntityBoundsInvalid,
-    MessageIdInvalid,
-    PeerIdInvalid,
-)
 
 try:
     from pyrogram.errors import FloodPremiumWait
 except ImportError:
     FloodPremiumWait = FloodWait
 
-from ... import LOGGER, bot_cache, categories_dict, intervals, status_dict, task_dict, task_dict_lock, user_data
+from ... import (
+    LOGGER,
+    bot_cache,
+    categories_dict,
+    intervals,
+    status_dict,
+    task_dict,
+    task_dict_lock,
+    user_data,
+)
 from ...core.config_manager import Config
 from ...core.tg_client import TgClient
 from ..ext_utils.bot_utils import SetInterval, download_image_url, fetch_drive_cat
@@ -61,7 +73,7 @@ def _resolve_gallery_media(media):
     if media == "IMAGES":
         if Config.IMAGES:
             Config.USE_IMAGES = True
-            media = choice(Config.IMAGES)
+            media = choice(Config.IMAGES)  # noqa: S311 - display image selection
         else:
             return None, "photo"
     if not media:
@@ -251,7 +263,7 @@ async def send_message(
             except Exception:
                 LOGGER.error("Error while sending photo", exc_info=True)
                 return await _send_text(message, text, buttons, **kwargs)
-        
+
         return await _send_text(message, text, buttons, **kwargs)
     except FloodWait as f:
         LOGGER.warning(str(f))
@@ -424,8 +436,11 @@ async def edit_message(
                         input_media,
                         reply_markup=buttons,
                     )
-                except Exception:
-                    pass
+                except Exception as err:
+                    LOGGER.debug(
+                        "Unable to replace oversized gallery media: %s",
+                        str(err) or repr(err),
+                    )
             return await message.edit_caption(
                 caption=short_text,
                 reply_markup=buttons,
@@ -850,6 +865,83 @@ async def open_category_btns(message):
         await edit_message(prompt, "<b>Task Cancelled</b>")
     del bot_cache[msg_id]
     return drive_id, index_link, is_cancelled
+
+
+def build_leech_dump_selection_buttons(user_id, msg_id, dumps, selected):
+    buttons = ButtonMaker()
+    for index, (name, _chat_id, _topic_id) in enumerate(dumps):
+        mark = "☑" if index in selected else "☐"
+        buttons.data_button(
+            f"{mark} {name}",
+            f"dsel {user_id} {msg_id} {index}",
+        )
+    buttons.data_button(
+        "Select All", f"dsel {user_id} {msg_id} all", "header"
+    )
+    buttons.data_button(
+        "Cancel", f"dsel {user_id} {msg_id} cancel", "footer",
+        style=ButtonStyle.DANGER,
+    )
+    buttons.data_button(
+        "Done", f"dsel {user_id} {msg_id} done", "footer",
+        style=ButtonStyle.SUCCESS,
+    )
+    return buttons.build_menu(2)
+
+
+def leech_dump_selection_text(dumps, selected):
+    selected_names = [dumps[index][0] for index in sorted(selected)]
+    selection = (
+        "\n".join(f"☑ {html_escape(name)}" for name in selected_names)
+        if selected_names
+        else "None"
+    )
+    return (
+        "<b>Select up to 3 Leech Dumps</b>\n\n"
+        "Tap individual dumps, or use <b>Select All</b> to send every file "
+        "to every saved destination.\n\n"
+        f"<b>Selected ({len(selected)}/3):</b>\n{selection}\n\n"
+        "<i>If time expires, the current selection is used; when nothing is "
+        "selected, all dumps are used.</i>"
+    )
+
+
+async def open_leech_dump_btns(message, dumps):
+    """Open the per-task named dump picker and return canonical selections."""
+    sender = message.from_user or message.sender_chat
+    user_id = sender.id
+    msg_id = message.id
+    cache_key = ("leech_dump", user_id, message.chat.id, msg_id)
+    state = {
+        "dumps": list(dumps),
+        "selected": set(),
+        "done": False,
+        "cancelled": False,
+    }
+    bot_cache[cache_key] = state
+    prompt = await send_message(
+        message,
+        leech_dump_selection_text(state["dumps"], state["selected"]),
+        build_leech_dump_selection_buttons(
+            user_id, msg_id, state["dumps"], state["selected"]
+        ),
+    )
+    try:
+        started = time()
+        while time() - started <= 60:
+            await sleep(0.5)
+            if state["done"] or state["cancelled"]:
+                break
+
+        if state["cancelled"]:
+            await edit_message(prompt, "<b>Task cancelled.</b>")
+            return [], True
+
+        selected = state["selected"] or set(range(len(state["dumps"])))
+        await delete_message(prompt)
+        return [state["dumps"][index] for index in sorted(selected)], False
+    finally:
+        bot_cache.pop(cache_key, None)
 
 
 async def open_drive_clean(message):

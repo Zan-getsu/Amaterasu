@@ -1,15 +1,17 @@
 import re
 from asyncio import gather, sleep
 from contextlib import suppress
-from os import path as ospath, walk
-from pyrogram.types import Message
+from os import path as ospath
+from os import walk
 from re import sub
 from secrets import token_hex
 from shlex import split
 
-from aiofiles.os import listdir, makedirs, remove, path as aiopath
+from aiofiles.os import listdir, makedirs, remove
+from aiofiles.os import path as aiopath
 from aioshutil import move, rmtree
 from pyrogram.enums import ChatAction, ChatType
+from pyrogram.types import Message
 
 from .. import (
     DOWNLOAD_DIR,
@@ -23,13 +25,14 @@ from .. import (
     task_dict_lock,
     user_data,
 )
-from ..core.config_manager import Config, BinConfig
+from ..core.config_manager import BinConfig, Config
 from ..core.tg_client import TgClient
 from ..helper.ext_utils.bot_lock import ff_lock
+from .ext_utils.autorename_utils import apply_autorename_template
 from .ext_utils.bot_utils import (
     fetch_drive_cat,
-    get_valid_base_url,
     get_size_bytes,
+    get_valid_base_url,
     new_task,
     sync_to_async,
 )
@@ -46,9 +49,9 @@ from .ext_utils.files_utils import (
 from .ext_utils.links_utils import (
     is_gdrive_id,
     is_gdrive_link,
+    is_mega_link,
     is_rclone_path,
     is_telegram_link,
-    is_mega_link,
     is_terabox_link,
 )
 from .ext_utils.media_utils import (
@@ -58,18 +61,24 @@ from .ext_utils.media_utils import (
     get_document_type,
     take_ss,
 )
-from .ext_utils.autorename_utils import apply_autorename_template
 from .ext_utils.metadata_utils import MetadataProcessor
+from .ext_utils.telegram_destinations import (
+    format_leech_dump_destination,
+    normalize_named_leech_dumps,
+    parse_leech_dump_destinations,
+    select_named_leech_dumps,
+)
 from .mirror_leech_utils.gdrive_utils.list import GoogleDriveList
 from .mirror_leech_utils.rclone_utils.list import RcloneList
-from .mirror_leech_utils.terabox_utils.list import TeraboxCookieSelector, TeraboxList
 from .mirror_leech_utils.status_utils.ffmpeg_status import FFmpegStatus
 from .mirror_leech_utils.status_utils.sevenz_status import SevenZStatus
+from .mirror_leech_utils.terabox_utils.list import TeraboxCookieSelector, TeraboxList
 from .telegram_helper.bot_commands import BotCommands
 from .telegram_helper.compat import get_user_mention
 from .telegram_helper.message_utils import (
     get_tg_link_message,
     open_category_btns,
+    open_leech_dump_btns,
     send_message,
     send_status_message,
 )
@@ -112,6 +121,9 @@ class TaskConfig:
         self.drive_id = ""
         self.leech_dest = ""
         self.cmd_up_dest = ""
+        self.selected_dumps = []
+        self.user_dump_selection = ""
+        self.leech_dump_context = {}
         self.rc_flags = ""
         self.tag = ""
         self.name = ""
@@ -278,7 +290,73 @@ class TaskConfig:
             self.terabox_cookie_source = selector.cookie_label
         return cookie
 
+    async def _prepare_leech_dumps(self):
+        if not self.is_leech:
+            return
+
+        dumps = normalize_named_leech_dumps(
+            self.user_dict.get("LEECH_DUMP")
+            if "LEECH_DUMP" in self.user_dict
+            else self.user_dict.get("LDUMP"),
+            self.user_dict.get("LEECH_DUMP_CHAT"),
+            self.user_id,
+        )
+        requested = str(self.user_dump_selection or "").strip()
+        dump_mode = self.user_dict.get("DUMP_MODE", True)
+        if not dump_mode:
+            if requested:
+                raise ValueError(
+                    "Leech Dump mode is disabled. Enable it in /userset before using -ud."
+                )
+            self.selected_dumps = []
+            return
+
+        if not dumps:
+            if requested:
+                raise ValueError(
+                    "No Leech Dumps are configured. Add them in /userset first."
+                )
+            self.selected_dumps = []
+            return
+
+        selected = select_named_leech_dumps(dumps, requested)
+        if selected is not None:
+            self.selected_dumps = selected
+        elif "selected_dumps" in self.leech_dump_context:
+            self.selected_dumps = list(self.leech_dump_context["selected_dumps"])
+        elif len(dumps) == 1:
+            self.selected_dumps = list(dumps)
+        else:
+            self.selected_dumps, is_cancelled = await open_leech_dump_btns(
+                self.message, dumps
+            )
+            if is_cancelled:
+                self.is_cancelled = True
+                raise ValueError("Leech Dump selection cancelled.")
+        self.leech_dump_context["selected_dumps"] = tuple(self.selected_dumps)
+
+    async def _normalize_command_leech_destination(self):
+        if not self.cmd_up_dest:
+            return
+        destinations = parse_leech_dump_destinations(
+            self.cmd_up_dest, self.user_id
+        )
+        if len(destinations) != 1:
+            raise ValueError("-up accepts exactly one Telegram destination.")
+        chat_id, topic_id = destinations[0]
+        if chat_id != self.user_id:
+            try:
+                chat = await TgClient.bot.get_chat(chat_id)
+            except Exception as err:
+                raise ValueError(
+                    f"The bot cannot access the -up destination {chat_id}: "
+                    f"{str(err) or type(err).__name__}"
+                ) from err
+            chat_id = chat.id
+        self.cmd_up_dest = format_leech_dump_destination((chat_id, topic_id))
+
     async def before_start(self):
+        await self._prepare_leech_dumps()
         self.name_swap = (
             self.name_swap
             or self.user_dict.get("NAME_SWAP", False)
@@ -286,9 +364,9 @@ class TaskConfig:
         )
         if self.name_swap:
             self.name_swap = [x.split(":") for x in self.name_swap.split("|")]
-            
+
         self.autorename_template = self.user_dict.get("AUTORENAME_TEMPLATE", "")
-        
+
         self.excluded_extensions = self.user_dict.get("EXCLUDED_EXTENSIONS") or (
             excluded_extensions
             if "EXCLUDED_EXTENSIONS" not in self.user_dict
@@ -589,33 +667,25 @@ class TaskConfig:
                 ) != self.get_config_path(self.up_dest):
                     raise ValueError("You must use the same config to clone!")
         else:
-            self.leech_dest = self.user_dict.get("LEECH_DUMP_CHAT")
-
+            # Config.LEECH_DUMP_CHAT remains the primary upload chat. A task's
+            # -up value and selected named Leech Dumps are cached separately and
+            # copied after upload, preserving topic IDs and avoiding reparsing.
+            self.leech_dest = ""
             self.cmd_up_dest = self.up_dest
+            self.transmission_mode = Config.TRANSMISSION_MODE
             if self.cmd_up_dest:
                 if not isinstance(self.cmd_up_dest, int):
-                    if self.cmd_up_dest.startswith("b:"):
-                        self.cmd_up_dest = self.cmd_up_dest.replace("b:", "", 1)
+                    mode_prefix = self.cmd_up_dest[:2].lower()
+                    if mode_prefix == "b:":
+                        self.cmd_up_dest = self.cmd_up_dest[2:]
                         self.transmission_mode = "bot"
-                    elif self.cmd_up_dest.startswith("u:"):
-                        self.cmd_up_dest = self.cmd_up_dest.replace("u:", "", 1)
+                    elif mode_prefix == "u:":
+                        self.cmd_up_dest = self.cmd_up_dest[2:]
                         self.transmission_mode = "user"
-                    elif self.cmd_up_dest.startswith("h:"):
-                        self.cmd_up_dest = self.cmd_up_dest.replace("h:", "", 1)
+                    elif mode_prefix == "h:":
+                        self.cmd_up_dest = self.cmd_up_dest[2:]
                         self.transmission_mode = "both"
-                    if "|" in str(self.cmd_up_dest):
-                        self.cmd_up_dest, _ = list(
-                            map(
-                                lambda x: int(x) if x.lstrip("-").isdigit() else x,
-                                self.cmd_up_dest.split("|", 1),
-                            )
-                        )
-                    elif str(self.cmd_up_dest).lstrip("-").isdigit():
-                        self.cmd_up_dest = int(self.cmd_up_dest)
-                    elif str(self.cmd_up_dest).lower() == "pm":
-                        self.cmd_up_dest = self.user_id
-
-            self.transmission_mode = Config.TRANSMISSION_MODE
+            await self._normalize_command_leech_destination()
             if self.bot_trans:
                 self.transmission_mode = "bot"
             if self.user_trans:
@@ -697,8 +767,10 @@ class TaskConfig:
                                 await self.client.send_chat_action(
                                     self.up_dest, ChatAction.TYPING
                                 )
-                            except Exception:
-                                raise ValueError("Start the bot and try again!")
+                            except Exception as err:
+                                raise ValueError(
+                                    "Start the bot and try again!"
+                                ) from err
                         else:
                             self.transmission_mode = "user"
             elif self.transmission_mode in ("user", "both") and not self.is_super_chat:
@@ -934,6 +1006,7 @@ class TaskConfig:
         next_task_kwargs = {}
         if multi_leech_summary is not None:
             next_task_kwargs["multi_leech_summary"] = multi_leech_summary
+        next_task_kwargs["leech_dump_context"] = self.leech_dump_context
 
         await obj(
             client=self.client,
@@ -987,6 +1060,7 @@ class TaskConfig:
             next_task_kwargs = {}
             if multi_leech_summary := getattr(self, "multi_leech_summary", None):
                 next_task_kwargs["multi_leech_summary"] = multi_leech_summary
+            next_task_kwargs["leech_dump_context"] = self.leech_dump_context
 
             await obj(
                 client=self.client,
@@ -1234,11 +1308,11 @@ class TaskConfig:
         def perform_swap(name, swaps, template=""):
             name, ext = ospath.splitext(name)
             name = sub(r"www\S+", "", name)
-            
+
             if template:
                 name_ext = apply_autorename_template(name + ext, template)
                 name, ext = ospath.splitext(name_ext)
-                
+
             if swaps:
                 for swap in swaps:
                     pattern, res, cnt, sen = (
@@ -1247,7 +1321,11 @@ class TaskConfig:
                     cnt = 0 if len(cnt) == 0 else int(cnt)
                     try:
                         name = sub(
-                            rf"{pattern}", res, name, cnt, flags=getattr(re, sen.upper(), 0)
+                            rf"{pattern}",
+                            res,
+                            name,
+                            count=cnt,
+                            flags=getattr(re, sen.upper(), 0),
                         )
                     except Exception as e:
                         LOGGER.error(
@@ -1436,9 +1514,9 @@ class TaskConfig:
                     else:
                         self.subsize = await get_path_size(f_path)
                         self.subname = file_
-                        
+
                     res = await ffmpeg.encode_video(f_path, self.encode_profile, self.encode_metadata)
-                    
+
                     if res:
                         try:
                             await remove(f_path)

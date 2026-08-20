@@ -13,7 +13,7 @@ try:
 except Exception:
     print("\n[ERROR] WZGram not installed!")
     print("\nInstall required dependencies:")
-    print("  pip install 'wzgram[fast]==3.0.23'")
+    print("  pip install 'wzgram[fast]==3.0.33'")
     sys.exit(1)
 
 

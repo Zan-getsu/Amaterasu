@@ -1,6 +1,5 @@
-# -*- coding: utf-8 -*-
-from asyncio import sleep
 from ast import literal_eval
+from asyncio import gather, sleep
 from functools import partial
 from html import escape
 from io import BytesIO
@@ -11,10 +10,11 @@ from time import time
 from aiofiles.os import makedirs, remove
 from aiofiles.os import path as aiopath
 from langcodes import Language
+from pyrogram.enums import ButtonStyle
 from pyrogram.filters import create
 from pyrogram.handlers import MessageHandler
-from pyrogram.enums import ButtonStyle
 
+from web.security import make_signed_token
 
 from .. import auth_chats, excluded_extensions, sudo_users, user_data
 from ..core.config_manager import Config
@@ -27,9 +27,14 @@ from ..helper.ext_utils.bot_utils import (
 )
 from ..helper.ext_utils.db_handler import database
 from ..helper.ext_utils.leech_font import LEECH_FONT_STYLES, normalize_leech_font
-from ..helper.ext_utils.mega_utils import get_mega_account_info
 from ..helper.ext_utils.media_utils import create_thumb
+from ..helper.ext_utils.mega_utils import get_mega_account_info
 from ..helper.ext_utils.status_utils import get_readable_file_size
+from ..helper.ext_utils.telegram_destinations import (
+    format_named_leech_dumps,
+    normalize_named_leech_dumps,
+    parse_named_leech_dumps,
+)
 from ..helper.telegram_helper.button_build import ButtonMaker
 from ..helper.telegram_helper.compat import get_user_mention
 from ..helper.telegram_helper.message_utils import (
@@ -38,7 +43,6 @@ from ..helper.telegram_helper.message_utils import (
     send_file,
     send_message,
 )
-from web.security import make_signed_token
 
 handler_dict = {}
 
@@ -62,7 +66,7 @@ def _display_value(value, fallback="None"):
 leech_options = [
     "THUMBNAIL",
     "LEECH_SPLIT_SIZE",
-    "LEECH_DUMP_CHAT",
+    "LEECH_DUMP",
     "LEECH_PREFIX",
     "LEECH_SUFFIX",
     "LEECH_FONT",
@@ -127,14 +131,34 @@ user_settings_text = {
         "",
         f"Send Leech split size in bytes or use gb or mb. Example: 40000000 or 2.5gb or 1000mb. PREMIUM_USER: {TgClient.IS_PREMIUM_USER}.</i> \n┖ <b>Time Left :</b> <code>60 sec</code>",
     ),
-    "LEECH_DUMP_CHAT": (
-        "",
-        "",
-        """Send leech destination ID/USERNAME/PM. 
-* b:id/@username/pm (b: means leech by bot) (id or username of the chat or write pm means private message so bot will send the files in private to you) when you should use b:(leech by bot)? When your default settings is leech by user and you want to leech by bot for specific task.
-* u:id/@username(u: means leech by user) This incase OWNER added USER_STRING_SESSION.
-* h:id/@username(hybrid leech) h: to upload files by bot and user based on file size.
-* id/@username|topic_id(leech in specific chat and topic) add | without space and write topic id after chat id or username.
+    "LEECH_DUMP": (
+        "String",
+        "Named chats where leeched files can also be copied.",
+        """<b>Set your Leech Dumps</b>
+
+Send one named destination per line using:
+<code>NAME DESTINATION</code>
+
+Example:
+<code>Movies -1001234567890
+Anime @animebackup
+Requests -1009876543210|45
+Personal pm</code>
+
+• Save up to 10 named dumps.
+• Names may contain spaces, but not commas.
+• Use <code>|topic_id</code> for a forum topic.
+• The complete list replaces the previous list only after every line is valid.
+• The bot validates that each chat is accessible before saving.
+
+For a leech task, use <code>-ud Movies,Anime</code> to choose up to 3 dumps,
+or <code>-ud all</code> to send every file to every saved dump. If several dumps
+exist and <code>-ud</code> is omitted, the bot shows a picker.
+
+Use the <b>Dump Mode</b> button to temporarily disable all additional Leech
+Dumps without deleting the saved list. The bot's primary upload chat is not
+affected.
+
 ┖ <b>Time Left :</b> <code>60 sec</code>""",
     ),
     "LEECH_PREFIX": (
@@ -402,11 +426,11 @@ async def get_user_settings(from_user, stype="main"):
         buttons.data_button("⚙ Leech Settings", f"userset {user_id} leech")
         buttons.data_button("⚙ Uphoster Settings", f"userset {user_id} uphoster")
         buttons.data_button("⚙ FF Media Settings", f"userset {user_id} ffset")
-        
+
         is_sudo = user_id == Config.OWNER_ID or user_id in sudo_users or user_dict.get("SUDO")
         if is_sudo:
             buttons.data_button("🎬 Encode Profiles", f"userset {user_id} encode")
-            
+
         buttons.data_button(
             "Mics Settings", f"userset {user_id} advanced", position="l_body"
         )
@@ -488,13 +512,29 @@ async def get_user_settings(from_user, stype="main"):
             split_size = user_dict["LEECH_SPLIT_SIZE"]
         else:
             split_size = Config.LEECH_SPLIT_SIZE
-        buttons.data_button("✦ Leech Destination", f"userset {user_id} menu LEECH_DUMP_CHAT")
-        if user_dict.get("LEECH_DUMP_CHAT", False):
-            leech_dest = user_dict["LEECH_DUMP_CHAT"]
-        elif "LEECH_DUMP_CHAT" not in user_dict and Config.LEECH_DUMP_CHAT:
-            leech_dest = Config.LEECH_DUMP_CHAT
+        buttons.data_button("✦ Leech Dump", f"userset {user_id} menu LEECH_DUMP")
+        try:
+            leech_dumps = normalize_named_leech_dumps(
+                user_dict.get("LEECH_DUMP")
+                if "LEECH_DUMP" in user_dict
+                else user_dict.get("LDUMP"),
+                user_dict.get("LEECH_DUMP_CHAT"),
+                user_id,
+            )
+        except ValueError:
+            leech_dumps = []
+        if leech_dumps:
+            dump_names = ", ".join(name for name, _chat, _topic in leech_dumps)
+            leech_dest = f"{len(leech_dumps)} saved ({dump_names})"
+            dump_mode = user_dict.get("DUMP_MODE", True)
+            buttons.data_button(
+                "Disable Dump Mode" if dump_mode else "Enable Dump Mode",
+                f"userset {user_id} tog DUMP_MODE {'f' if dump_mode else 't'}",
+            )
+            dump_mode_text = "Enabled" if dump_mode else "Disabled"
         else:
             leech_dest = "None"
+            dump_mode_text = "Not configured"
         buttons.data_button("✦ LEECH PREFIX", f"userset {user_id} menu LEECH_PREFIX")
         if user_dict.get("LEECH_PREFIX", False):
             lprefix = user_dict["LEECH_PREFIX"]
@@ -591,7 +631,8 @@ async def get_user_settings(from_user, stype="main"):
 ├─ {'Suffix':<15}: {escape(lsuffix)}
 ├─ {'Font':<15}: {escape(lfont)}
 ├─ {'Caption':<15}: {escape(lcap)}
-├─ {'Destination':<15}: {leech_dest}
+├─ {'Leech Dump':<15}: {leech_dest}
+├─ {'Dump Mode':<15}: {dump_mode_text}
 └─ {'Thumb Layout':<15}: {thumb_layout}
 </code>
 """
@@ -1174,9 +1215,9 @@ async def get_user_settings(from_user, stype="main"):
 
     elif stype == "encode":
         profiles = await database.get_encode_profiles(user_id)
-        
+
         buttons.data_button("➕ Create Profile", f"userset {user_id} enc_create", position="header")
-        
+
         text = "<b>✦ ENCODE PROFILES</b>\n<code>"
         if not profiles or len(profiles) <= 1:
             text += "└─ No custom profiles found.\n</code>"
@@ -1189,7 +1230,7 @@ async def get_user_settings(from_user, stype="main"):
                 if pdata.get("is_default"):
                     name = f"⭐ {name}"
                 buttons.data_button(name, f"userset {user_id} enc_view {pid}")
-                
+
         buttons.data_button("↩ BACK", f"userset {user_id} back main", "footer")
         buttons.data_button("✕ CLOSE", f"userset {user_id} close", "footer", style=ButtonStyle.DANGER)
         btns = buttons.build_menu(2)
@@ -1294,6 +1335,57 @@ async def remove_one(_, message, option, rfunc):
 
 
 @new_task
+async def set_leech_dumps(_, message, option, rfunc):
+    user_id = message.from_user.id
+    handler_dict[user_id] = False
+    try:
+        parsed = parse_named_leech_dumps(message.text)
+    except ValueError as err:
+        await send_message(message, str(err))
+        return
+
+    async def resolve_dump(name, destination):
+        chat_id, topic_id = destination
+        if chat_id == "pm":
+            return name, ("pm", None), None
+        try:
+            chat = await TgClient.bot.get_chat(chat_id)
+        except Exception as err:
+            return name, destination, str(err) or type(err).__name__
+        if chat is None:
+            return name, destination, "chat not found"
+        return name, (chat.id, topic_id), None
+
+    results = await gather(
+        *(resolve_dump(name, destination) for name, destination in parsed.items())
+    )
+    errors = [
+        f"• {escape(name)}: {escape(error)}"
+        for name, _destination, error in results
+        if error is not None
+    ]
+    if errors:
+        await send_message(
+            message,
+            "<b>Leech Dumps were not changed.</b> The bot could not access:\n"
+            + "\n".join(errors)
+            + "\n\nAdd the bot to those chats and make sure the IDs/usernames are correct.",
+        )
+        return
+
+    resolved = {name: destination for name, destination, _error in results}
+    update_user_ldata(user_id, "LEECH_DUMP", format_named_leech_dumps(resolved))
+    user_data.get(user_id, {}).pop("LDUMP", None)
+    # Once the named model is saved, prevent a legacy per-user value from
+    # silently reappearing if the named list is later removed.
+    update_user_ldata(user_id, "LEECH_DUMP_CHAT", "")
+    await delete_message(message)
+    await rfunc()
+    await database.update_user_data(user_id)
+    await database.update_user_doc(user_id, "LDUMP")
+
+
+@new_task
 async def set_option(_, message, option, rfunc):
     user_id = message.from_user.id
     handler_dict[user_id] = False
@@ -1302,7 +1394,6 @@ async def set_option(_, message, option, rfunc):
         if not value.isdigit():
             value = get_size_bytes(value)
         value = min(int(value), TgClient.MAX_SPLIT_SIZE)
-    # elif option == "LEECH_DUMP_CHAT": # TODO: Add
     elif option == "EXCLUDED_EXTENSIONS":
         fx = value.split()
         value = ["aria2", "!qB"]
@@ -1506,6 +1597,28 @@ async def get_menu(option, message, user_id):
             val = "<br>".join(lines)
         elif not val:
             val = "<b>Not Exists</b>"
+    elif option == "LEECH_DUMP":
+        try:
+            dumps = normalize_named_leech_dumps(
+                user_dict.get("LEECH_DUMP")
+                if "LEECH_DUMP" in user_dict
+                else user_dict.get("LDUMP"),
+                user_dict.get("LEECH_DUMP_CHAT"),
+                user_id,
+            )
+        except ValueError as err:
+            val = f"<b>Invalid saved value:</b> {escape(str(err))}"
+        else:
+            val = (
+                "\n".join(
+                    f"• <b>{escape(name)}</b>: "
+                    f"<code>{escape(str(chat_id))}"
+                    f"{'|' + str(topic_id) if topic_id is not None else ''}</code>"
+                    for name, chat_id, topic_id in dumps
+                )
+                if dumps
+                else "<b>Not Exists</b>"
+            )
 
     option_display = escape(str(option))
     input_type_display = escape(str(user_settings_text[option][0]))
@@ -1525,6 +1638,14 @@ async def get_menu(option, message, user_id):
 <code>{{extension}}</code>: File extension
 <code>{{audiolang}}</code>: Audio language
 <code>{{sublang}}</code>  : Subtitle language
+"""
+    elif option == "LEECH_DUMP":
+        text = f"""<b>✦ MENU SETTINGS</b>
+<b>Option:</b> <code>Leech Dump</code>
+<b>Saved Dumps:</b>
+{val}
+<b>Input Type:</b> <code>{input_type_display}</code>
+<b>Description:</b> {description_display}
 """
     else:
         value_display = f"<code>{escape(str(val))}</code>" if val else "<code>Not Exists</code>"
@@ -1650,13 +1771,13 @@ async def edit_user_settings(client, query):
         pdata = profiles.get(pid)
         if not pdata:
             return await update_user_settings(query, "encode")
-            
+
         buttons = ButtonMaker()
         buttons.data_button("⭐ Set Default", f"userset {user_id} enc_def {pid}")
         buttons.data_button("✕ Delete", f"userset {user_id} enc_del {pid}")
         buttons.data_button("↩ BACK", f"userset {user_id} back encode", "footer")
         buttons.data_button("✕ CLOSE", f"userset {user_id} close", "footer", style=ButtonStyle.DANGER)
-        
+
         profile_name = escape(str(pdata.get("name", pid)))
         text = (
             f"<b>✦ ENCODE PROFILE : {profile_name}</b>\n"
@@ -1670,7 +1791,7 @@ async def edit_user_settings(client, query):
             f"╰─ <b>Audio params</b> : "
             f"<code>{escape(str(pdata.get('audio_params', {})))}</code>"
         )
-        
+
         await edit_message(message, text, buttons.build_menu(2))
     elif data[2] == "enc_def":
         await query.answer("Profile set as default!", show_alert=True)
@@ -1789,7 +1910,7 @@ async def edit_user_settings(client, query):
         buttons = ButtonMaker()
         if data[2] == "set":
             text = _clean_setting_markup(user_settings_text[data[3]][2])
-            func = set_option
+            func = set_leech_dumps if data[3] == "LEECH_DUMP" else set_option
         elif data[2] == "addone":
             text = f"Add one or more string key and value to {data[3]}. Example: {{'key 1': 62625261, 'key 2': 'value 2'}}. Timeout: 60 sec"
             func = add_one
@@ -1833,15 +1954,28 @@ async def edit_user_settings(client, query):
             del user_dict[data[3]]
             await database.update_user_doc(user_id, data[3])
         else:
-            update_user_ldata(user_id, data[3], "")
+            if data[3] == "LEECH_DUMP":
+                update_user_ldata(user_id, "LEECH_DUMP", {})
+                user_data.get(user_id, {}).pop("LDUMP", None)
+                update_user_ldata(user_id, "LEECH_DUMP_CHAT", "")
+            else:
+                update_user_ldata(user_id, data[3], "")
             if data[3] == "MEGA_EMAIL":
                 update_user_ldata(user_id, "MEGA_PASSWORD", "")
             await database.update_user_data(user_id)
+            if data[3] == "LEECH_DUMP":
+                await database.update_user_doc(user_id, "LDUMP")
         await get_menu(data[3], message, user_id)
     elif data[2] == "reset":
         await query.answer("Reset Done!", show_alert=True)
         user_dict.pop(data[3], None)
+        if data[3] == "LEECH_DUMP":
+            update_user_ldata(user_id, "LEECH_DUMP", {})
+            user_data.get(user_id, {}).pop("LDUMP", None)
+            update_user_ldata(user_id, "LEECH_DUMP_CHAT", "")
         await database.update_user_data(user_id)
+        if data[3] == "LEECH_DUMP":
+            await database.update_user_doc(user_id, "LDUMP")
         await get_menu(data[3], message, user_id)
     elif data[2] == "confirm_reset_all":
         await query.answer()

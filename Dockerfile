@@ -25,7 +25,7 @@ RUN /amaterasuvenv/bin/pip install --no-cache-dir uv
 # Install python dependencies using uv
 COPY requirements.txt .
 RUN /amaterasuvenv/bin/uv pip install --python /amaterasuvenv/bin/python --no-cache-dir -r requirements.txt \
-    && /amaterasuvenv/bin/python -c "import pyrogram, warpcrypto; from pyrogram.crypto import aes; assert pyrogram.__version__ == '3.0.23', pyrogram.__version__; assert getattr(aes, 'warpcrypto', None) is warpcrypto, 'WarpCrypto is not WZGram active crypto backend'; print('Verified WZGram 3.0.23 with active WarpCrypto backend')"
+    && /amaterasuvenv/bin/python -c "import pyrogram, warpcrypto; from pyrogram.crypto import aes; assert pyrogram.__version__ == '3.0.33', pyrogram.__version__; assert getattr(aes, 'warpcrypto', None) is warpcrypto, 'WarpCrypto is not WZGram active crypto backend'; print('Verified WZGram 3.0.33 with active WarpCrypto backend')"
 
 # Copy all the project files
 COPY . .

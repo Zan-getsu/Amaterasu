@@ -87,6 +87,19 @@ In case you want to specify whether using token.pickle or service accounts you c
 DEFAULT_UPLOAD doesn't affect on leech cmds.
 """
 
+leech_dump = """<b>Leech Dump selection</b>: -ud
+
+Save named destinations in <b>User Settings → Leech Settings → Leech Dump</b>.
+
+• Choose up to 3 named dumps: <code>/cmd link -ud Movies,Backup</code>
+• Send to every saved dump: <code>/cmd link -ud all</code>
+• If one dump is saved, it is selected automatically.
+• If several are saved and <code>-ud</code> is omitted, the bot opens a picker.
+• Dump Mode can temporarily disable additional dumps without deleting them.
+
+The 3-dump limit applies only to individual selection. <code>-ud all</code> and
+<b>Select All</b> intentionally send every uploaded file to every saved dump."""
+
 user_download = """<b>User Download</b>: link
 
 /cmd tp:link to download using owner token.pickle incase service account enabled.
@@ -291,7 +304,7 @@ Apply custom metadata to media files using pipe (|) separator.
 
 <b>Dynamic Variables:</b>
 • <code>{filename}</code> - Original filename
-• <code>{basename}</code> - Filename without extension  
+• <code>{basename}</code> - Filename without extension
 • <code>{extension}</code> - File extension
 • <code>{audiolang}</code> - Audio language (auto-detected or English)
 • <code>{sublang}</code> - Subtitle language (auto-detected or none)
@@ -300,7 +313,7 @@ Apply custom metadata to media files using pipe (|) separator.
 <b>Per-Stream Metadata:</b>
 Set different metadata for audio/video/subtitle streams in User Settings > FFmpeg Settings:
 • <b>Audio Metadata:</b> Applied to each audio stream
-• <b>Video Metadata:</b> Applied to video streams  
+• <b>Video Metadata:</b> Applied to video streams
 • <b>Subtitle Metadata:</b> Applied to subtitle streams
 
 <b>Examples:</b>
@@ -326,6 +339,7 @@ YT_HELP_DICT = {
     "Thumb": thumb,
     "Split-Size": split_size,
     "Upload-Destination": upload,
+    "Leech-Dump": leech_dump,
     "Rclone-Flags": rcf,
     "Bulk": bulk,
     "Sample-Video": sample_video,
@@ -354,6 +368,7 @@ MIRROR_HELP_DICT = {
     "Thumb": thumb,
     "Split-Size": split_size,
     "Upload-Destination": upload,
+    "Leech-Dump": leech_dump,
     "Rclone-Flags": rcf,
     "Bulk": bulk,
     "Join": join,
@@ -412,7 +427,7 @@ PASSWORD_ERROR_MESSAGE = """
 - Insert <b>::</b> after the link and write the password after the sign.
 
 <b>Example:</b> link::my password
-"""
+"""  # noqa: S105 - user-facing password help text
 
 
 def get_bot_commands():
@@ -516,7 +531,7 @@ def get_help_string():
 
     commands = BotCommands.get_commands()
 
-    for key, cmds in commands.items():
+    for key, _cmds in commands.items():
         cmd_attr = getattr(BotCommands, f"{key}Command", None)
         if not cmd_attr:
             continue
@@ -576,7 +591,7 @@ def get_help_string():
             help_lines.append(f"{cmd_str} [query]: Bot settings.")
         elif key == "Select":
             help_lines.append(
-                f"{cmd_str}: Select files from torrents or nzb by gid or reply."
+                f"{cmd_str}: Select files from torrents or nzb by gid or reply."  # noqa: S608 - help text, not SQL
             )
         elif key == "CancelTask":
             help_lines.append(f"{cmd_str} [gid]: Cancel task by gid or reply.")
