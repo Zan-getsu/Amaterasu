@@ -2,6 +2,7 @@ import ast
 import asyncio
 import json
 import logging
+import os
 import re
 from contextlib import suppress
 from pathlib import Path
@@ -399,6 +400,159 @@ def test_leech_caption_quality_is_wired_to_media_probe():
 
     assert "dur, qual, lang, subs = await get_media_info(up_path, True)" in source
     assert "quality=qual" in source
+
+
+def test_split_quality_is_cached_before_first_part_is_removed(tmp_path):
+    first_part = tmp_path / "movie.mkv.001"
+    later_part = tmp_path / "movie.mkv.004"
+    first_part.write_bytes(b"first")
+    later_part.write_bytes(b"later")
+    probes = []
+
+    async def sync_to_async(func, *args):
+        return func(*args)
+
+    async def get_media_info(path, _extra_info):
+        probes.append(os.fspath(path))
+        return 0, "2160p", "", ""
+
+    class AsyncPath:
+        @staticmethod
+        async def exists(path):
+            return os.path.exists(path)
+
+    split_file_identity = load_method(
+        TELEGRAM_UPLOADER_SOURCE,
+        "TelegramUploader",
+        "_split_file_identity",
+        {"ospath": os.path, "re_match": re.match},
+    )
+    cache_split_qualities = load_method(
+        TELEGRAM_UPLOADER_SOURCE,
+        "TelegramUploader",
+        "_cache_split_qualities",
+        {
+            "LOGGER": SimpleNamespace(info=lambda *_args: None),
+            "get_media_info": get_media_info,
+            "natsorted": sorted,
+            "ospath": os.path,
+            "re_match": re.match,
+            "sync_to_async": sync_to_async,
+            "walk": os.walk,
+        },
+    )
+    get_cached_split_quality = load_method(
+        TELEGRAM_UPLOADER_SOURCE,
+        "TelegramUploader",
+        "_get_cached_split_quality",
+        {
+            "aiopath": AsyncPath,
+            "get_media_info": get_media_info,
+            "ospath": os.path,
+            "re_match": re.match,
+        },
+    )
+
+    class DummyUploader:
+        _split_file_identity = split_file_identity
+        _cache_split_qualities = cache_split_qualities
+        _get_cached_split_quality = get_cached_split_quality
+
+        def __init__(self):
+            self._path = os.fspath(tmp_path)
+            self._lcaption = "{quality} {filename}"
+            self._listener = SimpleNamespace(pre_split_quality={})
+            self._split_quality_cache = {}
+
+    async def run_check():
+        uploader = DummyUploader()
+        await uploader._cache_split_qualities()
+        first_part.unlink()
+        known, quality = await uploader._get_cached_split_quality(
+            os.fspath(later_part)
+        )
+        return uploader, known, quality
+
+    uploader, known, quality = asyncio.run(run_check())
+
+    assert known is True
+    assert quality == "2160p"
+    assert probes == [os.fspath(first_part)]
+    assert len(uploader._split_quality_cache) == 1
+
+
+def test_split_parts_upload_in_order_while_unrelated_files_remain_parallel():
+    split_file_identity = load_method(
+        TELEGRAM_UPLOADER_SOURCE,
+        "TelegramUploader",
+        "_split_file_identity",
+        {"ospath": os.path, "re_match": re.match},
+    )
+    upload_split_files_in_order = load_method(
+        TELEGRAM_UPLOADER_SOURCE,
+        "TelegramUploader",
+        "_upload_split_files_in_order",
+        {
+            "CancelledError": asyncio.CancelledError,
+            "LOGGER": SimpleNamespace(warning=lambda *_args: None),
+        },
+    )
+    queue_upload_task = load_method(
+        TELEGRAM_UPLOADER_SOURCE,
+        "TelegramUploader",
+        "_queue_upload_task",
+        {"ensure_future": asyncio.ensure_future},
+    )
+
+    class DummyUploader:
+        _split_file_identity = split_file_identity
+        _upload_split_files_in_order = upload_split_files_in_order
+        _queue_upload_task = queue_upload_task
+
+        def __init__(self):
+            self._listener = SimpleNamespace(is_cancelled=False)
+            self._split_upload_tails = {}
+            self._upload_tasks = []
+            self.events = []
+            self.active = 0
+            self.max_active = 0
+
+        async def _upload_file_task(
+            self, file_, _f_path, _dirpath, _user_session, _seq_idx
+        ):
+            self.active += 1
+            self.max_active = max(self.max_active, self.active)
+            self.events.append(("start", file_))
+            await asyncio.sleep(0.01)
+            self.events.append(("end", file_))
+            self.active -= 1
+            return file_
+
+    async def run_uploads():
+        uploader = DummyUploader()
+        for index, file_ in enumerate(
+            ("movie.mkv.001", "movie.mkv.002", "movie.mkv.003", "other.bin")
+        ):
+            uploader._queue_upload_task(
+                file_, os.path.join("downloads", file_), "downloads", False, index
+            )
+        await asyncio.gather(*uploader._upload_tasks)
+        return uploader
+
+    uploader = asyncio.run(run_uploads())
+    split_events = [
+        event for event in uploader.events if event[1].startswith("movie.mkv")
+    ]
+
+    assert split_events == [
+        ("start", "movie.mkv.001"),
+        ("end", "movie.mkv.001"),
+        ("start", "movie.mkv.002"),
+        ("end", "movie.mkv.002"),
+        ("start", "movie.mkv.003"),
+        ("end", "movie.mkv.003"),
+    ]
+    assert uploader.max_active == 2
 
 
 def test_telegram_folder_uploads_bound_file_and_metadata_concurrency():

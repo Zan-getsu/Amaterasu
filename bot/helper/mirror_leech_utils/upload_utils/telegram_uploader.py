@@ -126,6 +126,8 @@ class TelegramUploader:
         )
         self._file_upload_semaphore = Semaphore(self._file_upload_parallelism)
         self._state_lock = Lock()
+        self._split_quality_cache = {}
+        self._split_upload_tails = {}
         self._hu = HypertgUpload(self) if Config.USE_HYPER and Config.LEECH_DUMP_CHAT else None
         self._upload_seq = []
         self._msg_to_seq = {}
@@ -292,6 +294,69 @@ class TelegramUploader:
 
         return True
 
+    def _split_file_identity(self, file_path):
+        """Return a stable family key and part number for supported split names."""
+        file_name = ospath.basename(file_path)
+        if match := re_match(r"^(.+)\.(\d{3})$", file_name):
+            family_name = match.group(1)
+            part_number = int(match.group(2))
+        elif match := re_match(r"^(.+)\.part(\d+)(\.[^.]+)$", file_name):
+            family_name = f"{match.group(1)}{match.group(3)}"
+            part_number = int(match.group(2))
+        else:
+            return None
+        family_path = ospath.join(ospath.dirname(file_path), family_name)
+        return ospath.normcase(ospath.abspath(family_path)), part_number
+
+    async def _cache_split_qualities(self):
+        """Cache .001 quality before uploads can rename or remove that part."""
+        if "{quality}" not in self._lcaption.lower():
+            return
+        legacy_cache = getattr(self._listener, "pre_split_quality", {})
+        for dirpath, _, files in natsorted(await sync_to_async(walk, self._path)):
+            for file_ in natsorted(files):
+                match = re_match(r"^(.+)\.(\d{3})$", file_)
+                if not match or int(match.group(2)) != 1:
+                    continue
+                f_path = ospath.join(dirpath, file_)
+                identity = self._split_file_identity(f_path)
+                if identity is None or identity[0] in self._split_quality_cache:
+                    continue
+                quality = legacy_cache.get(match.group(1))
+                if quality is None:
+                    _, quality, _, _ = await get_media_info(f_path, True)
+                # An empty result is cached deliberately so every part receives
+                # the same caption instead of probing arbitrary binary chunks.
+                self._split_quality_cache[identity[0]] = quality or ""
+        if self._split_quality_cache:
+            LOGGER.info(
+                "Cached Telegram caption quality for %s split file group(s)",
+                len(self._split_quality_cache),
+            )
+
+    async def _get_cached_split_quality(self, up_path):
+        """Return whether split quality is known and its stable cached value."""
+        match = re_match(r"^(.+)\.(\d{3})$", ospath.basename(up_path))
+        if not match:
+            return False, ""
+        identity = self._split_file_identity(up_path)
+        if identity is None:
+            return False, ""
+        family_key = identity[0]
+        if family_key in self._split_quality_cache:
+            return True, self._split_quality_cache[family_key]
+
+        quality = getattr(self._listener, "pre_split_quality", {}).get(
+            match.group(1)
+        )
+        first_part = ospath.join(ospath.dirname(up_path), f"{match.group(1)}.001")
+        if quality is None and await aiopath.exists(first_part):
+            _, quality, _, _ = await get_media_info(first_part, True)
+        if quality is None:
+            return False, ""
+        self._split_quality_cache[family_key] = quality or ""
+        return True, self._split_quality_cache[family_key]
+
     async def _prepare_file(self, pre_file_, dirpath):
         cap_file_ = file_ = pre_file_
         lprefix = self._lprefix
@@ -324,18 +389,11 @@ class TelegramUploader:
                 r"\{([^}]+)\}", lambda m: f"{{{m.group(1).lower()}}}", parts[0]
             )
             up_path = ospath.join(dirpath, pre_file_)
-            import re as _re
-            _split_match = _re.search(r'^(.+)\.(\d{3})$', ospath.basename(up_path))
-            pre_quality = None
-            if _split_match:
-                base_name = _split_match.group(1)
-                pre_quality = getattr(self._listener, "pre_split_quality", {}).get(base_name)
-                if not pre_quality:
-                    _first = ospath.join(dirpath, f"{base_name}.001")
-                    if await aiopath.exists(_first):
-                        _, pre_quality, _, _ = await get_media_info(_first, True)
-            if pre_quality:
-                dur, qual, lang, subs = 0, pre_quality, "", ""
+            has_split_quality, split_quality = await self._get_cached_split_quality(
+                up_path
+            )
+            if has_split_quality:
+                dur, qual, lang, subs = 0, split_quality, "", ""
             else:
                 dur, qual, lang, subs = await get_media_info(up_path, True)
             class SafeDict(dict):
@@ -620,6 +678,54 @@ class TelegramUploader:
                 file_, f_path, dirpath, user_session, seq_idx
             )
 
+    async def _upload_split_files_in_order(
+        self, previous_task, file_, f_path, dirpath, user_session, seq_idx
+    ):
+        """Wait for the preceding sibling before uploading the next split part."""
+        try:
+            await previous_task
+        except CancelledError:
+            if self._listener.is_cancelled:
+                return None
+            raise
+        except Exception as err:
+            LOGGER.warning(
+                "Previous split-part upload failed; continuing in order: %s",
+                str(err) or repr(err),
+            )
+        if self._listener.is_cancelled:
+            return None
+        return await self._upload_file_task(
+            file_, f_path, dirpath, user_session, seq_idx
+        )
+
+    def _queue_upload_task(self, file_, f_path, dirpath, user_session, seq_idx):
+        identity = self._split_file_identity(f_path)
+        previous_task = (
+            self._split_upload_tails.get(identity[0]) if identity is not None else None
+        )
+        if previous_task is None:
+            task = ensure_future(
+                self._upload_file_task(
+                    file_, f_path, dirpath, user_session, seq_idx
+                )
+            )
+        else:
+            task = ensure_future(
+                self._upload_split_files_in_order(
+                    previous_task,
+                    file_,
+                    f_path,
+                    dirpath,
+                    user_session,
+                    seq_idx,
+                )
+            )
+        if identity is not None:
+            self._split_upload_tails[identity[0]] = task
+        self._upload_tasks.append(task)
+        return task
+
     async def _upload_file_task_inner(
         self, file_, f_path, dirpath, user_session, seq_idx
     ):
@@ -667,6 +773,8 @@ class TelegramUploader:
         if not res:
             return
         self._upload_tasks = []
+        self._split_upload_tails = {}
+        await self._cache_split_qualities()
         LOGGER.info(
             "Telegram file upload parallelism: %s",
             self._file_upload_parallelism,
@@ -730,12 +838,9 @@ class TelegramUploader:
                             )
                     self._last_msg_in_group = False
                     self._upload_seq.append(None)
-                    task = ensure_future(
-                        self._upload_file_task(
-                            file_, f_path, dirpath, self._user_session, seq_idx
-                        )
+                    self._queue_upload_task(
+                        file_, f_path, dirpath, self._user_session, seq_idx
                     )
-                    self._upload_tasks.append(task)
                     seq_idx += 1
                     if self._listener.is_cancelled:
                         return
