@@ -47,7 +47,8 @@ class GoogleDriveDownload(GoogleDriveHelper):
     def download(self):
         file_id = self.get_id_from_url(self.listener.link, self.listener.user_id)
         self.service = self.authorize()
-        self._updater = SetInterval(self.update_interval, self.progress)
+        updater = SetInterval(self.update_interval, self.progress)
+        self._updater = updater
         try:
             meta = self.get_file_metadata(file_id)
             if meta.get("mimeType") == self.G_DRIVE_DIR_MIME_TYPE:
@@ -69,17 +70,15 @@ class GoogleDriveDownload(GoogleDriveHelper):
                     self.alt_auth = True
                     self.use_sa = False
                     LOGGER.error("File not found. Trying with token.pickle...")
-                    self._updater.cancel()
+                    updater.cancel()
                     return self.download()
                 err = "File not found!"
             async_to_sync(self.listener.on_download_error, err)
             self.listener.is_cancelled = True
         finally:
-            self._updater.cancel()
-            if self.listener.is_cancelled:
-                return
+            updater.cancel()
+        if not self.listener.is_cancelled:
             async_to_sync(self.listener.on_download_complete)
-            return
 
     def _download_folder(self, folder_id, path, folder_name):
         folder_name = folder_name.replace("/", "")

@@ -10,7 +10,7 @@
 # built-in cloudflare_tunnel.py will handle it directly — no separate
 # tunnel container needed.
 
-FROM alpine:3.20
+FROM alpine:3.24
 
 RUN set -eux; \
     apk add --no-cache bash ca-certificates curl grep; \

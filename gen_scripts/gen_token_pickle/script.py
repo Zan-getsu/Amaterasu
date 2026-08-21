@@ -23,6 +23,19 @@ SCOPES = [
     "https://www.googleapis.com/auth/youtube.readonly",
     "https://www.googleapis.com/auth/youtube.force-ssl",
 ]
+_MISSING = object()
+
+
+def dump_legacy_compatible_credentials(creds, file_obj) -> None:
+    """Write a token that older google-auth clients can still unpickle."""
+    rab_manager = getattr(creds, "_rab_manager", _MISSING)
+    if rab_manager is not _MISSING:
+        creds._rab_manager = None
+    try:
+        pickle.dump(creds, file_obj, protocol=4)
+    finally:
+        if rab_manager is not _MISSING:
+            creds._rab_manager = rab_manager
 
 
 def print_header(title: str) -> None:
@@ -66,7 +79,7 @@ def save_token(creds) -> None:
     """Save credentials to token file."""
     try:
         with open(TOKEN_FILE, "wb") as f:
-            pickle.dump(creds, f)
+            dump_legacy_compatible_credentials(creds, f)
         print(f"\n[OK] Token saved to: {TOKEN_FILE}")
     except Exception as e:
         print(f"\n[ERROR] Failed to save token: {e}")

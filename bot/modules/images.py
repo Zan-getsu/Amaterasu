@@ -1,6 +1,8 @@
+from .. import LOGGER
 from ..core.config_manager import Config
 from ..helper.ext_utils.bot_utils import handleIndex, new_task
 from ..helper.ext_utils.db_handler import database
+from ..helper.ext_utils.http_client import get_client
 from ..helper.telegram_helper.bot_commands import BotCommands
 from ..helper.telegram_helper.button_build import ButtonMaker
 from ..helper.telegram_helper.message_utils import (
@@ -24,38 +26,32 @@ from ..helper.telegram_helper.message_utils import (
 async def _search_images_for_query(query, page=1, per_page=4):
     """Search wallpaperflare, peapix, wallhaven for the query.
     Returns a list of image URLs (max per_page). Page is 1-indexed."""
-    from httpx import AsyncClient, Limits
     from ..helper.ext_utils.bot_utils import (
         _fetch_wallpaperflare,
-        _fetch_peapix,
         _fetch_wallhaven,
     )
     seen = set()
     all_results = []
     sources = Config.IMG_SOURCES if isinstance(Config.IMG_SOURCES, list) else ["wallpaperflare"]
     try:
-        async with AsyncClient(
-            headers={"User-Agent": "Mozilla/5.0"},
-            limits=Limits(max_connections=5),
-            timeout=30,
-        ) as client:
-            if "wallpaperflare" in sources:
-                # Fetch 2 pages to have enough results
-                for p in range(1, page + 1):
-                    results = await _fetch_wallpaperflare(client, query, p, seen)
-                    for url in results:
-                        if url not in seen:
-                            seen.add(url)
-                            all_results.append(url)
-            if "wallhaven" in sources:
-                for p in range(1, page + 1):
-                    results = await _fetch_wallhaven(client, query, p, seen)
-                    for url in results:
-                        if url not in seen:
-                            seen.add(url)
-                            all_results.append(url)
-    except Exception:
-        pass
+        client = await get_client()
+        if "wallpaperflare" in sources:
+            # Fetch earlier pages as well so the combined result list can be sliced.
+            for p in range(1, page + 1):
+                results = await _fetch_wallpaperflare(client, query, p, seen)
+                for url in results:
+                    if url not in seen:
+                        seen.add(url)
+                        all_results.append(url)
+        if "wallhaven" in sources:
+            for p in range(1, page + 1):
+                results = await _fetch_wallhaven(client, query, p, seen)
+                for url in results:
+                    if url not in seen:
+                        seen.add(url)
+                        all_results.append(url)
+    except Exception as error:
+        LOGGER.warning("Interactive image search failed for %r: %s", query, error)
     # Return the slice for the requested page
     start = (page - 1) * per_page
     return all_results[start : start + per_page], len(all_results)

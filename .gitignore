@@ -67,3 +67,4 @@ tests/*
 !tests/test_multi_leech_summary.py
 !tests/test_google_drive_index_folders.py
 !tests/test_direct_listener_parallel.py
+!tests/test_http_client_pooling.py

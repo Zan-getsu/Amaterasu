@@ -11,7 +11,7 @@ from aiofiles.os import listdir, makedirs, path as aiopath
 from contextlib import suppress
 
 from ....core.config_manager import Config, BinConfig
-from ...ext_utils.bot_utils import cmd_exec, sync_to_async
+from ...ext_utils.bot_utils import SetInterval, cmd_exec, sync_to_async
 from ...ext_utils.files_utils import (
     count_files_and_folders,
     get_mime_type,
@@ -27,6 +27,7 @@ class RcloneTransferHelper:
     def __init__(self, listener):
         self._listener = listener
         self._proc = None
+        self._updater = None
         self._transferred_size = "0 B"
         self._eta = "-"
         self._percentage = "0%"

@@ -319,6 +319,7 @@ LOGGER.info("Web UI: SABnzbd available at /nzb/")
 #   3. Stop the managed Cloudflare Tunnel child process
 #   4. Cancel pending status-update intervals
 #   5. Persist Config to MongoDB and close its connection
+#   6. Close the shared HTTP connection pool
 # Download daemons (aria2, qBittorrent, SABnzbd, JD) are NOT paused —
 # they continue in their own processes and resume on next boot via
 # INCOMPLETE_TASK_NOTIFIER.
@@ -387,6 +388,14 @@ async def _graceful_shutdown():
             await database.disconnect()
     except Exception as e:
         LOGGER.error(f"Shutdown: config persist error: {e}")
+
+    LOGGER.info("Shutdown: closing shared HTTP client...")
+    try:
+        from .helper.ext_utils.http_client import close_client
+
+        await close_client()
+    except Exception as e:
+        LOGGER.error(f"Shutdown: shared HTTP client close error: {e}")
 
     LOGGER.info("Shutdown complete.")
 

@@ -20,7 +20,6 @@ from aiofiles import open as aiopen
 from aiofiles.os import mkdir
 from aiofiles.os import path as aiopath
 from httpx import AsyncClient
-from niquests import AsyncSession
 from pyrogram.enums import ButtonStyle
 from pyrogram.handlers import MessageHandler
 
@@ -34,6 +33,7 @@ from .help_messages import (
     MIRROR_HELP_DICT,
     YT_HELP_DICT,
 )
+from .http_client import get_client
 from .secrets import PIN_SALT as _PIN_SALT
 from .secrets import SERVICE_PWD_SALT as _SERVICE_PWD_SALT
 from .telegraph_helper import telegraph
@@ -667,12 +667,12 @@ async def download_image_url(url):
     image_name = url.split("/")[-1].split("?")[0]
     des_dir = ospath.join(path, image_name)
     try:
-        async with AsyncClient(headers={"User-Agent": "Mozilla/5.0"}, follow_redirects=True) as client:
-            resp = await client.get(url, timeout=15)
-            if resp.status_code == 200:
-                async with aiopen(des_dir, "wb") as f:
-                    await f.write(resp.content)
-                return des_dir
+        client = await get_client()
+        resp = await client.get(url, timeout=15)
+        if resp.status_code == 200:
+            async with aiopen(des_dir, "wb") as f:
+                await f.write(resp.content)
+            return des_dir
         LOGGER.error(f"Failed to download image from {url}: status {resp.status_code}")
     except Exception as e:
         LOGGER.error(f"Failed to download image from {url}: {e}")
@@ -684,7 +684,7 @@ async def _fetch_wallpaperflare(client, query, page, seen):
     img_pattern = re_compile(r'data-src="(https://c4\.wallpaperflare\.com/wallpaper[^"]+)"')
     url = f"{base_url}?wallpaper={query}&width=1280&height=720&page={page}"
     try:
-        resp = await client.get(url, allow_redirects=True, timeout=15)
+        resp = await client.get(url, follow_redirects=True, timeout=15)
         if resp.status_code != 200:
             return []
         return [m for m in img_pattern.findall(resp.text) if m not in seen]
@@ -696,7 +696,7 @@ async def _fetch_wallpaperflare(client, query, page, seen):
 async def _fetch_peapix(client, country, seen):
     url = f"https://peapix.com/bing/feed?country={country}"
     try:
-        resp = await client.get(url, allow_redirects=True, timeout=15)
+        resp = await client.get(url, follow_redirects=True, timeout=15)
         if resp.status_code != 200:
             LOGGER.warning(f"Peapix fetch failed: status {resp.status_code}")
             return []
@@ -710,7 +710,7 @@ async def _fetch_peapix(client, country, seen):
 async def _fetch_wallhaven(client, query, page, seen):
     url = f"https://wallhaven.cc/api/v1/search?q={query}&categories=111&purity=100&sorting=relevance&page={page}"
     try:
-        resp = await client.get(url, allow_redirects=True, timeout=15)
+        resp = await client.get(url, follow_redirects=True, timeout=15)
         if resp.status_code != 200:
             LOGGER.warning(f"Wallhaven fetch failed [{query} p{page}]: status {resp.status_code}")
             return []
@@ -744,33 +744,31 @@ async def search_images():
     new_images = []
 
     try:
-        async with AsyncSession(
-            headers={"User-Agent": "Mozilla/5.0"},
-        ) as client:
-            if "wallpaperflare" in sources:
-                for query in query_list:
-                    for page in range(1, total_pages + 1):
-                        results = await _fetch_wallpaperflare(client, query, page, seen)
-                        for url in results:
-                            if url not in seen:
-                                seen.add(url)
-                                new_images.append(url)
+        client = await get_client()
+        if "wallpaperflare" in sources:
+            for query in query_list:
+                for page in range(1, total_pages + 1):
+                    results = await _fetch_wallpaperflare(client, query, page, seen)
+                    for url in results:
+                        if url not in seen:
+                            seen.add(url)
+                            new_images.append(url)
 
-            if "peapix" in sources:
-                results = await _fetch_peapix(client, "us", seen)
-                for url in results:
-                    if url not in seen:
-                        seen.add(url)
-                        new_images.append(url)
+        if "peapix" in sources:
+            results = await _fetch_peapix(client, "us", seen)
+            for url in results:
+                if url not in seen:
+                    seen.add(url)
+                    new_images.append(url)
 
-            if "wallhaven" in sources:
-                for query in query_list:
-                    for page in range(1, total_pages + 1):
-                        results = await _fetch_wallhaven(client, query, page, seen)
-                        for url in results:
-                            if url not in seen:
-                                seen.add(url)
-                                new_images.append(url)
+        if "wallhaven" in sources:
+            for query in query_list:
+                for page in range(1, total_pages + 1):
+                    results = await _fetch_wallhaven(client, query, page, seen)
+                    for url in results:
+                        if url not in seen:
+                            seen.add(url)
+                            new_images.append(url)
     except Exception as e:
         LOGGER.error(f"search_images error: {e}")
         return

@@ -32,6 +32,20 @@ TOKEN_PAGE_TTL_SECONDS = 15 * 60
 MAX_CREDENTIALS_FILE_SIZE = 64 * 1024
 
 _ENCRYPTED_BLOB_MAGIC = b"AMATERASU_FERNET_V1\0"
+_MISSING = object()
+
+
+def _legacy_compatible_pickle(credentials) -> bytes:
+    """Serialize credentials without google-auth's new RAB implementation."""
+
+    rab_manager = getattr(credentials, "_rab_manager", _MISSING)
+    if rab_manager is not _MISSING:
+        credentials._rab_manager = None
+    try:
+        return pickle_dumps(credentials, protocol=4)
+    finally:
+        if rab_manager is not _MISSING:
+            credentials._rab_manager = rab_manager
 
 
 def parse_google_scopes(raw: str) -> list[str]:
@@ -141,7 +155,7 @@ def serialize_google_credentials(
         scopes=scopes,
         expiry=expiry,
     )
-    pickle_bytes = pickle_dumps(credentials, protocol=4)
+    pickle_bytes = _legacy_compatible_pickle(credentials)
     json_bytes = credentials.to_json().encode("utf-8")
     return pickle_bytes, json_bytes, bool(credentials.refresh_token)
 

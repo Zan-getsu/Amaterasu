@@ -4,11 +4,9 @@ Provides a single httpx.AsyncClient instance for all new code, with
 sensible defaults: HTTP/2 enabled, connection pooling, timeouts.
 
 Existing v1.5.0 code uses requests, aiohttp, and httpx ad-hoc. This
-module is the canonical client going forward. Migrate callers
-gradually — do NOT rewrite all existing callers in one pass.
+module is the canonical client for reusable HTTPX workloads.
 
 TODO (future phases): migrate these files to use this client:
-  - bot/helper/ext_utils/bot_utils.py (search_images uses httpx.AsyncClient directly)
   - bot/helper/mirror_leech_utils/download_utils/direct_link_generator.py (uses requests + cloudscraper)
   - bot/helper/ext_utils/shortener_utils.py (uses requests)
   - web/wserver.py (uses aiohttp.ClientSession for proxy fetch)
@@ -21,8 +19,9 @@ Usage:
         return resp.json()
 """
 
-from httpx import AsyncClient, Timeout, Limits, HTTPStatusError
 from logging import getLogger
+
+from httpx import AsyncClient, Limits, Timeout
 
 LOGGER = getLogger(__name__)
 

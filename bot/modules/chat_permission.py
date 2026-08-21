@@ -1,7 +1,7 @@
 from time import time
 from datetime import datetime, timezone, timedelta
 
-from .. import user_data
+from .. import sudo_users, user_data
 from ..helper.ext_utils.bot_utils import update_user_ldata, new_task
 from ..helper.ext_utils.db_handler import database
 from ..helper.telegram_helper.message_utils import send_message
@@ -295,7 +295,11 @@ async def check_force_sub(client, message):
     if user is None:
         return True
     uid = user.id
-    if uid == Config.OWNER_ID or uid in user_data and user_data[uid].get("SUDO") or uid in sudo_users:
+    if (
+        uid == Config.OWNER_ID
+        or uid in sudo_users
+        or user_data.get(uid, {}).get("SUDO")
+    ):
         return True
 
     # Parse FORCE_SUB_IDS — accept list of ints or comma-separated string
@@ -322,7 +326,6 @@ async def check_force_sub(client, message):
         return True
 
     # User hasn't joined all required channels — send join buttons
-    from ..helper.telegram_helper.button_build import ButtonMaker
     buttons = ButtonMaker()
     for chan_id in not_joined:
         try:
