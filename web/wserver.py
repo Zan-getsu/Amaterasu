@@ -1,6 +1,6 @@
 import mimetypes
 import re
-from asyncio import CancelledError, create_task, current_task, gather, sleep, to_thread
+from asyncio import CancelledError, create_task, current_task, sleep, to_thread
 from contextlib import asynccontextmanager, suppress
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
@@ -525,7 +525,10 @@ async def _read_profile_data(request: Request) -> dict:
         raise HTTPException(status_code=400, detail="Profile must be an object")
     if not isinstance(data.get("name"), str) or not data["name"].strip():
         raise HTTPException(status_code=400, detail="Profile name is required")
-    return data
+    from bot.helper.ext_utils.media_utils import normalize_encode_profile
+
+    normalized, _ = normalize_encode_profile(data)
+    return normalized
 
 
 async def re_verify(paused, resumed, hash_id):
@@ -1428,9 +1431,7 @@ def _verify_session_cookie(token: str | None) -> bool:
     """Verify the session cookie against the expected HMAC."""
     if not token:
         return False
-    from hmac import new as hmac_new, compare_digest
-    from hashlib import sha256
-    from base64 import urlsafe_b64encode
+    from hmac import compare_digest
     expected = _make_session_cookie()
     return compare_digest(token, expected)
 

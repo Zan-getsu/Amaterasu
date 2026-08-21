@@ -307,22 +307,22 @@ SEARCH_PLUGINS = [
 # 17. ENCODE SETTINGS
 # ==========================================
 DEFAULT_ENCODE_PRESET = {
-    "video_codec": "libsvtav1",  # Standard SVT-AV1 Encoder
-    "audio_codec": "libopus",
+    # Hardware-friendly defaults for smooth playback across common players.
+    # AV1/HEVC and Opus remain available through custom encode profiles.
+    "video_codec": "libx264",
+    "audio_codec": "aac",
     "subtitle_mode": "copy",
     "video_params": {
-        "crf": 34,  # Optimal CRF for standard anime encode
-        "preset": 6,  # Standard preset sweet-spot for quality/speed
-        "pix_fmt": "yuv420p10le",
-        "profile": 0,
-        "level": "5.1",
-        # Standard Mainline SVT-AV1 Optimized Parameters:
-        "extra_params": "tune=0:film-grain=4:film-grain-denoise=0:enable-overlays=1:scm=2:keyint=240:irefresh-type=2",
+        "crf": 23,
+        "preset": "medium",
+        "pix_fmt": "yuv420p",
+        "profile": "high",
+        "extra_params": "",
         "color_primaries": "bt709",
         "color_trc": "bt709",
         "colorspace": "bt709",
     },
-    "audio_params": {"bitrate": "128k", "channels": 2, "vbr": True},
+    "audio_params": {"bitrate": "192k", "channels": 2, "vbr": False},
 }
 DISABLE_ENCODE = False
 

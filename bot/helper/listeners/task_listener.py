@@ -212,22 +212,35 @@ class TaskListener(TaskConfig):
 
 
     async def _prompt_encode_profile(self):
-        profiles = await database.get_encode_profiles(self.user_id)
+        profiles = await database.get_encode_profiles(self.user_id) or {}
+        if not isinstance(profiles, dict):
+            LOGGER.warning("Ignoring malformed encoding profile collection")
+            profiles = {}
         self._temp_profiles = profiles
-        
+
+        default_profile = Config.DEFAULT_ENCODE_PRESET or {}
+        if not isinstance(default_profile, dict):
+            default_profile = {}
+        default_codec = str(default_profile.get("video_codec", "libx264")).lower()
+        default_codec = {
+            "libsvtav1": "SVT-AV1",
+            "libx264": "H.264",
+            "libx265": "HEVC",
+            "libvpx-vp9": "VP9",
+        }.get(default_codec, default_codec.upper())
         buttons = ButtonMaker()
         buttons.data_button(
-            "◆ DEFAULT : SVT-AV1", f"enc {self.user_id} sel default"
+            f"◆ DEFAULT : {default_codec}", f"enc {self.user_id} sel default"
         )
-        
+
         for pid, pdata in profiles.items():
-            if pid == "_id":
+            if pid == "_id" or not isinstance(pdata, dict):
                 continue
-            name = pdata.get("name", pid)
+            name = str(pdata.get("name") or pid)
             if pdata.get("is_default"):
                 name = f"⭐ {name}"
             buttons.data_button(name, f"enc {self.user_id} sel {pid}")
-            
+
         buttons.data_button("✕ CANCEL", f"enc {self.user_id} cancel")
         reply_to = await send_message(
             self.message,
@@ -236,10 +249,10 @@ class TaskListener(TaskConfig):
             "<b>Timeout</b> : <code>60s</code>",
             buttons.build_menu(2),
         )
-        
+
         self.encode_event = Event()
         self.encode_profile = None
-        
+
         handler = self.client.add_handler(
             CallbackQueryHandler(self._profile_callback_cb, filters=regex(f"^enc {self.user_id}")),
             group=-1,
@@ -249,7 +262,11 @@ class TaskListener(TaskConfig):
         except Exception:
             user_default = None
             for pid, pdata in profiles.items():
-                if pid != "_id" and pdata.get("is_default"):
+                if (
+                    pid != "_id"
+                    and isinstance(pdata, dict)
+                    and pdata.get("is_default")
+                ):
                     user_default = pdata
                     break
             self.encode_profile = user_default or Config.DEFAULT_ENCODE_PRESET
@@ -271,14 +288,18 @@ class TaskListener(TaskConfig):
             if pid_search == "default":
                 self.encode_profile = Config.DEFAULT_ENCODE_PRESET
             else:
-                profiles = await database.get_encode_profiles(self.user_id)
+                profiles = await database.get_encode_profiles(self.user_id) or {}
+                if not isinstance(profiles, dict):
+                    profiles = {}
                 for db_pid, pdata in profiles.items():
-                    if db_pid == "_id":
+                    if db_pid == "_id" or not isinstance(pdata, dict):
                         continue
-                    if db_pid.lower() == pid_search or pdata.get("name", "").lower() == pid_search:
+                    if db_pid.lower() == pid_search or str(
+                        pdata.get("name", "")
+                    ).lower() == pid_search:
                         self.encode_profile = pdata
                         break
-        
+
         if not self.encode_profile:
             await self._prompt_encode_profile()
 

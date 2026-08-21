@@ -27,7 +27,7 @@ from ..helper.ext_utils.bot_utils import (
 )
 from ..helper.ext_utils.db_handler import database
 from ..helper.ext_utils.leech_font import LEECH_FONT_STYLES, normalize_leech_font
-from ..helper.ext_utils.media_utils import create_thumb
+from ..helper.ext_utils.media_utils import create_thumb, normalize_encode_profile
 from ..helper.ext_utils.mega_utils import get_mega_account_info
 from ..helper.ext_utils.status_utils import get_readable_file_size
 from ..helper.ext_utils.telegram_destinations import (
@@ -1710,9 +1710,17 @@ async def _handle_enc_create(client, message, rfunc):
         pdata = json.loads(message.text.strip())
         if "name" not in pdata:
             raise Exception("Profile must have a 'name' field")
+        pdata, profile_warnings = normalize_encode_profile(pdata)
         pid = uuid.uuid4().hex[:8]
         await database.save_encode_profile(user_id, pid, pdata)
-        await send_message(message, f"Profile '{pdata['name']}' saved!")
+        warning_text = (
+            "\nAdjusted: " + "; ".join(profile_warnings)
+            if profile_warnings
+            else ""
+        )
+        await send_message(
+            message, f"Profile '{pdata['name']}' saved!{warning_text}"
+        )
     except Exception as e:
         await send_message(message, f"Error: {str(e)}")
     await delete_message(message)
@@ -1789,9 +1797,9 @@ async def edit_user_settings(client, query):
             f"<b>✦ ENCODE PROFILE : {profile_name}</b>\n"
             "<i>Review the active codecs and parameters.</i>\n\n"
             f"╭─ <b>Video codec</b> : "
-            f"<code>{escape(str(pdata.get('video_codec', 'libsvtav1')))}</code>\n"
+            f"<code>{escape(str(pdata.get('video_codec', 'libx264')))}</code>\n"
             f"├─ <b>Audio codec</b> : "
-            f"<code>{escape(str(pdata.get('audio_codec', 'libopus')))}</code>\n"
+            f"<code>{escape(str(pdata.get('audio_codec', 'aac')))}</code>\n"
             f"├─ <b>Video params</b> : "
             f"<code>{escape(str(pdata.get('video_params', {})))}</code>\n"
             f"╰─ <b>Audio params</b> : "

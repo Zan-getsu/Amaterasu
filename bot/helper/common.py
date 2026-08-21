@@ -281,6 +281,14 @@ class TaskConfig:
                     f"token.pickle not found: {token_path}. "
                     "Ask the bot owner to provide one, or upload your own via /userset."
                 )
+            if status == "up":
+                from .mirror_leech_utils.gdrive_utils.helper import (
+                    GDRIVE_SERVICE_ACCOUNTS_PATH,
+                    validate_gdrive_oauth_token,
+                )
+
+                if token_path != GDRIVE_SERVICE_ACCOUNTS_PATH:
+                    await sync_to_async(validate_gdrive_oauth_token, token_path)
 
     async def _terabox_cookie_path(self, purpose="Transfer"):
         selector = TeraboxCookieSelector(self, purpose=purpose)

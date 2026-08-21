@@ -1,27 +1,30 @@
-import re
-
-from contextlib import suppress
-from fractions import Fraction
-from PIL import Image
-from hashlib import md5
-from aiofiles.os import remove, path as aiopath, makedirs
 import json
+import re
 from asyncio import (
     create_subprocess_exec,
     gather,
-    wait_for,
     sleep,
+    wait_for,
 )
 from asyncio.subprocess import PIPE
+from contextlib import suppress
+from fractions import Fraction
+from hashlib import md5
+from math import isfinite
 from os import path as ospath
-from re import search as re_search, escape
+from re import escape
+from re import search as re_search
 from shutil import which
 from time import time, time_ns
+
+from aiofiles.os import makedirs, remove
+from aiofiles.os import path as aiopath
 from aioshutil import rmtree
 from langcodes import Language
 from niquests import AsyncSession
+from PIL import Image
 
-from ... import LOGGER, DOWNLOAD_DIR, threads, cores
+from ... import DOWNLOAD_DIR, LOGGER, cores, threads
 from ...core.config_manager import BinConfig
 from .bot_utils import cmd_exec, sync_to_async
 from .files_utils import get_mime_type, is_archive, is_archive_split
@@ -423,10 +426,408 @@ async def get_document_type(path):
     return is_video, is_audio, is_image
 
 
-def get_encode_output_path(input_path, codec):
+_MATROSKA_EXTENSIONS = {".mkv", ".mka"}
+_MP4_EXTENSIONS = {".mp4", ".m4v", ".mov"}
+_MP4_VIDEO_CODECS = {"copy", "libx264", "libx265"}
+_MP4_AUDIO_CODECS = {"copy", "aac", "ac3", "eac3", "libmp3lame"}
+_SUPPORTED_VIDEO_CODECS = {
+    "copy",
+    "libsvtav1",
+    "libx264",
+    "libx265",
+    "libvpx-vp9",
+    "mpeg4",
+}
+_SUPPORTED_AUDIO_CODECS = {
+    "copy",
+    "aac",
+    "ac3",
+    "eac3",
+    "flac",
+    "libmp3lame",
+    "libopus",
+}
+_X26X_PRESETS = {
+    "ultrafast",
+    "superfast",
+    "veryfast",
+    "faster",
+    "fast",
+    "medium",
+    "slow",
+    "slower",
+    "veryslow",
+}
+_PIXEL_FORMATS = {
+    "libsvtav1": {"yuv420p", "yuv420p10le"},
+    "libx264": {"yuv420p", "yuv420p10le", "yuv422p", "yuv444p"},
+    "libx265": {"yuv420p", "yuv420p10le", "yuv422p", "yuv444p"},
+    "libvpx-vp9": {"yuv420p", "yuv420p10le", "yuv422p", "yuv444p"},
+    "mpeg4": {"yuv420p"},
+}
+
+
+def _bounded_int(value, default, minimum, maximum):
+    try:
+        return max(minimum, min(maximum, int(value)))
+    except (TypeError, ValueError):
+        return default
+
+
+def _as_bool(value, default=False):
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "yes", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "off"}:
+            return False
+    if isinstance(value, (int, float)):
+        return bool(value)
+    return default
+
+
+def normalize_encode_profile(profile):
+    """Compile loose JSON profile data into safe codec-specific settings."""
+    warnings = []
+    raw = dict(profile) if isinstance(profile, dict) else {}
+
+    video_codec = str(raw.get("video_codec") or "libx264").strip().lower()
+    if video_codec not in _SUPPORTED_VIDEO_CODECS:
+        warnings.append(f"unsupported video codec {video_codec!r}; using libx264")
+        video_codec = "libx264"
+    audio_codec = str(raw.get("audio_codec") or "aac").strip().lower()
+    if audio_codec not in _SUPPORTED_AUDIO_CODECS:
+        warnings.append(f"unsupported audio codec {audio_codec!r}; using aac")
+        audio_codec = "aac"
+    subtitle_mode = str(raw.get("subtitle_mode") or "copy").strip().lower()
+    if subtitle_mode not in {"copy", "burn", "none"}:
+        warnings.append(f"unsupported subtitle mode {subtitle_mode!r}; using copy")
+        subtitle_mode = "copy"
+
+    supplied_video = raw.get("video_params")
+    supplied_video = supplied_video if isinstance(supplied_video, dict) else {}
+    video_params = dict(supplied_video)
+    legacy_codec_params = _parse_codec_params(video_params.get("extra_params"))
+    crf_max = 63 if video_codec in {"libsvtav1", "libvpx-vp9"} else 51
+    crf_default = {
+        "libsvtav1": 30,
+        "libx264": 23,
+        "libx265": 24,
+        "libvpx-vp9": 30,
+        "mpeg4": 24,
+    }.get(video_codec, 23)
+    video_params["crf"] = _bounded_int(
+        video_params.get("crf", legacy_codec_params.get("crf")),
+        crf_default,
+        0,
+        crf_max,
+    )
+
+    if video_codec == "libsvtav1":
+        video_params["preset"] = _bounded_int(
+            video_params.get("preset", legacy_codec_params.get("preset")), 6, 0, 13
+        )
+    elif video_codec in {"libx264", "libx265"}:
+        preset = str(video_params.get("preset") or "medium").strip().lower()
+        video_params["preset"] = preset if preset in _X26X_PRESETS else "medium"
+
+    default_pix_fmt = (
+        "yuv420p10le" if video_codec in {"libsvtav1", "libx265"} else "yuv420p"
+    )
+    pixel_format = str(video_params.get("pix_fmt") or default_pix_fmt).strip().lower()
+    allowed_pixel_formats = _PIXEL_FORMATS.get(video_codec)
+    if allowed_pixel_formats and pixel_format not in allowed_pixel_formats:
+        warnings.append(
+            f"pixel format {pixel_format!r} is invalid for {video_codec}; "
+            f"using {default_pix_fmt}"
+        )
+        pixel_format = default_pix_fmt
+    video_params["pix_fmt"] = pixel_format
+
+    profile_value = video_params.get("profile", legacy_codec_params.get("profile"))
+    if profile_value not in (None, ""):
+        video_params["profile"] = profile_value
+    if video_codec == "libsvtav1" and profile_value not in (None, ""):
+        normalized_profile = _bounded_int(profile_value, -1, 0, 2)
+        if normalized_profile != 0:
+            warnings.append(
+                f"AV1 profile {profile_value!r} is incompatible with the "
+                "4:2:0 formats supported by libsvtav1; using Main"
+            )
+            video_params["profile"] = 0
+        else:
+            video_params["profile"] = normalized_profile
+    elif video_codec == "libx264" and profile_value not in (None, ""):
+        normalized_profile = str(profile_value).strip().lower()
+        if normalized_profile not in {"baseline", "main", "high", "high10"}:
+            warnings.append(f"invalid H.264 profile {profile_value!r}; using auto")
+            video_params.pop("profile", None)
+        else:
+            video_params["profile"] = normalized_profile
+    elif video_codec == "libx265" and profile_value not in (None, ""):
+        normalized_profile = str(profile_value).strip().lower()
+        if normalized_profile not in {"main", "main10"}:
+            warnings.append(f"invalid HEVC profile {profile_value!r}; using auto")
+            video_params.pop("profile", None)
+        else:
+            video_params["profile"] = normalized_profile
+    elif video_codec not in {"libsvtav1", "libx264", "libx265"}:
+        video_params.pop("profile", None)
+
+    h264_profile = video_params.get("profile") if video_codec == "libx264" else None
+    if h264_profile:
+        required_format = "yuv420p10le" if h264_profile == "high10" else "yuv420p"
+        if video_params["pix_fmt"] != required_format:
+            warnings.append(
+                f"H.264 {h264_profile} requires {required_format}; "
+                "updating pixel format"
+            )
+            video_params["pix_fmt"] = required_format
+
+    hevc_profile = video_params.get("profile") if video_codec == "libx265" else None
+    if hevc_profile:
+        required_format = "yuv420p10le" if hevc_profile == "main10" else "yuv420p"
+        if video_params["pix_fmt"] != required_format:
+            warnings.append(
+                f"HEVC {hevc_profile} requires {required_format}; "
+                "updating pixel format"
+            )
+            video_params["pix_fmt"] = required_format
+
+    level_value = video_params.get("level", legacy_codec_params.get("level"))
+    if level_value not in (None, ""):
+        video_params["level"] = level_value
+    if video_codec == "libsvtav1" and video_params.get("level") not in (None, ""):
+        level = str(video_params["level"]).strip()
+        if re.fullmatch(r"[2-7][0-3]", level):
+            level = f"{level[0]}.{level[1]}"
+        if not re.fullmatch(r"[2-7]\.[0-3]", level):
+            warnings.append(f"invalid AV1 level {level!r}; using auto")
+            video_params.pop("level", None)
+        else:
+            video_params["level"] = level
+
+    if "fast_decode" in video_params:
+        video_params["fast_decode"] = _as_bool(video_params["fast_decode"], True)
+    if "keyint_seconds" in video_params:
+        video_params["keyint_seconds"] = _bounded_int(
+            video_params["keyint_seconds"], 10, 1, 30
+        )
+    video_params["extra_params"] = str(
+        video_params.get("extra_params") or ""
+    ).strip().replace("\n", "").replace("\r", "")
+    fps_mode = str(video_params.get("fps_mode") or "vfr").strip().lower()
+    video_params["fps_mode"] = (
+        fps_mode if fps_mode in {"vfr", "cfr", "passthrough", "auto"} else "vfr"
+    )
+
+    supplied_audio = raw.get("audio_params")
+    supplied_audio = supplied_audio if isinstance(supplied_audio, dict) else {}
+    audio_params = dict(supplied_audio)
+    default_bitrate = "128k" if audio_codec == "libopus" else "192k"
+    bitrate = str(audio_params.get("bitrate") or default_bitrate).strip().lower()
+    bitrate_match = re.fullmatch(r"(\d+(?:\.\d+)?)([km])", bitrate)
+    bitrate_bps = 0
+    if bitrate_match:
+        bitrate_bps = float(bitrate_match[1]) * (
+            1_000 if bitrate_match[2] == "k" else 1_000_000
+        )
+    if not 8_000 <= bitrate_bps <= 10_000_000:
+        warnings.append(f"invalid audio bitrate {bitrate!r}; using {default_bitrate}")
+        bitrate = default_bitrate
+    audio_params["bitrate"] = bitrate
+    audio_params["channels"] = _bounded_int(audio_params.get("channels"), 2, 0, 8)
+    audio_params["vbr"] = (
+        _as_bool(audio_params.get("vbr"), True) if audio_codec == "libopus" else False
+    )
+
+    normalized = dict(raw)
+    normalized.update(
+        {
+            "name": str(raw.get("name") or "Encoding Profile").strip(),
+            "video_codec": video_codec,
+            "audio_codec": audio_codec,
+            "subtitle_mode": subtitle_mode,
+            "video_params": video_params,
+            "audio_params": audio_params,
+            "metadata": dict(raw.get("metadata") or {})
+            if isinstance(raw.get("metadata"), dict)
+            else {},
+            "disposition": dict(raw.get("disposition") or {})
+            if isinstance(raw.get("disposition"), dict)
+            else {},
+            "rename": str(raw.get("rename") or "").strip(),
+            "cover_image": str(raw.get("cover_image") or "").strip(),
+        }
+    )
+    return normalized, warnings
+
+
+def _parse_codec_params(params):
+    parsed = {}
+    for part in str(params or "").split(":"):
+        part = part.strip()
+        if not part or "=" not in part:
+            continue
+        key, value = part.split("=", 1)
+        key = key.strip()
+        value = value.strip()
+        if key and value and re.fullmatch(r"[A-Za-z0-9_-]+", key):
+            parsed[key] = value
+    return parsed
+
+
+def _build_svtav1_params(video_params, worker_count, frame_rate=0):
+    params = _parse_codec_params(video_params.get("extra_params"))
+    for authoritative in ("preset", "crf", "profile", "level"):
+        params.pop(authoritative, None)
+
+    requested_workers = _bounded_int(params.get("lp"), worker_count, 1, worker_count)
+    params["lp"] = str(requested_workers)
+
+    if "keyint" in params:
+        keyint = _bounded_int(params["keyint"], 0, 1, 1800)
+        if keyint:
+            params["keyint"] = str(keyint)
+        else:
+            params.pop("keyint")
+    if "keyint" not in params:
+        seconds = _bounded_int(video_params.get("keyint_seconds"), 10, 1, 30)
+        fps = frame_rate if frame_rate > 0 else 24
+        params["keyint"] = str(max(24, min(1800, round(fps * seconds))))
+
+    fast_decode = video_params.get("fast_decode")
+    if fast_decode is None:
+        default_fast_decode = params.get("tune") != "0"
+        params["fast-decode"] = (
+            "1"
+            if _as_bool(params.get("fast-decode"), default_fast_decode)
+            else "0"
+        )
+    else:
+        params["fast-decode"] = "1" if fast_decode else "0"
+
+    if video_params.get("profile") is not None:
+        params["profile"] = str(video_params["profile"])
+    if video_params.get("level"):
+        params["level"] = str(video_params["level"]).replace(".", "")
+    return ":".join(f"{key}={value}" for key, value in params.items())
+
+
+def get_encode_output_path(input_path, codec, audio_codec=None):
     base, ext = ospath.splitext(input_path)
-    suffix = "_encoded"
-    return f"{base}{suffix}{ext}"
+    output_ext = ext
+    normalized_ext = ext.lower()
+
+    # Matroska safely supports every codec and stream type exposed by the
+    # profile builder. Keep MP4/MOV only for broadly compatible combinations;
+    # placing AV1/Opus/FLAC or copied non-MP4 subtitles in the source extension
+    # can mux successfully while producing a file that players cannot seek or
+    # decode reliably.
+    if audio_codec is not None and normalized_ext not in _MATROSKA_EXTENSIONS:
+        mp4_compatible = (
+            normalized_ext in _MP4_EXTENSIONS
+            and codec in _MP4_VIDEO_CODECS
+            and audio_codec in _MP4_AUDIO_CODECS
+        )
+        if not mp4_compatible:
+            output_ext = ".mkv"
+
+    return f"{base}_encoded{output_ext}"
+
+
+def _probe_duration(probe):
+    """Return a finite media duration, preferring the primary video stream."""
+    streams = probe.get("streams") or []
+    candidates = []
+    for stream in streams:
+        if stream.get("codec_type") != "video" or stream.get("disposition", {}).get(
+            "attached_pic"
+        ):
+            continue
+        candidates.extend(
+            (stream.get("duration"), stream.get("tags", {}).get("DURATION"))
+        )
+        break
+    candidates.append((probe.get("format") or {}).get("duration"))
+
+    for value in candidates:
+        if value in (None, "", "N/A"):
+            continue
+        try:
+            duration = (
+                float(time_to_seconds(value)) if ":" in str(value) else float(value)
+            )
+        except (TypeError, ValueError):
+            continue
+        if isfinite(duration) and duration > 0:
+            return duration
+    return 0
+
+
+def _count_media_streams(probe, stream_type):
+    return sum(
+        1
+        for stream in probe.get("streams") or []
+        if stream.get("codec_type") == stream_type
+        and not stream.get("disposition", {}).get("attached_pic")
+    )
+
+
+def _probe_video_frame_count(probe, duration=0):
+    stream = next(
+        (
+            item
+            for item in probe.get("streams") or []
+            if item.get("codec_type") == "video"
+            and not item.get("disposition", {}).get("attached_pic")
+        ),
+        None,
+    )
+    if not stream:
+        return 0
+    frame_count = stream.get("nb_frames")
+    if isinstance(frame_count, str) and frame_count.isdigit():
+        return int(frame_count)
+    stream_duration = duration or _probe_duration(probe)
+    frame_rate = _parse_frame_rate(stream.get("avg_frame_rate")) or _parse_frame_rate(
+        stream.get("r_frame_rate")
+    )
+    return max(1, round(stream_duration * frame_rate)) if stream_duration and frame_rate else 0
+
+
+def _subtitle_filter_path(media_path):
+    return str(media_path).replace("\\", "/").replace(":", r"\:").replace("'", r"\'")
+
+
+async def _probe_media_file(media_path):
+    try:
+        stdout, stderr, code = await wait_for(
+            cmd_exec(
+                [
+                    "ffprobe",
+                    "-hide_banner",
+                    "-loglevel",
+                    "error",
+                    "-print_format",
+                    "json",
+                    "-show_format",
+                    "-show_streams",
+                    media_path,
+                ]
+            ),
+            timeout=60,
+        )
+    except Exception as error:
+        return None, f"ffprobe failed: {error}"
+    if code != 0:
+        return None, stderr or "ffprobe could not read the file"
+    try:
+        return json.loads(stdout), ""
+    except (TypeError, json.JSONDecodeError) as error:
+        return None, f"ffprobe returned invalid JSON: {error}"
 
 
 async def get_streams(file):
@@ -875,17 +1276,129 @@ class FFMpeg:
                     await remove(op)
             return False
 
+    async def _decode_encode_sample(self, media_path, position, stream_type):
+        cmd = [
+            BinConfig.FFMPEG_NAME,
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-xerror",
+            "-ss",
+            f"{position:.3f}",
+            "-i",
+            media_path,
+        ]
+        if stream_type == "video":
+            cmd.extend(["-map", "0:v:0", "-frames:v", "1", "-an"])
+        else:
+            cmd.extend(["-map", "0:a:0", "-t", "1", "-vn"])
+        cmd.extend(["-progress", "pipe:1", "-f", "null", "-"])
+
+        try:
+            stdout, stderr, code = await wait_for(cmd_exec(cmd), timeout=60)
+        except Exception as error:
+            return False, f"{stream_type} decode check timed out or failed: {error}"
+        if code != 0:
+            return False, stderr or f"{stream_type} decode check failed"
+        if stream_type == "video":
+            decoded = any(
+                line.startswith("frame=") and line.partition("=")[2].strip() != "0"
+                for line in stdout.splitlines()
+            )
+        else:
+            decoded = any(
+                line.startswith(("out_time_us=", "out_time_ms="))
+                and line.partition("=")[2].strip() not in {"", "0", "N/A"}
+                for line in stdout.splitlines()
+            )
+        if not decoded:
+            return False, f"no {stream_type} data decoded near {position:.3f}s"
+        return True, ""
+
+    async def _validate_encoded_media(
+        self, input_file, output_file, expect_audio, source_probe=None
+    ):
+        if source_probe is None:
+            source_probe, source_error = await _probe_media_file(input_file)
+            if source_probe is None:
+                return False, f"could not validate source media: {source_error}"
+        output_probe, output_error = await _probe_media_file(output_file)
+        if output_probe is None:
+            return False, f"encoded container is unreadable: {output_error}"
+
+        if _count_media_streams(output_probe, "video") == 0:
+            return False, "encoded file has no playable video stream"
+        source_has_audio = _count_media_streams(source_probe, "audio") > 0
+        if expect_audio and source_has_audio and not _count_media_streams(
+            output_probe, "audio"
+        ):
+            return False, "source audio was selected but encoded file has no audio stream"
+
+        source_duration = _probe_duration(source_probe)
+        output_duration = _probe_duration(output_probe)
+        if output_duration <= 0:
+            return False, "encoded file has no finite positive duration"
+        if source_duration > 0:
+            tolerance = max(2.0, min(15.0, source_duration * 0.01))
+            if abs(output_duration - source_duration) > tolerance:
+                return False, (
+                    "encoded duration differs from source "
+                    f"({output_duration:.3f}s vs {source_duration:.3f}s)"
+                )
+
+        sample_positions = {
+            0.0,
+            max(0.0, output_duration * 0.5),
+            max(0.0, output_duration - min(2.0, output_duration * 0.1)),
+        }
+        for position in sorted(sample_positions):
+            if self._listener.is_cancelled:
+                return False, "encoding was cancelled during validation"
+            valid, reason = await self._decode_encode_sample(
+                output_file, position, "video"
+            )
+            if not valid:
+                return False, reason
+
+        if expect_audio and source_has_audio:
+            valid, reason = await self._decode_encode_sample(
+                output_file, output_duration * 0.5, "audio"
+            )
+            if not valid:
+                return False, reason
+        return True, ""
+
     async def encode_video(self, input_file, profile, metadata=None):
         self.clear()
-        self._total_time = (await get_media_info(input_file))[0]
-        self._total_frames = await get_video_frame_count(input_file, self._total_time)
-        v_codec = profile.get("video_codec", "libsvtav1")
-        a_codec = profile.get("audio_codec", "libopus")
+        profile, profile_warnings = normalize_encode_profile(profile)
+        for warning in profile_warnings:
+            LOGGER.warning(f"Encode profile normalized: {warning}")
+
+        source_probe, source_error = await _probe_media_file(input_file)
+        if source_probe is None:
+            LOGGER.error(f"Could not inspect source before encoding: {source_error}")
+            return False
+        self._total_time = _probe_duration(source_probe)
+        self._total_frames = _probe_video_frame_count(
+            source_probe, self._total_time
+        )
+        frame_rate = (
+            self._total_frames / self._total_time
+            if self._total_frames and self._total_time
+            else 0
+        )
+        v_codec = profile.get("video_codec", "libx264")
+        a_codec = profile.get("audio_codec", "aac")
         v_params = profile.get("video_params", {})
         a_params = profile.get("audio_params", {})
         sub_mode = profile.get("subtitle_mode", "copy")
+        if sub_mode == "burn" and v_codec == "copy":
+            LOGGER.warning(
+                "Subtitle burn-in requires video encoding; using libx264 instead of copy."
+            )
+            v_codec = "libx264"
 
-        output_file = get_encode_output_path(input_file, v_codec)
+        output_file = get_encode_output_path(input_file, v_codec, a_codec)
 
         # Merge profile metadata with task-specific metadata (task metadata overrides profile)
         prof_meta = profile.get("metadata", {})
@@ -899,14 +1412,21 @@ class FFMpeg:
             from ..ext_utils.metadata_utils import MetadataProcessor
             processor = MetadataProcessor()
             enc_meta = await processor.process(enc_meta, input_file)
-            
+
         if "__internal_rename__" in enc_meta:
             new_name = enc_meta.pop("__internal_rename__")
             if new_name:
                 import os
                 ext = os.path.splitext(output_file)[1]
-                if not os.path.splitext(new_name)[1]:
+                new_base, new_ext = os.path.splitext(new_name)
+                if not new_ext:
                     new_name += ext
+                elif new_ext.lower() != ext.lower():
+                    LOGGER.warning(
+                        f"Encode rename requested {new_ext}, but {ext} is required "
+                        "for the selected codecs; using the safe container."
+                    )
+                    new_name = f"{new_base}{ext}"
                 dirpath = os.path.dirname(output_file)
                 output_file = f"{dirpath}/{new_name}"
 
@@ -932,11 +1452,14 @@ class FFMpeg:
         cmd = [
             "taskset", "-c", f"{cores}",
             BinConfig.FFMPEG_NAME,
+            "-y", "-nostdin",
             "-hide_banner", "-loglevel", "error", "-progress", "pipe:1",
+            "-fflags", "+genpts",
             "-i", input_file,
         ]
 
         is_mkv = output_file.lower().endswith(('.mkv', '.mka'))
+        is_mp4 = output_file.lower().endswith((".mp4", ".m4v", ".mov"))
 
         if not is_mkv and hasattr(self._listener, "thumb") and self._listener.thumb:
             cmd.extend(["-i", self._listener.thumb])
@@ -959,6 +1482,22 @@ class FFMpeg:
         if sub_mode == "copy":
             add_map_flags(cmd, "s", s_track)
             cmd.extend(["-c:s", "copy"])
+        elif sub_mode == "burn":
+            selected_subtitle = next(
+                (
+                    track.strip().rstrip("?")
+                    for track in str(s_track).split(",")
+                    if track.strip().rstrip("?").isdigit()
+                ),
+                "0",
+            )
+            cmd.extend(
+                [
+                    "-vf",
+                    "subtitles="
+                    f"filename='{_subtitle_filter_path(input_file)}':si={selected_subtitle}",
+                ]
+            )
 
         if is_mkv:
             cmd.extend(["-map", "0:t?", "-c:t", "copy"])
@@ -967,26 +1506,76 @@ class FFMpeg:
             cmd.extend(["-map", "1", "-c:v:1", "copy", "-disposition:v:1", "attached_pic"])
 
         crf = v_params.get("crf", 30)
-        preset = v_params.get("preset", 4)
-        pix_fmt = v_params.get("pix_fmt", "yuv420p10le")
+        preset = v_params.get("preset", 6 if v_codec == "libsvtav1" else "medium")
+        pix_fmt = v_params.get(
+            "pix_fmt",
+            "yuv420p10le" if v_codec in {"libsvtav1", "libx265"} else "yuv420p",
+        )
 
+        LOGGER.info(
+            "Encoding profile applied: "
+            f"name={profile.get('name', 'Encoding Profile')!r}, "
+            f"video={v_codec}, audio={a_codec}, crf={crf}, preset={preset}, "
+            f"pix_fmt={pix_fmt}, fps_mode={v_params.get('fps_mode', 'vfr')}, "
+            f"subtitles={sub_mode}"
+        )
+
+        extra_v_params = str(v_params.get("extra_params") or "").strip()
         if v_codec == "libsvtav1":
-            svt_params = f"preset={preset}:crf={crf}"
-            if v_params.get("profile") is not None:
-                svt_params += f":profile={v_params['profile']}"
-            if v_params.get("level"):
-                lvl = str(v_params['level']).replace(".", "")
-                svt_params += f":level={lvl}"
-            if v_params.get("extra_params"):
-                svt_params += f":{v_params['extra_params']}"
-            cmd.extend(["-pix_fmt", pix_fmt, "-svtav1-params", svt_params])
+            svt_params = _build_svtav1_params(
+                v_params, max(1, threads), frame_rate
+            )
+            cmd.extend(
+                [
+                    "-pix_fmt",
+                    pix_fmt,
+                    "-preset",
+                    str(preset),
+                    "-crf",
+                    str(crf),
+                    "-svtav1-params",
+                    svt_params,
+                ]
+            )
         elif v_codec == "libx265":
-            x265_params = f"crf={crf}:preset={preset}"
-            cmd.extend(["-pix_fmt", pix_fmt, "-x265-params", x265_params])
+            cmd.extend(
+                ["-pix_fmt", pix_fmt, "-crf", str(crf), "-preset", str(preset)]
+            )
+            if extra_v_params:
+                x265_parts = extra_v_params.split(":")
+                tune = next(
+                    (part.partition("=")[2] for part in x265_parts if part.startswith("tune=")),
+                    "",
+                )
+                if tune:
+                    cmd.extend(["-tune", tune])
+                x265_params = ":".join(
+                    part for part in x265_parts if not part.startswith("tune=")
+                )
+                if x265_params:
+                    cmd.extend(["-x265-params", x265_params])
         elif v_codec == "libx264":
             cmd.extend(["-pix_fmt", pix_fmt, "-crf", str(crf), "-preset", str(preset)])
+            if extra_v_params:
+                x264_parts = extra_v_params.split(":")
+                tune = next(
+                    (part.partition("=")[2] for part in x264_parts if part.startswith("tune=")),
+                    "",
+                )
+                if tune:
+                    cmd.extend(["-tune", tune])
+                x264_params = ":".join(
+                    part for part in x264_parts if not part.startswith("tune=")
+                )
+                if x264_params:
+                    cmd.extend(["-x264-params", x264_params])
+        elif v_codec == "libvpx-vp9":
+            cmd.extend(["-pix_fmt", pix_fmt, "-crf", str(crf), "-b:v", "0"])
+        elif v_codec == "mpeg4":
+            quantizer = max(1, min(31, round(float(crf) / 6)))
+            cmd.extend(["-pix_fmt", pix_fmt, "-q:v", str(quantizer)])
 
-        if v_codec != "libsvtav1":
+        if v_codec not in {"copy", "libsvtav1"}:
             if v_params.get("profile") is not None and str(v_params["profile"]).strip():
                 cmd.extend(["-profile:v", str(v_params["profile"])])
             if v_params.get("level") is not None and str(v_params["level"]).strip():
@@ -998,21 +1587,23 @@ class FFMpeg:
             cmd.extend(["-color_trc", str(v_params["color_trc"])])
         if v_params.get("colorspace"):
             cmd.extend(["-colorspace", str(v_params["colorspace"])])
+        if v_codec != "copy":
+            cmd.extend(["-fps_mode:v:0", str(v_params.get("fps_mode", "vfr"))])
 
         cmd.extend(["-c:a", a_codec])
         if a_codec != "copy":
             if a_params.get("bitrate"):
-                cmd.extend(["-b:a", a_params["bitrate"]])
+                cmd.extend(["-b:a", str(a_params["bitrate"])])
             if a_params.get("channels"):
                 cmd.extend(["-ac", str(a_params["channels"])])
-            if a_params.get("vbr"):
+            if a_codec == "libopus" and a_params.get("vbr"):
                 cmd.extend(["-vbr", "on"])
 
         if enc_meta:
             for k, v in enc_meta.items():
-                k = k.strip()
+                k = str(k).strip()
                 if ":" in k:
-                    cmd.extend([f"-metadata:{k}", v])
+                    cmd.extend([f"-metadata:{k}", str(v)])
                 else:
                     cmd.extend(["-metadata", f"{k}={v}"])
 
@@ -1020,14 +1611,20 @@ class FFMpeg:
         disposition = profile.get("disposition", {})
         if disposition:
             for stream_spec, disp_value in disposition.items():
-                cmd.extend([f"-disposition:{stream_spec.strip()}", disp_value.strip()])
+                cmd.extend(
+                    [
+                        f"-disposition:{str(stream_spec).strip()}",
+                        str(disp_value).strip(),
+                    ]
+                )
 
         temp_cover_dir = None
         temp_cover_path = None
         cmd.extend(["-threads", f"{threads}"])
         if is_mkv and hasattr(self._listener, "thumb") and self._listener.thumb:
-            import aioshutil
             from time import time
+
+            import aioshutil
             temp_cover_dir = f"{DOWNLOAD_DIR}temp_cover_{time()}"
             await makedirs(temp_cover_dir, exist_ok=True)
             temp_cover_path = ospath.join(temp_cover_dir, "cover.jpg")
@@ -1036,6 +1633,20 @@ class FFMpeg:
                 "-attach", temp_cover_path,
                 "-metadata:s:m:filename:cover.jpg", "mimetype=image/jpeg"
             ])
+        cmd.extend(
+            [
+                "-max_muxing_queue_size",
+                "4096",
+                "-avoid_negative_ts",
+                "make_zero",
+            ]
+        )
+        if is_mkv:
+            cmd.extend(["-cluster_time_limit", "5000"])
+        elif is_mp4:
+            cmd.extend(["-movflags", "+faststart"])
+            if v_codec == "libx265":
+                cmd.extend(["-tag:v:0", "hvc1"])
         cmd.extend([output_file])
 
         if self._listener.is_cancelled:
@@ -1064,6 +1675,22 @@ class FFMpeg:
                 self._listener.thumb = original_thumb
             return False
         if code == 0:
+            expect_audio = bool(str(a_track).strip())
+            valid, reason = await self._validate_encoded_media(
+                input_file, output_file, expect_audio, source_probe
+            )
+            if not valid:
+                LOGGER.error(
+                    "Encoded media validation failed; keeping the source file. "
+                    f"Reason: {reason}. Output: {output_file}"
+                )
+                if await aiopath.exists(output_file):
+                    await remove(output_file)
+                if custom_thumb_path:
+                    await remove(custom_thumb_path)
+                    self._listener.thumb = original_thumb
+                return False
+            LOGGER.info(f"Encoded media passed playback validation: {output_file}")
             if custom_thumb_path:
                 await remove(custom_thumb_path)
                 self._listener.thumb = original_thumb

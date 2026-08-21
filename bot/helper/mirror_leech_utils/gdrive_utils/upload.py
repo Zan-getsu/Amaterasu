@@ -1,25 +1,27 @@
-from googleapiclient.errors import HttpError
-from googleapiclient.http import MediaFileUpload
 from json import loads
 from logging import getLogger
-from os import path as ospath, listdir, remove
+from os import listdir, remove
+from os import path as ospath
+
+from googleapiclient.errors import HttpError
+from googleapiclient.http import MediaFileUpload
 from tenacity import (
-    retry,
-    wait_exponential,
-    stop_after_attempt,
-    retry_if_exception,
     RetryError,
+    retry,
+    retry_if_exception,
+    stop_after_attempt,
+    wait_exponential,
 )
 
-def retry_if_not_404(err):
-    if isinstance(err, HttpError) and err.resp.status == 404:
-        return False
-    return True
-
 from ....core.config_manager import Config
-from ...ext_utils.bot_utils import async_to_sync, SetInterval
+from ...ext_utils.bot_utils import SetInterval, async_to_sync
 from ...ext_utils.files_utils import get_mime_type
-from ...mirror_leech_utils.gdrive_utils.helper import GoogleDriveHelper
+from ...mirror_leech_utils.gdrive_utils.helper import (
+    GoogleDriveHelper,
+    gdrive_auth_error_message,
+    is_gdrive_auth_error,
+    should_retry_gdrive_error,
+)
 
 LOGGER = getLogger(__name__)
 
@@ -52,13 +54,13 @@ class GoogleDriveUpload(GoogleDriveHelper):
 
     def upload(self):
         self.user_setting()
-        self.service = self.authorize()
-        LOGGER.info(f"Uploading: {self._path}")
-        self._updater = SetInterval(self.update_interval, self.progress)
         dir_id = None
         link = ""
         mime_type = ""
         try:
+            self.service = self.authorize()
+            LOGGER.info(f"Uploading: {self._path}")
+            self._updater = SetInterval(self.update_interval, self.progress)
             if ospath.isfile(self._path):
                 mime_type = get_mime_type(self._path)
                 link = self._upload_file(
@@ -90,12 +92,17 @@ class GoogleDriveUpload(GoogleDriveHelper):
             if isinstance(err, RetryError):
                 LOGGER.info(f"Total Attempts: {err.last_attempt.attempt_number}")
                 err = err.last_attempt.exception()
-            err = str(err).replace(">", "").replace("<", "")
+            err = (
+                gdrive_auth_error_message(self.token_path)
+                if is_gdrive_auth_error(err)
+                else str(err).replace(">", "").replace("<", "")
+            )
             LOGGER.error(err)
             async_to_sync(self.listener.on_upload_error, err)
             self._is_errored = True
         finally:
-            self._updater.cancel()
+            if self._updater is not None:
+                self._updater.cancel()
 
         if self.listener.is_cancelled and not self._is_errored:
             if mime_type == "Folder" and dir_id:
@@ -147,7 +154,7 @@ class GoogleDriveUpload(GoogleDriveHelper):
     @retry(
         wait=wait_exponential(multiplier=2, min=3, max=6),
         stop=stop_after_attempt(3),
-        retry=retry_if_exception(retry_if_not_404),
+        retry=retry_if_exception(should_retry_gdrive_error),
     )
     def _upload_file(self, file_path, file_name, mime_type, dest_id, in_dir=True):
         file_metadata = {
@@ -224,8 +231,8 @@ class GoogleDriveUpload(GoogleDriveHelper):
             return
         try:
             remove(file_path)
-        except Exception:
-            pass
+        except Exception as error:
+            LOGGER.debug("Unable to remove uploaded source %s: %s", file_path, error)
         self.file_processed_bytes = 0
         if not Config.IS_TEAM_DRIVE:
             self.set_permission(response["id"])

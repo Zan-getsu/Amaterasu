@@ -23,6 +23,17 @@
   const generateId = () => Math.random().toString(36).substring(2, 10);
   const apiPath = (path) => `${path}?user_id=${userId}&token=${token}`;
 
+  async function responseError(response, action) {
+    let detail = '';
+    try {
+      const body = await response.json();
+      detail = body.detail || body.error || '';
+    } catch (_) {
+      detail = await response.text().catch(() => '');
+    }
+    return new Error(detail || `${action} failed with HTTP ${response.status}`);
+  }
+
   // ========================================================================
   //  PRESETS & OPTIONS
   // ========================================================================
@@ -49,11 +60,11 @@
       audio_params: { bitrate: "192k" }
     },
     {
-      name: "🔬 AV1 Max Compression",
+      name: "🚀 AV1 Balanced",
       video_codec: "libsvtav1", audio_codec: "libopus", subtitle_mode: "copy",
       metadata: {},
-      video_params: { crf: 28, preset: 4, pix_fmt: "yuv420p10le" },
-      audio_params: { bitrate: "128k" }
+      video_params: { crf: 30, preset: 6, pix_fmt: "yuv420p10le", keyint_seconds: 10, fast_decode: true },
+      audio_params: { bitrate: "128k", vbr: true }
     },
     {
       name: "🎌 Anime Encode",
@@ -87,6 +98,47 @@
     { value: "superfast", label: "Super Fast" },
     { value: "ultrafast", label: "Ultra Fast" }
   ];
+
+  const VIDEO_PROFILE_OPTIONS = {
+    libsvtav1: [{ value: '0', label: 'Main (4:2:0)' }],
+    libx264: [
+      { value: 'baseline', label: 'Baseline' },
+      { value: 'main', label: 'Main' },
+      { value: 'high', label: 'High' },
+      { value: 'high10', label: 'High 10' }
+    ],
+    libx265: [
+      { value: 'main', label: 'Main' },
+      { value: 'main10', label: 'Main 10' }
+    ]
+  };
+
+  const PIXEL_FORMAT_OPTIONS = {
+    libsvtav1: [
+      { value: 'yuv420p10le', label: '10-bit YUV 4:2:0 (Recommended)' },
+      { value: 'yuv420p', label: '8-bit YUV 4:2:0 (Standard)' }
+    ],
+    libx264: [
+      { value: 'yuv420p', label: '8-bit YUV 4:2:0 (Most compatible)' },
+      { value: 'yuv420p10le', label: '10-bit YUV 4:2:0' },
+      { value: 'yuv422p', label: '8-bit YUV 4:2:2' },
+      { value: 'yuv444p', label: '8-bit YUV 4:4:4' }
+    ],
+    libx265: [
+      { value: 'yuv420p10le', label: '10-bit YUV 4:2:0 (Recommended)' },
+      { value: 'yuv420p', label: '8-bit YUV 4:2:0 (Standard)' },
+      { value: 'yuv422p', label: '8-bit YUV 4:2:2' },
+      { value: 'yuv444p', label: '8-bit YUV 4:4:4' }
+    ],
+    'libvpx-vp9': [
+      { value: 'yuv420p10le', label: '10-bit YUV 4:2:0' },
+      { value: 'yuv420p', label: '8-bit YUV 4:2:0' },
+      { value: 'yuv422p', label: '8-bit YUV 4:2:2' },
+      { value: 'yuv444p', label: '8-bit YUV 4:4:4' }
+    ],
+    mpeg4: [{ value: 'yuv420p', label: '8-bit YUV 4:2:0' }],
+    copy: []
+  };
 
   const DISPOSITION_OPTIONS = [
     { label: "0 (Remove all flags)", value: "0" },
@@ -146,7 +198,11 @@
             const result = await res.json();
             return result.id || id;
           }
-        } catch (e) { console.error("API error, saving locally", e); }
+          throw await responseError(res, 'Saving profile');
+        } catch (e) {
+          console.error("Profile API save failed", e);
+          throw e;
+        }
       }
       const stored = localStorage.getItem(LOCAL_STORAGE_KEY);
       const profiles = stored ? JSON.parse(stored) : {};
@@ -160,7 +216,11 @@
         try {
           const res = await fetch(apiPath(`/api/profiles/${id}`), { method: 'DELETE' });
           if (res.ok) return;
-        } catch (e) { console.error("API error, deleting locally", e); }
+          throw await responseError(res, 'Deleting profile');
+        } catch (e) {
+          console.error("Profile API delete failed", e);
+          throw e;
+        }
       }
       const stored = localStorage.getItem(LOCAL_STORAGE_KEY);
       if (stored) {
@@ -174,7 +234,11 @@
         try {
           const res = await fetch(apiPath(`/api/profiles/${id}/default`), { method: 'POST' });
           if (res.ok) return;
-        } catch (e) { console.error("API error, setting default locally", e); }
+          throw await responseError(res, 'Setting default profile');
+        } catch (e) {
+          console.error("Profile API default update failed", e);
+          throw e;
+        }
       }
       const stored = localStorage.getItem(LOCAL_STORAGE_KEY);
       if (stored) {
@@ -204,45 +268,38 @@
   }
 
   function applyPreset(preset) {
-    const nameEl = document.getElementById('p-name');
-    const currentName = nameEl?.value || '';
-
     // Set basic fields
     setVal('v-codec', preset.video_codec);
     setVal('a-codec', preset.audio_codec);
     setVal('s-mode', preset.subtitle_mode);
 
-    // Video params
-    if (preset.video_params) {
-      if (preset.video_params.crf !== undefined) {
-        setVal('v-crf', preset.video_params.crf);
-        updateCRFDisplay();
-      }
-      if (preset.video_params.pix_fmt) setVal('v-pix_fmt', preset.video_params.pix_fmt);
-      if (preset.video_params.profile !== undefined) setVal('v-profile', preset.video_params.profile);
-      if (preset.video_params.level !== undefined) setVal('v-level', preset.video_params.level);
-      if (preset.video_params.color_primaries !== undefined) setVal('v-color-prim', preset.video_params.color_primaries);
-      if (preset.video_params.color_trc !== undefined) setVal('v-color-trc', preset.video_params.color_trc);
-      if (preset.video_params.colorspace !== undefined) setVal('v-colorspace', preset.video_params.colorspace);
-      if (preset.video_params.extra_params !== undefined) setVal('v-extra', preset.video_params.extra_params);
-    }
-
-    // Update preset dropdown for codec
+    // Reset every codec-specific field so values from the previously selected
+    // profile cannot leak into this preset and create an invalid combination.
+    const videoParams = preset.video_params || {};
     updatePresetDropdown();
-    if (preset.video_params?.preset !== undefined) {
-      setVal('v-preset-select', preset.video_params.preset);
-      updatePresetDisplay();
-    }
+    setVal('v-crf', videoParams.crf ?? 23);
+    setVal('v-preset-select', videoParams.preset ?? (preset.video_codec === 'libsvtav1' ? 6 : 'medium'));
+    setVal('v-pix_fmt', videoParams.pix_fmt || (preset.video_codec === 'libsvtav1' ? 'yuv420p10le' : 'yuv420p'));
+    setVal('v-profile', videoParams.profile ?? '');
+    setVal('v-level', videoParams.level || '');
+    setVal('v-color-prim', videoParams.color_primaries || '');
+    setVal('v-color-trc', videoParams.color_trc || '');
+    setVal('v-colorspace', videoParams.colorspace || '');
+    setVal('v-fps-mode', videoParams.fps_mode || 'vfr');
+    setVal('v-extra', videoParams.extra_params || '');
+    setVal('v-keyint-seconds', videoParams.keyint_seconds || 10);
+    alignPixelFormatForProfile();
+    const fastDecodeEl = document.getElementById('v-fast-decode');
+    if (fastDecodeEl) fastDecodeEl.checked = videoParams.fast_decode !== false;
+    updateCRFDisplay();
+    updatePresetDisplay();
 
     // Audio params
-    if (preset.audio_params) {
-      if (preset.audio_params.bitrate) setVal('a-bitrate', preset.audio_params.bitrate);
-      if (preset.audio_params.channels !== undefined) setVal('a-channels', preset.audio_params.channels);
-      if (preset.audio_params.vbr !== undefined) {
-        const vbrEl = document.getElementById('a-vbr');
-        if (vbrEl) vbrEl.checked = preset.audio_params.vbr;
-      }
-    }
+    const audioParams = preset.audio_params || {};
+    setVal('a-bitrate', audioParams.bitrate || (preset.audio_codec === 'libopus' ? '128k' : '192k'));
+    setVal('a-channels', audioParams.channels ?? 2);
+    const vbrEl = document.getElementById('a-vbr');
+    if (vbrEl) vbrEl.checked = preset.audio_codec === 'libopus' && Boolean(audioParams.vbr);
 
     // Clear tag builders
     metadataTagList = [];
@@ -313,12 +370,59 @@
 
     // Set default preset value
     if (codec === 'libsvtav1') {
-      presetSelect.value = 4;
+      presetSelect.value = 6;
     } else if (codec === 'libx264' || codec === 'libx265') {
       presetSelect.value = 'medium';
     }
 
     updatePresetDisplay();
+    updatePixelFormatOptions();
+    updateProfileOptions();
+  }
+
+  function updatePixelFormatOptions() {
+    const pixelSelect = document.getElementById('v-pix_fmt');
+    if (!pixelSelect) return;
+    const codec = getVal('v-codec');
+    const options = PIXEL_FORMAT_OPTIONS[codec] || [];
+    const current = pixelSelect.value;
+    pixelSelect.innerHTML = '';
+    options.forEach(option => {
+      const element = document.createElement('option');
+      element.value = option.value;
+      element.textContent = option.label;
+      pixelSelect.appendChild(element);
+    });
+    if (options.length) {
+      pixelSelect.value = options.some(option => option.value === current)
+        ? current
+        : options[0].value;
+    }
+  }
+
+  function alignPixelFormatForProfile() {
+    const codec = getVal('v-codec');
+    const profile = getVal('v-profile');
+    if (codec === 'libx264' && profile) {
+      setVal('v-pix_fmt', profile === 'high10' ? 'yuv420p10le' : 'yuv420p');
+    } else if (codec === 'libx265' && profile) {
+      setVal('v-pix_fmt', profile === 'main10' ? 'yuv420p10le' : 'yuv420p');
+    }
+  }
+
+  function updateProfileOptions() {
+    const profileSelect = document.getElementById('v-profile');
+    if (!profileSelect) return;
+    const current = profileSelect.value;
+    const options = VIDEO_PROFILE_OPTIONS[getVal('v-codec')] || [];
+    profileSelect.innerHTML = '<option value="">Default / Auto</option>';
+    options.forEach(option => {
+      const element = document.createElement('option');
+      element.value = option.value;
+      element.textContent = option.label;
+      profileSelect.appendChild(element);
+    });
+    profileSelect.value = options.some(option => option.value === current) ? current : '';
   }
 
   function updatePresetDisplay() {
@@ -377,13 +481,14 @@
     const isVideoCopy = vCodec === 'copy';
     toggleEl('v-crf-group', !isVideoCopy);
     toggleEl('v-preset-group', !isVideoCopy && (vCodec === 'libsvtav1' || vCodec === 'libx264' || vCodec === 'libx265'));
+    toggleEl('v-av1-playback-group', vCodec === 'libsvtav1');
 
-    // Audio: hide bitrate for copy/flac, hide channels for copy, hide VBR for copy
+    // Audio: VBR is an explicit switch only for the libopus encoder.
     const isAudioCopy = aCodec === 'copy';
     const isFlac = aCodec === 'flac';
     toggleEl('a-bitrate-group', !isAudioCopy && !isFlac);
     toggleEl('a-channels-group', !isAudioCopy);
-    toggleEl('a-vbr-group', !isAudioCopy);
+    toggleEl('a-vbr-group', aCodec === 'libopus');
   }
 
   function toggleEl(id, show) {
@@ -395,6 +500,10 @@
   document.getElementById('v-codec')?.addEventListener('change', () => {
     updatePresetDropdown();
     updateConditionalVisibility();
+    generatePreview();
+  });
+  document.getElementById('v-profile')?.addEventListener('change', () => {
+    alignPixelFormatForProfile();
     generatePreview();
   });
   document.getElementById('a-codec')?.addEventListener('change', () => {
@@ -724,25 +833,28 @@
       name: getVal('p-name') || "Custom Profile",
       rename: getVal('g-rename') || "",
       cover_image: getVal('g-cover') || "",
-      video_codec: vCodec || "libx265",
-      audio_codec: aCodec || "libopus",
+      video_codec: vCodec || "libx264",
+      audio_codec: aCodec || "aac",
       subtitle_mode: getVal('s-mode') || "copy",
       metadata,
       video_params: {
-        crf: parseInt(getVal('v-crf') || "24"),
-        preset: vCodec === 'libsvtav1' ? parseInt(getVal('v-preset-select') || "4") : (getVal('v-preset-select') || "medium"),
-        pix_fmt: getVal('v-pix_fmt') || "yuv420p10le",
+        crf: parseInt(getVal('v-crf') || "23"),
+        preset: vCodec === 'libsvtav1' ? parseInt(getVal('v-preset-select') || "6") : (getVal('v-preset-select') || "medium"),
+        pix_fmt: getVal('v-pix_fmt') || "yuv420p",
         profile: getVal('v-profile') || "",
         level: getVal('v-level') || "",
         color_primaries: getVal('v-color-prim') || "",
         color_trc: getVal('v-color-trc') || "",
         colorspace: getVal('v-colorspace') || "",
-        extra_params: getVal('v-extra') || ""
+        extra_params: getVal('v-extra') || "",
+        keyint_seconds: vCodec === 'libsvtav1' ? parseInt(getVal('v-keyint-seconds') || "10") : undefined,
+        fast_decode: vCodec === 'libsvtav1' ? (document.getElementById('v-fast-decode')?.checked !== false) : undefined,
+        fps_mode: getVal('v-fps-mode') || "vfr"
       },
       audio_params: {
-        bitrate: getVal('a-bitrate') || "128k",
+        bitrate: getVal('a-bitrate') || (aCodec === 'libopus' ? "128k" : "192k"),
         channels: parseInt(getVal('a-channels') || "2"),
-        vbr: document.getElementById('a-vbr')?.checked || false
+        vbr: aCodec === 'libopus' && (document.getElementById('a-vbr')?.checked || false)
       }
     };
 
@@ -775,7 +887,7 @@
   //  FFMPEG COMMAND GENERATION
   // ========================================================================
   function getFFmpegCmd(profile) {
-    let cmd = `ffmpeg -i input.mkv \\\n`;
+    let cmd = `ffmpeg -y -nostdin -fflags +genpts -i input.mkv \\\n`;
 
     // Track mapping
     if (profile.metadata?.v_track) {
@@ -791,15 +903,44 @@
     // Video
     cmd += `  -c:v ${profile.video_codec}`;
     if (profile.video_codec !== 'copy') {
-      if (profile.video_params?.crf !== undefined) cmd += ` -crf ${profile.video_params.crf}`;
-      if (profile.video_params?.preset !== undefined) cmd += ` -preset ${profile.video_params.preset}`;
       if (profile.video_params?.pix_fmt) cmd += ` -pix_fmt ${profile.video_params.pix_fmt}`;
-      if (profile.video_params?.profile) cmd += ` -profile:v ${profile.video_params.profile}`;
-      if (profile.video_params?.level) cmd += ` -level ${profile.video_params.level}`;
+      if (profile.video_codec === 'libsvtav1') {
+        const svtParts = [];
+        if (profile.video_params?.preset !== undefined) cmd += ` -preset ${profile.video_params.preset}`;
+        if (profile.video_params?.crf !== undefined) cmd += ` -crf ${profile.video_params.crf}`;
+        const extraParams = String(profile.video_params?.extra_params || '').trim();
+        if (extraParams) svtParts.push(extraParams);
+        if (profile.video_params?.fast_decode !== undefined && !/(^|:)fast-decode=/.test(extraParams)) {
+          svtParts.push(`fast-decode=${profile.video_params.fast_decode ? 1 : 0}`);
+        }
+        if (profile.video_params?.profile !== undefined && profile.video_params.profile !== '') {
+          svtParts.push(`profile=${profile.video_params.profile}`);
+        }
+        if (profile.video_params?.level) {
+          svtParts.push(`level=${String(profile.video_params.level).replace('.', '')}`);
+        }
+        if (svtParts.length) cmd += ` -svtav1-params "${svtParts.join(':')}"`;
+      } else {
+        if (profile.video_params?.crf !== undefined) cmd += ` -crf ${profile.video_params.crf}`;
+        if (profile.video_params?.preset !== undefined && ['libx264', 'libx265'].includes(profile.video_codec)) {
+          cmd += ` -preset ${profile.video_params.preset}`;
+        }
+        if (profile.video_codec === 'libvpx-vp9') cmd += ` -b:v 0`;
+        if (profile.video_params?.extra_params && ['libx264', 'libx265'].includes(profile.video_codec)) {
+          const codecParam = profile.video_codec === 'libx265' ? 'x265' : 'x264';
+          cmd += ` -${codecParam}-params "${profile.video_params.extra_params}"`;
+        }
+      }
+      if (profile.video_codec !== 'libsvtav1' && profile.video_params?.profile) {
+        cmd += ` -profile:v ${profile.video_params.profile}`;
+      }
+      if (profile.video_codec !== 'libsvtav1' && profile.video_params?.level) {
+        cmd += ` -level ${profile.video_params.level}`;
+      }
       if (profile.video_params?.color_primaries) cmd += ` \\\n  -color_primaries ${profile.video_params.color_primaries}`;
       if (profile.video_params?.color_trc) cmd += ` -color_trc ${profile.video_params.color_trc}`;
       if (profile.video_params?.colorspace) cmd += ` -colorspace ${profile.video_params.colorspace}`;
-      if (profile.video_params?.extra_params) cmd += ` \\\n  ${profile.video_params.extra_params}`;
+      cmd += ` -fps_mode:v:0 ${profile.video_params?.fps_mode || 'vfr'}`;
     }
     cmd += ` \\\n`;
 
@@ -811,7 +952,7 @@
     if (profile.audio_codec !== 'copy' && profile.audio_params?.channels) {
       cmd += ` -ac ${profile.audio_params.channels}`;
     }
-    if (profile.audio_codec !== 'copy' && profile.audio_params?.vbr) {
+    if (profile.audio_codec === 'libopus' && profile.audio_params?.vbr) {
       cmd += ` -vbr on`;
     }
     cmd += ` \\\n`;
@@ -850,7 +991,8 @@
       });
     }
 
-    cmd += `  output.mkv`;
+    cmd += `  -max_muxing_queue_size 4096 -avoid_negative_ts make_zero \\\n`;
+    cmd += `  -cluster_time_limit 5000 output.mkv`;
     return cmd;
   }
 
@@ -903,50 +1045,55 @@
     currentProfileId = id;
 
     // Basic fields
-    if (data.name) setVal('p-name', data.name);
-    if (data.rename !== undefined) setVal('g-rename', data.rename);
-    if (data.cover_image !== undefined) setVal('g-cover', data.cover_image);
-    if (data.video_codec) setVal('v-codec', data.video_codec);
-    if (data.audio_codec) setVal('a-codec', data.audio_codec);
-    if (data.subtitle_mode) setVal('s-mode', data.subtitle_mode);
+    setVal('p-name', data.name || 'Custom Profile');
+    setVal('g-rename', data.rename || '');
+    setVal('g-cover', data.cover_image || '');
+    setVal('v-codec', data.video_codec || 'libx264');
+    setVal('a-codec', data.audio_codec || 'aac');
+    setVal('s-mode', data.subtitle_mode || 'copy');
 
     // Video params
+    const videoParams = data.video_params || {};
+    const isAv1 = getVal('v-codec') === 'libsvtav1';
+    const isHevc = getVal('v-codec') === 'libx265';
     updatePresetDropdown();
-    if (data.video_params) {
-      if (data.video_params.crf !== undefined) {
-        setVal('v-crf', data.video_params.crf);
-        updateCRFDisplay();
-      }
-      if (data.video_params.preset !== undefined) {
-        setVal('v-preset-select', data.video_params.preset);
-        updatePresetDisplay();
-      }
-      if (data.video_params.pix_fmt) setVal('v-pix_fmt', data.video_params.pix_fmt);
-      if (data.video_params.profile) setVal('v-profile', data.video_params.profile);
-      if (data.video_params.level) setVal('v-level', data.video_params.level);
-      if (data.video_params.color_primaries) setVal('v-color-prim', data.video_params.color_primaries);
-      if (data.video_params.color_trc) setVal('v-color-trc', data.video_params.color_trc);
-      if (data.video_params.colorspace) setVal('v-colorspace', data.video_params.colorspace);
-      if (data.video_params.extra_params) setVal('v-extra', data.video_params.extra_params);
+    setVal('v-crf', videoParams.crf ?? (isAv1 ? 30 : (isHevc ? 24 : 23)));
+    setVal('v-preset-select', videoParams.preset ?? (isAv1 ? 6 : 'medium'));
+    setVal('v-pix_fmt', videoParams.pix_fmt || ((isAv1 || isHevc) ? 'yuv420p10le' : 'yuv420p'));
+    setVal('v-profile', videoParams.profile ?? '');
+    setVal('v-level', videoParams.level || '');
+    setVal('v-color-prim', videoParams.color_primaries || '');
+    setVal('v-color-trc', videoParams.color_trc || '');
+    setVal('v-colorspace', videoParams.colorspace || '');
+    setVal('v-fps-mode', videoParams.fps_mode || 'vfr');
+    setVal('v-extra', videoParams.extra_params || '');
+    setVal('v-keyint-seconds', videoParams.keyint_seconds || 10);
+    alignPixelFormatForProfile();
+    const fastDecodeEl = document.getElementById('v-fast-decode');
+    const legacyTuneZero = String(videoParams.extra_params || '')
+      .split(':').some(part => part.trim() === 'tune=0');
+    if (fastDecodeEl) {
+      fastDecodeEl.checked = videoParams.fast_decode !== undefined
+        ? Boolean(videoParams.fast_decode)
+        : !legacyTuneZero;
     }
+    updateCRFDisplay();
+    updatePresetDisplay();
 
     // Audio params
-    if (data.audio_params) {
-      if (data.audio_params.bitrate) setVal('a-bitrate', data.audio_params.bitrate);
-      if (data.audio_params.channels !== undefined) setVal('a-channels', data.audio_params.channels);
-      if (data.audio_params.vbr !== undefined) {
-        const vbrEl = document.getElementById('a-vbr');
-        if (vbrEl) vbrEl.checked = data.audio_params.vbr;
-      }
-    }
+    const audioParams = data.audio_params || {};
+    const isOpus = getVal('a-codec') === 'libopus';
+    setVal('a-bitrate', audioParams.bitrate || (isOpus ? '128k' : '192k'));
+    setVal('a-channels', audioParams.channels ?? 2);
+    const vbrEl = document.getElementById('a-vbr');
+    if (vbrEl) vbrEl.checked = isOpus && audioParams.vbr !== false;
 
     // Track selectors
-    if (data.metadata) {
-      if (data.metadata.title !== undefined) setVal('g-title', data.metadata.title);
-      setTrackSelector('v', data.metadata.v_track || '');
-      setTrackSelector('a', data.metadata.a_track || '');
-      setTrackSelector('s', data.metadata.s_track || '');
-    }
+    const profileMetadata = data.metadata || {};
+    setVal('g-title', profileMetadata.title || '');
+    setTrackSelector('v', profileMetadata.v_track || '');
+    setTrackSelector('a', profileMetadata.a_track || '');
+    setTrackSelector('s', profileMetadata.s_track || '');
 
     // Stream metadata tags
     metadataTagList = [];
@@ -1042,25 +1189,29 @@
 
     currentProfileId = null;
     setVal('p-name', 'Custom Profile');
-    setVal('v-codec', 'libx265');
-    setVal('a-codec', 'libopus');
+    setVal('v-codec', 'libx264');
+    setVal('a-codec', 'aac');
     setVal('s-mode', 'copy');
-    setVal('v-crf', 24);
-    setVal('v-pix_fmt', 'yuv420p10le');
+    setVal('v-crf', 23);
+    setVal('v-pix_fmt', 'yuv420p');
     setVal('v-profile', '');
     setVal('v-level', '');
     setVal('v-color-prim', '');
     setVal('v-color-trc', '');
     setVal('v-colorspace', '');
+    setVal('v-fps-mode', 'vfr');
     setVal('v-extra', '');
-    setVal('a-bitrate', '128k');
+    setVal('v-keyint-seconds', '10');
+    const fastDecodeEl = document.getElementById('v-fast-decode');
+    if (fastDecodeEl) fastDecodeEl.checked = true;
+    setVal('a-bitrate', '192k');
     setVal('a-channels', '2');
     setVal('g-rename', '');
     setVal('g-title', '');
     setVal('g-cover', '');
 
     const vbrEl = document.getElementById('a-vbr');
-    if (vbrEl) vbrEl.checked = true;
+    if (vbrEl) vbrEl.checked = false;
 
     // Reset track selectors
     ['v', 'a', 's'].forEach(s => setTrackSelector(s, ''));
@@ -1139,42 +1290,47 @@
   window.actionProfile = async function (action, id) {
     if (!cachedProfiles[id] && action !== 'delete') return;
 
-    if (action === 'load') {
-      loadProfileIntoForm(id, cachedProfiles[id]);
-      profilesModal.style.display = 'none';
-      if (typeof showToast === 'function') showToast("Profile loaded!");
-    } else if (action === 'delete') {
-      if (confirm("Are you sure you want to delete this profile?")) {
-        await profileApi.delete(id);
-        if (currentProfileId === id) {
-          currentProfileId = null;
-          updateDeleteButton();
+    try {
+      if (action === 'load') {
+        loadProfileIntoForm(id, cachedProfiles[id]);
+        profilesModal.style.display = 'none';
+        if (typeof showToast === 'function') showToast("Profile loaded!");
+      } else if (action === 'delete') {
+        if (confirm("Are you sure you want to delete this profile?")) {
+          await profileApi.delete(id);
+          if (currentProfileId === id) {
+            currentProfileId = null;
+            updateDeleteButton();
+          }
+          renderProfilesList();
+          if (typeof showToast === 'function') showToast("Profile deleted");
         }
+      } else if (action === 'default') {
+        await profileApi.setDefault(id);
         renderProfilesList();
-        if (typeof showToast === 'function') showToast("Profile deleted");
+        if (typeof showToast === 'function') showToast("Default profile updated");
+      } else if (action === 'duplicate') {
+        const original = cachedProfiles[id];
+        if (original) {
+          const copy = { ...JSON.parse(JSON.stringify(original)), name: `${original.name} (Copy)`, is_default: false };
+          await profileApi.save(null, copy);
+          renderProfilesList();
+          if (typeof showToast === 'function') showToast("Profile duplicated!");
+        }
+      } else if (action === 'copy') {
+        const exportData = { ...cachedProfiles[id] };
+        delete exportData.is_default;
+        await navigator.clipboard.writeText(JSON.stringify(exportData, null, 4));
+        if (typeof showToast === 'function') showToast("JSON copied to clipboard!");
+      } else if (action === 'toggle') {
+        const previewEl = document.getElementById(`profile-preview-${id}`);
+        if (previewEl) {
+          previewEl.style.display = previewEl.style.display === 'none' ? 'block' : 'none';
+        }
       }
-    } else if (action === 'default') {
-      await profileApi.setDefault(id);
-      renderProfilesList();
-      if (typeof showToast === 'function') showToast("Default profile updated");
-    } else if (action === 'duplicate') {
-      const original = cachedProfiles[id];
-      if (original) {
-        const copy = { ...JSON.parse(JSON.stringify(original)), name: `${original.name} (Copy)`, is_default: false };
-        await profileApi.save(null, copy);
-        renderProfilesList();
-        if (typeof showToast === 'function') showToast("Profile duplicated!");
-      }
-    } else if (action === 'copy') {
-      const exportData = { ...cachedProfiles[id] };
-      delete exportData.is_default;
-      navigator.clipboard.writeText(JSON.stringify(exportData, null, 4));
-      if (typeof showToast === 'function') showToast("JSON copied to clipboard!");
-    } else if (action === 'toggle') {
-      const previewEl = document.getElementById(`profile-preview-${id}`);
-      if (previewEl) {
-        previewEl.style.display = previewEl.style.display === 'none' ? 'block' : 'none';
-      }
+    } catch (error) {
+      console.error(`Profile action '${action}' failed`, error);
+      if (typeof showToast === 'function') showToast(error.message || "Profile action failed", "error");
     }
   };
 
@@ -1182,7 +1338,19 @@
     if (!profilesListContainer) return;
     profilesListContainer.innerHTML = '<div style="text-align:center; padding: 40px; color: var(--bs-text-muted);"><i data-lucide="loader" class="fa-spin" style="width:24px;height:24px;margin-bottom:8px;"></i><h3>Loading...</h3></div>';
 
-    cachedProfiles = await profileApi.list();
+    try {
+      const loadedProfiles = await profileApi.list();
+      cachedProfiles = Object.fromEntries(
+        Object.entries(loadedProfiles || {}).filter(
+          ([id, profile]) => id !== '_id' && profile && typeof profile === 'object' && !Array.isArray(profile)
+        )
+      );
+    } catch (error) {
+      console.error("Unable to load encoding profiles", error);
+      profilesListContainer.innerHTML = '<div style="text-align:center; padding:40px; color:var(--bs-danger);">Unable to load profiles. Check the database connection and try again.</div>';
+      if (typeof showToast === 'function') showToast("Unable to load profiles", "error");
+      return;
+    }
     const ids = Object.keys(cachedProfiles);
 
     if (ids.length === 0) {
@@ -1194,8 +1362,12 @@
     let html = '';
     for (const id of ids) {
       const p = cachedProfiles[id];
-      const presetStr = p.video_params?.preset ? `<span class="badge-chip">${p.video_params.preset}</span>` : '';
-      const crfStr = p.video_params?.crf !== undefined ? `<span class="badge-chip">CRF ${p.video_params.crf}</span>` : '';
+      const presetStr = p.video_params?.preset !== undefined
+        ? `<span class="badge-chip">${escHtml(p.video_params.preset)}</span>`
+        : '';
+      const crfStr = p.video_params?.crf !== undefined
+        ? `<span class="badge-chip">CRF ${escHtml(p.video_params.crf)}</span>`
+        : '';
 
       html += `
         <div class="profile-card">

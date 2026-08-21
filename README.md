@@ -1255,9 +1255,22 @@ Instead of typing out complex FFmpeg commands every time, you can create and sav
 You can set any profile as your **Default**. The bot will automatically use this profile whenever you start an encoding task (e.g., using the `-en` flag).
 
 ### 2. Supported Codecs
-- **Video**: `libsvtav1` (Next-gen AV1), `libx265` (HEVC/H.265), `libx264` (H.264), `copy`
-- **Audio**: `libopus`, `aac`, `copy`
-- **Subtitle**: `copy`, `none`
+- **Video**: `libsvtav1` (AV1), `libx265` (HEVC/H.265), `libx264` (H.264), `libvpx-vp9` (VP9), `mpeg4`, `copy`
+- **Audio**: `libopus`, `aac`, `flac`, `libmp3lame`, `ac3`, `copy`
+- **Subtitle**: `copy`, `burn`, `none`
+
+The built-in default is H.264 + AAC in 8-bit 4:2:0 for broad hardware and
+player compatibility. Advanced AV1, HEVC, Opus, and FLAC profiles remain
+available; Amaterasu automatically uses Matroska when the selected codecs are
+not safely compatible with the source container. Every completed encode is
+probed and seek-decoded at multiple timestamps before the source is removed. If
+that validation fails, the invalid output is deleted and the source is kept.
+
+SVT-AV1 profiles use FFmpeg's native CRF and preset controls, stay within the
+bot's assigned CPU set, and default to preset `6`, a ten-second seek interval,
+and fast-decode bitstreams. Existing profiles remain compatible: legacy
+`extra_params` such as film grain, `tune`, and explicit `keyint` values are
+preserved, while named profile fields remain authoritative for CRF and preset.
 
 ### 3. Track Mapping & Metadata Injection
 You can dynamically isolate specific audio/subtitle tracks and inject custom metadata (titles, release years, track names) either directly into your **Encode Profile** or on the fly using the `-enmeta` command argument.
@@ -1432,10 +1445,13 @@ The **Video Settings** section is open by default. Here you can configure:
 | Setting | Description | UI Element |
 |---|---|---|
 | **Video Codec** | The encoder to use (`libsvtav1`, `libx265`, `libx264`, or `copy`) | Dropdown |
-| **CRF (Quality)** | Quality level — lower = better quality, larger file. `24-28` recommended for AV1. | Slider with live label |
+| **CRF (Quality)** | Quality level — lower = better quality, larger file. `28-34` is a practical AV1 range. | Slider with live label |
 | **Preset / Speed** | Encoding speed vs compression tradeoff. Slower = smaller files. | Dropdown |
 | **Pixel Format** | Bit depth. `yuv420p10le` recommended for 10-bit AV1/HEVC. | Dropdown |
 | **Format Profile & Level** | Codec compliance level (e.g., Profile `0`, Level `5.1`). | Dropdowns |
+| **Frame Timing** | Preserve VFR timing, force CFR, pass timestamps through, or let FFmpeg decide. | Dropdown |
+| **AV1 Seek Interval** | Target seconds between AV1 keyframes; `10` is the balanced default. | Dropdown |
+| **AV1 Fast Decode** | Reduces decoder complexity for smoother AV1 playback. | Toggle |
 | **Color Primaries / TRC / Colorspace** | HDR / SDR color metadata (`bt709`, `bt2020`, etc.). | Dropdowns |
 | **Extra Parameters** | Advanced SVT-AV1/x265 params in colon-separated format. | Text field |
 
@@ -1457,7 +1473,7 @@ Expand the **Audio Settings** section to configure:
 | **Audio Codec** | `libopus`, `aac`, `flac`, or `copy` |
 | **Bitrate** | Output audio bitrate (e.g., `128k`, `192k`, `320k`) |
 | **Channels** | Channel layout (Stereo, 5.1, 7.1, or keep original) |
-| **VBR Toggle** | Variable bitrate optimization |
+| **VBR Toggle** | Variable bitrate optimization for Opus profiles |
 
 Just like Video, the Audio section includes its own **Track Selection**, **Metadata Tags**, and **Disposition Flags** sub-sections. For example, to label two audio tracks:
 
@@ -1474,7 +1490,7 @@ Expand the **Subtitle Settings** section:
 
 | Setting | Description |
 |---|---|
-| **Subtitle Mode** | `copy` (keep original subs) or `none` (discard all subtitles) |
+| **Subtitle Mode** | `copy`, `burn` (hardsubs), or `none` |
 | **Subtitle Tracks to Keep** | Same track selector as Video/Audio |
 | **Subtitle Metadata Tags** | Add Title/Language tags to subtitle tracks |
 | **Subtitle Disposition Flags** | Mark subtitle tracks as `default`, `forced`, etc. |
@@ -1558,10 +1574,13 @@ Here's what a typical anime encoding profile looks like when built through the W
         "s:s:2": "title=English (Signs/Songs)"
     },
     "video_params": {
-        "crf": 24,
-        "preset": 4,
+        "crf": 30,
+        "preset": 6,
         "pix_fmt": "yuv420p10le",
-        "extra_params": "tune=0:film-grain=4",
+        "keyint_seconds": 10,
+        "fast_decode": true,
+        "fps_mode": "vfr",
+        "extra_params": "tune=1:film-grain=4",
         "profile": "0",
         "level": "5.1",
         "color_primaries": "bt709",

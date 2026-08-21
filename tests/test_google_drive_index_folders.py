@@ -1,9 +1,60 @@
+from importlib import import_module
+from pickle import dump, load
+from sys import modules
+from types import ModuleType
 from unittest.mock import patch
 
 import pytest
+from google.auth.exceptions import RefreshError
 
 from bot.helper.ext_utils.exceptions import DirectDownloadLinkException
 from bot.helper.mirror_leech_utils.download_utils import direct_link_generator as dlg
+
+
+@pytest.fixture
+def gdrive_modules(monkeypatch):
+    """Load Drive helpers without requiring the local optional API wheel."""
+    package = ModuleType("googleapiclient")
+    package.__path__ = []
+    discovery = ModuleType("googleapiclient.discovery")
+    discovery.build = lambda *_args, **_kwargs: object()
+    tenacity = ModuleType("tenacity")
+
+    def retry(*_args, **_kwargs):
+        return lambda function: function
+
+    tenacity.RetryError = type("RetryError", (Exception,), {})
+    tenacity.retry = retry
+    tenacity.retry_if_exception = lambda *_args, **_kwargs: object()
+    tenacity.retry_if_exception_type = lambda *_args, **_kwargs: object()
+    tenacity.stop_after_attempt = lambda *_args, **_kwargs: object()
+    tenacity.wait_exponential = lambda *_args, **_kwargs: object()
+
+    monkeypatch.setitem(modules, "googleapiclient", package)
+    monkeypatch.setitem(modules, "googleapiclient.discovery", discovery)
+    monkeypatch.setitem(modules, "tenacity", tenacity)
+
+    helper_name = "bot.helper.mirror_leech_utils.gdrive_utils.helper"
+    modules.pop(helper_name, None)
+    helper = import_module(helper_name)
+    yield helper
+    modules.pop(helper_name, None)
+
+
+class _RevokedCredentials:
+    valid = False
+    refresh_token = "revoked-refresh-token"
+
+    def refresh(self, _request):
+        raise RefreshError("invalid_grant: Bad Request")
+
+
+class _RefreshableCredentials:
+    valid = False
+    refresh_token = "working-refresh-token"
+
+    def refresh(self, _request):
+        self.valid = True
 
 
 class _Response:
@@ -52,6 +103,56 @@ class _IndexSession:
             self.post_failures[key] -= 1
             raise ConnectionError("network is unreachable")
         return _Response(data=self.pages[key])
+
+
+def test_invalid_grant_is_a_permanent_actionable_authentication_error(gdrive_modules):
+    helper = gdrive_modules
+    error = helper.GoogleDriveCredentialError(
+        "('invalid_grant: Bad Request', {'error': 'invalid_grant'})"
+    )
+
+    assert helper.is_gdrive_auth_error(error)
+    assert helper.should_retry_gdrive_error(error) is False
+    assert "/tokengen" in helper.gdrive_auth_error_message("tokens/123.pickle")
+    assert "bot owner" in helper.gdrive_auth_error_message("token.pickle")
+    assert hasattr(helper.GoogleDriveHelper, "switch_service_account")
+    assert hasattr(helper.GoogleDriveHelper, "get_id_from_url")
+
+
+def test_revoked_oauth_token_fails_during_preflight(
+    tmp_path,
+    monkeypatch,
+    gdrive_modules,
+):
+    helper = gdrive_modules
+    token_path = tmp_path / "user-token.pickle"
+    with token_path.open("wb") as token_file:
+        dump(_RevokedCredentials(), token_file)
+    monkeypatch.setattr(helper, "Request", lambda: object())
+
+    with pytest.raises(
+        helper.GoogleDriveCredentialError,
+        match="expired or was revoked",
+    ):
+        helper.validate_gdrive_oauth_token(str(token_path))
+
+
+def test_preflight_persists_successfully_refreshed_oauth_token(
+    tmp_path,
+    monkeypatch,
+    gdrive_modules,
+):
+    helper = gdrive_modules
+    token_path = tmp_path / "user-token.pickle"
+    with token_path.open("wb") as token_file:
+        dump(_RefreshableCredentials(), token_file)
+    monkeypatch.setattr(helper, "Request", lambda: object())
+
+    helper.validate_gdrive_oauth_token(str(token_path))
+
+    with token_path.open("rb") as token_file:
+        refreshed = load(token_file)
+    assert refreshed.valid is True
 
 
 def _page(files, *, next_token=None, page_index=0):

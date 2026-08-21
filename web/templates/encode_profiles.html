@@ -262,8 +262,8 @@
                 <label class="form-label">Video Codec</label>
                 <select id="v-codec" class="form-input form-select">
                   <option value="libsvtav1">SVT-AV1 (Best for 4K/HDR)</option>
-                  <option value="libx265" selected>H.265 / HEVC (Best for 1080p)</option>
-                  <option value="libx264">H.264 / AVC (Most Compatible)</option>
+                  <option value="libx265">H.265 / HEVC (Best for 1080p)</option>
+                  <option value="libx264" selected>H.264 / AVC (Most Compatible)</option>
                   <option value="libvpx-vp9">VP9 (YouTube format)</option>
                   <option value="mpeg4">MPEG-4 (Legacy)</option>
                   <option value="copy">Copy (No re-encode)</option>
@@ -275,7 +275,7 @@
                 </label>
                 <select id="v-pix_fmt" class="form-input form-select">
                   <option value="yuv420p10le">10-bit YUV 4:2:0 (HDR/Banding prevention)</option>
-                  <option value="yuv420p">8-bit YUV 4:2:0 (Standard)</option>
+                  <option value="yuv420p" selected>8-bit YUV 4:2:0 (Standard)</option>
                   <option value="yuv422p">8-bit YUV 4:2:2</option>
                   <option value="yuv444p">8-bit YUV 4:4:4</option>
                 </select>
@@ -289,9 +289,9 @@
                   <label class="form-label">CRF (Quality)
                     <span class="tooltip-wrap"><i data-lucide="help-circle" class="tooltip-icon"></i><span class="tooltip-bubble">Constant Rate Factor. Lower = higher quality and larger file. 18 is near lossless, 24-28 is standard for AV1/HEVC.</span></span>
                   </label>
-                  <span class="slider-value" id="v-crf-val">24</span>
+                  <span class="slider-value" id="v-crf-val">23</span>
                 </div>
-                <input type="range" id="v-crf" class="slider-input" min="0" max="63" value="24">
+                <input type="range" id="v-crf" class="slider-input" min="0" max="63" value="23">
                 <div class="slider-hint" id="v-crf-hint"></div>
               </div>
             </div>
@@ -309,8 +309,30 @@
               </select>
             </div>
 
+            <div id="v-av1-playback-group" class="form-row hidden" style="margin-top: 16px;">
+              <div class="form-group">
+                <label class="form-label">AV1 Seek Interval
+                  <span class="tooltip-wrap"><i data-lucide="help-circle" class="tooltip-icon"></i><span class="tooltip-bubble">Target seconds between AV1 keyframes. Ten seconds balances compression with reliable seeking.</span></span>
+                </label>
+                <select id="v-keyint-seconds" class="form-input form-select">
+                  <option value="5">5 seconds (Faster seeking)</option>
+                  <option value="10" selected>10 seconds (Balanced)</option>
+                  <option value="15">15 seconds (Smaller file)</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label class="form-label">Decoder Optimization</label>
+                <label class="toggle-wrap" style="min-height: 42px;">
+                  <input type="checkbox" id="v-fast-decode" checked>
+                  <div class="toggle-track"><div class="toggle-thumb"></div></div>
+                  <span class="toggle-label">Fast-decode AV1 bitstream</span>
+                </label>
+                <div class="form-hint">Reduces playback complexity with a small compression tradeoff.</div>
+              </div>
+            </div>
+
             <!-- Advanced Video Row -->
-            <div class="form-row" style="margin-top: 16px;">
+            <div class="form-row-3" style="margin-top: 16px;">
               <div class="form-group">
                 <label class="form-label">Format Profile</label>
                 <select id="v-profile" class="form-input form-select">
@@ -339,6 +361,15 @@
                   <option value="6.0">6.0 (8K)</option>
                   <option value="6.1">6.1</option>
                   <option value="6.2">6.2</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label class="form-label">Frame Timing</label>
+                <select id="v-fps-mode" class="form-input form-select">
+                  <option value="vfr" selected>Variable (Preserve timing)</option>
+                  <option value="cfr">Constant frame rate</option>
+                  <option value="passthrough">Timestamp passthrough</option>
+                  <option value="auto">FFmpeg automatic</option>
                 </select>
               </div>
             </div>
@@ -439,8 +470,8 @@
               <div class="form-group">
                 <label class="form-label">Audio Codec</label>
                 <select id="a-codec" class="form-input form-select">
-                  <option value="libopus" selected>Opus (Best Quality/Size)</option>
-                  <option value="aac">AAC (Most Compatible)</option>
+                  <option value="libopus">Opus (Best Quality/Size)</option>
+                  <option value="aac" selected>AAC (Most Compatible)</option>
                   <option value="flac">FLAC (Lossless)</option>
                   <option value="libmp3lame">MP3</option>
                   <option value="ac3">AC-3 (Dolby Digital)</option>
@@ -452,8 +483,8 @@
                 <select id="a-bitrate" class="form-input form-select">
                   <option value="64k">64 kbps (Low)</option>
                   <option value="96k">96 kbps</option>
-                  <option value="128k" selected>128 kbps (Standard)</option>
-                  <option value="192k">192 kbps (High)</option>
+                  <option value="128k">128 kbps (Standard)</option>
+                  <option value="192k" selected>192 kbps (High)</option>
                   <option value="256k">256 kbps</option>
                   <option value="320k">320 kbps (Maximum)</option>
                 </select>
@@ -473,7 +504,7 @@
 
             <div id="a-vbr-group" style="margin-top: 16px;">
               <label class="toggle-wrap">
-                <input type="checkbox" id="a-vbr" checked>
+                <input type="checkbox" id="a-vbr">
                 <div class="toggle-track"><div class="toggle-thumb"></div></div>
                 <span class="form-label" style="text-transform: none; font-size: 13px;">Variable Bitrate (VBR)</span>
               </label>
@@ -672,5 +703,5 @@
 {% endblock %}
 
 {% block extra_js %}
-<script src="/static/js/encode.js?v=2"></script>
+<script src="/static/js/encode.js?v=6"></script>
 {% endblock %}
