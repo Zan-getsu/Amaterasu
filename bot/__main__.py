@@ -1,8 +1,8 @@
 # ruff: noqa: E402
 
 import faulthandler
-from sys import stderr
 from logging import FileHandler, getLogger
+from sys import stderr
 
 faulthandler.enable(file=stderr, all_threads=True)
 
@@ -22,8 +22,8 @@ for _h in getLogger().handlers:
     if isinstance(_h, FileHandler):
         try:
             faulthandler.enable(file=_h.stream.fileno(), all_threads=True)
-        except Exception:
-            pass
+        except Exception as error:
+            LOGGER.debug("Unable to attach faulthandler to log file: %s", error)
         break
 from .core.tg_client import TgClient
 
@@ -32,12 +32,12 @@ _clean_task = None
 STARTUP_BANNER = r"""
 ╔════════════════════════════════════════════════════════════════════════════════════════════╗
 ║                                                                                            ║
-║      █████╗ ███╗   ███╗███████╗████████╗███████╗██████╗  █████╗ ███████╗██╗   ██╗          ║
-║     ██╔══██╗████╗ ████║██╔════╝╚══██╔══╝██╔════╝██╔══██╗██╔══██╗██╔════╝██║   ██║          ║
-║     ███████║██╔████╔██║█████╗     ██║   █████╗  ██████╔╝███████║███████╗██║   ██║          ║
-║     ██╔══██║██║╚██╔╝██║██╔══╝     ██║   ██╔══╝  ██╔══██╗██╔══██║╚════██║██║   ██║          ║
-║     ██║  ██║██║ ╚═╝ ██║███████╗   ██║   ███████╗██║  ██║██║  ██║███████║╚██████╔╝          ║
-║     ╚═╝  ╚═╝╚═╝     ╚═╝╚══════╝   ╚═╝   ╚══════╝╚═╝  ╚═╝╚═╝  ╚══════╝ ╚═════╝              ║
+║        █████╗ ███╗   ███╗ █████╗ ████████╗███████╗██████╗  █████╗ ███████╗██╗   ██╗        ║
+║       ██╔══██╗████╗ ████║██╔══██╗╚══██╔══╝██╔════╝██╔══██╗██╔══██╗██╔════╝██║   ██║        ║
+║       ███████║██╔████╔██║███████║   ██║   █████╗  ██████╔╝███████║███████╗██║   ██║        ║
+║       ██╔══██║██║╚██╔╝██║██╔══██║   ██║   ██╔══╝  ██╔══██╗██╔══██║╚════██║██║   ██║        ║
+║       ██║  ██║██║ ╚═╝ ██║██║  ██║   ██║   ███████╗██║  ██║██║  ██║███████║╚██████╔╝        ║
+║        ╚═╝  ╚═╝╚═╝     ╚═╝╚═╝  ╚═╝   ╚═╝   ╚══════╝╚═╝  ╚═╝╚═╝  ╚═╝╚══════╝ ╚═════╝        ║
 ║                                                                                            ║
 ║                              ────  Amaterasu  ────                                         ║
 ║                                 The Black Sun                                              ║
@@ -163,8 +163,8 @@ async def main():
             if cid != 0 and id(client) not in helper_client_ids:
                 try:
                     await client.stop()
-                except Exception:
-                    pass
+                except Exception as error:
+                    LOGGER.debug("Unable to stop stream client %s: %s", cid, error)
         TgClient.stream_clients = {}
         TgClient.stream_loads = {}
         TgClient.stream_prewarm = {}
@@ -323,8 +323,8 @@ LOGGER.info("Web UI: SABnzbd available at /nzb/")
 # Download daemons (aria2, qBittorrent, SABnzbd, JD) are NOT paused —
 # they continue in their own processes and resume on next boot via
 # INCOMPLETE_TASK_NOTIFIER.
-import signal
 import asyncio as _asyncio
+import signal
 
 _shutdown_event = _asyncio.Event()
 
@@ -375,8 +375,8 @@ async def _graceful_shutdown():
             if hasattr(interval, "cancel"):
                 try:
                     interval.cancel()
-                except Exception:
-                    pass
+                except Exception as error:
+                    LOGGER.debug("Unable to cancel status interval: %s", error)
     except Exception as e:
         LOGGER.error(f"Shutdown: interval cancel error: {e}")
 

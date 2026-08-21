@@ -23,6 +23,26 @@ EN_LANGUAGE_PATH = ROOT / "bot" / "helper" / "languages" / "en.py"
 SERVICES_PATH = ROOT / "bot" / "modules" / "services.py"
 SETUP_PATH = ROOT / "bot" / "modules" / "setup.py"
 SPEEDTEST_PATH = ROOT / "bot" / "modules" / "speedtest.py"
+MAIN_PATH = ROOT / "bot" / "__main__.py"
+README_PATH = ROOT / "README.md"
+
+AMATERASU_ASCII_ROWS = (
+    "█████╗ ███╗   ███╗ █████╗ ████████╗███████╗██████╗  █████╗ ███████╗██╗   ██╗",
+    "██╔══██╗████╗ ████║██╔══██╗╚══██╔══╝██╔════╝██╔══██╗██╔══██╗██╔════╝██║   ██║",
+    "███████║██╔████╔██║███████║   ██║   █████╗  ██████╔╝███████║███████╗██║   ██║",
+    "██╔══██║██║╚██╔╝██║██╔══██║   ██║   ██╔══╝  ██╔══██╗██╔══██║╚════██║██║   ██║",
+    "██║  ██║██║ ╚═╝ ██║██║  ██║   ██║   ███████╗██║  ██║██║  ██║███████║╚██████╔╝",
+    "╚═╝  ╚═╝╚═╝     ╚═╝╚═╝  ╚═╝   ╚═╝   ╚══════╝╚═╝  ╚═╝╚═╝  ╚═╝╚══════╝ ╚═════╝",
+)
+
+
+def test_runtime_and_readme_banners_spell_amaterasu():
+    runtime_source = MAIN_PATH.read_text(encoding="utf-8")
+    readme = README_PATH.read_text(encoding="utf-8")
+
+    for row in AMATERASU_ASCII_ROWS:
+        assert row in runtime_source
+        assert row in readme
 
 
 def _load_inline_ui():

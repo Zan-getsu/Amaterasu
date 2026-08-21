@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from importlib import import_module
 from uuid import uuid4
 
@@ -45,18 +45,19 @@ class DbManager:
         try:
             if self._conn is not None:
                 self._conn.close()
-            # Phase 1.10 — MongoDB connection pooling. maxPoolSize=50
-            # handles 50 concurrent operations (plenty for a single-bot
-            # deployment with 10 concurrent tasks). minPoolSize=5 keeps
-            # warm connections ready. serverSelectionTimeoutMS=5000 fails
-            # fast if MongoDB is unreachable (default 30s is too long for
-            # a bot that should degrade gracefully).
+            # Keep the pool elastic. A non-zero minPoolSize makes PyMongo's
+            # maintenance thread continuously open idle sockets; during a
+            # temporary Docker DNS outage that produces background
+            # AutoReconnect tracebacks even when Amaterasu is not using the
+            # database. Connections are still pooled up to maxPoolSize once
+            # requested, while both selection and TCP setup fail fast.
             self._conn = AsyncIOMotorClient(
                 Config.DATABASE_URL,
                 server_api=ServerApi("1"),
                 maxPoolSize=50,
-                minPoolSize=5,
+                minPoolSize=0,
                 serverSelectionTimeoutMS=5000,
+                connectTimeoutMS=5000,
             )
             self.db = self._conn.amaterasu
             self._return = False
@@ -367,7 +368,7 @@ class DbManager:
                 "is_pm": is_pm,
                 "restart_notified": False,
                 "schema_version": INCOMPLETE_TASK_SCHEMA,
-                "created_at": datetime.now(timezone.utc),
+                "created_at": datetime.now(UTC),
             }},
             upsert=True,
         )
@@ -693,11 +694,10 @@ class DbManager:
         None for a permanent ban. Returns True on success."""
         if self._return:
             return False
-        from datetime import datetime, timezone
         doc = {
             "user_id": user_id,
             "added_by": added_by,
-            "added_at": datetime.now(timezone.utc),
+            "added_at": datetime.now(UTC),
             "expires_at": expires_at,
             "reason": reason,
         }
@@ -764,7 +764,6 @@ class DbManager:
         the engines_used.<engine> counter."""
         if self._return:
             return
-        from datetime import datetime, timezone
         update = {
             "$inc": {
                 "total_downloads": downloads,
@@ -772,7 +771,7 @@ class DbManager:
                 "bytes_downloaded": bytes_downloaded,
                 "bytes_uploaded": bytes_uploaded,
             },
-            "$set": {"last_active": datetime.now(timezone.utc)},
+            "$set": {"last_active": datetime.now(UTC)},
         }
         if engine:
             update["$inc"][f"engines_used.{engine}"] = 1
@@ -800,8 +799,7 @@ class DbManager:
         (check on next request, not via cron)."""
         if self._return:
             return
-        from datetime import datetime, timezone
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         try:
             doc = await self.db.user_stats.find_one({"user_id": user_id})
             if doc is None:
@@ -845,12 +843,11 @@ class DbManager:
         Lazily resets counters that have expired."""
         if self._return:
             return 0, 0, None, None
-        from datetime import datetime, timezone
         try:
             doc = await self.db.user_stats.find_one({"user_id": user_id})
             if doc is None:
                 return 0, 0, None, None
-            now = datetime.now(timezone.utc)
+            now = datetime.now(UTC)
             daily_bytes = doc.get("daily_bytes", 0)
             monthly_bytes = doc.get("monthly_bytes", 0)
             daily_reset = doc.get("daily_reset_at")

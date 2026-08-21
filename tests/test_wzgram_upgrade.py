@@ -1,10 +1,14 @@
 import asyncio
+import gc
+import warnings
 from pathlib import Path
+from types import SimpleNamespace
 
 import pyrogram
 import warpcrypto
 from pyrogram import Client
 from pyrogram.crypto import aes
+from pyrogram.dispatcher import Dispatcher
 from pyrogram.methods.advanced import save_file
 
 from bot.core.tg_client import (
@@ -65,6 +69,65 @@ def test_amaterasu_prefers_wzgram_native_media_pool_with_fallback():
     assert "pool = await _get_stable_media_session_pool(" in source
     assert "await self._reset_failed_wzgram_pool(err, user_session)" in uploader_source
     assert 'backend != "WZGram"' in uploader_source
+
+
+def test_handler_registration_is_safe_while_event_loop_is_stopped():
+    client = object.__new__(WzgramClient)
+    client.loop = asyncio.new_event_loop()
+    client.dispatcher = Dispatcher(SimpleNamespace(listeners=None))
+    first_handler = object()
+    second_handler = object()
+
+    try:
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always", RuntimeWarning)
+            assert client.add_handler(first_handler, 5) == (first_handler, 5)
+            assert client.add_handler(second_handler, -1) == (second_handler, -1)
+            gc.collect()
+
+        assert not [warning for warning in caught if "never awaited" in str(warning.message)]
+        assert list(client.dispatcher.groups) == [-1, 5]
+        assert client.dispatcher.groups[5] == [first_handler]
+
+        assert client.remove_handler(first_handler, 5) is None
+        assert 5 not in client.dispatcher.groups
+    finally:
+        client.loop.close()
+
+
+async def test_mongodb_pool_does_not_force_idle_dns_connections(monkeypatch):
+    from bot.core.config_manager import Config
+    from bot.helper.ext_utils import db_handler
+
+    class Collection:
+        async def create_index(self, *args, **kwargs):
+            return kwargs.get("name")
+
+    class Database:
+        blacklisted_users = Collection()
+        user_stats = Collection()
+        google_oauth_states = Collection()
+
+    class MotorClient:
+        def __init__(self, url, **kwargs):
+            self.url = url
+            self.options = kwargs
+            self.amaterasu = Database()
+
+        def close(self):
+            return None
+
+    monkeypatch.setattr(Config, "DATABASE_URL", "mongodb://database.example")
+    monkeypatch.setattr(db_handler, "AsyncIOMotorClient", MotorClient)
+    manager = db_handler.DbManager()
+
+    await manager.connect()
+
+    assert manager._return is False
+    assert manager._conn.options["maxPoolSize"] == 50
+    assert manager._conn.options["minPoolSize"] == 0
+    assert manager._conn.options["serverSelectionTimeoutMS"] == 5000
+    assert manager._conn.options["connectTimeoutMS"] == 5000
 
 
 def test_failed_media_sessions_are_bounded_and_recognized():

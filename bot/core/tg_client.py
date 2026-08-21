@@ -1,6 +1,7 @@
 import asyncio as _asyncio
 from ast import literal_eval
 from asyncio import CancelledError, Lock, gather, get_running_loop, sleep, wait_for
+from collections import OrderedDict
 from hashlib import sha256
 from importlib import import_module
 from inspect import signature
@@ -9,6 +10,7 @@ from time import monotonic
 from pyrogram import Client, enums
 from pyrogram import __version__ as WZGRAM_VERSION
 from pyrogram.errors import FloodWait
+from pyrogram.handlers import DisconnectHandler
 from pyrogram.types import ChatPrivileges
 
 from .. import LOGGER, bot_loop
@@ -232,6 +234,59 @@ async def resilient_tg_operation(
 
 class WzgramClient(Client):
     """WZGram implementation behind Amaterasu's framework-neutral boundary."""
+
+    def add_handler(self, handler, group=0):
+        """Register handlers safely when startup has paused the event loop.
+
+        WZGram 3.0.33 creates its dispatcher coroutine before checking for a
+        running loop. Module-level and synchronous plugin registration can
+        therefore leak that coroutine and emit ``was never awaited``. Keep the
+        public synchronous API while applying WZGram's own fallback mutation
+        without constructing a coroutine when the loop is stopped.
+        """
+        try:
+            get_running_loop()
+        except RuntimeError:
+            owner_loop = getattr(self, "loop", None)
+            if owner_loop is not None and owner_loop.is_running():
+                owner_loop.call_soon_threadsafe(
+                    super().add_handler,
+                    handler,
+                    group,
+                )
+            elif isinstance(handler, DisconnectHandler):
+                self.disconnect_handler = handler.callback
+            else:
+                dispatcher = self.dispatcher
+                if group not in dispatcher.groups:
+                    dispatcher.groups[group] = []
+                    dispatcher.groups = OrderedDict(
+                        sorted(dispatcher.groups.items())
+                    )
+                dispatcher.groups[group].append(handler)
+            return handler, group
+        return super().add_handler(handler, group)
+
+    def remove_handler(self, handler, group=0):
+        """Remove handlers without leaking WZGram's dispatcher coroutine."""
+        try:
+            get_running_loop()
+        except RuntimeError:
+            owner_loop = getattr(self, "loop", None)
+            if owner_loop is not None and owner_loop.is_running():
+                owner_loop.call_soon_threadsafe(
+                    super().remove_handler,
+                    handler,
+                    group,
+                )
+            elif isinstance(handler, DisconnectHandler):
+                self.disconnect_handler = None
+            elif group in self.dispatcher.groups:
+                self.dispatcher.groups[group].remove(handler)
+                if not self.dispatcher.groups[group]:
+                    del self.dispatcher.groups[group]
+            return None
+        return super().remove_handler(handler, group)
 
     async def invoke(self, query, *args, **kwargs):
         query_name = _query_name(query)
