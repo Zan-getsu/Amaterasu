@@ -461,3 +461,4 @@ def test_profile_entry_points_normalize_saved_data_and_default_label_is_dynamic(
     assert "throw await responseError" in encode_js
     assert "-fps_mode:v:0" in encode_js
     assert '<option value="yuv420p" selected>' in encode_html
+    assert ".profile-card { flex: 0 0 auto;" in encode_html
