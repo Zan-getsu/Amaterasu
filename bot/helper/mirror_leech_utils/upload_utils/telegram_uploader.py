@@ -42,7 +42,7 @@ from tenacity import (
 )
 
 from ....core.config_manager import Config
-from ....core.tg_client import TgClient
+from ....core.tg_client import TgClient, is_wzgram_media_session_failure
 from ...ext_utils.bot_utils import sync_to_async
 from ...ext_utils.files_utils import get_base_name, is_archive
 from ...ext_utils.hyperul_utils import HypertgUpload
@@ -196,6 +196,32 @@ class TelegramUploader:
                     monotonic() + flood_wait,
                 )
                 raise
+
+    async def _reset_failed_wzgram_pool(self, error, user_session):
+        backend = (
+            getattr(self._hu, "last_backend", "HyperUP")
+            if self._hu is not None
+            else "WZGram"
+        )
+        if backend != "WZGram" or not is_wzgram_media_session_failure(error):
+            return False
+        client = (
+            TgClient.user
+            if user_session and TgClient.user is not None
+            else self._listener.client
+        )
+        reset_pool = getattr(client, "reset_media_session_pool", None)
+        if reset_pool is None:
+            return False
+        try:
+            await reset_pool(reason=type(error).__name__)
+            return True
+        except Exception as reset_error:
+            LOGGER.warning(
+                "Unable to reset failed WZGram media pool: %s",
+                str(reset_error) or repr(reset_error),
+            )
+            return False
 
     async def _user_settings(self):
         settings_map = {
@@ -1399,6 +1425,7 @@ class TelegramUploader:
         except Exception as err:
             if self._listener.is_cancelled:
                 raise StopTransmission() from err
+            await self._reset_failed_wzgram_pool(err, user_session)
             if (
                 self._thumb is None
                 and thumb is not None

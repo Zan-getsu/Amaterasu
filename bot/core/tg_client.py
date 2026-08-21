@@ -1,8 +1,10 @@
+import asyncio as _asyncio
 from ast import literal_eval
-from asyncio import CancelledError, Lock, gather, get_running_loop, sleep
+from asyncio import CancelledError, Lock, gather, get_running_loop, sleep, wait_for
 from hashlib import sha256
 from importlib import import_module
 from inspect import signature
+from time import monotonic
 
 from pyrogram import Client, enums
 from pyrogram import __version__ as WZGRAM_VERSION
@@ -14,6 +16,9 @@ from .config_manager import Config
 
 MAX_CONCURRENT_TRANSMISSIONS = 8
 WARP_ALIGNED_CHUNK_SIZE = 1024 * 1024
+WZGRAM_MEDIA_RESTART_ATTEMPTS = 3
+WZGRAM_MEDIA_RESET_COOLDOWN = 30
+WZGRAM_UPLOAD_PART_ATTEMPTS = 4
 _TRANSIENT_RPC_ERRORS = frozenset(
     {
         "InternalServerError",
@@ -80,6 +85,96 @@ def _query_is_idempotent(query):
             "SaveBigFilePart",
         }
     )
+
+
+def is_wzgram_media_session_failure(error):
+    """Return whether an upload failed because its MTProto media session died."""
+    current = error
+    for _ in range(6):
+        if isinstance(current, (TimeoutError, ConnectionError)):
+            return True
+        message = str(current).lower()
+        if any(
+            marker in message
+            for marker in (
+                "request timed out",
+                "session restart failed",
+                "connection lost",
+                "connection reset",
+            )
+        ):
+            return True
+        current = getattr(current, "__cause__", None) or getattr(
+            current, "__context__", None
+        )
+        if current is None:
+            break
+    return False
+
+
+def _configure_wzgram_media_pool(pool):
+    """Bound per-session restart loops so the outer retry can rebuild the pool."""
+    for session in pool:
+        session.MAX_RETRIES = min(
+            int(getattr(session, "MAX_RETRIES", WZGRAM_MEDIA_RESTART_ATTEMPTS)),
+            WZGRAM_MEDIA_RESTART_ATTEMPTS,
+        )
+    return pool
+
+
+class _WzgramUploadQueue(_asyncio.Queue):
+    """Prevent WZGram cleanup from blocking after every worker has failed."""
+
+    def __init__(self, maxsize=0):
+        super().__init__(maxsize)
+        self._amaterasu_consumers = set()
+
+    async def get(self):
+        consumer = _asyncio.current_task()
+        if consumer is not None:
+            self._amaterasu_consumers.add(consumer)
+        return await super().get()
+
+    async def put(self, item):
+        if item is not None:
+            return await super().put(item)
+
+        while True:
+            try:
+                self.put_nowait(item)
+                return None
+            except _asyncio.QueueFull:
+                consumers = self._amaterasu_consumers
+                if consumers and all(task.done() for task in consumers):
+                    # WZGram is unwinding after the media workers died. No task
+                    # can consume the queued RPCs now, so discard one to make
+                    # room for each shutdown sentinel instead of deadlocking.
+                    try:
+                        self.get_nowait()
+                    except _asyncio.QueueEmpty:
+                        pass
+                    continue
+                try:
+                    await _asyncio.wait_for(super().put(item), timeout=1)
+                    return None
+                except TimeoutError:
+                    # Recheck worker state. A worker can fail while this
+                    # sentinel is waiting for a queue slot.
+                    continue
+
+
+class _WzgramAsyncioProxy:
+    """Use the guarded queue only inside WZGram's native file uploader."""
+
+    _amaterasu_queue_guard = True
+
+    def __init__(self, asyncio_module):
+        self._asyncio_module = asyncio_module
+
+    def __getattr__(self, name):
+        if name == "Queue":
+            return _WzgramUploadQueue
+        return getattr(self._asyncio_module, name)
 
 
 async def resilient_tg_operation(
@@ -166,7 +261,7 @@ class WzgramClient(Client):
         # Retain the proven sequential constructor only as a recovery path for
         # transient endpoint/session creation failures.
         try:
-            return await super()._get_media_session_pool(dc_id, requested_size)
+            pool = await super()._get_media_session_pool(dc_id, requested_size)
         except Exception as error:
             LOGGER.warning(
                 "WZGram native media pool failed for DC%s (%s); using "
@@ -174,11 +269,73 @@ class WzgramClient(Client):
                 dc_id,
                 error,
             )
-            return await _get_stable_media_session_pool(
+            pool = await _get_stable_media_session_pool(
                 self,
                 dc_id,
                 requested_size,
             )
+        return _configure_wzgram_media_pool(pool)
+
+    async def reset_media_session_pool(self, dc_id=None, reason=""):
+        """Drop failed media sessions so the next upload builds a fresh pool."""
+        if dc_id is None:
+            dc_id = await self.storage.dc_id()
+        reset_lock = getattr(self, "_amaterasu_media_reset_lock", None)
+        if reset_lock is None:
+            reset_lock = self._amaterasu_media_reset_lock = Lock()
+
+        async with reset_lock:
+            reset_times = getattr(self, "_amaterasu_media_reset_at", None)
+            if reset_times is None:
+                reset_times = self._amaterasu_media_reset_at = {}
+            now = monotonic()
+            last_reset = reset_times.get(dc_id, 0)
+            if now - last_reset < WZGRAM_MEDIA_RESET_COOLDOWN:
+                LOGGER.debug(
+                    "Skipping duplicate WZGram media pool reset for DC%s",
+                    dc_id,
+                )
+                return 0
+
+            pool_lock = self._media_sessions_locks.setdefault(dc_id, Lock())
+            async with pool_lock:
+                sessions = list(self.media_session_pools.pop(dc_id, []))
+                base_session = self.media_sessions.get(dc_id)
+                if (
+                    base_session is not None
+                    and not base_session.is_started.is_set()
+                ):
+                    self.media_sessions.pop(dc_id, None)
+                    sessions.append(base_session)
+
+            unique_sessions = list(
+                {id(session): session for session in sessions}.values()
+            )
+            if unique_sessions:
+                reset_times[dc_id] = now
+
+            async def stop_session(session):
+                try:
+                    await wait_for(session.stop(), timeout=10)
+                except Exception as error:
+                    LOGGER.debug(
+                        "Unable to stop failed WZGram media session for DC%s: %s",
+                        dc_id,
+                        error,
+                    )
+
+            if unique_sessions:
+                await gather(
+                    *(stop_session(session) for session in unique_sessions),
+                    return_exceptions=True,
+                )
+                LOGGER.warning(
+                    "Reset %s failed WZGram media sessions for DC%s%s",
+                    len(unique_sessions),
+                    dc_id,
+                    f" after {reason}" if reason else "",
+                )
+            return len(unique_sessions)
 
 
 class TelegramClient:
@@ -306,10 +463,19 @@ def _report_wzgram_upload_pool():
     except (ImportError, AttributeError):
         return
 
+    save_file_module.MAX_RETRIES = min(
+        int(getattr(save_file_module, "MAX_RETRIES", WZGRAM_UPLOAD_PART_ATTEMPTS)),
+        WZGRAM_UPLOAD_PART_ATTEMPTS,
+    )
+    if not getattr(save_file_module.asyncio, "_amaterasu_queue_guard", False):
+        save_file_module.asyncio = _WzgramAsyncioProxy(save_file_module.asyncio)
+
     LOGGER.info(
-        "WZGram %s native adaptive media pools enabled (cap: %s sessions)",
+        "WZGram %s native adaptive media pools enabled "
+        "(cap: %s sessions, part retries: %s, cleanup guard: enabled)",
         WZGRAM_VERSION,
         getattr(save_file_module, "POOL_SIZE", 1),
+        save_file_module.MAX_RETRIES,
     )
 
 

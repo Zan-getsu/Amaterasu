@@ -87,18 +87,19 @@ In case you want to specify whether using token.pickle or service accounts you c
 DEFAULT_UPLOAD doesn't affect on leech cmds.
 """
 
-leech_dump = """<b>Leech Dump selection</b>: -ud
+leech_dump = """<b>Choose Leech Dumps</b>: -ud
 
-Save named destinations in <b>User Settings → Leech Settings → Leech Dump</b>.
+First save your extra upload chats in
+<b>User Settings → Leech Settings → Leech Dump</b>.
 
-• Choose up to 3 named dumps: <code>/cmd link -ud Movies,Backup</code>
-• Send to every saved dump: <code>/cmd link -ud all</code>
-• If one dump is saved, it is selected automatically.
-• If several are saved and <code>-ud</code> is omitted, the bot opens a picker.
-• Dump Mode can temporarily disable additional dumps without deleting them.
+Then choose where the leech should also be sent:
+• One dump: <code>/cmd link -ud Movies</code>
+• Up to 3 dumps: <code>/cmd link -ud Movies,Backup</code>
+• Every saved dump: <code>/cmd link -ud all</code>
+• Omit <code>-ud</code>: one saved dump is automatic; several open the picker.
 
-The 3-dump limit applies only to individual selection. <code>-ud all</code> and
-<b>Select All</b> intentionally send every uploaded file to every saved dump."""
+<b>Select All</b> works like <code>-ud all</code>. Turning off Dump Mode pauses
+these extra copies without deleting your saved list."""
 
 user_download = """<b>User Download</b>: link
 

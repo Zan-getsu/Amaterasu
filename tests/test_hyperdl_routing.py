@@ -1033,8 +1033,10 @@ def test_leech_dump_ui_uses_clear_multiple_destination_guide():
 
     assert 'buttons.data_button("✦ Leech Dump"' in source
     assert "✦ Leech Destination" not in source
-    assert "Send one named destination per line" in source
-    assert "The complete list replaces the previous list" in source
+    assert "A Leech Dump is an extra chat" in source
+    assert "Put one dump on each line" in source
+    assert "A new valid list replaces the old list" in source
+    assert "No <code>-ud</code> → one dump is automatic" in source
     assert "parse_named_leech_dumps(message.text)" in source
     assert "await TgClient.bot.get_chat(chat_id)" in source
     assert 'update_user_ldata(user_id, "LEECH_DUMP"' in source

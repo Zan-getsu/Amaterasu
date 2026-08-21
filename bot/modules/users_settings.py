@@ -133,31 +133,37 @@ user_settings_text = {
     ),
     "LEECH_DUMP": (
         "String",
-        "Named chats where leeched files can also be copied.",
-        """<b>Set your Leech Dumps</b>
+        "Extra Telegram chats where the bot can send copies of leeched files.",
+        """<b>Set Leech Dump</b>
 
-Send one named destination per line using:
-<code>NAME DESTINATION</code>
+A Leech Dump is an extra chat where the bot sends a copy of your leeched files.
 
-Example:
+<b>Send your list like this:</b>
 <code>Movies -1001234567890
 Anime @animebackup
-Requests -1009876543210|45
-Personal pm</code>
+My Private Chat pm</code>
 
-• Save up to 10 named dumps.
-• Names may contain spaces, but not commas.
-• Use <code>|topic_id</code> for a forum topic.
-• The complete list replaces the previous list only after every line is valid.
-• The bot validates that each chat is accessible before saving.
+Put one dump on each line: first type a name, then its destination.
+The destination can be a chat ID, <code>@username</code>, or <code>pm</code> for
+your private chat.
 
-For a leech task, use <code>-ud Movies,Anime</code> to choose up to 3 dumps,
-or <code>-ud all</code> to send every file to every saved dump. If several dumps
-exist and <code>-ud</code> is omitted, the bot shows a picker.
+<b>Forum topic:</b>
+Add <code>|topic_id</code> after the chat ID:
+<code>Requests -1009876543210|45</code>
 
-Use the <b>Dump Mode</b> button to temporarily disable all additional Leech
-Dumps without deleting the saved list. The bot's primary upload chat is not
-affected.
+<b>Choose dumps when leeching (with Dump Mode on):</b>
+• No <code>-ud</code> → one dump is automatic; for several, use the picker.
+• <code>-ud Movies</code> → send to Movies.
+• <code>-ud Movies,Anime</code> → choose up to 3 dumps.
+• <code>-ud all</code> → send to every saved dump.
+
+<b>Remember:</b>
+• You can save up to 10 dumps.
+• Dump names can contain spaces, but not commas.
+• Add the bot to each destination chat before saving.
+• A new valid list replaces the old list. If any line is wrong, nothing changes.
+• Turning off <b>Dump Mode</b> pauses extra copies without deleting your list.
+  Your normal leech upload is not affected.
 
 ┖ <b>Time Left :</b> <code>60 sec</code>""",
     ),

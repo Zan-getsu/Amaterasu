@@ -62,6 +62,7 @@ tests/*
 !tests/test_hyperdl_routing.py
 !tests/test_bot_settings_categories.py
 !tests/test_wzgram_upgrade.py
+!tests/test_ytdlp_thumbnail_recovery.py
 !tests/test_update_safety.py
 !tests/test_multi_leech_summary.py
 !tests/test_google_drive_index_folders.py

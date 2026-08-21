@@ -1,28 +1,82 @@
+from asyncio import sleep
+from contextlib import suppress
+from html import unescape
 from logging import getLogger
 from mimetypes import guess_extension
-from os import path as ospath, listdir, replace
+from os import listdir, replace
+from os import path as ospath
 from re import search as re_search
-from contextlib import suppress
 from secrets import token_hex
 from zipfile import ZipFile, is_zipfile
-from asyncio import sleep
-from yt_dlp import YoutubeDL, DownloadError
-from yt_dlp.networking.impersonate import ImpersonateTarget
 
-from .... import task_dict_lock, task_dict
+from yt_dlp import DownloadError, YoutubeDL
+from yt_dlp.networking.impersonate import ImpersonateTarget
+from yt_dlp.postprocessor import EmbedThumbnailPP
+from yt_dlp.utils import PostProcessingError
+
+from .... import task_dict, task_dict_lock
 from ....core.config_manager import BinConfig, Config
-from ...ext_utils.bot_utils import sync_to_async, async_to_sync, get_content_info
+from ...ext_utils.bot_utils import async_to_sync, get_content_info, sync_to_async
 from ...ext_utils.files_utils import get_mime_type
 from ...ext_utils.task_manager import (
     check_running_tasks,
-    stop_duplicate_check,
     limit_checker,
+    stop_duplicate_check,
 )
 from ...mirror_leech_utils.status_utils.queue_status import QueueStatus
 from ...telegram_helper.message_utils import send_status_message
 from ..status_utils.yt_dlp_status import YtDlpStatus
 
 LOGGER = getLogger(__name__)
+
+
+class ResilientEmbedThumbnailPP(EmbedThumbnailPP):
+    """Keep a completed download when only its optional cover cannot embed."""
+
+    def run(self, info):
+        try:
+            return super().run(info)
+        except PostProcessingError as error:
+            self.report_warning(
+                "Thumbnail embedding failed; keeping the downloaded media "
+                f"without an embedded cover: {error}"
+            )
+            return [], info
+
+
+def _build_resilient_ytdlp(options):
+    """Replace yt-dlp's fatal thumbnail embedder with a fail-open variant."""
+    safe_options = dict(options)
+    embed_definitions = []
+    postprocessors = []
+    for definition in safe_options.get("postprocessors", []):
+        if definition.get("key") == "EmbedThumbnail":
+            embed_definitions.append(dict(definition))
+        else:
+            postprocessors.append(definition)
+    safe_options["postprocessors"] = postprocessors
+
+    ydl = YoutubeDL(safe_options)
+    for definition in embed_definitions:
+        definition.pop("key", None)
+        when = definition.pop("when", "post_process")
+        ydl.add_post_processor(
+            ResilientEmbedThumbnailPP(ydl, **definition),
+            when=when,
+        )
+    return ydl
+
+
+def _decode_filename_entities(name):
+    """Decode extractor-provided HTML entities without looping indefinitely."""
+    if not name:
+        return name
+    for _ in range(2):
+        decoded = unescape(name)
+        if decoded == name:
+            break
+        name = decoded
+    return name.strip()
 
 
 def _bin_path(name):
@@ -354,28 +408,28 @@ class YoutubeDLHelper:
     def _download(self, path):
         self._active = True
         try:
-            with suppress(Exception):
-                with YoutubeDL(self.opts) as ydl:
-                    try:
-                        ydl.download([self._listener.link])
-                    except DownloadError as e:
-                        if not self._listener.is_cancelled:
-                            self._on_download_error(e)
-                        return
-                self._repair_unknown_video_name(path)
-                if self.is_playlist and (
-                    not ospath.exists(path) or len(listdir(path)) == 0
-                ):
-                    self._on_download_error(
-                        "No video available to download from this playlist. Check logs for more details"
-                    )
-                    return
-                if self._listener.is_cancelled:
-                    return
-                async_to_sync(self._listener.on_download_complete)
+            with _build_resilient_ytdlp(self.opts) as ydl:
+                ydl.download([self._listener.link])
+            self._repair_unknown_video_name(path)
+            if self.is_playlist and (
+                not ospath.exists(path) or len(listdir(path)) == 0
+            ):
+                self._on_download_error(
+                    "No video available to download from this playlist. Check logs for more details"
+                )
+                return
+            if self._listener.is_cancelled:
+                return
+            async_to_sync(self._listener.on_download_complete)
+        except DownloadError as error:
+            if not self._listener.is_cancelled:
+                self._on_download_error(error)
+        except Exception as error:
+            LOGGER.exception("Unexpected yt-dlp task failure")
+            if not self._listener.is_cancelled:
+                self._on_download_error(error)
         finally:
             self._active = False
-        return
 
     async def add_download(
         self, path, qual, playlist, options, extra_postprocess=True, forced_name=None
@@ -447,9 +501,13 @@ class YoutubeDLHelper:
         await sync_to_async(self._extract_meta_data)
         if self._listener.is_cancelled:
             return
+        self._listener.name = _decode_filename_entities(self._listener.name)
+        normalized_ext = ospath.splitext(self._listener.name)[-1]
+        if normalized_ext:
+            self._ext = normalized_ext
         if forced_name:
-            self._listener.name = forced_name
-            self._ext = ospath.splitext(forced_name)[-1]
+            self._listener.name = _decode_filename_entities(forced_name)
+            self._ext = ospath.splitext(self._listener.name)[-1]
 
         base_name, ext = ospath.splitext(self._listener.name)
         trim_name = self._listener.name if self.is_playlist else base_name
@@ -571,7 +629,7 @@ class YoutubeDLHelper:
                     self.opts[key].append(value)
             elif key == "download_ranges":
                 if isinstance(value, list):
-                    self.opts[key] = lambda info, ytdl: value
+                    self.opts[key] = lambda info, ytdl, value=value: value
             else:
                 if key == "writethumbnail" and value is True:
                     self.keep_thumb = True
