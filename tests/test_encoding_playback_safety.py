@@ -380,6 +380,119 @@ async def test_validation_rejects_missing_audio_and_checks_seek_points():
     assert "no audio stream" in reason
 
 
+async def test_audio_decode_check_requires_a_real_decoded_frame():
+    calls = []
+    result = {
+        "stdout": "\n".join(
+            [
+                "#format: frame checksums",
+                "#stream#, dts, pts, duration, size, hash",
+                "0, 0, 0, 1024, 4096, abc123",
+            ]
+        ),
+        "stderr": "",
+        "code": 0,
+    }
+
+    async def cmd_exec(cmd):
+        calls.append(cmd)
+        return result["stdout"], result["stderr"], result["code"]
+
+    async def wait_for(awaitable, timeout):
+        assert timeout == 60
+        return await awaitable
+
+    decode = _load_ffmpeg_method(
+        "_decode_encode_sample",
+        {
+            "BinConfig": type("BinConfig", (), {"FFMPEG_NAME": "ffmpeg"}),
+            "cmd_exec": cmd_exec,
+            "wait_for": wait_for,
+        },
+    )
+
+    valid, reason = await decode(object(), "encoded.mkv", 870.015, "audio")
+
+    assert valid is True
+    assert reason == ""
+    assert "framehash" in calls[0]
+    assert "pcm_s16le" in calls[0]
+    assert calls[0][calls[0].index("-frames:a") + 1] == "1"
+
+    result["stdout"] = "out_time_us=1000000\nprogress=end"
+    valid, reason = await decode(object(), "encoded.mkv", 870.015, "audio")
+
+    assert valid is False
+    assert reason == "no audio data decoded near 870.015s"
+
+
+async def test_audio_validation_retries_empty_midpoint_without_masking_decode_errors():
+    probe_duration, count_streams = _load_media_helpers(
+        "_probe_duration", "_count_media_streams"
+    )
+    probe = {
+        "streams": [{"codec_type": "video"}, {"codec_type": "audio"}],
+        "format": {"duration": "120"},
+    }
+
+    async def probe_file(path):
+        return probe, ""
+
+    validate = _load_ffmpeg_method(
+        "_validate_encoded_media",
+        {
+            "_probe_media_file": probe_file,
+            "_probe_duration": probe_duration,
+            "_count_media_streams": count_streams,
+        },
+    )
+
+    class Validator:
+        _listener = type("Listener", (), {"is_cancelled": False})()
+
+        def __init__(self, hard_error=False, always_empty=False):
+            self.audio_positions = []
+            self.hard_error = hard_error
+            self.always_empty = always_empty
+
+        async def _decode_encode_sample(self, path, position, stream_type):
+            if stream_type == "video":
+                return True, ""
+            self.audio_positions.append(position)
+            if self.hard_error:
+                return False, "invalid audio packet"
+            if self.always_empty or len(self.audio_positions) == 1:
+                return False, f"no audio data decoded near {position:.3f}s"
+            return True, ""
+
+    validator = Validator()
+    valid, reason = await validate(
+        validator, "source", "output", True, source_probe=probe
+    )
+
+    assert valid is True
+    assert reason == ""
+    assert validator.audio_positions == [60.0, 30.0]
+
+    validator = Validator(hard_error=True)
+    valid, reason = await validate(
+        validator, "source", "output", True, source_probe=probe
+    )
+
+    assert valid is False
+    assert reason == "invalid audio packet"
+    assert validator.audio_positions == [60.0]
+
+    validator = Validator(always_empty=True)
+    valid, reason = await validate(
+        validator, "source", "output", True, source_probe=probe
+    )
+
+    assert valid is False
+    assert "no audio frames decoded" in reason
+    assert validator.audio_positions == [60.0, 30.0, 90.0]
+
+
 def test_default_profiles_are_playback_compatible_and_consistent():
     sample = _literal_assignment(ROOT / "config_sample.py", "DEFAULT_ENCODE_PRESET")
     defaults_tree = ast.parse(

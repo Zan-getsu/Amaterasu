@@ -1291,8 +1291,28 @@ class FFMpeg:
         if stream_type == "video":
             cmd.extend(["-map", "0:v:0", "-frames:v", "1", "-an"])
         else:
-            cmd.extend(["-map", "0:a:0", "-t", "1", "-vn"])
-        cmd.extend(["-progress", "pipe:1", "-f", "null", "-"])
+            # Hash one decoded PCM frame instead of inferring audio from progress
+            # timestamps. After an input seek FFmpeg can legitimately report an
+            # out_time of zero even though it decoded audio, which caused valid
+            # copied tracks to be rejected after a successful video encode.
+            cmd.extend(
+                [
+                    "-map",
+                    "0:a:0",
+                    "-t",
+                    "2",
+                    "-frames:a",
+                    "1",
+                    "-vn",
+                    "-c:a",
+                    "pcm_s16le",
+                    "-f",
+                    "framehash",
+                    "pipe:1",
+                ]
+            )
+        if stream_type == "video":
+            cmd.extend(["-progress", "pipe:1", "-f", "null", "-"])
 
         try:
             stdout, stderr, code = await wait_for(cmd_exec(cmd), timeout=60)
@@ -1306,9 +1326,11 @@ class FFMpeg:
                 for line in stdout.splitlines()
             )
         else:
+            # framehash data rows begin with the numeric output stream index;
+            # headers begin with '#'. This proves that an audio frame was
+            # decoded, including valid silence and frames whose timestamp is 0.
             decoded = any(
-                line.startswith(("out_time_us=", "out_time_ms="))
-                and line.partition("=")[2].strip() not in {"", "0", "N/A"}
+                line.partition(",")[0].strip().isdigit()
                 for line in stdout.splitlines()
             )
         if not decoded:
@@ -1361,11 +1383,30 @@ class FFMpeg:
                 return False, reason
 
         if expect_audio and source_has_audio:
-            valid, reason = await self._decode_encode_sample(
-                output_file, output_duration * 0.5, "audio"
-            )
-            if not valid:
-                return False, reason
+            midpoint = output_duration * 0.5
+            audio_positions = [midpoint]
+            for fraction in (0.25, 0.75):
+                position = output_duration * fraction
+                if all(abs(position - existing) >= 0.5 for existing in audio_positions):
+                    audio_positions.append(position)
+
+            empty_reasons = []
+            for position in audio_positions:
+                if self._listener.is_cancelled:
+                    return False, "encoding was cancelled during validation"
+                valid, reason = await self._decode_encode_sample(
+                    output_file, position, "audio"
+                )
+                if valid:
+                    break
+                if not reason.startswith("no audio data decoded near "):
+                    return False, reason
+                empty_reasons.append(reason)
+            else:
+                return False, (
+                    "no audio frames decoded at the midpoint or fallback "
+                    f"sample positions ({'; '.join(empty_reasons)})"
+                )
         return True, ""
 
     async def encode_video(self, input_file, profile, metadata=None):
