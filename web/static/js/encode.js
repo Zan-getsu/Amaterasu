@@ -907,12 +907,22 @@
       if (profile.video_params?.pix_fmt) cmd += ` -pix_fmt ${profile.video_params.pix_fmt}`;
       if (profile.video_codec === 'libsvtav1') {
         const svtParts = [];
-        if (profile.video_params?.preset !== undefined) cmd += ` -preset ${profile.video_params.preset}`;
-        if (profile.video_params?.crf !== undefined) cmd += ` -crf ${profile.video_params.crf}`;
-        const extraParams = String(profile.video_params?.extra_params || '').trim();
+        if (useAutomaticTimestamps) {
+          if (profile.video_params?.preset !== undefined) svtParts.push(`preset=${profile.video_params.preset}`);
+          if (profile.video_params?.crf !== undefined) svtParts.push(`crf=${profile.video_params.crf}`);
+        } else {
+          if (profile.video_params?.preset !== undefined) cmd += ` -preset ${profile.video_params.preset}`;
+          if (profile.video_params?.crf !== undefined) cmd += ` -crf ${profile.video_params.crf}`;
+        }
+        let extraParams = String(profile.video_params?.extra_params || '').trim();
+        if (useAutomaticTimestamps && profile.video_params?.fast_decode === false) {
+          extraParams = extraParams.split(':').filter(part => !part.startsWith('fast-decode=')).join(':');
+        }
         if (extraParams) svtParts.push(extraParams);
-        if (profile.video_params?.fast_decode !== undefined && !/(^|:)fast-decode=/.test(extraParams)) {
+        if (profile.video_params?.fast_decode === true && !/(^|:)fast-decode=/.test(extraParams)) {
           svtParts.push(`fast-decode=${profile.video_params.fast_decode ? 1 : 0}`);
+        } else if (!useAutomaticTimestamps && profile.video_params?.fast_decode === false && !/(^|:)fast-decode=/.test(extraParams)) {
+          svtParts.push('fast-decode=0');
         }
         if (profile.video_params?.profile !== undefined && profile.video_params.profile !== '') {
           svtParts.push(`profile=${profile.video_params.profile}`);
@@ -998,7 +1008,8 @@
     cmd += `  -max_muxing_queue_size 4096`;
     if (!useAutomaticTimestamps) cmd += ` -avoid_negative_ts make_zero`;
     cmd += ` \\\n`;
-    cmd += `  -cluster_time_limit 5000 output.mkv`;
+    if (!useAutomaticTimestamps) cmd += `  -cluster_time_limit 5000 `;
+    cmd += `output.mkv`;
     return cmd;
   }
 

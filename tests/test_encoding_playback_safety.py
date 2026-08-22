@@ -191,6 +191,63 @@ def test_existing_av1_profile_is_preserved_and_compiled_efficiently():
     assert "crf=" not in params
 
 
+def test_copied_audio_av1_uses_pre_upgrade_svt_parameter_semantics():
+    _, _, _, normalize, build_svt = _load_media_helpers(
+        "_bounded_int",
+        "_as_bool",
+        "_parse_codec_params",
+        "normalize_encode_profile",
+        "_build_svtav1_params",
+    )
+    profile, warnings = normalize(
+        {
+            "video_codec": "libsvtav1",
+            "audio_codec": "copy",
+            "video_params": {
+                "crf": 26,
+                "preset": 5,
+                "fast_decode": False,
+                "keyint_seconds": 10,
+                "profile": "0",
+                "level": "5.1",
+                "extra_params": (
+                    "tune=0:film-grain=0:enable-overlays=1:scm=2:"
+                    "irefresh-type=2"
+                ),
+            },
+        }
+    )
+    params = build_svt(
+        profile["video_params"],
+        worker_count=4,
+        frame_rate=24,
+        compatibility_mode=True,
+    )
+
+    assert warnings == []
+    assert "keyint=240" in params
+    assert "profile=0" in params
+    assert "level=51" in params
+    assert "lp=" not in params
+    assert "fast-decode=" not in params
+
+    profile_without_decoder_override, _ = normalize(
+        {
+            "video_codec": "libsvtav1",
+            "audio_codec": "copy",
+            "video_params": {"extra_params": "tune=0"},
+        }
+    )
+    params_without_override = build_svt(
+        profile_without_decoder_override["video_params"],
+        worker_count=4,
+        frame_rate=24,
+        compatibility_mode=True,
+    )
+    assert "fast-decode=" not in params_without_override
+    assert "keyint=" not in params_without_override
+
+
 def test_minimal_av1_profile_gets_balanced_defaults_without_overriding_legacy_params():
     _, _, _, normalize, build_svt = _load_media_helpers(
         "_bounded_int",
@@ -713,6 +770,9 @@ def test_encode_pipeline_selects_copy_safe_timestamps_and_validates_before_succe
     assert "_build_svtav1_params(" in method_source
     assert '"-fps_mode:v:0"' in method_source
     assert 'timestamp_policy["fps_mode"]' in method_source
+    assert "legacy_av1_copy" in method_source
+    assert "compatibility_mode=legacy_av1_copy" in method_source
+    assert 'svt_params = f"preset={preset}:crf={crf}:{svt_params}"' in method_source
     assert '"-avoid_negative_ts"' in method_source
     assert 'if timestamp_policy["shift_negative_ts"]:' in method_source
     assert '"-max_muxing_queue_size"' in method_source
@@ -783,5 +843,7 @@ def test_profile_entry_points_normalize_saved_data_and_default_label_is_dynamic(
     assert "throw await responseError" in encode_js
     assert "-fps_mode:v:0" in encode_js
     assert "useAutomaticTimestamps" in encode_js
+    assert "svtParts.push(`preset=${profile.video_params.preset}`)" in encode_js
+    assert "if (!useAutomaticTimestamps) cmd += `  -cluster_time_limit 5000 `" in encode_js
     assert '<option value="yuv420p" selected>' in encode_html
     assert ".profile-card { flex: 0 0 auto;" in encode_html

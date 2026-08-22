@@ -679,13 +679,26 @@ def _parse_codec_params(params):
     return parsed
 
 
-def _build_svtav1_params(video_params, worker_count, frame_rate=0):
+def _build_svtav1_params(
+    video_params, worker_count, frame_rate=0, compatibility_mode=False
+):
     params = _parse_codec_params(video_params.get("extra_params"))
     for authoritative in ("preset", "crf", "profile", "level"):
         params.pop(authoritative, None)
 
-    requested_workers = _bounded_int(params.get("lp"), worker_count, 1, worker_count)
-    params["lp"] = str(requested_workers)
+    if compatibility_mode:
+        # Match the pre-upgrade encoder: let SVT select its parallelism unless
+        # the saved profile explicitly contains an lp value. taskset already
+        # limits the process to the configured CPU set.
+        if "lp" in params:
+            params["lp"] = str(
+                _bounded_int(params["lp"], worker_count, 1, worker_count)
+            )
+    else:
+        requested_workers = _bounded_int(
+            params.get("lp"), worker_count, 1, worker_count
+        )
+        params["lp"] = str(requested_workers)
 
     if "keyint" in params:
         keyint = _bounded_int(params["keyint"], 0, 1, 1800)
@@ -693,13 +706,26 @@ def _build_svtav1_params(video_params, worker_count, frame_rate=0):
             params["keyint"] = str(keyint)
         else:
             params.pop("keyint")
-    if "keyint" not in params:
+    if "keyint" not in params and (
+        not compatibility_mode or "keyint_seconds" in video_params
+    ):
         seconds = _bounded_int(video_params.get("keyint_seconds"), 10, 1, 30)
         fps = frame_rate if frame_rate > 0 else 24
         params["keyint"] = str(max(24, min(1800, round(fps * seconds))))
 
     fast_decode = video_params.get("fast_decode")
-    if fast_decode is None:
+    if compatibility_mode:
+        if fast_decode is True:
+            params["fast-decode"] = "1"
+        elif fast_decode is False:
+            # SVT-AV1 2.3 defaults to the old full-decoder toolset. Omitting
+            # the option reproduces the command emitted by the working encoder.
+            params.pop("fast-decode", None)
+        elif "fast-decode" in params:
+            params["fast-decode"] = (
+                "1" if _as_bool(params["fast-decode"], False) else "0"
+            )
+    elif fast_decode is None:
         default_fast_decode = params.get("tune") != "0"
         params["fast-decode"] = (
             "1"
@@ -1535,7 +1561,10 @@ class FFMpeg:
             cmd.extend(["-max_muxing_queue_size", "4096"])
             if timestamp_policy["shift_negative_ts"]:
                 cmd.extend(["-avoid_negative_ts", "make_zero"])
-            if extension.lower() in {".mkv", ".mka"}:
+            if (
+                extension.lower() in {".mkv", ".mka"}
+                and not timestamp_policy["automatic_timestamps"]
+            ):
                 cmd.extend(["-cluster_time_limit", "5000"])
             elif extension.lower() in {".mp4", ".m4v", ".mov"}:
                 cmd.extend(["-movflags", "+faststart"])
@@ -1746,22 +1775,34 @@ class FFMpeg:
         )
 
         extra_v_params = str(v_params.get("extra_params") or "").strip()
+        legacy_av1_copy = (
+            v_codec == "libsvtav1" and timestamp_policy["automatic_timestamps"]
+        )
         if v_codec == "libsvtav1":
             svt_params = _build_svtav1_params(
-                v_params, max(1, threads), frame_rate
+                v_params,
+                max(1, threads),
+                frame_rate,
+                compatibility_mode=legacy_av1_copy,
             )
-            cmd.extend(
-                [
-                    "-pix_fmt",
-                    pix_fmt,
-                    "-preset",
-                    str(preset),
-                    "-crf",
-                    str(crf),
-                    "-svtav1-params",
-                    svt_params,
-                ]
-            )
+            if legacy_av1_copy:
+                # Preserve the exact pre-upgrade SVT option route for the
+                # Matroska + copied-audio compatibility path.
+                svt_params = f"preset={preset}:crf={crf}:{svt_params}"
+                cmd.extend(["-pix_fmt", pix_fmt, "-svtav1-params", svt_params])
+            else:
+                cmd.extend(
+                    [
+                        "-pix_fmt",
+                        pix_fmt,
+                        "-preset",
+                        str(preset),
+                        "-crf",
+                        str(crf),
+                        "-svtav1-params",
+                        svt_params,
+                    ]
+                )
         elif v_codec == "libx265":
             cmd.extend(
                 ["-pix_fmt", pix_fmt, "-crf", str(crf), "-preset", str(preset)]
@@ -1861,7 +1902,7 @@ class FFMpeg:
         cmd.extend(["-max_muxing_queue_size", "4096"])
         if timestamp_policy["shift_negative_ts"]:
             cmd.extend(["-avoid_negative_ts", "make_zero"])
-        if is_mkv:
+        if is_mkv and not timestamp_policy["automatic_timestamps"]:
             cmd.extend(["-cluster_time_limit", "5000"])
         elif is_mp4:
             cmd.extend(["-movflags", "+faststart"])
