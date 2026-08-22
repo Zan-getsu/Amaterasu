@@ -28,7 +28,7 @@ def test_base_image_fails_build_when_av1_stack_is_missing_or_mismatched():
     dockerfile = (ROOT / "Dockerfile.base").read_text(encoding="utf-8")
 
     required_checks = (
-        'grep -F "ffmpeg version ${FFMPEG_VERSION#n}"',
+        'grep -F "ffmpeg version ${FFMPEG_VERSION}"',
         "pkg-config --modversion SvtAv1Enc",
         "pkg-config --modversion aom",
         "pkg-config --modversion dav1d",
@@ -38,6 +38,7 @@ def test_base_image_fails_build_when_av1_stack_is_missing_or_mismatched():
     )
     for check in required_checks:
         assert check in dockerfile
+    assert "${FFMPEG_VERSION#n}" not in dockerfile
 
     av1_verification = dockerfile.split("# 8. Verification", maxsplit=1)[1]
     assert "grep -E 'av1|libaom|libsvtav1' || true" not in av1_verification
@@ -60,5 +61,6 @@ def test_manual_image_verifier_checks_exact_stack_and_codec_availability():
 
     for name in EXPECTED_STACK:
         assert f"AMATERASU_{name}" in verifier
+    assert "${AMATERASU_FFMPEG_VERSION#n}" not in verifier
     for codec in ("libsvtav1", "libaom-av1", "libdav1d"):
         assert f'grep -F "{codec}"' in verifier

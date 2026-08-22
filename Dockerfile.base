@@ -504,7 +504,7 @@ RUN set -eux; \
     ldconfig; \
     echo "=== FFmpeg version ==="; \
     ffmpeg -version | head -5; \
-    ffmpeg -version | head -1 | grep -F "ffmpeg version ${FFMPEG_VERSION#n}"; \
+    ffmpeg -version | head -1 | grep -F "ffmpeg version ${FFMPEG_VERSION}"; \
     echo "=== AV1 library versions ==="; \
     test "$(pkg-config --modversion SvtAv1Enc)" = "${SVT_AV1_VERSION#v}"; \
     test "$(pkg-config --modversion aom)" = "${AOM_VERSION#v}"; \

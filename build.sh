@@ -58,7 +58,7 @@ verify() {
         set -euo pipefail
         echo "[1] FFmpeg:"
         ffmpeg -version | head -3
-        ffmpeg -version | head -1 | grep -F "ffmpeg version ${AMATERASU_FFMPEG_VERSION#n}"
+        ffmpeg -version | head -1 | grep -F "ffmpeg version ${AMATERASU_FFMPEG_VERSION}"
         echo
         echo "[2] AV1 library versions:"
         test "$(pkg-config --modversion SvtAv1Enc)" = "${AMATERASU_SVT_AV1_VERSION#v}"
