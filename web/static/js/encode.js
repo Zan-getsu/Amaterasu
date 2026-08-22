@@ -915,10 +915,17 @@
           if (profile.video_params?.crf !== undefined) cmd += ` -crf ${profile.video_params.crf}`;
         }
         let extraParams = String(profile.video_params?.extra_params || '').trim();
+        const seekSeconds = Number(profile.video_params?.keyint_seconds);
+        if (Number.isFinite(seekSeconds)) {
+          extraParams = extraParams.split(':').filter(part => !part.startsWith('keyint=')).join(':');
+        }
         if (useAutomaticTimestamps && profile.video_params?.fast_decode === false) {
           extraParams = extraParams.split(':').filter(part => !part.startsWith('fast-decode=')).join(':');
         }
         if (extraParams) svtParts.push(extraParams);
+        if (Number.isFinite(seekSeconds)) {
+          svtParts.push(`keyint=${Math.max(24, Math.min(1800, Math.round(seekSeconds * 24)))}`);
+        }
         if (profile.video_params?.fast_decode === true && !/(^|:)fast-decode=/.test(extraParams)) {
           svtParts.push(`fast-decode=${profile.video_params.fast_decode ? 1 : 0}`);
         } else if (!useAutomaticTimestamps && profile.video_params?.fast_decode === false && !/(^|:)fast-decode=/.test(extraParams)) {

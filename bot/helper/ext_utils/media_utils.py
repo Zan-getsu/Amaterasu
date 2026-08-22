@@ -700,16 +700,19 @@ def _build_svtav1_params(
         )
         params["lp"] = str(requested_workers)
 
-    if "keyint" in params:
+    explicit_seek_interval = "keyint_seconds" in video_params
+    if explicit_seek_interval:
+        seconds = _bounded_int(video_params["keyint_seconds"], 10, 1, 30)
+        fps = frame_rate if frame_rate > 0 else 24
+        params["keyint"] = str(max(24, min(1800, round(fps * seconds))))
+    elif "keyint" in params:
         keyint = _bounded_int(params["keyint"], 0, 1, 1800)
         if keyint:
             params["keyint"] = str(keyint)
         else:
             params.pop("keyint")
-    if "keyint" not in params and (
-        not compatibility_mode or "keyint_seconds" in video_params
-    ):
-        seconds = _bounded_int(video_params.get("keyint_seconds"), 10, 1, 30)
+    if "keyint" not in params and not compatibility_mode:
+        seconds = 10
         fps = frame_rate if frame_rate > 0 else 24
         params["keyint"] = str(max(24, min(1800, round(fps * seconds))))
 
@@ -1803,6 +1806,7 @@ class FFMpeg:
                         svt_params,
                     ]
                 )
+            LOGGER.info(f"SVT-AV1 resolved parameters: {svt_params}")
         elif v_codec == "libx265":
             cmd.extend(
                 ["-pix_fmt", pix_fmt, "-crf", str(crf), "-preset", str(preset)]

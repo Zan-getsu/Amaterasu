@@ -312,9 +312,10 @@
             <div id="v-av1-playback-group" class="form-row hidden" style="margin-top: 16px;">
               <div class="form-group">
                 <label class="form-label">AV1 Seek Interval
-                  <span class="tooltip-wrap"><i data-lucide="help-circle" class="tooltip-icon"></i><span class="tooltip-bubble">Target seconds between AV1 keyframes. Ten seconds balances compression with reliable seeking.</span></span>
+                  <span class="tooltip-wrap"><i data-lucide="help-circle" class="tooltip-icon"></i><span class="tooltip-bubble">Target seconds between AV1 keyframes. Shorter intervals improve seeking with a small compression tradeoff.</span></span>
                 </label>
                 <select id="v-keyint-seconds" class="form-input form-select">
+                  <option value="2">2 seconds (Smooth seeking)</option>
                   <option value="5">5 seconds (Faster seeking)</option>
                   <option value="10" selected>10 seconds (Balanced)</option>
                   <option value="15">15 seconds (Smaller file)</option>

@@ -212,7 +212,7 @@ def test_copied_audio_av1_uses_pre_upgrade_svt_parameter_semantics():
                 "level": "5.1",
                 "extra_params": (
                     "tune=0:film-grain=0:enable-overlays=1:scm=2:"
-                    "irefresh-type=2"
+                    "keyint=120:irefresh-type=2"
                 ),
             },
         }
@@ -226,10 +226,20 @@ def test_copied_audio_av1_uses_pre_upgrade_svt_parameter_semantics():
 
     assert warnings == []
     assert "keyint=240" in params
+    assert "keyint=120" not in params
     assert "profile=0" in params
     assert "level=51" in params
     assert "lp=" not in params
     assert "fast-decode=" not in params
+
+    profile["video_params"]["keyint_seconds"] = 2
+    smooth_seek_params = build_svt(
+        profile["video_params"],
+        worker_count=4,
+        frame_rate=24,
+        compatibility_mode=True,
+    )
+    assert "keyint=48" in smooth_seek_params
 
     profile_without_decoder_override, _ = normalize(
         {
@@ -773,6 +783,7 @@ def test_encode_pipeline_selects_copy_safe_timestamps_and_validates_before_succe
     assert "legacy_av1_copy" in method_source
     assert "compatibility_mode=legacy_av1_copy" in method_source
     assert 'svt_params = f"preset={preset}:crf={crf}:{svt_params}"' in method_source
+    assert "SVT-AV1 resolved parameters:" in method_source
     assert '"-avoid_negative_ts"' in method_source
     assert 'if timestamp_policy["shift_negative_ts"]:' in method_source
     assert '"-max_muxing_queue_size"' in method_source
@@ -844,6 +855,8 @@ def test_profile_entry_points_normalize_saved_data_and_default_label_is_dynamic(
     assert "-fps_mode:v:0" in encode_js
     assert "useAutomaticTimestamps" in encode_js
     assert "svtParts.push(`preset=${profile.video_params.preset}`)" in encode_js
+    assert "part => !part.startsWith('keyint=')" in encode_js
     assert "if (!useAutomaticTimestamps) cmd += `  -cluster_time_limit 5000 `" in encode_js
     assert '<option value="yuv420p" selected>' in encode_html
+    assert '<option value="2">2 seconds (Smooth seeking)</option>' in encode_html
     assert ".profile-card { flex: 0 0 auto;" in encode_html
