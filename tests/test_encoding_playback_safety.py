@@ -95,6 +95,46 @@ def test_encode_container_is_selected_for_codec_compatibility():
     assert get_output_path("movie.mkv", "libsvtav1", "libopus") == "movie_encoded.mkv"
 
 
+def test_copied_audio_matroska_uses_seek_safe_automatic_timestamps():
+    (timestamp_policy,) = _load_media_helpers("_encode_timestamp_policy")
+
+    copy_vfr = timestamp_policy("episode.mkv", "copy", "vfr")
+    assert copy_vfr == {
+        "automatic_timestamps": True,
+        "generate_pts": False,
+        "fps_mode": None,
+        "shift_negative_ts": False,
+    }
+
+    copy_auto = timestamp_policy("episode.mka", "copy", "auto")
+    assert copy_auto["automatic_timestamps"] is True
+    assert copy_auto["fps_mode"] is None
+
+
+def test_explicit_cfr_and_noncopy_audio_keep_requested_timestamp_controls():
+    (timestamp_policy,) = _load_media_helpers("_encode_timestamp_policy")
+
+    copy_cfr = timestamp_policy("episode.mkv", "copy", "cfr")
+    assert copy_cfr["automatic_timestamps"] is True
+    assert copy_cfr["generate_pts"] is False
+    assert copy_cfr["fps_mode"] == "cfr"
+    assert copy_cfr["shift_negative_ts"] is False
+
+    encoded_audio = timestamp_policy("episode.mkv", "aac", "vfr")
+    assert encoded_audio == {
+        "automatic_timestamps": False,
+        "generate_pts": True,
+        "fps_mode": "vfr",
+        "shift_negative_ts": True,
+    }
+
+    copied_mp4 = timestamp_policy("episode.mp4", "copy", "vfr")
+    assert copied_mp4["automatic_timestamps"] is False
+    assert copied_mp4["generate_pts"] is True
+    assert copied_mp4["fps_mode"] == "vfr"
+    assert copied_mp4["shift_negative_ts"] is True
+
+
 def test_subtitle_filter_path_is_safe_for_ffmpeg_filter_syntax():
     (filter_path,) = _load_media_helpers("_subtitle_filter_path")
 
@@ -504,6 +544,7 @@ async def test_empty_copied_audio_is_rebuilt_without_reencoding_video():
     commands = []
     replacements = []
     removals = []
+    (timestamp_policy,) = _load_media_helpers("_encode_timestamp_policy")
 
     class Process:
         returncode = 0
@@ -547,6 +588,7 @@ async def test_empty_copied_audio_is_rebuilt_without_reencoding_video():
             "remove": remove,
             "replace": replace,
             "LOGGER": Logger,
+            "_encode_timestamp_policy": timestamp_policy,
         },
     )
 
@@ -586,9 +628,13 @@ async def test_empty_copied_audio_is_rebuilt_without_reencoding_video():
     assert len(commands) == 2
     copy_command, command = commands
     assert "-c:a" not in copy_command
+    assert "-fflags" not in copy_command
+    assert "-avoid_negative_ts" not in copy_command
     assert "0:v?" in command
     assert "1:a:0?" in command
     assert command[command.index("-c:a") + 1] == "aac"
+    assert command[command.index("-fflags") + 1] == "+genpts"
+    assert command[command.index("-avoid_negative_ts") + 1] == "make_zero"
     assert command[command.index("-af") + 1] == "aresample=async=1:first_pts=0"
     assert command[command.index("-b:a") + 1] == "128k"
     assert command[command.index("-ac") + 1] == "2"
@@ -645,7 +691,7 @@ def test_default_profiles_are_playback_compatible_and_consistent():
     assert defaults["audio_params"]["vbr"] is False
 
 
-def test_encode_pipeline_normalizes_timestamps_and_validates_before_success():
+def test_encode_pipeline_selects_copy_safe_timestamps_and_validates_before_success():
     source = MEDIA_UTILS_PATH.read_text(encoding="utf-8")
     tree = ast.parse(source)
     ffmpeg_class = next(
@@ -658,13 +704,17 @@ def test_encode_pipeline_normalizes_timestamps_and_validates_before_success():
     )
     method_source = ast.get_source_segment(source, encode_method)
 
+    assert "_encode_timestamp_policy(" in method_source
+    assert 'if timestamp_policy["generate_pts"]:' in method_source
     assert '"-fflags", "+genpts"' in method_source
     assert '"-y", "-nostdin"' in method_source
     assert '"-preset"' in method_source
     assert '"-crf"' in method_source
     assert "_build_svtav1_params(" in method_source
     assert '"-fps_mode:v:0"' in method_source
+    assert 'timestamp_policy["fps_mode"]' in method_source
     assert '"-avoid_negative_ts"' in method_source
+    assert 'if timestamp_policy["shift_negative_ts"]:' in method_source
     assert '"-max_muxing_queue_size"' in method_source
     assert '"-cluster_time_limit", "5000"' in method_source
     assert '"-movflags", "+faststart"' in method_source
@@ -678,6 +728,17 @@ def test_encode_pipeline_normalizes_timestamps_and_validates_before_success():
     assert "source_probe" in method_source
     assert "if not valid:" in method_source
     assert "await remove(output_file)" in method_source
+
+    repair_method = next(
+        node
+        for node in ffmpeg_class.body
+        if isinstance(node, ast.AsyncFunctionDef)
+        and node.name == "_repair_copied_audio"
+    )
+    repair_source = ast.get_source_segment(source, repair_method)
+    assert "_encode_timestamp_policy(" in repair_source
+    assert 'if timestamp_policy["generate_pts"]:' in repair_source
+    assert 'if timestamp_policy["shift_negative_ts"]:' in repair_source
 
     common_source = (ROOT / "bot" / "helper" / "common.py").read_text(
         encoding="utf-8"
@@ -721,5 +782,6 @@ def test_profile_entry_points_normalize_saved_data_and_default_label_is_dynamic(
     assert "PIXEL_FORMAT_OPTIONS" in encode_js
     assert "throw await responseError" in encode_js
     assert "-fps_mode:v:0" in encode_js
+    assert "useAutomaticTimestamps" in encode_js
     assert '<option value="yuv420p" selected>' in encode_html
     assert ".profile-card { flex: 0 0 auto;" in encode_html

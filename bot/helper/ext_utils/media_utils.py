@@ -716,6 +716,31 @@ def _build_svtav1_params(video_params, worker_count, frame_rate=0):
     return ":".join(f"{key}={value}" for key, value in params.items())
 
 
+def _encode_timestamp_policy(output_path, audio_codec, fps_mode="vfr"):
+    """Choose timestamp options without breaking copied-audio seeks.
+
+    Matroska can preserve the source audio packet timeline while FFmpeg applies
+    its normal automatic timestamp handling to the re-encoded video. Forcing
+    generated PTS, VFR video timing, and a second output timestamp shift around
+    copied audio made some players lose audio after a random seek.
+    """
+    extension = ospath.splitext(str(output_path))[1].lower()
+    normalized_fps_mode = str(fps_mode or "vfr").strip().lower()
+    automatic_timestamps = (
+        str(audio_codec or "").strip().lower() == "copy"
+        and extension in _MATROSKA_EXTENSIONS
+    )
+    effective_fps_mode = normalized_fps_mode
+    if automatic_timestamps and normalized_fps_mode in {"auto", "vfr"}:
+        effective_fps_mode = None
+    return {
+        "automatic_timestamps": automatic_timestamps,
+        "generate_pts": not automatic_timestamps,
+        "fps_mode": effective_fps_mode,
+        "shift_negative_ts": not automatic_timestamps,
+    }
+
+
 def get_encode_output_path(input_path, codec, audio_codec=None):
     base, ext = ospath.splitext(input_path)
     output_ext = ext
@@ -1427,6 +1452,9 @@ class FFMpeg:
         repair_file = f"{base}.audio-repair{extension}"
         failure_reasons = []
         for audio_mode in ("copy", "aac"):
+            timestamp_policy = _encode_timestamp_policy(
+                repair_file, audio_mode, "auto"
+            )
             cmd = [
                 "taskset",
                 "-c",
@@ -1437,15 +1465,19 @@ class FFMpeg:
                 "-hide_banner",
                 "-loglevel",
                 "error",
-                "-fflags",
-                "+genpts",
-                "-i",
-                output_file,
-                "-i",
-                input_file,
-                "-map",
-                "0:v?",
             ]
+            if timestamp_policy["generate_pts"]:
+                cmd.extend(["-fflags", "+genpts"])
+            cmd.extend(
+                [
+                    "-i",
+                    output_file,
+                    "-i",
+                    input_file,
+                    "-map",
+                    "0:v?",
+                ]
+            )
 
             for track in str(audio_tracks).split(","):
                 track = track.strip()
@@ -1500,14 +1532,9 @@ class FFMpeg:
                     ]
                 )
 
-            cmd.extend(
-                [
-                    "-max_muxing_queue_size",
-                    "4096",
-                    "-avoid_negative_ts",
-                    "make_zero",
-                ]
-            )
+            cmd.extend(["-max_muxing_queue_size", "4096"])
+            if timestamp_policy["shift_negative_ts"]:
+                cmd.extend(["-avoid_negative_ts", "make_zero"])
             if extension.lower() in {".mkv", ".mka"}:
                 cmd.extend(["-cluster_time_limit", "5000"])
             elif extension.lower() in {".mp4", ".m4v", ".mov"}:
@@ -1642,17 +1669,21 @@ class FFMpeg:
             if custom_thumb_path:
                 self._listener.thumb = custom_thumb_path
 
+        is_mkv = output_file.lower().endswith((".mkv", ".mka"))
+        is_mp4 = output_file.lower().endswith((".mp4", ".m4v", ".mov"))
+        timestamp_policy = _encode_timestamp_policy(
+            output_file, a_codec, v_params.get("fps_mode", "vfr")
+        )
+
         cmd = [
             "taskset", "-c", f"{cores}",
             BinConfig.FFMPEG_NAME,
             "-y", "-nostdin",
             "-hide_banner", "-loglevel", "error", "-progress", "pipe:1",
-            "-fflags", "+genpts",
-            "-i", input_file,
         ]
-
-        is_mkv = output_file.lower().endswith(('.mkv', '.mka'))
-        is_mp4 = output_file.lower().endswith((".mp4", ".m4v", ".mov"))
+        if timestamp_policy["generate_pts"]:
+            cmd.extend(["-fflags", "+genpts"])
+        cmd.extend(["-i", input_file])
 
         if not is_mkv and hasattr(self._listener, "thumb") and self._listener.thumb:
             cmd.extend(["-i", self._listener.thumb])
@@ -1710,6 +1741,7 @@ class FFMpeg:
             f"name={profile.get('name', 'Encoding Profile')!r}, "
             f"video={v_codec}, audio={a_codec}, crf={crf}, preset={preset}, "
             f"pix_fmt={pix_fmt}, fps_mode={v_params.get('fps_mode', 'vfr')}, "
+            f"timestamp_mode={'automatic' if timestamp_policy['automatic_timestamps'] else 'normalized'}, "
             f"subtitles={sub_mode}"
         )
 
@@ -1780,8 +1812,8 @@ class FFMpeg:
             cmd.extend(["-color_trc", str(v_params["color_trc"])])
         if v_params.get("colorspace"):
             cmd.extend(["-colorspace", str(v_params["colorspace"])])
-        if v_codec != "copy":
-            cmd.extend(["-fps_mode:v:0", str(v_params.get("fps_mode", "vfr"))])
+        if v_codec != "copy" and timestamp_policy["fps_mode"]:
+            cmd.extend(["-fps_mode:v:0", timestamp_policy["fps_mode"]])
 
         cmd.extend(["-c:a", a_codec])
         if a_codec != "copy":
@@ -1826,14 +1858,9 @@ class FFMpeg:
                 "-attach", temp_cover_path,
                 "-metadata:s:m:filename:cover.jpg", "mimetype=image/jpeg"
             ])
-        cmd.extend(
-            [
-                "-max_muxing_queue_size",
-                "4096",
-                "-avoid_negative_ts",
-                "make_zero",
-            ]
-        )
+        cmd.extend(["-max_muxing_queue_size", "4096"])
+        if timestamp_policy["shift_negative_ts"]:
+            cmd.extend(["-avoid_negative_ts", "make_zero"])
         if is_mkv:
             cmd.extend(["-cluster_time_limit", "5000"])
         elif is_mp4:

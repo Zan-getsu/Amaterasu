@@ -887,7 +887,8 @@
   //  FFMPEG COMMAND GENERATION
   // ========================================================================
   function getFFmpegCmd(profile) {
-    let cmd = `ffmpeg -y -nostdin -fflags +genpts -i input.mkv \\\n`;
+    const useAutomaticTimestamps = profile.audio_codec === 'copy';
+    let cmd = `ffmpeg -y -nostdin${useAutomaticTimestamps ? '' : ' -fflags +genpts'} -i input.mkv \\\n`;
 
     // Track mapping
     if (profile.metadata?.v_track) {
@@ -940,7 +941,10 @@
       if (profile.video_params?.color_primaries) cmd += ` \\\n  -color_primaries ${profile.video_params.color_primaries}`;
       if (profile.video_params?.color_trc) cmd += ` -color_trc ${profile.video_params.color_trc}`;
       if (profile.video_params?.colorspace) cmd += ` -colorspace ${profile.video_params.colorspace}`;
-      cmd += ` -fps_mode:v:0 ${profile.video_params?.fps_mode || 'vfr'}`;
+      const fpsMode = profile.video_params?.fps_mode || 'vfr';
+      if (!(useAutomaticTimestamps && ['auto', 'vfr'].includes(fpsMode))) {
+        cmd += ` -fps_mode:v:0 ${fpsMode}`;
+      }
     }
     cmd += ` \\\n`;
 
@@ -991,7 +995,9 @@
       });
     }
 
-    cmd += `  -max_muxing_queue_size 4096 -avoid_negative_ts make_zero \\\n`;
+    cmd += `  -max_muxing_queue_size 4096`;
+    if (!useAutomaticTimestamps) cmd += ` -avoid_negative_ts make_zero`;
+    cmd += ` \\\n`;
     cmd += `  -cluster_time_limit 5000 output.mkv`;
     return cmd;
   }
