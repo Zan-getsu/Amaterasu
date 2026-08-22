@@ -1533,6 +1533,17 @@ class TaskConfig:
                             return False
                         if self.is_file:
                             return res
+                    elif not self.is_cancelled:
+                        # Never continue to upload the source as though encoding
+                        # succeeded. A failed or unverified encode must be visible
+                        # to the requester and stop the task.
+                        self.is_cancelled = True
+                        await self.on_download_error(
+                            "Encoding failed or the encoded output did not pass "
+                            f"playback validation: {file_}. The original file was "
+                            "not uploaded as an encoded result."
+                        )
+                        return False
         return dl_path
 
     async def generate_sample_video(self, dl_path, gid):

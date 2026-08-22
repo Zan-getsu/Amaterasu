@@ -425,6 +425,13 @@ async def test_audio_decode_check_requires_a_real_decoded_frame():
     assert valid is False
     assert reason == "no audio data decoded near 870.015s"
 
+    result["stderr"] = "invalid AAC packet"
+    result["code"] = 1
+    valid, reason = await decode(object(), "encoded.mkv", 870.015, "audio")
+
+    assert valid is False
+    assert reason == "audio decode check failed: invalid AAC packet"
+
 
 async def test_audio_validation_retries_empty_midpoint_without_masking_decode_errors():
     probe_duration, count_streams = _load_media_helpers(
@@ -493,6 +500,124 @@ async def test_audio_validation_retries_empty_midpoint_without_masking_decode_er
     assert validator.audio_positions == [60.0, 30.0, 90.0]
 
 
+async def test_empty_copied_audio_is_rebuilt_without_reencoding_video():
+    commands = []
+    replacements = []
+    removals = []
+
+    class Process:
+        returncode = 0
+
+        async def communicate(self):
+            return b"", b""
+
+    async def create_subprocess_exec(*cmd, stdout, stderr):
+        commands.append(list(cmd))
+        return Process()
+
+    async def wait_for(awaitable, timeout):
+        assert timeout == 900
+        return await awaitable
+
+    async def replace(source, destination):
+        replacements.append((source, destination))
+
+    async def remove(path):
+        removals.append(path)
+
+    class Logger:
+        @staticmethod
+        def info(message):
+            pass
+
+        @staticmethod
+        def warning(message):
+            pass
+
+    repair = _load_ffmpeg_method(
+        "_repair_copied_audio",
+        {
+            "ospath": ospath,
+            "cores": "0-3",
+            "BinConfig": type("BinConfig", (), {"FFMPEG_NAME": "ffmpeg"}),
+            "create_subprocess_exec": create_subprocess_exec,
+            "PIPE": object(),
+            "wait_for": wait_for,
+            "suppress": suppress,
+            "remove": remove,
+            "replace": replace,
+            "LOGGER": Logger,
+        },
+    )
+
+    class Repairer:
+        _listener = type(
+            "Listener", (), {"is_cancelled": False, "subproc": None}
+        )()
+
+        def __init__(self):
+            self.validation_count = 0
+
+        async def _validate_encoded_media(
+            self, input_file, output_file, expect_audio, source_probe
+        ):
+            assert input_file == "source.mkv"
+            assert output_file == "encoded.audio-repair.mkv"
+            assert expect_audio is True
+            assert source_probe == {"format": {"duration": "120"}}
+            self.validation_count += 1
+            if self.validation_count == 1:
+                return False, "no audio frames decoded after stream copy"
+            return True, ""
+
+    valid, reason = await repair(
+        Repairer(),
+        "source.mkv",
+        "encoded.mkv",
+        "0",
+        {"bitrate": "128k", "channels": 2},
+        {"s:a:0": "title=Japanese"},
+        {"a:0": "default"},
+        {"format": {"duration": "120"}},
+    )
+
+    assert valid is True
+    assert reason == ""
+    assert len(commands) == 2
+    copy_command, command = commands
+    assert "-c:a" not in copy_command
+    assert "0:v?" in command
+    assert "1:a:0?" in command
+    assert command[command.index("-c:a") + 1] == "aac"
+    assert command[command.index("-af") + 1] == "aresample=async=1:first_pts=0"
+    assert command[command.index("-b:a") + 1] == "128k"
+    assert command[command.index("-ac") + 1] == "2"
+    assert "-metadata:s:a:0" in command
+    assert "-disposition:a:0" in command
+    assert removals == ["encoded.audio-repair.mkv"]
+    assert replacements == [("encoded.audio-repair.mkv", "encoded.mkv")]
+
+    cancelled = Repairer()
+    cancelled._listener = type(
+        "Listener", (), {"is_cancelled": True, "subproc": None}
+    )()
+    command_count = len(commands)
+    valid, reason = await repair(
+        cancelled,
+        "source.mkv",
+        "encoded.mkv",
+        "0",
+        {},
+        {},
+        {},
+        {"format": {"duration": "120"}},
+    )
+
+    assert valid is False
+    assert reason == "audio repair was cancelled"
+    assert len(commands) == command_count
+
+
 def test_default_profiles_are_playback_compatible_and_consistent():
     sample = _literal_assignment(ROOT / "config_sample.py", "DEFAULT_ENCODE_PRESET")
     defaults_tree = ast.parse(
@@ -546,9 +671,32 @@ def test_encode_pipeline_normalizes_timestamps_and_validates_before_success():
     assert 'sub_mode == "burn"' in method_source
     assert '"subtitles="' in method_source
     assert "await self._validate_encoded_media(" in method_source
+    assert "await self._repair_copied_audio(" in method_source
+    assert 'a_codec == "copy"' in method_source
+    assert "encoded file has no audio stream" in method_source
+    assert '"audio decode check failed:"' in method_source
     assert "source_probe" in method_source
     assert "if not valid:" in method_source
     assert "await remove(output_file)" in method_source
+
+    common_source = (ROOT / "bot" / "helper" / "common.py").read_text(
+        encoding="utf-8"
+    )
+    common_tree = ast.parse(common_source)
+    common_class = next(
+        node
+        for node in common_tree.body
+        if isinstance(node, ast.ClassDef) and node.name == "TaskConfig"
+    )
+    proceed_encode = next(
+        node
+        for node in common_class.body
+        if isinstance(node, ast.AsyncFunctionDef) and node.name == "proceed_encode"
+    )
+    proceed_source = ast.get_source_segment(common_source, proceed_encode)
+    assert "await self.on_download_error(" in proceed_source
+    assert "The original file was" in proceed_source
+    assert "not uploaded as an encoded result" in proceed_source
 
 
 def test_profile_entry_points_normalize_saved_data_and_default_label_is_dynamic():

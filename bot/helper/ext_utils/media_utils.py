@@ -17,7 +17,7 @@ from re import search as re_search
 from shutil import which
 from time import time, time_ns
 
-from aiofiles.os import makedirs, remove
+from aiofiles.os import makedirs, remove, replace
 from aiofiles.os import path as aiopath
 from aioshutil import rmtree
 from langcodes import Language
@@ -1319,7 +1319,8 @@ class FFMpeg:
         except Exception as error:
             return False, f"{stream_type} decode check timed out or failed: {error}"
         if code != 0:
-            return False, stderr or f"{stream_type} decode check failed"
+            detail = stderr or "FFmpeg returned a non-zero status"
+            return False, f"{stream_type} decode check failed: {detail}"
         if stream_type == "video":
             decoded = any(
                 line.startswith("frame=") and line.partition("=")[2].strip() != "0"
@@ -1408,6 +1409,157 @@ class FFMpeg:
                     f"sample positions ({'; '.join(empty_reasons)})"
                 )
         return True, ""
+
+    async def _repair_copied_audio(
+        self,
+        input_file,
+        output_file,
+        audio_tracks,
+        audio_params,
+        metadata,
+        disposition,
+        source_probe,
+    ):
+        """Replace an empty copied-audio stream without re-encoding the video."""
+        if self._listener.is_cancelled:
+            return False, "audio repair was cancelled"
+        base, extension = ospath.splitext(output_file)
+        repair_file = f"{base}.audio-repair{extension}"
+        failure_reasons = []
+        for audio_mode in ("copy", "aac"):
+            cmd = [
+                "taskset",
+                "-c",
+                f"{cores}",
+                BinConfig.FFMPEG_NAME,
+                "-y",
+                "-nostdin",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-fflags",
+                "+genpts",
+                "-i",
+                output_file,
+                "-i",
+                input_file,
+                "-map",
+                "0:v?",
+            ]
+
+            for track in str(audio_tracks).split(","):
+                track = track.strip()
+                if not track:
+                    continue
+                if track in {"?", "*", "all"}:
+                    cmd.extend(["-map", "1:a?"])
+                else:
+                    track = track.rstrip("?")
+                    if track.isdigit():
+                        cmd.extend(["-map", f"1:a:{track}?"])
+
+            cmd.extend(
+                [
+                    "-map",
+                    "0:s?",
+                    "-map",
+                    "0:t?",
+                    "-map_metadata",
+                    "0",
+                    "-map_chapters",
+                    "0",
+                    "-c",
+                    "copy",
+                ]
+            )
+            if audio_mode == "aac":
+                cmd.extend(
+                    [
+                        "-c:a",
+                        "aac",
+                        "-af",
+                        "aresample=async=1:first_pts=0",
+                    ]
+                )
+                if audio_params.get("bitrate"):
+                    cmd.extend(["-b:a", str(audio_params["bitrate"])])
+                if audio_params.get("channels"):
+                    cmd.extend(["-ac", str(audio_params["channels"])])
+
+            for key, value in metadata.items():
+                key = str(key).strip()
+                if ":" in key:
+                    cmd.extend([f"-metadata:{key}", str(value)])
+                else:
+                    cmd.extend(["-metadata", f"{key}={value}"])
+            for stream_spec, value in disposition.items():
+                cmd.extend(
+                    [
+                        f"-disposition:{str(stream_spec).strip()}",
+                        str(value).strip(),
+                    ]
+                )
+
+            cmd.extend(
+                [
+                    "-max_muxing_queue_size",
+                    "4096",
+                    "-avoid_negative_ts",
+                    "make_zero",
+                ]
+            )
+            if extension.lower() in {".mkv", ".mka"}:
+                cmd.extend(["-cluster_time_limit", "5000"])
+            elif extension.lower() in {".mp4", ".m4v", ".mov"}:
+                cmd.extend(["-movflags", "+faststart"])
+            cmd.append(repair_file)
+
+            process = None
+            try:
+                process = await create_subprocess_exec(*cmd, stdout=PIPE, stderr=PIPE)
+                self._listener.subproc = process
+                _, stderr = await wait_for(process.communicate(), timeout=900)
+                code = process.returncode
+                stderr = stderr.decode(errors="replace").strip()
+            except Exception as error:
+                if process is not None and process.returncode is None:
+                    process.kill()
+                    with suppress(Exception):
+                        await process.wait()
+                with suppress(Exception):
+                    await remove(repair_file)
+                return False, f"audio repair timed out or failed: {error}"
+            if self._listener.is_cancelled:
+                with suppress(Exception):
+                    await remove(repair_file)
+                return False, "audio repair was cancelled"
+            if code != 0:
+                failure_reasons.append(
+                    f"{audio_mode}: {stderr or 'FFmpeg command failed'}"
+                )
+                with suppress(Exception):
+                    await remove(repair_file)
+                continue
+
+            valid, reason = await self._validate_encoded_media(
+                input_file, repair_file, True, source_probe
+            )
+            if valid:
+                await replace(repair_file, output_file)
+                if audio_mode == "copy":
+                    LOGGER.info("Audio repair preserved the original audio bitstream.")
+                else:
+                    LOGGER.warning(
+                        "Audio stream copy remained empty; repaired it as AAC with "
+                        "normalized timestamps."
+                    )
+                return True, ""
+
+            failure_reasons.append(f"{audio_mode}: {reason}")
+            with suppress(Exception):
+                await remove(repair_file)
+
+        return False, "; ".join(failure_reasons)
 
     async def encode_video(self, input_file, profile, metadata=None):
         self.clear()
@@ -1720,6 +1872,38 @@ class FFMpeg:
             valid, reason = await self._validate_encoded_media(
                 input_file, output_file, expect_audio, source_probe
             )
+            if (
+                not valid
+                and a_codec == "copy"
+                and reason.startswith(
+                    (
+                        "no audio frames decoded",
+                        "source audio was selected but encoded file has no audio stream",
+                        "audio decode check failed:",
+                    )
+                )
+            ):
+                LOGGER.warning(
+                    "Copied audio contained no decodable packets after encoding; "
+                    "repairing audio from the source without re-encoding video."
+                )
+                repaired, repair_reason = await self._repair_copied_audio(
+                    input_file,
+                    output_file,
+                    a_track,
+                    a_params,
+                    enc_meta,
+                    disposition,
+                    source_probe,
+                )
+                if repaired:
+                    valid, reason = True, ""
+                    LOGGER.info(
+                        "Copied audio was repaired and passed playback validation: "
+                        f"{output_file}"
+                    )
+                else:
+                    reason = f"{reason}; audio repair failed: {repair_reason}"
             if not valid:
                 LOGGER.error(
                     "Encoded media validation failed; keeping the source file. "
