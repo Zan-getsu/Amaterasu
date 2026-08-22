@@ -55,15 +55,24 @@ verify() {
     local img="${IMAGE_NAME}:${IMAGE_TAG}"
     echo ">>> Verifying ${img}"
     docker run --rm "${img}" bash -lc '
-        set -e
+        set -euo pipefail
         echo "[1] FFmpeg:"
         ffmpeg -version | head -3
+        ffmpeg -version | head -1 | grep -F "ffmpeg version ${AMATERASU_FFMPEG_VERSION#n}"
         echo
-        echo "[2] AV1 encoders:"
-        ffmpeg -hide_banner -encoders 2>/dev/null | grep -E "av1|libaom|libsvtav1"
+        echo "[2] AV1 library versions:"
+        test "$(pkg-config --modversion SvtAv1Enc)" = "${AMATERASU_SVT_AV1_VERSION#v}"
+        test "$(pkg-config --modversion aom)" = "${AMATERASU_AOM_VERSION#v}"
+        test "$(pkg-config --modversion dav1d)" = "${AMATERASU_DAV1D_VERSION#v}"
+        printf "SVT-AV1 %s | libaom %s | dav1d %s\n" \
+            "${AMATERASU_SVT_AV1_VERSION#v}" \
+            "${AMATERASU_AOM_VERSION#v}" \
+            "${AMATERASU_DAV1D_VERSION#v}"
         echo
-        echo "[3] AV1 decoders:"
-        ffmpeg -hide_banner -decoders 2>/dev/null | grep -E "av1|dav1d"
+        echo "[3] AV1 codec availability:"
+        ffmpeg -hide_banner -encoders 2>/dev/null | grep -F "libsvtav1"
+        ffmpeg -hide_banner -encoders 2>/dev/null | grep -F "libaom-av1"
+        ffmpeg -hide_banner -decoders 2>/dev/null | grep -F "libdav1d"
         echo
         echo "[4] Mega SDK Python:"
         python3 -c "from mega import MegaApi; import os; print(\"{}: OK\".format(os.environ.get(\"MEGA_SDK_VERSION\", \"unknown\")))"

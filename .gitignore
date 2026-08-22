@@ -69,3 +69,4 @@ tests/*
 !tests/test_direct_listener_parallel.py
 !tests/test_http_client_pooling.py
 !tests/test_encoding_playback_safety.py
+!tests/test_multimedia_stack.py

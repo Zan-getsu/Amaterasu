@@ -44,7 +44,7 @@ jobs:
       - name: Run lightweight smoke tests
         run: |
           test_files=""
-          for file in tests/test_config.py tests/test_security.py; do
+          for file in tests/test_config.py tests/test_security.py tests/test_multimedia_stack.py; do
             if [ -f "$file" ]; then
               test_files="$test_files $file"
             fi

@@ -5,7 +5,7 @@
 #  Standalone, multi-arch (amd64 + arm64) base image built entirely from source.
 #
 #  - Base:        python:3.11-slim-bookworm (Debian 12)
-#  - FFmpeg:      9.x compiled from source with full AV1 stack
+#  - FFmpeg:      8.0 compatibility-pinned with the verified AV1 stack
 #  - AV1 stack:   SVT-AV1 + libaom + dav1d (all built from source)
 #  - Mega SDK:    v7.0.0 official C++ SDK Python bindings (autotools build)
 #  - Download:    aria2 1.37.0 from source, qbittorrent-nox, sabnzbdplus, p7zip, rclone, cloudflared, java
@@ -224,7 +224,7 @@ RUN set -eux; \
 # -----------------------------------------------------------------------------
 # 3. SVT-AV1 — scalable AV1 encoder (used by FFmpeg --enable-libsvtav1)
 # -----------------------------------------------------------------------------
-ARG SVT_AV1_VERSION=v4.2.0
+ARG SVT_AV1_VERSION=v2.3.0
 RUN set -eux; \
     git clone --depth 1 --branch "${SVT_AV1_VERSION}" \
         https://gitlab.com/AOMediaCodec/SVT-AV1.git /tmp/SVT-AV1; \
@@ -241,7 +241,7 @@ RUN set -eux; \
 # -----------------------------------------------------------------------------
 # 4. libaom — AV1 reference encoder/decoder (used by --enable-libaom)
 # -----------------------------------------------------------------------------
-ARG AOM_VERSION=v3.14.1
+ARG AOM_VERSION=v3.11.0
 RUN set -eux; \
     git clone --depth 1 --branch "${AOM_VERSION}" \
         https://aomedia.googlesource.com/aom /tmp/aom; \
@@ -262,7 +262,7 @@ RUN set -eux; \
 # -----------------------------------------------------------------------------
 # 5. dav1d — fast AV1 decoder (used by --enable-libdav1d)
 # -----------------------------------------------------------------------------
-ARG DAV1D_VERSION=1.5.3
+ARG DAV1D_VERSION=1.5.0
 RUN set -eux; \
     git clone --depth 1 --branch "${DAV1D_VERSION}" \
         https://code.videolan.org/videolan/dav1d.git /tmp/dav1d; \
@@ -277,12 +277,13 @@ RUN set -eux; \
     rm -rf /tmp/dav1d
 
 # -----------------------------------------------------------------------------
-# 6. FFmpeg 9.x with full AV1 + multimedia codec support
+# 6. FFmpeg 8.0 with full AV1 + multimedia codec support
 # -----------------------------------------------------------------------------
-# Pin the latest verified stable release here. Release tags are published at
-# https://github.com/FFmpeg/FFmpeg/tags.
+# Compatibility pins below are the last stack verified across Amaterasu's
+# playback targets. Upgrade FFmpeg and the AV1 libraries only after the full
+# encode, audio, container, and random-seek playback matrix passes.
 #
-# IMPORTANT — flags removed in FFmpeg 8.x and still absent in FFmpeg 9.x:
+# IMPORTANT — flags removed in FFmpeg 8.x:
 #   The following flags were valid in FFmpeg 6.x/7.x but are now INVALID:
 #     --enable-avcodec --enable-avformat --enable-avutil
 #     --enable-swresample --enable-swscale --enable-avfilter
@@ -302,7 +303,11 @@ RUN set -eux; \
 #       Debian 12 ships librist 0.2.7+dfsg-1, but the "+dfsg" suffix
 #       confuses pkg-config's version comparison, causing FFmpeg's
 #       "librist >= 0.2.7 not found" check to fail. Easiest fix: drop it.
-ARG FFMPEG_VERSION=n9.0.1
+ARG FFMPEG_VERSION=n8.0
+ENV AMATERASU_FFMPEG_VERSION="${FFMPEG_VERSION}" \
+    AMATERASU_SVT_AV1_VERSION="${SVT_AV1_VERSION}" \
+    AMATERASU_AOM_VERSION="${AOM_VERSION}" \
+    AMATERASU_DAV1D_VERSION="${DAV1D_VERSION}"
 RUN set -eux; \
     git clone --depth 1 --branch "${FFMPEG_VERSION}" \
         https://github.com/FFmpeg/FFmpeg.git /tmp/ffmpeg; \
@@ -315,6 +320,8 @@ RUN set -eux; \
         --enable-nonfree \
         --enable-version3 \
         --enable-shared \
+        --disable-static \
+        --disable-doc \
         --enable-pic \
         --enable-libaom \
         --enable-libdav1d \
@@ -497,10 +504,16 @@ RUN set -eux; \
     ldconfig; \
     echo "=== FFmpeg version ==="; \
     ffmpeg -version | head -5; \
+    ffmpeg -version | head -1 | grep -F "ffmpeg version ${FFMPEG_VERSION#n}"; \
+    echo "=== AV1 library versions ==="; \
+    test "$(pkg-config --modversion SvtAv1Enc)" = "${SVT_AV1_VERSION#v}"; \
+    test "$(pkg-config --modversion aom)" = "${AOM_VERSION#v}"; \
+    test "$(pkg-config --modversion dav1d)" = "${DAV1D_VERSION#v}"; \
     echo "=== FFmpeg AV1 encoders ==="; \
-    ffmpeg -hide_banner -encoders | grep -E 'av1|libaom|libsvtav1' || true; \
+    ffmpeg -hide_banner -encoders | grep -F 'libsvtav1'; \
+    ffmpeg -hide_banner -encoders | grep -F 'libaom-av1'; \
     echo "=== FFmpeg AV1 decoders ==="; \
-    ffmpeg -hide_banner -decoders | grep -E 'av1|dav1d' || true; \
+    ffmpeg -hide_banner -decoders | grep -F 'libdav1d'; \
     echo "=== libmega.so files in /usr/local/lib ==="; \
     ls -la /usr/local/lib/libmega.so* 2>/dev/null || echo "WARNING: no libmega.so in /usr/local/lib"; \
     echo "=== ldconfig cache (libmega entries) ==="; \
