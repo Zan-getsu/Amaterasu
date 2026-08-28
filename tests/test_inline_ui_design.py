@@ -633,6 +633,14 @@ def test_generated_telegram_commands_meet_bot_api_limits():
     assert all(3 <= len(item.description) <= 256 for item in menu)
 
 
+def test_stats_ram_does_not_include_every_same_user_process():
+    source = (ROOT / "bot" / "modules" / "stats.py").read_text(encoding="utf-8")
+
+    assert "bot_ram_used = Process().memory_info().rss" in source
+    assert "Process().username()" not in source
+    assert "BOT PROCESS RAM" in source
+
+
 @pytest.mark.asyncio
 async def test_command_sync_sets_and_reads_back_the_complete_menu(monkeypatch):
     from bot.helper.telegram_helper import command_sync

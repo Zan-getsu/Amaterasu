@@ -451,6 +451,102 @@ def test_public_terabox_page_parser_supports_current_template_tokens():
     )
 
 
+def test_public_terabox_prefers_dedicated_cookie_and_normalizes_paths(
+    monkeypatch, tmp_path
+):
+    from bot.helper.mirror_leech_utils.download_utils import direct_link_generator
+
+    (tmp_path / "cookies.txt").write_text(
+        ".terabox.com TRUE / FALSE 0 ndus generic\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "terabox.txt").write_text(
+        ".terabox.com TRUE / FALSE 0 ndus dedicated\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+
+    class Response:
+        status_code = 200
+
+        def __init__(self, *, payload=None, text="", url="https://www.terabox.com/"):
+            self._payload = payload
+            self.text = text
+            self.url = url
+
+        def json(self):
+            return self._payload
+
+    class FakeSession:
+        last = None
+
+        def __init__(self):
+            self.cookies = {}
+            self.headers = {}
+            self.proxies = {}
+            self.calls = []
+            type(self).last = self
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def get(self, url, **kwargs):
+            self.calls.append((url, kwargs))
+            if "/sharing/link" in url:
+                return Response(
+                    text=(
+                        '<script>var templateData = {"jsToken":"page-token",'
+                        '"pcftoken":"pcf-token"};</script>'
+                    ),
+                    url=url,
+                )
+            if "/api/shorturlinfo" in url:
+                return Response(
+                    payload={
+                        "errno": 0,
+                        "sign": "sign",
+                        "timestamp": 1,
+                        "shareid": 2,
+                        "uk": 3,
+                    }
+                )
+            if "/share/list" in url:
+                return Response(
+                    payload={
+                        "errno": 0,
+                        "title": "/Root Folder",
+                        "list": [
+                            {
+                                "isdir": 0,
+                                "path": "/Root Folder/child/video.mkv",
+                                "server_filename": "video.mkv",
+                                "fs_id": 4,
+                                "dlink": "https://download.example/video.mkv",
+                                "size": 5,
+                            }
+                        ],
+                    }
+                )
+            raise AssertionError(f"Unexpected request: {url}")
+
+    monkeypatch.setattr(direct_link_generator, "Session", FakeSession)
+
+    result = direct_link_generator.terabox(
+        "https://www.terabox.com/s/1abc123",
+        structured=True,
+    )
+
+    assert result["title"] == "Root Folder"
+    assert result["contents"][0]["path"] == "child"
+    assert "Cookie: ndus=dedicated" in result["header"]
+    sharing_call, shorturl_call, _list_call = FakeSession.last.calls
+    assert sharing_call[0].endswith("surl=abc123")
+    assert shorturl_call[1]["params"]["shorturl"] == "1abc123"
+
+
 def test_public_terabox_fallback_error_is_safe_and_actionable():
     from bot.helper.mirror_leech_utils.download_utils import direct_link_generator
 

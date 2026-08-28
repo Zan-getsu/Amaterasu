@@ -112,10 +112,7 @@ async def get_stats(event, key="home"):
         res = get_system_resources_cached()
         bot_ram_mb = res["ram_mb"]
         bot_ram_total = bot_ram_mb * 1024 * 1024
-        user = Process().username()
-        bot_ram_used = sum(
-            p.memory_info().rss for p in process_iter() if p.username() == user
-        )
+        bot_ram_used = Process().memory_info().rss
         bot_ram_free = max(0, bot_ram_total - bot_ram_used)
         bot_ram_pct = (
             round((bot_ram_used / bot_ram_total * 100), 2) if bot_ram_total > 0 else 0
@@ -126,7 +123,7 @@ async def get_stats(event, key="home"):
         v_cores = (sys_cpu or 0) - (p_cores or 0)
         msg = f"""<b>✦ BOT STATISTICS</b>
 <pre>┌─ {'Uptime':<9}: {get_readable_time(time() - bot_start_time)}
-├─ ─── INSTANCE RAM ─────────────
+├─ ─── BOT PROCESS RAM ─────────
 ├─ {'Progress':<9}: {get_progress_bar_string(bot_ram_pct)} {bot_ram_pct}%
 ├─ {'Used':<9}: {get_readable_file_size(bot_ram_used)}
 ├─ {'Free':<9}: {get_readable_file_size(bot_ram_free)}

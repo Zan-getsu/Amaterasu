@@ -1619,7 +1619,7 @@ def _terabox_request_with_retry(
     ) from last_error
 
 
-def terabox(url, cookie_file="cookies.txt", *, structured=False):
+def terabox(url, cookie_file=None, *, structured=False):
     if "/file/" in url:
         return url
 
@@ -1659,18 +1659,28 @@ def terabox(url, cookie_file="cookies.txt", *, structured=False):
             session.proxies.update(proxies)
 
     def __load_cookies():
-        if not ospath.isfile(cookie_file):
+        selected_cookie_file = cookie_file
+        if selected_cookie_file is None:
+            selected_cookie_file = next(
+                (
+                    path
+                    for path in ("terabox.txt", "cookies.txt")
+                    if ospath.isfile(path)
+                ),
+                None,
+            )
+        if not selected_cookie_file:
             return None
         cookies = {}
         try:
-            with open(cookie_file) as f:
+            with open(selected_cookie_file) as f:
                 for line in f:
                     line = line.rstrip("\r\n")
                     if line.startswith("#HttpOnly_"):
                         line = line[len("#HttpOnly_") :]
                     if not line or line.startswith("#"):
                         continue
-                    parts = line.split("\t")
+                    parts = line.split(None, 6)
                     if len(parts) < 7:
                         continue
                     if any(k in parts[0].lower() for k in COOKIE_DOMAINS):
@@ -1690,7 +1700,7 @@ def terabox(url, cookie_file="cookies.txt", *, structured=False):
             surl = qs["surl"][0]
         elif "/s/" in parsed.path:
             surl = parsed.path.split("/s/", 1)[1].split("/", 1)[0]
-        if surl.startswith("1") and len(surl) > 20:
+        if surl.startswith("1"):
             surl = surl[1:]
         if not surl:
             raise DirectDownloadLinkException(
@@ -1887,6 +1897,7 @@ def terabox(url, cookie_file="cookies.txt", *, structured=False):
                 "is_folder": False,
             }
             pending = []
+            base = {"dir": ""}
 
             def __walk(dir_path=None, root=False):
                 page = 1
@@ -1903,7 +1914,8 @@ def terabox(url, cookie_file="cookies.txt", *, structured=False):
                         num=200,
                     )
                     if root and page == 1 and not details["title"]:
-                        details["title"] = (data.get("title") or surl).lstrip("/")
+                        base["dir"] = (data.get("title") or "").rstrip("/")
+                        details["title"] = ospath.basename(base["dir"]) or surl
                     items = data.get("list") or []
                     if not items:
                         break
@@ -1912,8 +1924,11 @@ def terabox(url, cookie_file="cookies.txt", *, structured=False):
                             details["is_folder"] = True
                             __walk(dir_path=it["path"])
                         else:
+                            parent = ospath.dirname(it.get("path", ""))
+                            if base["dir"] and parent.startswith(base["dir"]):
+                                parent = parent[len(base["dir"]) :]
                             entry = {
-                                "path": ospath.dirname(it.get("path", "")).lstrip("/"),
+                                "path": parent.strip("/"),
                                 "filename": it["server_filename"],
                                 "fs_id": str(it.get("fs_id") or ""),
                                 "url": it.get("dlink", ""),
