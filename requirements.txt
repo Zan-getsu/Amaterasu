@@ -13,9 +13,9 @@ curl_cffi>=0.16.1
 dnspython
 feedparser
 # Keep the Google token generator and bot runtime on the same current releases.
-google-auth==2.56.3
-google-auth-oauthlib==1.4.0
-google-auth-httplib2==0.4.1
+google-auth==2.57.0
+google-auth-oauthlib==1.4.1
+google-auth-httplib2==0.4.2
 google-api-python-client==2.199.0
 cryptography>=50.0.0
 gunicorn
@@ -38,7 +38,7 @@ urllib3
 uvloop
 xattr
 yt-dlp-ejs
-wzgram[fast]==3.0.33
+wzgram[fast]==3.0.36
 # Keep the Rust MTProto backend explicit so dependency pruning cannot silently
 # remove the accelerator required by WZGram 3.0.33.
 warpcrypto>=2.0.6
