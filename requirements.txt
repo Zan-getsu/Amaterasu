@@ -38,10 +38,10 @@ urllib3
 uvloop
 xattr
 yt-dlp-ejs
-wzgram[fast]==3.0.33
+wzgram[fast]==3.1.0
 # Keep the Rust MTProto backend explicit so dependency pruning cannot silently
-# remove the accelerator required by WZGram 3.0.33.
-warpcrypto>=2.0.6
+# remove the accelerator required by WZGram 3.1.0.
+warpcrypto==2.0.7
 yt-dlp[default,curl-cffi]==2026.8.19
 fastapi==0.141.1
 python-multipart>=0.0.32,<1

@@ -6,7 +6,6 @@ from os import walk as oswalk
 from pathlib import Path
 
 from aiofiles.os import path as aiopath
-from aiofiles.os import rename as aiorename
 from aiohttp import ClientSession
 from tenacity import (
     RetryError,
@@ -212,12 +211,7 @@ class BuzzHeavierUpload:
         if self.listener.is_cancelled:
             return None
 
-        # Replace spaces with dots in filename
-        new_path = ospath.join(
-            ospath.dirname(path), ospath.basename(path).replace(" ", ".")
-        )
-        await aiorename(path, new_path)
-        file_name = ospath.basename(new_path)
+        file_name = ospath.basename(path).replace(" ", ".")
 
         if not parentId:
             # Default to root if no parentId provided
@@ -230,7 +224,7 @@ class BuzzHeavierUpload:
             # The docs say: https://w.buzzheavier.com/{name} Uploads a file to default location
             url = f"{self.upload_url}{file_name}"
 
-        return await self.upload_aiohttp(url, new_path)
+        return await self.upload_aiohttp(url, path)
 
     async def _upload_dir(self, input_directory):
         parent_folder_id = self.folder_id or await self.__get_root_id()
@@ -261,10 +255,7 @@ class BuzzHeavierUpload:
                 break
 
             rel_path = ospath.relpath(root, input_directory)
-            current_folder_id = folder_ids.get(ospath.dirname(rel_path), main_folder_id)
-
-            if rel_path != ".":
-                current_folder_id = folder_ids.get(rel_path)
+            current_folder_id = folder_ids.get(rel_path, main_folder_id)
 
             for subdir in _dirs:
                 sub_folder_data = await self.create_folder(current_folder_id, subdir)
@@ -282,7 +273,9 @@ class BuzzHeavierUpload:
                         f"Could not retrieve subfolder ID from response: {sub_folder_data}"
                     )
 
-                sub_rel_path = ospath.join(rel_path, subdir)
+                sub_rel_path = (
+                    subdir if rel_path == "." else ospath.join(rel_path, subdir)
+                )
                 folder_ids[sub_rel_path] = sub_folder_id
                 self.total_folders += 1
 

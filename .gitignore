@@ -59,8 +59,10 @@ tests/*
 !tests/test_status_network_metrics.py
 !tests/test_inline_ui_design.py
 !tests/test_filetolink_streaming.py
+!tests/test_adaptive_tg_stream.py
 !tests/test_hyperdl_routing.py
 !tests/test_bot_settings_categories.py
+!tests/test_wzmlx_august_ports.py
 !tests/test_wzgram_upgrade.py
 !tests/test_ytdlp_thumbnail_recovery.py
 !tests/test_update_safety.py

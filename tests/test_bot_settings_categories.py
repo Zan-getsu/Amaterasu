@@ -251,6 +251,7 @@ async def test_filetolink_tuning_exports_values_and_restarts_web_worker():
         calls.append("started")
 
     values = {
+        "FILETOLINK_ADAPTIVE_STREAMING": True,
         "FILETOLINK_GETFILE_CONCURRENCY": 8,
         "FILETOLINK_PREFETCH_CHUNKS": 4,
     }
@@ -266,6 +267,7 @@ async def test_filetolink_tuning_exports_values_and_restarts_web_worker():
     await namespace["_apply_filetolink_web_tuning"]()
 
     assert environment == {
+        "FILETOLINK_ADAPTIVE_STREAMING": "True",
         "FILETOLINK_GETFILE_CONCURRENCY": "8",
         "FILETOLINK_PREFETCH_CHUNKS": "4",
     }

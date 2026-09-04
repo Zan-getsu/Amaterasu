@@ -18,6 +18,15 @@ def gdrive_modules(monkeypatch):
     package.__path__ = []
     discovery = ModuleType("googleapiclient.discovery")
     discovery.build = lambda *_args, **_kwargs: object()
+    errors = ModuleType("googleapiclient.errors")
+
+    class HttpError(Exception):
+        def __init__(self, resp=None, content=b""):
+            super().__init__("Google API error")
+            self.resp = resp or {}
+            self.content = content
+
+    errors.HttpError = HttpError
     tenacity = ModuleType("tenacity")
 
     def retry(*_args, **_kwargs):
@@ -32,6 +41,7 @@ def gdrive_modules(monkeypatch):
 
     monkeypatch.setitem(modules, "googleapiclient", package)
     monkeypatch.setitem(modules, "googleapiclient.discovery", discovery)
+    monkeypatch.setitem(modules, "googleapiclient.errors", errors)
     monkeypatch.setitem(modules, "tenacity", tenacity)
 
     helper_name = "bot.helper.mirror_leech_utils.gdrive_utils.helper"
@@ -117,6 +127,68 @@ def test_invalid_grant_is_a_permanent_actionable_authentication_error(gdrive_mod
     assert "bot owner" in helper.gdrive_auth_error_message("token.pickle")
     assert hasattr(helper.GoogleDriveHelper, "switch_service_account")
     assert hasattr(helper.GoogleDriveHelper, "get_id_from_url")
+
+
+def test_service_account_rotation_is_stable_and_ignores_non_json_files(
+    monkeypatch,
+    gdrive_modules,
+):
+    helper = gdrive_modules
+    credential_paths = []
+
+    monkeypatch.setattr(
+        helper,
+        "listdir",
+        lambda _path: ["notes.txt", "b.json", "a.json"],
+    )
+    monkeypatch.setattr(helper, "randrange", lambda _count: 0)
+    monkeypatch.setattr(
+        helper.service_account.Credentials,
+        "from_service_account_file",
+        lambda path, scopes: credential_paths.append(path) or object(),
+    )
+    monkeypatch.setattr(helper, "build", lambda *_args, **_kwargs: object())
+
+    drive = helper.GoogleDriveHelper()
+    drive.use_sa = True
+    drive.service = drive.authorize()
+    drive.switch_service_account()
+
+    assert credential_paths == ["accounts/a.json", "accounts/b.json"]
+    assert drive.sa_index == 1
+
+
+def test_quota_aware_execute_switches_service_account_once(gdrive_modules):
+    helper = gdrive_modules
+    drive = helper.GoogleDriveHelper()
+    drive.use_sa = True
+    drive.sa_number = 2
+    drive.sa_count = 1
+    switches = []
+
+    def switch():
+        switches.append(True)
+        drive.sa_count += 1
+
+    drive.switch_service_account = switch
+    quota_error = helper.HttpError(
+        {"content-type": "application/json"},
+        b'{"error":{"errors":[{"reason":"userRateLimitExceeded"}]}}',
+    )
+
+    class Request:
+        def __init__(self, result):
+            self.result = result
+
+        def execute(self):
+            if isinstance(self.result, Exception):
+                raise self.result
+            return self.result
+
+    requests = iter([Request(quota_error), Request({"id": "ok"})])
+
+    assert drive._execute(lambda: next(requests)) == {"id": "ok"}
+    assert switches == [True]
 
 
 def test_revoked_oauth_token_fails_during_preflight(

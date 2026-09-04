@@ -1,4 +1,5 @@
 from ast import literal_eval
+from copy import deepcopy
 from importlib import import_module
 from json import loads as json_loads
 from json import JSONDecodeError
@@ -53,6 +54,7 @@ class Config:
     BOT_TOKEN = ""
     HELPER_TOKENS = ""
     USE_HELPER_BOTS_FOR_FILETOLINK = True
+    FILETOLINK_ADAPTIVE_STREAMING = True
     FILETOLINK_GETFILE_CONCURRENCY = 8
     FILETOLINK_PREFETCH_CHUNKS = 4
     HELPER_STRINGS = ""
@@ -72,6 +74,7 @@ class Config:
     DEBRID_LINK_API = ""
     DISABLE_TORRENTS = False
     DISABLE_LEECH = False
+    DISABLE_MIRROR = False
     DISABLE_BULK = False
     DISABLE_MULTI = False
     DISABLE_SEED = False
@@ -693,6 +696,9 @@ class Config:
         cls._normalize_upload_parallelism()
         cls._validate_required()
         cls.construct_base_url()
+
+
+DEFAULT_CONFIG = deepcopy(Config.get_all())
 
 
 class BinConfig:

@@ -69,6 +69,8 @@
       background: rgba(13,17,23,0.58);
     }
     .toolbar-actions { display: flex; align-items: center; gap: var(--bs-space-2); flex-wrap: wrap; min-width: 0; }
+    .toolbar-search { min-width: min(240px, 100%); flex: 1; }
+    .toolbar-search .bs-input { min-height: 38px; padding: 8px 12px; }
     .selector-shell .bs-btn { letter-spacing: 0; }
     .submit-control { flex-shrink: 0; }
     .path-strip {
@@ -219,6 +221,11 @@
             <button id="selectAllBtn" class="bs-btn bs-btn--secondary bs-btn--sm"><i class="fa-solid fa-list-check"></i> Select Folder</button>
             <button id="invertSelectionBtn" class="bs-btn bs-btn--ghost bs-btn--sm"><i class="fa-solid fa-arrow-rotate-left"></i> Invert Selection</button>
             <button id="selectEverythingBtn" class="bs-btn bs-btn--ghost bs-btn--sm"><i class="fa-solid fa-check-double"></i> Select Everything</button>
+            <button id="sortNameBtn" class="bs-btn bs-btn--ghost bs-btn--sm" title="Sort by name"><i class="fa-solid fa-arrow-down-a-z"></i> Name <span id="nameSort">↑</span></button>
+            <button id="sortSizeBtn" class="bs-btn bs-btn--ghost bs-btn--sm" title="Sort by size"><i class="fa-solid fa-arrow-down-wide-short"></i> Size <span id="sizeSort">↕</span></button>
+            <div class="toolbar-search">
+              <input type="search" id="fileSearch" class="bs-input" placeholder="Search this folder" aria-label="Search files in the current folder">
+            </div>
           </div>
           <button id="submitBtn" class="bs-btn bs-btn--primary submit-control"><i class="fa-solid fa-circle-check"></i> Submit Selection</button>
         </div>
@@ -263,6 +270,9 @@
     const selectedSizeEl = document.getElementById('selectedSize');
     const totalSizeEl = document.getElementById('totalSize');
     const currentPathEl = document.getElementById('currentPath');
+    const fileSearch = document.getElementById('fileSearch');
+    const sortNameBtn = document.getElementById('sortNameBtn');
+    const sortSizeBtn = document.getElementById('sortSizeBtn');
 
     pinInput.focus();
     const urlParams = new Proxy(new URLSearchParams(window.location.search), {
@@ -292,6 +302,9 @@
     let currentFolder = null;
     let files = [];
     let allowEdit = false;
+    let sortBy = 'name';
+    let sortAsc = true;
+    let lastSelectedNode = null;
 
     function formatSize(size) {
         const units = ['B', 'KB', 'MB', 'GB', 'TB'];
@@ -317,6 +330,26 @@
         return totalSize;
     }
 
+    function sortNodes(nodes) {
+        const values = new Map();
+        for (const node of nodes) {
+            values.set(
+                node,
+                sortBy === 'name'
+                    ? node.name.toLowerCase()
+                    : (node.type === 'folder' ? calculateFolderSize(node) : node.size),
+            );
+        }
+        return [...nodes].sort((a, b) => {
+            if (a.type !== b.type) return a.type === 'folder' ? -1 : 1;
+            const aValue = values.get(a);
+            const bValue = values.get(b);
+            if (aValue < bValue) return sortAsc ? -1 : 1;
+            if (aValue > bValue) return sortAsc ? 1 : -1;
+            return 0;
+        });
+    }
+
     function renderCurrentPath() {
         if (!currentPathEl) return;
         if (!currentFolder) {
@@ -340,7 +373,8 @@
             backButton.addEventListener('click', goBack);
             fileTree.appendChild(backButton);
         }
-        nodes.forEach(node => {
+        const sortedNodes = sortNodes(nodes);
+        sortedNodes.forEach(node => {
             const div = document.createElement('div');
             div.className = `file-tree-item ${node.type === 'folder' ? 'folder-item' : 'file-item'}`;
             
@@ -349,7 +383,11 @@
             checkbox.id = node.id;
             checkbox.className = 'custom-checkbox';
             checkbox.checked = node.selected;
-            checkbox.addEventListener('change', () => toggleFile(node));
+            checkbox.addEventListener('click', (event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                toggleFile(node, event);
+            });
 
             const icon = document.createElement('span');
             icon.className = 'icon-container';
@@ -410,14 +448,12 @@
             }
 
             div.addEventListener('click', (event) => {
-                if (event.target.classList.contains('file-name')) {
-                    if (node.type === 'folder') {
-                        openFolder(node);
-                    } else {
-                        toggleFile(node);
-                    }
-                } else if (event.target.classList.contains('edit-btn') || event.target.closest('.edit-btn')) {
+                if (event.target.closest('.edit-btn')) {
                     openEditFileNameModal(node);
+                } else if (node.type === 'folder' && event.target.closest('.file-name')) {
+                    openFolder(node);
+                } else if (!event.target.closest('input[type="checkbox"]')) {
+                    toggleFile(node, event);
                 }
             });
 
@@ -425,6 +461,7 @@
         });
         updateSelectAllButtonText();
         updateSelectEverythingButtonText();
+        filterFilesBySearch();
     }
 
     function areAllChildrenSelected(folder) {
@@ -435,15 +472,59 @@
         return folder.children.some(child => child.type === 'folder' ? areSomeChildrenSelected(child) : child.selected);
     }
 
-    function toggleFile(node) {
-        if (node.type === 'folder') {
-            const isSelected = !areAllChildrenSelected(node);
-            toggleFolder(node, isSelected);
+    function visibleNodesInOrder() {
+        const query = (fileSearch?.value || '').toLowerCase().trim();
+        const nodes = (currentFolder ? currentFolder.children : files).filter(
+            node => !query || node.name.toLowerCase().includes(query),
+        );
+        return sortNodes(nodes);
+    }
+
+    function toggleFile(node, event = {}) {
+        const shouldSelect = node.type === 'folder'
+            ? !areAllChildrenSelected(node)
+            : !node.selected;
+        const nodes = visibleNodesInOrder();
+        const start = event.shiftKey && lastSelectedNode
+            ? nodes.findIndex(item => item.id === lastSelectedNode.id)
+            : -1;
+        const end = nodes.findIndex(item => item.id === node.id);
+        if (start !== -1 && end !== -1) {
+            const from = Math.min(start, end);
+            const to = Math.max(start, end);
+            for (let index = from; index <= to; index++) {
+                const current = nodes[index];
+                if (current.type === 'folder') toggleFolder(current, shouldSelect);
+                else current.selected = shouldSelect;
+                updateParentFolders(current);
+            }
+        } else if (node.type === 'folder') {
+            toggleFolder(node, shouldSelect);
         } else {
-            node.selected = !node.selected;
+            node.selected = shouldSelect;
         }
         updateParentFolders(node);
+        lastSelectedNode = node;
         updateStats();
+        renderFileTree(currentFolder ? currentFolder.children : files);
+    }
+
+    function filterFilesBySearch() {
+        const query = (fileSearch?.value || '').toLowerCase().trim();
+        document.querySelectorAll('#fileTree .file-tree-item:not(.back-button)').forEach(row => {
+            const name = row.querySelector('.file-name');
+            row.style.display = !query || (name && name.textContent.toLowerCase().includes(query)) ? '' : 'none';
+        });
+    }
+
+    function setSort(type) {
+        if (sortBy === type) sortAsc = !sortAsc;
+        else {
+            sortBy = type;
+            sortAsc = type === 'name';
+        }
+        document.getElementById('nameSort').textContent = sortBy === 'name' ? (sortAsc ? '↑' : '↓') : '↕';
+        document.getElementById('sizeSort').textContent = sortBy === 'size' ? (sortAsc ? '↑' : '↓') : '↕';
         renderFileTree(currentFolder ? currentFolder.children : files);
     }
 
@@ -686,6 +767,9 @@
     selectEverythingBtn.addEventListener('click', selectEverything);
     selectAllBtn.addEventListener('click', selectAll);
     submitBtn.addEventListener('click', submitData);
+    fileSearch.addEventListener('input', filterFilesBySearch);
+    sortNameBtn.addEventListener('click', () => setSort('name'));
+    sortSizeBtn.addEventListener('click', () => setSort('size'));
 
     reusableModal.addEventListener('click', (event) => {
         if (event.target === reusableModal) closeModal();

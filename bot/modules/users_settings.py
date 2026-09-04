@@ -1130,8 +1130,9 @@ async def get_user_settings(from_user, stype="main"):
         else:
             ytopt = "None"
 
-        upload_paths = user_dict.get("UPLOAD_PATHS", {})
-        if not upload_paths and "UPLOAD_PATHS" not in user_dict and Config.UPLOAD_PATHS:
+        if user_dict.get("UPLOAD_PATHS", False):
+            upload_paths = user_dict["UPLOAD_PATHS"]
+        elif "UPLOAD_PATHS" not in user_dict and Config.UPLOAD_PATHS:
             upload_paths = Config.UPLOAD_PATHS
         else:
             upload_paths = "None"
@@ -1560,6 +1561,8 @@ async def get_menu(option, message, user_id):
         back_to = "ffset"
     elif option in advanced_options:
         back_to = "advanced"
+    elif option in uphoster_options:
+        back_to = option.split("_")[0].lower()
     elif option in mega_options:
         back_to = "mega"
     else:
@@ -1600,7 +1603,7 @@ async def get_menu(option, message, user_id):
                 ilink = v.get("index_link", "")
                 ilink_part = f" | <code>{escape(ilink)}</code>" if ilink else ""
                 lines.append(f"  <b>{escape(k)}</b>: <code>{escape(did)}</code>{ilink_part}")
-            val = "<br>".join(lines)
+            val = "\n   ".join(lines)
         elif not val:
             val = "<b>Not Exists</b>"
     elif option == "LEECH_DUMP":

@@ -75,7 +75,7 @@ async def _call_with_flood_retry(method, *args, **kwargs):
             await sleep(flood.value + 1)
 
 
-# WZGram 3.0.33 performs its own rate-aware part dispatch and bounds active
+# WZGram 3.1.0 performs its own rate-aware part dispatch and bounds active
 # transmissions. Allow two files per account to use that native parallelism,
 # while retaining a conservative outer gate and shared SendMedia cooldown to
 # avoid finalization bursts. HyperTG has its own worker pool and bypasses this.
@@ -278,7 +278,7 @@ class TelegramUploader:
                 await self._listener.on_upload_error(str(e))
                 return False
 
-        if self._user_session:
+        elif self._user_session:
             try:
                 self._sent_msg = await _call_with_flood_retry(
                     self._listener.client.get_messages,

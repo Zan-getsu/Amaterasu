@@ -152,10 +152,10 @@ async def cancel_all_update(_, query):
     reply_to = message.reply_to_message
     user_id = int(data[3]) if len(data) > 3 else ""
     is_sudo = await CustomFilters.sudo("", query)
-    if not is_sudo and user_id and user_id != query.from_user.id:
+    if not is_sudo and user_id != query.from_user.id:
         await query.answer("Not Yours!", show_alert=True)
-    else:
-        await query.answer()
+        return
+    await query.answer()
     if data[1] == "close":
         await delete_message(reply_to, message)
     elif data[1] == "back":
@@ -182,4 +182,3 @@ async def cancel_all_update(_, query):
         res = await cancel_all(data[1], user_id)
         if not res:
             await send_message(reply_to, f"No matching tasks for {data[1]}!")
-

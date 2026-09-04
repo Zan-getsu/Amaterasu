@@ -1,6 +1,6 @@
-# Generate Telegram Pyrogram Session
+# Generate Telegram WZGram Session
 
-> Creates a Pyrogram session string for Telegram user authentication.
+> Creates a WZGram-compatible session string for Telegram user authentication.
 
 ## Quick Info
 
@@ -27,7 +27,7 @@
    - API Hash
 3. **Python dependencies**:
    ```bash
-   pip install pyrogram tgcrypto
+   pip install "wzgram[fast]==3.1.0"
    ```
 
 ---
@@ -65,7 +65,7 @@ When prompted, enter:
 
 ### What Happens
 
-1. Pyrogram client connects to Telegram
+1. WZGram client connects to Telegram
 2. Session string is generated
 3. Session is sent to your **Saved Messages** in Telegram
 4. You copy the session string for bot configuration
@@ -104,7 +104,7 @@ pyrogram_session = "your_session_string_here"
 
 ### Session Format
 
-The generated session is a Pyrogram v2 session string:
+The generated session is compatible with WZGram's Pyrogram API:
 ```
 AQABB...
 ```
@@ -126,7 +126,7 @@ This string contains encrypted credentials for your Telegram account.
 | `Invalid API key format` | Wrong format | Use format: `12345678:AbCdEfGh...` |
 | `API HASH must be 32 characters` | Wrong length | Copy exact 32 chars from my.telegram.org |
 | `Invalid phone format` | Missing country code | Include + and country code |
-| `Pyrogram not installed` | Missing dependencies | `pip install pyrogram tgcrypto` |
+| `WZGram not installed` | Missing dependencies | `pip install "wzgram[fast]==3.1.0"` |
 
 ### Common Issues
 

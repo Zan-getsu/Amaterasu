@@ -461,6 +461,9 @@ async def start_web_server():
         Config.WEB_ACCESS_PASSWORD = access_pwd
     proc_env = environ.copy()
     proc_env["WEB_ACCESS_PASSWORD"] = access_pwd
+    proc_env["FILETOLINK_ADAPTIVE_STREAMING"] = str(
+        Config.FILETOLINK_ADAPTIVE_STREAMING
+    )
     proc_env["FILETOLINK_GETFILE_CONCURRENCY"] = str(
         Config.FILETOLINK_GETFILE_CONCURRENCY
     )

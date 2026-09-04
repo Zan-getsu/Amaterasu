@@ -228,6 +228,11 @@ async def lifespan(app: FastAPI):
         if qbittorrent is not None:
             await qbittorrent.close()
         if Config.BOT_TOKEN:
+            from bot.helper.telegram_helper.tg_stream import (
+                shutdown_adaptive_streams,
+            )
+
+            await shutdown_adaptive_streams()
             await TgClient.stop()
         await database.disconnect()
 
@@ -1819,10 +1824,21 @@ def _positive_env_int(name: str, default: int, maximum: int) -> int:
     return min(max(value, 1), maximum)
 
 
+def _env_bool(name: str, default: bool) -> bool:
+    value = environ.get(name)
+    if value is None:
+        return default
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
 # Each bot account gets a bounded GetFile request pool.  A single transfer may
 # prefetch several ordered chunks when the worker is quiet, while concurrent
 # transfers automatically reduce their own window and share the same slots.
 # This keeps Telegram busy without letting one request flood a media session.
+FILETOLINK_ADAPTIVE_STREAMING = _env_bool(
+    "FILETOLINK_ADAPTIVE_STREAMING",
+    True,
+)
 FILETOLINK_GETFILE_CONCURRENCY = _positive_env_int(
     "FILETOLINK_GETFILE_CONCURRENCY",
     MAX_CONCURRENT_PER_CLIENT,
@@ -2000,13 +2016,25 @@ def _record_stream_success(client_id: int) -> None:
     health["last_error"] = ""
 
 
-def _record_stream_failure(client_id: int, reason: str) -> None:
+def _record_stream_failure(
+    client_id: int,
+    reason: str,
+    cooldown_seconds: int | None = None,
+) -> None:
     health = _stream_health(client_id)
     failures = int(health.get("failures") or 0) + 1
     health["failures"] = failures
     health["last_error"] = str(reason)[:160]
-    if failures >= 2:
-        health["cooldown_until"] = monotonic() + STREAM_CLIENT_COOLDOWN_SECONDS
+    if cooldown_seconds is not None or failures >= 2:
+        cooldown = (
+            max(int(cooldown_seconds), 1)
+            if cooldown_seconds is not None
+            else STREAM_CLIENT_COOLDOWN_SECONDS
+        )
+        health["cooldown_until"] = max(
+            float(health.get("cooldown_until") or 0),
+            monotonic() + cooldown,
+        )
 
 
 def _stream_client_choices() -> list[tuple[int, any]]:
@@ -2035,6 +2063,34 @@ def _acquire_stream_client(client_id: int) -> None:
 
 def select_optimal_client() -> tuple[int, any]:
     return _stream_client_choices()[0]
+
+
+def _reserve_stream_clients(
+    primary_client_id: int,
+    primary_client,
+    requested: int,
+) -> dict[int, any]:
+    """Reserve distinct healthy workers without exceeding existing load caps."""
+    from bot.core.tg_client import TgClient
+
+    reserved = {primary_client_id: primary_client}
+    for client_id, client in _stream_client_choices():
+        if len(reserved) >= max(int(requested or 1), 1):
+            break
+        if client_id in reserved or client is None:
+            continue
+        if not _stream_client_available(client_id):
+            continue
+        if TgClient.stream_loads.get(client_id, 0) >= MAX_CONCURRENT_PER_CLIENT:
+            continue
+        _acquire_stream_client(client_id)
+        reserved[client_id] = client
+    return reserved
+
+
+def _release_reserved_stream_clients(reserved: dict[int, any]) -> None:
+    for reserved_client_id in reserved:
+        _release_stream_load(reserved_client_id)
 
 def get_media(message):
     # Phase 2.12 — delegate to canonical implementation in tg_utils.py
@@ -2581,6 +2637,8 @@ async def stream_media(chat_id: str, message_id: int, request: Request, filename
             "X-Content-Type-Options": "nosniff",
             **CORS_HEADERS,
         }
+        etag_seed = unique_id or f"{chat_id}:{message_id}:{file_size}"
+        headers["ETag"] = f'"{sha256(str(etag_seed).encode()).hexdigest()[:32]}"'
         
         if ranged_response:
             headers["Content-Range"] = f"bytes {start}-{end}/{file_size}"
@@ -2634,16 +2692,75 @@ async def stream_media(chat_id: str, message_id: int, request: Request, filename
             cache_reservation = None
             cache_file = None
             cache_complete = False
-            transfer_id = _begin_filetolink_transfer(
-                filename,
-                mode,
-                "Telegram",
-                content_length,
-                client_id,
-            )
+            adaptive_engine = None
+            backend = "WZGram"
+            reserved_clients = {client_id: client}
+            transfer_id = None
+            bytes_sent = 0
             try:
-                bytes_sent = 0
                 stream_started = monotonic()
+
+                if FILETOLINK_ADAPTIVE_STREAMING:
+                    try:
+                        from bot.helper.telegram_helper.tg_stream import (
+                            AdaptiveTelegramStream,
+                            build_profile,
+                        )
+
+                        profile_kind = (
+                            "bulk"
+                            if disposition == "attachment"
+                            else "playback"
+                        )
+                        profile = build_profile(
+                            profile_kind,
+                            concurrency=_transfer_prefetch_depth(client_id),
+                            prefetch=FILETOLINK_PREFETCH_CHUNKS,
+                        )
+                        reserved_clients = _reserve_stream_clients(
+                            client_id,
+                            client,
+                            profile.client_count,
+                        )
+                        adaptive_engine = await AdaptiveTelegramStream(
+                            chat_id=chat_id,
+                            message_id=message_id,
+                            clients=reserved_clients,
+                            primary_client_id=client_id,
+                            primary_message=message,
+                            profile=profile,
+                            on_failure=_record_stream_failure,
+                        ).open()
+                        backend = f"Adaptive {profile.name}"
+                    except CancelledError:
+                        raise
+                    except Exception as error:
+                        LOGGER.warning(
+                            "Adaptive streaming unavailable for %s; using "
+                            "WZGram fallback: %s",
+                            filename,
+                            error,
+                        )
+                        for reserved_client_id in tuple(reserved_clients):
+                            if reserved_client_id == client_id:
+                                continue
+                            _release_stream_load(reserved_client_id)
+                            reserved_clients.pop(reserved_client_id, None)
+                        adaptive_engine = None
+                        backend = "WZGram"
+
+                transfer_source = (
+                    "Telegram"
+                    if backend == "WZGram"
+                    else f"Telegram / {backend}"
+                )
+                transfer_id = _begin_filetolink_transfer(
+                    filename,
+                    mode,
+                    transfer_source,
+                    content_length,
+                    client_id,
+                )
 
                 # Cache the exact bytes already crossing the live response.
                 # This replaces the former second full Telegram download that
@@ -2673,40 +2790,97 @@ async def stream_media(chat_id: str, message_id: int, request: Request, filename
                             )
                             cache_reservation = None
 
-                async for chunk in _iter_telegram_range(
-                    client_id,
-                    client,
-                    message,
-                    start,
-                    end,
-                    file_size,
-                ):
-                    if cache_file is not None:
-                        await cache_file.write(chunk)
-                    bytes_sent += len(chunk)
-                    _update_filetolink_transfer(transfer_id, bytes_sent)
-                    yield chunk
+                async def deliver(iterator):
+                    nonlocal bytes_sent
+                    async for chunk in iterator:
+                        if cache_file is not None:
+                            await cache_file.write(chunk)
+                        bytes_sent += len(chunk)
+                        _update_filetolink_transfer(transfer_id, bytes_sent)
+                        yield chunk
+
+                if adaptive_engine is not None:
+                    try:
+                        async for chunk in deliver(
+                            adaptive_engine.iter_range(start, end)
+                        ):
+                            yield chunk
+                    except CancelledError:
+                        raise
+                    except Exception as error:
+                        if bytes_sent:
+                            raise
+                        LOGGER.warning(
+                            "Adaptive streaming unavailable before first byte "
+                            "for %s; using WZGram fallback: %s",
+                            filename,
+                            error,
+                        )
+                        for reserved_client_id in tuple(reserved_clients):
+                            if reserved_client_id == client_id:
+                                continue
+                            _release_stream_load(reserved_client_id)
+                            reserved_clients.pop(reserved_client_id, None)
+                        adaptive_engine = None
+                        backend = "WZGram"
+                        active_transfer = _filetolink_active_streams.get(
+                            transfer_id
+                        )
+                        if active_transfer is not None:
+                            active_transfer["source"] = "Telegram"
+
+                if adaptive_engine is None:
+                    async for chunk in deliver(
+                        _iter_telegram_range(
+                            client_id,
+                            client,
+                            message,
+                            start,
+                            end,
+                            file_size,
+                        )
+                    ):
+                        yield chunk
 
                 if bytes_sent >= content_length:
-                    _record_stream_success(client_id)
+                    successful_clients = (
+                        adaptive_engine.used_client_ids
+                        - adaptive_engine.failed_client_ids
+                        if adaptive_engine is not None
+                        else {client_id}
+                    )
+                    for successful_client_id in successful_clients:
+                        _record_stream_success(successful_client_id)
                     cache_complete = start == 0 and end == file_size - 1
                     elapsed = max(monotonic() - stream_started, 0.001)
                     LOGGER.info(
-                        "FileToLink performance: name=%s client=%s bytes=%s "
-                        "elapsed=%.2fs speed=%.2fMiB/s chunk=%s prefetch=%s active=%s",
+                        "FileToLink performance: name=%s client=%s backend=%s "
+                        "bytes=%s elapsed=%.2fs speed=%.2fMiB/s prefetch=%s active=%s",
                         filename,
                         client_id,
+                        backend if adaptive_engine is not None else "WZGram",
                         bytes_sent,
                         elapsed,
                         bytes_sent / elapsed / (1024 * 1024),
-                        CHUNK_SIZE,
                         _transfer_prefetch_depth(client_id),
                         TgClient.stream_loads.get(client_id, 1),
                     )
             except CancelledError:
                 raise
             except Exception as error:
-                _record_stream_failure(client_id, f"stream interrupted: {error}")
+                if adaptive_engine is None:
+                    _record_stream_failure(
+                        client_id,
+                        f"stream interrupted: {error}",
+                    )
+                elif not adaptive_engine.failed_client_ids:
+                    for failed_client_id in (
+                        adaptive_engine.used_client_ids or {client_id}
+                    ):
+                        _record_stream_failure(
+                            failed_client_id,
+                            f"stream interrupted: {error}",
+                        )
                 LOGGER.warning(
                     "Telegram stream interrupted for %s after %s/%s bytes: %s",
                     filename,
@@ -2724,8 +2898,9 @@ async def stream_media(chat_id: str, message_id: int, request: Request, filename
                     file_size,
                     cache_complete,
                 )
-                _finish_filetolink_transfer(transfer_id)
-                _release_stream_load(client_id)
+                if transfer_id is not None:
+                    _finish_filetolink_transfer(transfer_id)
+                _release_reserved_stream_clients(reserved_clients)
                 
         return StreamingResponse(
             stream_generator(),

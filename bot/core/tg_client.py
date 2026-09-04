@@ -1,7 +1,6 @@
 import asyncio as _asyncio
 from ast import literal_eval
 from asyncio import CancelledError, Lock, gather, get_running_loop, sleep, wait_for
-from collections import OrderedDict
 from hashlib import sha256
 from importlib import import_module
 from inspect import signature
@@ -10,7 +9,6 @@ from time import monotonic
 from pyrogram import Client, enums
 from pyrogram import __version__ as WZGRAM_VERSION
 from pyrogram.errors import FloodWait
-from pyrogram.handlers import DisconnectHandler
 from pyrogram.types import ChatPrivileges
 
 from .. import LOGGER, bot_loop
@@ -235,59 +233,6 @@ async def resilient_tg_operation(
 class WzgramClient(Client):
     """WZGram implementation behind Amaterasu's framework-neutral boundary."""
 
-    def add_handler(self, handler, group=0):
-        """Register handlers safely when startup has paused the event loop.
-
-        WZGram 3.0.33 creates its dispatcher coroutine before checking for a
-        running loop. Module-level and synchronous plugin registration can
-        therefore leak that coroutine and emit ``was never awaited``. Keep the
-        public synchronous API while applying WZGram's own fallback mutation
-        without constructing a coroutine when the loop is stopped.
-        """
-        try:
-            get_running_loop()
-        except RuntimeError:
-            owner_loop = getattr(self, "loop", None)
-            if owner_loop is not None and owner_loop.is_running():
-                owner_loop.call_soon_threadsafe(
-                    super().add_handler,
-                    handler,
-                    group,
-                )
-            elif isinstance(handler, DisconnectHandler):
-                self.disconnect_handler = handler.callback
-            else:
-                dispatcher = self.dispatcher
-                if group not in dispatcher.groups:
-                    dispatcher.groups[group] = []
-                    dispatcher.groups = OrderedDict(
-                        sorted(dispatcher.groups.items())
-                    )
-                dispatcher.groups[group].append(handler)
-            return handler, group
-        return super().add_handler(handler, group)
-
-    def remove_handler(self, handler, group=0):
-        """Remove handlers without leaking WZGram's dispatcher coroutine."""
-        try:
-            get_running_loop()
-        except RuntimeError:
-            owner_loop = getattr(self, "loop", None)
-            if owner_loop is not None and owner_loop.is_running():
-                owner_loop.call_soon_threadsafe(
-                    super().remove_handler,
-                    handler,
-                    group,
-                )
-            elif isinstance(handler, DisconnectHandler):
-                self.disconnect_handler = None
-            elif group in self.dispatcher.groups:
-                self.dispatcher.groups[group].remove(handler)
-                if not self.dispatcher.groups[group]:
-                    del self.dispatcher.groups[group]
-            return None
-        return super().remove_handler(handler, group)
-
     async def invoke(self, query, *args, **kwargs):
         query_name = _query_name(query)
         try:
@@ -311,7 +256,7 @@ class WzgramClient(Client):
             raise
 
     async def _get_media_session_pool(self, dc_id, requested_size):
-        # WZGram 3.0.33 has its own adaptive, rate-aware media pool. Prefer it
+        # WZGram 3.1.0 has its own adaptive, rate-aware media pool. Prefer it
         # so Amaterasu benefits from upstream worker sizing and retry fixes.
         # Retain the proven sequential constructor only as a recovery path for
         # transient endpoint/session creation failures.
@@ -511,6 +456,21 @@ async def _get_stable_media_session_pool(client, dc_id, requested_size):
         return list(pool)
 
 
+def _configure_wzgram_upload_module(save_file_module):
+    """Bound retries and install cleanup compatibility only when needed."""
+    save_file_module.MAX_RETRIES = min(
+        int(getattr(save_file_module, "MAX_RETRIES", WZGRAM_UPLOAD_PART_ATTEMPTS)),
+        WZGRAM_UPLOAD_PART_ATTEMPTS,
+    )
+
+    if callable(getattr(save_file_module, "_stop_workers", None)):
+        return "native"
+
+    if not getattr(save_file_module.asyncio, "_amaterasu_queue_guard", False):
+        save_file_module.asyncio = _WzgramAsyncioProxy(save_file_module.asyncio)
+    return "compatibility"
+
+
 def _report_wzgram_upload_pool():
     """Report the active native uploader without assuming fixed worker sizes."""
     try:
@@ -518,19 +478,15 @@ def _report_wzgram_upload_pool():
     except (ImportError, AttributeError):
         return
 
-    save_file_module.MAX_RETRIES = min(
-        int(getattr(save_file_module, "MAX_RETRIES", WZGRAM_UPLOAD_PART_ATTEMPTS)),
-        WZGRAM_UPLOAD_PART_ATTEMPTS,
-    )
-    if not getattr(save_file_module.asyncio, "_amaterasu_queue_guard", False):
-        save_file_module.asyncio = _WzgramAsyncioProxy(save_file_module.asyncio)
+    cleanup_mode = _configure_wzgram_upload_module(save_file_module)
 
     LOGGER.info(
         "WZGram %s native adaptive media pools enabled "
-        "(cap: %s sessions, part retries: %s, cleanup guard: enabled)",
+        "(cap: %s sessions, part retries: %s, cleanup: %s)",
         WZGRAM_VERSION,
         getattr(save_file_module, "POOL_SIZE", 1),
         save_file_module.MAX_RETRIES,
+        cleanup_mode,
     )
 
 

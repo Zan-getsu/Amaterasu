@@ -93,6 +93,8 @@ class MultiUphosterUpload:
     async def on_upload_complete(
         self, service, link, files, folders, mime_type, dir_id
     ):
+        if service in self.results:
+            return
         self.results[service] = {
             "link": link,
             "files": files,
@@ -103,6 +105,8 @@ class MultiUphosterUpload:
         await self._check_completion()
 
     async def on_upload_error(self, service, error):
+        if service in self.results:
+            return
         LOGGER.error(f"Upload failed for {service}: {error}")
         self.failed.append(service)
         self.results[service] = {"error": error}

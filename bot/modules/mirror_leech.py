@@ -296,7 +296,17 @@ class Mirror(TaskListener):
         )
 
     async def new_event(self):
-
+        if self.is_leech:
+            if Config.DISABLE_LEECH:
+                await send_message(
+                    self.message, "The Leech command is currently disabled."
+                )
+                return
+        elif Config.DISABLE_MIRROR and not self.is_uphoster:
+            await send_message(
+                self.message, "The Mirror command is currently disabled."
+            )
+            return
 
         text = self.message.text.split("\n")
         input_list = text[0].split()
@@ -871,9 +881,6 @@ async def nzb_mirror(client, message):
 
 
 async def leech(client, message):
-    if Config.DISABLE_LEECH:
-        await message.reply("The Leech command is currently disabled.")
-        return
     _schedule_task_start(Mirror(client, message, is_leech=True))
 
 

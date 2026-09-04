@@ -1,10 +1,11 @@
 from cloudscraper import create_scraper
+from functools import lru_cache
 from hashlib import sha256
 from http.cookiejar import MozillaCookieJar
 from json import JSONDecodeError, loads
 from lxml.etree import HTML
 from os import getenv, path as ospath
-from re import DOTALL, findall, match, search
+from re import DOTALL, findall, match, search, sub
 from niquests import Session, post, get
 from niquests.adapters import HTTPAdapter
 from niquests.exceptions import (
@@ -441,8 +442,10 @@ def direct_link_generator(link):
         return debrid_unrestrict(link)
     elif "yadi.sk" in link or "disk.yandex." in link:
         return yandex_disk(link)
-    elif "buzzheavier.com" in domain:
+    elif any(x in domain for x in ("buzzheavier.com", "bzzhr.co", "bzzhr.to")):
         return buzzheavier(link)
+    elif "hubcloud" in domain:
+        return hubcloud(link)
     elif "devuploads" in domain:
         return devuploads(link)
     elif "lulacloud.com" in domain:
@@ -607,6 +610,10 @@ def direct_link_generator(link):
         return linkBox(link)
     elif is_share_link(link):
         return filepress(link) if "filepress" in domain else sharer_scraper(link)
+    elif "gdflix" in domain:
+        return gdflix(link)
+    elif "hubdrive" in domain:
+        return hubdrive(link)
     # Phase 1 port P9 — JioDrive resolver (must come BEFORE the
     # 'No Direct link function found' fallback so jiodrive.xyz URLs
     # route to jiodrive() instead of falling through). Default-off:
@@ -934,11 +941,179 @@ def debrid_link(url):
 
 
 def transfer_it(url):
-    resp = post("https://transfer-it-henna.vercel.app/post", json={"url": url})
-    if resp.status_code == 200:
-        return resp.json()["url"]
-    else:
+    transfer_handle = urlparse(url).path.rstrip("/").rsplit("/", 1)[-1]
+    api = "https://g.api.mega.co.nz/cs"
+    with CurlSession(impersonate="chrome") as session:
+        try:
+            info = session.post(
+                api,
+                params={"x": transfer_handle},
+                json=[{"a": "xi", "xh": transfer_handle}],
+                timeout=20,
+            ).json()[0]
+            name = b64decode(
+                info["t"].replace("-", "+").replace("_", "/") + "=="
+            ).decode()
+            if info["size"][1] == 1:
+                nodes = session.post(
+                    api,
+                    params={"x": transfer_handle},
+                    json=[{"a": "f", "c": 1, "r": 1}],
+                    timeout=20,
+                ).json()[0]["f"]
+                handle = next(node["h"] for node in nodes if not node["t"])
+            else:
+                handle = info["z"]
+                name = f"{transfer_handle}{handle}.zip"
+        except Exception as e:
+            raise DirectDownloadLinkException(
+                "ERROR: File Expired or File Not Found"
+            ) from e
+        response = session.get(
+            f"https://bt7.api.mega.co.nz/cs/g?x={transfer_handle}&n={handle}&fn={quote(name)}",
+            headers={"Referer": "https://transfer.it/"},
+            allow_redirects=False,
+            timeout=20,
+        )
+    direct_url = response.headers.get("location", "")
+    if "userstorage" not in direct_url:
         raise DirectDownloadLinkException("ERROR: File Expired or File Not Found")
+    return direct_url
+
+
+def _hubcloud_links(session, url):
+    try:
+        tree = HTML(session.get(url, timeout=20).text)
+        if generator := tree.xpath("//a[@id='download']/@href"):
+            tree = HTML(session.get(generator[0], timeout=20).text)
+        return [
+            href
+            for href in tree.xpath("//a[contains(@class, 'btn-lg')]/@href")
+            if href.startswith("http") and "vdplay" not in href
+        ]
+    except Exception:
+        return []
+
+
+def _first_alive(session, links):
+    fallback = ""
+    for direct_url in links:
+        try:
+            if "bzzhr.co" in direct_url or "bzzhr.to" in direct_url:
+                return buzzheavier(direct_url)
+            response = session.head(direct_url, timeout=20)
+            if inner := parse_qs(urlparse(response.url).query).get("link"):
+                direct_url = inner[0]
+                response = session.head(direct_url, timeout=20)
+            if response.status_code < 400 and "text/html" not in response.headers.get(
+                "content-type", ""
+            ):
+                return direct_url
+            fallback = fallback or direct_url
+        except Exception:
+            continue
+    return fallback
+
+
+def hubcloud(url):
+    with CurlSession(impersonate="chrome") as session:
+        if direct_url := _first_alive(session, _hubcloud_links(session, url)):
+            return direct_url
+    raise DirectDownloadLinkException("ERROR: File Not Found or Expired")
+
+
+def hubdrive(url):
+    parsed = urlparse(url)
+    file_id = parsed.path.rstrip("/").rsplit("/", 1)[-1]
+    host = f"{parsed.scheme}://{parsed.netloc}"
+    links = []
+    with CurlSession(impersonate="chrome") as session:
+        tree = HTML(session.get(url, timeout=20).text)
+        if "/packs/" in url:
+            details = {
+                "contents": [],
+                "title": (tree.xpath("//title/text()") or [""])[0]
+                .split("|")[-1]
+                .strip(),
+                "total_size": 0,
+            }
+            for row in tree.xpath("//div[contains(@class, 'pack-clean-file')]"):
+                names = row.xpath(
+                    ".//div[contains(@class, 'pack-clean-title')]/text()"
+                )
+                sizes = row.xpath(
+                    ".//div[contains(@class, 'pack-clean-size')]/text()"
+                )
+                items = row.xpath(
+                    ".//a[contains(@class, 'pack-clean-link')]/@href"
+                )
+                if not names or not items:
+                    continue
+                details["contents"].append(
+                    {
+                        "path": "",
+                        "filename": names[0].strip(),
+                        "url": hubdrive(f"{host}{items[0]}"),
+                    }
+                )
+                details["total_size"] += speed_string_to_bytes(
+                    sizes[0].strip() if sizes else "0b"
+                )
+            if not details["contents"]:
+                raise DirectDownloadLinkException("ERROR: No files found in pack")
+            return details
+        try:
+            response = session.post(
+                f"{host}/ajax.php?ajax=direct-download",
+                data={"id": file_id},
+                headers={"X-Requested-With": "XMLHttpRequest", "Referer": url},
+                timeout=20,
+            )
+            if drive_link := response.json().get("data", {}).get("gd"):
+                links.append(drive_link)
+        except Exception:
+            pass
+        if mirror := tree.xpath("//a[contains(@href, 'hubcloud')]/@href"):
+            links += _hubcloud_links(session, mirror[0])
+        if direct_url := _first_alive(session, links):
+            return direct_url
+    raise DirectDownloadLinkException("ERROR: File Not Found or Expired")
+
+
+def gdflix(url):
+    with CurlSession(impersonate="chrome") as session:
+        response = session.get(url, timeout=20)
+        tree = HTML(response.text)
+        if "/pack/" in url:
+            host = f"https://{urlparse(response.url).netloc}"
+            details = {
+                "contents": [],
+                "title": (tree.xpath("//title/text()") or [""])[0]
+                .split("|")[-1]
+                .strip(),
+                "total_size": 0,
+            }
+            for link in tree.xpath("//a[starts-with(@href, '/file/')]"):
+                name, _, size = " ".join(link.itertext()).strip().rpartition("[")
+                details["contents"].append(
+                    {
+                        "path": "",
+                        "filename": name.strip(),
+                        "url": gdflix(f"{host}{link.attrib['href']}"),
+                    }
+                )
+                details["total_size"] += speed_string_to_bytes(size.strip("] "))
+            if not details["contents"]:
+                raise DirectDownloadLinkException("ERROR: No files found in pack")
+            return details
+        if not (instant := tree.xpath("//a[contains(@href, 'instant')]/@href")):
+            raise DirectDownloadLinkException("ERROR: Instant DL link not found")
+        response = session.get(instant[0], allow_redirects=False, timeout=20)
+        if not (location := response.headers.get("location", "").strip()):
+            raise DirectDownloadLinkException("ERROR: File Not Found or Expired")
+        if direct_url := parse_qs(urlparse(location).query).get("url"):
+            return direct_url[0]
+        return location
 
 
 def buzzheavier(url):
@@ -947,9 +1122,10 @@ def buzzheavier(url):
     @param link: URL from buzzheavier
     @return: Direct download link
     """
-    pattern = r"^https?://buzzheavier\.com/[a-zA-Z0-9]+$"
+    pattern = r"^https?://(?:buzzheavier\.com|bzzhr\.(?:co|to))/[a-zA-Z0-9]+$"
     if not match(pattern, url):
         return url
+    host = f"https://{urlparse(url).netloc}"
 
     def _bhscraper(session , url):
         if "/download" not in url:
@@ -969,7 +1145,7 @@ def buzzheavier(url):
         tree = HTML(response.text)
         if link := tree.xpath("//a[contains(@hx-get, 'download')]"):
             hx_get = link[0].attrib.get("hx-get", "").strip()
-            return _bhscraper(session , f"https://buzzheavier.com{hx_get}")
+            return _bhscraper(session, f"{host}{hx_get}")
         elif folders := tree.xpath("//tbody[@id='tbody']/tr"):
             details = {"contents": [], "title": "", "total_size": 0}
             for data in folders:
@@ -977,7 +1153,7 @@ def buzzheavier(url):
                     filename = data.xpath(".//a")[0].text.strip()
                     _id = data.xpath(".//a")[0].attrib.get("href", "").strip()
                     size = data.xpath(".//td[@class='text-center']/text()")[0].strip()
-                    url = buzzheavier(f"https://buzzheavier.com{_id}")
+                    url = buzzheavier(f"{host}{_id}")
                     if not url:
                         raise DirectDownloadLinkException("ERROR: No download link found")
                     item = {
@@ -2473,6 +2649,18 @@ def linkBox(url: str):
     return details
 
 
+@lru_cache(1)
+def _gofile_salt(_slot):
+    try:
+        js = get("https://gofile.io/js/wt.obf.js", timeout=15).text
+        js = sub(r"\\x([0-9a-f]{2})", lambda m: chr(int(m[1], 16)), js)
+        if salt := search(r"'([0-9a-f]{14})'", js[js.index("generateWT") :]):
+            return salt[1]
+    except Exception:
+        pass
+    return "12af056dacea0b"
+
+
 def gofile(url):
     try:
         if "::" in url:
@@ -2484,6 +2672,22 @@ def gofile(url):
         _id = url.split("/")[-1]
     except Exception as e:
         raise DirectDownloadLinkException(f"ERROR: {e.__class__.__name__}")
+
+    def __add_content_item(node, folderPath, details):
+        if not folderPath:
+            folderPath = details["title"]
+        item = {
+            "path": ospath.join(folderPath),
+            "filename": node["name"],
+            "url": node["link"],
+        }
+        if "size" in node:
+            size = node["size"]
+            if isinstance(size, str) and size.isdigit():
+                size = float(size)
+            details["total_size"] += size
+        details["contents"].append(item)
+        return folderPath
 
     def __get_token(session):
         headers = {
@@ -2504,10 +2708,7 @@ def gofile(url):
     def __fetch_links(session, _id, folderPath=""):
         _url = f"https://api.gofile.io/contents/{_id}?cache=true"
         time_slot = int(time()) // 14400
-        # GoFile validates this hash as the website client token.  Keep it
-        # aligned with WZML-X; the old gf2026x value is rejected by the
-        # contents API and prevents links from being resolved.
-        raw = f"{user_agent}::en-US::{token}::{time_slot}::9844d94d963d30"
+        raw = f"{user_agent}::en-US::{token}::{time_slot}::{_gofile_salt(time_slot)}"
         wt = sha256(raw.encode()).hexdigest()
         headers = {
             "User-Agent": user_agent,
@@ -2542,30 +2743,19 @@ def gofile(url):
         if not details["title"]:
             details["title"] = data["name"] if data["type"] == "folder" else _id
 
-        contents = data["children"]
-        for content in contents.values():
+        if "children" not in data:
+            __add_content_item(data, folderPath, details)
+            return
+
+        for content in data["children"].values():
             if content["type"] == "folder":
                 if not content["public"]:
                     continue
-                if not folderPath:
-                    newFolderPath = ospath.join(details["title"], content["name"])
-                else:
-                    newFolderPath = ospath.join(folderPath, content["name"])
+                base = folderPath if folderPath else details["title"]
+                newFolderPath = ospath.join(base, content["name"])
                 __fetch_links(session, content["id"], newFolderPath)
             else:
-                if not folderPath:
-                    folderPath = details["title"]
-                item = {
-                    "path": ospath.join(folderPath),
-                    "filename": content["name"],
-                    "url": content["link"],
-                }
-                if "size" in content:
-                    size = content["size"]
-                    if isinstance(size, str) and size.isdigit():
-                        size = float(size)
-                    details["total_size"] += size
-                details["contents"].append(item)
+                folderPath = __add_content_item(content, folderPath, details)
 
     details = {"contents": [], "title": "", "total_size": 0}
     with Session() as session:

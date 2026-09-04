@@ -16,6 +16,7 @@ from ..helper.ext_utils.bot_utils import (
     new_task,
 )
 from ..helper.ext_utils.status_utils import get_task_by_gid, MirrorStatus
+from ..helper.ext_utils.task_manager import limit_checker
 from ..helper.telegram_helper.message_utils import (
     send_message,
     send_status_message,
@@ -84,13 +85,12 @@ async def select(_, message):
         return
 
     try:
+        await task.update()
+        id_ = task.hash() if task.listener.is_qbit else task.gid()
         if not task.queued:
-            await task.update()
-            id_ = task.gid()
             if task.listener.is_nzb:
                 await sabnzbd_client.pause_job(id_)
             elif task.listener.is_qbit:
-                id_ = task.hash()
                 await TorrentManager.qbittorrent.torrents.stop([id_])
             else:
                 try:
@@ -107,6 +107,16 @@ async def select(_, message):
     SBUTTONS = bt_selection_buttons(id_)
     msg = "<b>Download Paused!</b>\n\n<i>Select your files &amp; press <b>Done Selecting</b> to start.</i>"
     await send_message(message, msg, SBUTTONS)
+
+
+async def _selection_limit_exceeded(task, message):
+    limit_message = await limit_checker(task.listener)
+    if not limit_message:
+        return False
+    await send_message(message, limit_message)
+    await task.cancel_task()
+    await delete_message(message)
+    return True
 
 
 @new_task
@@ -194,6 +204,7 @@ async def confirm_selection(_, query):
     elif data[1] == "done":
         await query.answer()
         id_ = data[3]
+        task.listener.files_selected = True
         if hasattr(task, "seeding"):
             if task.listener.is_qbit:
                 tor_info = (
@@ -210,6 +221,12 @@ async def confirm_selection(_, query):
                                     await remove(f_path)
                                 except Exception:
                                     pass
+                tor_info = (
+                    await TorrentManager.qbittorrent.torrents.info(hashes=[id_])
+                )[0]
+                task.listener.size = tor_info.size
+                if await _selection_limit_exceeded(task, message):
+                    return
                 if not task.queued:
                     await TorrentManager.qbittorrent.torrents.start([id_])
             else:
@@ -220,6 +237,13 @@ async def confirm_selection(_, query):
                             await remove(f["path"])
                         except Exception:
                             pass
+                task.listener.size = sum(
+                    int(file["length"])
+                    for file in res
+                    if file["selected"] == "true"
+                )
+                if await _selection_limit_exceeded(task, message):
+                    return
                 if not task.queued:
                     try:
                         await TorrentManager.aria2.unpause(id_)
@@ -228,7 +252,8 @@ async def confirm_selection(_, query):
                             f"{e} Error in resume, this mostly happens after abuse aria2. Try to use select cmd again!"
                         )
         elif task.listener.is_nzb:
-            await sabnzbd_client.resume_job(id_)
+            if not task.queued:
+                await sabnzbd_client.resume_job(id_)
         await send_status_message(message)
         await delete_message(message)
     else:

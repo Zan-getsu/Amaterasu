@@ -4,7 +4,7 @@ from http.client import IncompleteRead, RemoteDisconnected
 from io import FileIO
 from json import loads
 from logging import getLogger
-from os import makedirs, path as ospath
+from os import makedirs, path as ospath, remove
 from socket import timeout as SocketTimeout
 from ssl import SSLError
 from time import sleep
@@ -46,10 +46,10 @@ class GoogleDriveDownload(GoogleDriveHelper):
 
     def download(self):
         file_id = self.get_id_from_url(self.listener.link, self.listener.user_id)
-        self.service = self.authorize()
         updater = SetInterval(self.update_interval, self.progress)
         self._updater = updater
         try:
+            self.service = self.authorize()
             meta = self.get_file_metadata(file_id)
             if meta.get("mimeType") == self.G_DRIVE_DIR_MIME_TYPE:
                 self._download_folder(file_id, self._path, self.listener.name)
@@ -105,6 +105,7 @@ class GoogleDriveDownload(GoogleDriveHelper):
             ) and not filename.strip().lower().endswith(
                 tuple(self.listener.excluded_extensions)
             ):
+                self.sa_count = 1
                 self._download_file(file_id, path, filename, mime_type)
             if self.listener.is_cancelled:
                 break
@@ -134,7 +135,8 @@ class GoogleDriveDownload(GoogleDriveHelper):
                 self.listener.name = filename
         if self.listener.is_cancelled:
             return
-        fh = FileIO(f"{path}/{filename}", "wb")
+        output_path = f"{path}/{filename}"
+        fh = FileIO(output_path, "wb")
         downloader = MediaIoBaseDownload(fh, request, chunksize=100 * 1024 * 1024)
         done = False
         retries = 0
@@ -174,6 +176,20 @@ class GoogleDriveDownload(GoogleDriveHelper):
                     if err.resp.get("content-type", "").startswith("application/json"):
                         reason = _error_reason(err)
                         if "fileNotDownloadable" in reason and "document" in mime_type:
+                            fh.close()
+                            try:
+                                remove(output_path)
+                            except OSError as cleanup_error:
+                                LOGGER.warning(
+                                    "Unable to remove Google Drive export placeholder %s: %s",
+                                    output_path,
+                                    cleanup_error,
+                                )
+                            self.proc_bytes = max(
+                                0, self.proc_bytes - self.file_processed_bytes
+                            )
+                            self.file_processed_bytes = 0
+                            self.status = None
                             return self._download_file(
                                 file_id, path, filename, mime_type, True
                             )
@@ -193,6 +209,12 @@ class GoogleDriveDownload(GoogleDriveHelper):
                                     return
                                 self.switch_service_account()
                                 LOGGER.info(f"Got: {reason}, Trying Again...")
+                                fh.close()
+                                self.proc_bytes = max(
+                                    0, self.proc_bytes - self.file_processed_bytes
+                                )
+                                self.file_processed_bytes = 0
+                                self.status = None
                                 return self._download_file(
                                     file_id, path, filename, mime_type
                                 )

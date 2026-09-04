@@ -59,7 +59,9 @@ async def authorize(_, message):
             thread_id = int(msg[2].strip())
         else:
             chat_id = int(msg[1].strip())
-    elif reply_to := message.reply_to_message:
+    elif (
+        reply_to := message.reply_to_message
+    ) and reply_to.id != message.message_thread_id:
         chat_id = (reply_to.from_user or reply_to.sender_chat).id
     else:
         if message.is_topic_message:
@@ -99,7 +101,9 @@ async def unauthorize(_, message):
             thread_id = int(msg[2].strip())
         else:
             chat_id = int(msg[1].strip())
-    elif reply_to := message.reply_to_message:
+    elif (
+        reply_to := message.reply_to_message
+    ) and reply_to.id != message.message_thread_id:
         chat_id = (reply_to.from_user or reply_to.sender_chat).id
     else:
         if message.is_topic_message:
@@ -110,6 +114,8 @@ async def unauthorize(_, message):
             "thread_ids", []
         ):
             user_data[chat_id]["thread_ids"].remove(thread_id)
+            if not user_data[chat_id].get("thread_ids"):
+                update_user_ldata(chat_id, "AUTH", False)
         else:
             update_user_ldata(chat_id, "AUTH", False)
         await database.update_user_data(chat_id)

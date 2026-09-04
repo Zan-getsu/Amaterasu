@@ -20,7 +20,7 @@
   <br>
   <a href="#"><img src="https://img.shields.io/badge/Powered%20By-Python_3.11-blue?style=for-the-badge&logo=python"></a>
   <a href="#"><img src="https://img.shields.io/badge/Deployed_Via-Docker-2496ED?style=for-the-badge&logo=docker"></a>
-  <a href="#"><img src="https://img.shields.io/badge/Framework-Pyrogram_2.2.19-green?style=for-the-badge&logo=telegram"></a>
+  <a href="#"><img src="https://img.shields.io/badge/Framework-WZGram_3.1.0-green?style=for-the-badge&logo=telegram"></a>
 </p>
 
 [**Telegram Channel**](#) • [**Support Group**](#) • [**Report a Bug**](#)
@@ -198,7 +198,7 @@ graph TD
 | Component | Technology |
 |---|---|
 | Language | Python 3.11 |
-| Telegram Framework | WZGram 3.0.33 (`pyrogram` API) |
+| Telegram Framework | WZGram 3.1.0 (`pyrogram` API) |
 | Web Server | FastAPI + Uvicorn |
 | Database | MongoDB (Motor async driver) |
 | Containerization | Docker / Podman |
@@ -223,7 +223,7 @@ Before deploying Amaterasu, you will need:
 | **Owner ID** | [@MissRose_bot](https://t.me/MissRose_bot) or [@userinfobot](https://t.me/userinfobot) | Send `/id` to get your numeric Telegram User ID |
 | **VPS / Server** | Any Linux VPS (Ubuntu/Debian recommended) | Minimum: **1 CPU, 1 GB RAM, 20 GB disk** (2 GB+ RAM recommended for heavy media) |
 | **Google Drive** *(optional)* | [Google Cloud Console](https://console.cloud.google.com) | Generate `token.pickle` or Service Account keys for GDrive uploads |
-| **User Session String** *(optional)* | Generate with Pyrogram's `StringSession` | Needed for downloading restricted Telegram content or uploading files > 2 GB |
+| **User Session String** *(optional)* | Generate with WZGram's compatible session API | Needed for downloading restricted Telegram content or uploading files > 2 GB |
 
 ---
 
@@ -573,16 +573,17 @@ All variables go inside `config.py`. Copy `config_sample.py` as your starting te
 
 | Variable | Type | Default | Description |
 |---|---|---|---|
-| `USER_SESSION_STRING` | `str` | `""` | Pyrogram string session for a user account. Required for restricted content downloads and uploads >2 GB |
+| `USER_SESSION_STRING` | `str` | `""` | WZGram-compatible session string for a user account. Required for restricted content downloads and uploads >2 GB |
 | `HELPER_TOKENS` | `str` | `""` | Space-separated helper bot tokens used by HyperDL/HyperUP parallel Telegram transfers |
 | `USE_HELPER_BOTS_FOR_FILETOLINK` | `bool` | `True` | Also use `HELPER_TOKENS` as FileToLink stream workers. Set `False` if helpers cannot read the effective BIN channel |
+| `FILETOLINK_ADAPTIVE_STREAMING` | `bool` | `True` | Use the WZML-X adaptive MTProto range engine; automatically falls back to WZGram's native streamer before response bytes start |
 | `FILETOLINK_GETFILE_CONCURRENCY` | `int` | `8` | Maximum concurrent Telegram `GetFile` requests per FileToLink stream bot. Valid range: 1–32 |
 | `FILETOLINK_PREFETCH_CHUNKS` | `int` | `4` | Maximum ordered look-ahead chunks per transfer; capped by concurrency and reduced automatically under load |
 | `HELPER_STRINGS` | `str` | `""` | Space-separated helper user session strings. These clients can start with the bot, but HyperDL/HyperUP currently uses helper bot tokens as its active worker pool |
 | `HELPER_BOT_PROXIES` | `str` | `""` | Optional newline-separated proxy dictionaries for `HELPER_TOKENS`, one proxy per helper bot |
 | `HELPER_USER_PROXIES` | `str` | `""` | Optional newline-separated proxy dictionaries for `HELPER_STRINGS`, one proxy per helper user |
 | `DEFAULT_LANG` | `str` | `""` | Default language code for the bot |
-| `TG_PROXY` | `dict` | `{}` | Proxy config for Pyrogram (`{"scheme": "socks5", "hostname": "...", "port": ...}`) |
+| `TG_PROXY` | `dict` | `{}` | Proxy config for WZGram (`{"scheme": "socks5", "hostname": "...", "port": ...}`) |
 | `BOT_PM` | `bool` | `False` | If `True`, bot sends task completion messages in PM |
 | `BOT_MAX_TASKS` | `int` | `0` | Global maximum concurrent tasks (0 = unlimited) |
 | `USER_MAX_TASKS` | `int` | `0` | Per-user maximum concurrent tasks |
@@ -830,7 +831,7 @@ All limits are in **GB**. Set `0` to disable the limit.
 | `GLOBAL_RATE_LIMIT` | `bool` | `False` | Reserved legacy setting; not currently enforced |
 | `RATE_LIMIT_ENABLED` | `bool` | `False` | Reserved legacy setting; not currently enforced |
 
-`FILETOLINK_GETFILE_CONCURRENCY` caps in-flight Telegram chunk requests per stream bot (default `8`), while `FILETOLINK_PREFETCH_CHUNKS` controls the maximum ordered look-ahead per transfer (default `4`). Both can be changed from `/bsetting`; the web stream service restarts automatically so the new values take effect immediately. Active transfers automatically receive a smaller prefetch window so simultaneous users share each worker fairly. `FILETOLINK_CACHE_MAX_MB` caps a single cached file (default `256`) and `FILETOLINK_CACHE_TOTAL_MAX_MB` caps total cache usage (default `2048`). Complete live responses populate the cache directly without a second Telegram download. Use `/link status` to inspect stream clients, tuning, storage config, and cache usage.
+`FILETOLINK_ADAPTIVE_STREAMING` enables latency-first playback chunks, adaptive ordered request windows, duplicate-chunk coalescing, file-reference refresh, and bounded worker failover. If the direct engine cannot initialize, Amaterasu falls back to WZGram's native streamer before sending response bytes. `FILETOLINK_GETFILE_CONCURRENCY` caps in-flight Telegram chunk requests per stream bot (default `8`), while `FILETOLINK_PREFETCH_CHUNKS` controls the maximum ordered look-ahead per transfer (default `4`). These values can be changed from `/bsetting`; the web stream service restarts automatically so the new values take effect immediately. Active transfers automatically receive a smaller prefetch window so simultaneous users share each worker fairly. `FILETOLINK_CACHE_MAX_MB` caps a single cached file (default `256`) and `FILETOLINK_CACHE_TOTAL_MAX_MB` caps total cache usage (default `2048`). Complete live responses populate the cache directly without a second Telegram download. Use `/link status` to inspect stream clients, tuning, storage config, and cache usage.
 
 ### 14. Web Server
 
@@ -1942,10 +1943,11 @@ This auto-leeches new anime releases in 1080p (mkv or mp4), excluding batch pack
 </details>
 
 <details>
-  <summary><b>How to generate a Pyrogram String Session?</b></summary>
+  <summary><b>How to generate a WZGram String Session?</b></summary>
   <br>
 
   ```python
+  # WZGram keeps the Pyrogram-compatible import namespace.
   from pyrogram import Client
 
   app = Client("my_account", api_id=YOUR_API_ID, api_hash="YOUR_API_HASH")

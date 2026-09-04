@@ -4,6 +4,7 @@ from asyncio import (
     sleep,
 )
 from ast import literal_eval
+from copy import deepcopy
 from functools import partial
 from html import escape
 from io import BytesIO
@@ -47,7 +48,7 @@ from ..helper.ext_utils.bot_utils import (
     new_task,
 )
 from ..core.auto_restart import schedule_auto_restart
-from ..core.config_manager import Config
+from ..core.config_manager import Config, DEFAULT_CONFIG
 from ..core.tg_client import TgClient, db_partition_id
 from ..core.torrent_manager import TorrentManager
 from ..core.startup import (
@@ -97,6 +98,7 @@ def _config_update_payload(key, value):
 DEFAULT_VALUES = {
     "AUTO_PROVISION_STREAM_BOTS": False,
     "USE_HELPER_BOTS_FOR_FILETOLINK": True,
+    "FILETOLINK_ADAPTIVE_STREAMING": True,
     "FILETOLINK_GETFILE_CONCURRENCY": 8,
     "FILETOLINK_PREFETCH_CHUNKS": 4,
     "USE_LEECH_DUMP_AS_BIN_CHANNEL": False,
@@ -142,6 +144,10 @@ DEFAULT_DESP = {
     "BOT_TOKEN": "Telegram Bot Token from @BotFather.",
     "HELPER_TOKENS": "Space-separated helper bot tokens used by HyperDL and HyperUP.",
     "USE_HELPER_BOTS_FOR_FILETOLINK": "Also use HELPER_TOKENS as FileToLink stream workers. Helpers must be able to read the effective BIN channel. Default: True.",
+    "FILETOLINK_ADAPTIVE_STREAMING": (
+        "Use the WZML-X adaptive MTProto range engine with automatic fallback "
+        "to WZGram streaming. Default: True."
+    ),
     "FILETOLINK_GETFILE_CONCURRENCY": "Maximum concurrent Telegram GetFile requests per FileToLink stream bot. Valid range: 1-32. Default: 8.",
     "FILETOLINK_PREFETCH_CHUNKS": "Shared-load look-ahead chunks per FileToLink transfer. An idle transfer can use the full GETFILE_CONCURRENCY budget; concurrent transfers are reduced to a fair share. Default: 4.",
     "BOT_MAX_TASKS": "Max tasks (including queued) the bot runs in parallel. 0 = unlimited.",
@@ -160,6 +166,7 @@ DEFAULT_DESP = {
     "DEBRID_LINK_API": "Debrid-link.com API key for premium hoster support.",
     "DISABLE_TORRENTS": "Disable all torrent downloads. Default: False.",
     "DISABLE_LEECH": "Disable all leech (download to Telegram) tasks. Default: False.",
+    "DISABLE_MIRROR": "Disable all mirror (upload to cloud) tasks. Default: False.",
     "DISABLE_BULK": "Disable bulk (zip/unzip) operations. Default: False.",
     "DISABLE_MULTI": "Disable multi-part splits. Default: False.",
     "DISABLE_SEED": "Disable seeding after torrent download. Default: False.",
@@ -343,6 +350,7 @@ RESTART_VARS = {
 HIDDEN_VARS = {"PORT"}
 
 FILETOLINK_WEB_VARS = {
+    "FILETOLINK_ADAPTIVE_STREAMING",
     "FILETOLINK_GETFILE_CONCURRENCY",
     "FILETOLINK_PREFETCH_CHUNKS",
 }
@@ -395,6 +403,7 @@ CONFIG_CATEGORIES = {
             "AUTO_PROVISION_STREAM_BOTS",
             "USE_HELPER_BOTS_FOR_FILETOLINK",
             "USE_LEECH_DUMP_AS_BIN_CHANNEL",
+            "FILETOLINK_ADAPTIVE_STREAMING",
             "FILETOLINK_GETFILE_CONCURRENCY",
             "FILETOLINK_PREFETCH_CHUNKS",
             "MEDIA_STORE",
@@ -679,6 +688,7 @@ def _is_protected_variable(key):
 ONOFF_VARS = [
     "DISABLE_TORRENTS",
     "DISABLE_LEECH",
+    "DISABLE_MIRROR",
     "DISABLE_BULK",
     "DISABLE_MULTI",
     "DISABLE_SEED",
@@ -1681,11 +1691,18 @@ async def edit_bot_settings(client, query):
         await update_buttons(message, f"varcat_{slug}")
     elif data[1] == "resetvar":
         await query.answer()
-        value = ""
+        previous_usenet_servers = (
+            deepcopy(Config.USENET_SERVERS)
+            if data[2] == "USENET_SERVERS"
+            and isinstance(Config.USENET_SERVERS, list)
+            else []
+        )
+        value = deepcopy(DEFAULT_CONFIG.get(data[2], ""))
         if data[2] in ("IMAGES", "SEARCH_PLUGINS", "USENET_SERVERS", "YT_TAGS", "IMG_SOURCES"):
-            value = []
+            value = deepcopy(DEFAULT_CONFIG.get(data[2], []))
         elif data[2] in DEFAULT_VALUES:
-            value = DEFAULT_VALUES[data[2]]
+            if data[2] == "LEECH_SPLIT_SIZE":
+                value = TgClient.MAX_SPLIT_SIZE
             if (
                 data[2] == "STATUS_UPDATE_INTERVAL"
                 and len(task_dict) != 0
@@ -1718,14 +1735,30 @@ async def edit_bot_settings(client, query):
             await database.trunc_table("tasks")
         elif data[2] in ("JD_EMAIL", "JD_PASS"):
             await (await create_subprocess_exec("pkill", "-9", "-f", "java")).wait()
-        elif data[2] == "USENET_SERVERS":
-            for s in (Config.USENET_SERVERS if isinstance(Config.USENET_SERVERS, list) else []):
-                if isinstance(s, dict):
-                    await sabnzbd_client.delete_config("servers", s.get("name", ""))
         elif data[2] == "AUTHORIZED_CHATS":
             auth_chats.clear()
         elif data[2] == "SUDO_USERS":
             sudo_users.clear()
+        if data[2] == "USENET_SERVERS":
+            server_names = [
+                name
+                for server in previous_usenet_servers
+                if isinstance(server, dict) and (name := server.get("name"))
+            ]
+            cleanup_results = await gather(
+                *(
+                    sabnzbd_client.delete_config("servers", name)
+                    for name in server_names
+                ),
+                return_exceptions=True,
+            )
+            for name, result in zip(server_names, cleanup_results, strict=True):
+                if isinstance(result, BaseException):
+                    LOGGER.warning(
+                        "Failed to remove SABnzbd server %s during reset: %s",
+                        name,
+                        result,
+                    )
         Config.set(data[2], value)
         if data[2] in FILETOLINK_WEB_VARS:
             value = Config.get(data[2])

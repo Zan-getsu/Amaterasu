@@ -474,15 +474,29 @@ class HypertgDownload(HypertgTransfer):
 
         write_tasks = {}
         failed_offsets = set()
+        write_errors = 0
+        max_writes = max(max_win, min_win)
 
         def _failed_offset(offset):
             # Part boundaries are not necessarily Telegram-chunk aligned.
             # Keep retries inside this part's logical byte range.
             return max(offset, start)
 
-        def _schedule_write(offset, chunk):
+        def _reap_writes():
+            nonlocal write_errors
+            for task in [task for task in write_tasks if task.done()]:
+                offset = write_tasks.pop(task)
+                if not task.cancelled() and task.exception() is not None:
+                    failed_offsets.add(offset)
+                    write_errors += 1
+
+        async def _schedule_write(offset, chunk):
             task = create_task(_write(offset, chunk))
             write_tasks[task] = _failed_offset(offset)
+            _reap_writes()
+            while len(write_tasks) >= max_writes:
+                await wait(write_tasks, return_when=FIRST_COMPLETED)
+                _reap_writes()
 
         try:
             while cur <= last_byte or inflight:
@@ -490,18 +504,18 @@ class HypertgDownload(HypertgTransfer):
                     while inflight:
                         done_set, inflight = await wait(inflight, return_when=FIRST_COMPLETED)
                         for f in done_set:
+                            known_offset = _inflight_offsets.pop(f, None)
                             try:
                                 s, roff, chunk = f.result()
                                 if not chunk:
                                     failed_offsets.add(_failed_offset(roff))
                                     continue
-                                _schedule_write(roff, chunk)
+                                await _schedule_write(roff, chunk)
                             except CancelledError:
                                 raise
                             except Exception:
-                                roff = _inflight_offsets.get(f)
-                                if roff is not None:
-                                    failed_offsets.add(_failed_offset(roff))
+                                if known_offset is not None:
+                                    failed_offsets.add(_failed_offset(known_offset))
                     c = cur
                     while c <= last_byte:
                         failed_offsets.add(_failed_offset(c))
@@ -519,6 +533,7 @@ class HypertgDownload(HypertgTransfer):
                     break
                 done_set, inflight = await wait(inflight, return_when=FIRST_COMPLETED)
                 for f in done_set:
+                    _inflight_offsets.pop(f, None)
                     s, roff, chunk = f.result()
                     if not chunk:
                         failed_offsets.add(_failed_offset(roff))
@@ -527,7 +542,7 @@ class HypertgDownload(HypertgTransfer):
                     if ok_count >= window:
                         window = min(window + 2, max_win)
                         ok_count = 0
-                    _schedule_write(roff, chunk)
+                    await _schedule_write(roff, chunk)
         except CancelledError:
             raise
         except Exception as e:
@@ -543,6 +558,8 @@ class HypertgDownload(HypertgTransfer):
                     request.cancel()
             if pending_requests:
                 await gather(*pending_requests, return_exceptions=True)
+            inflight.clear()
+            _inflight_offsets.clear()
             if write_tasks:
                 tasks = list(write_tasks)
                 write_results = await gather(*tasks, return_exceptions=True)
@@ -556,12 +573,12 @@ class HypertgDownload(HypertgTransfer):
                     if isinstance(result, BaseException)
                 ]
                 failed_offsets.update(failed_writes)
-                write_errors = len(failed_writes)
-                if write_errors:
-                    LOGGER.warning(
-                        f"HypertgDL {write_errors}/{len(write_results)} "
-                        f"write tasks failed client={cname}"
-                    )
+                write_errors += len(failed_writes)
+                write_tasks.clear()
+            if write_errors:
+                LOGGER.warning(
+                    f"HypertgDL {write_errors} write tasks failed client={cname}"
+                )
         return failed_offsets
 
     async def _release_client_loads(self, client_ids):
@@ -591,10 +608,11 @@ class HypertgDownload(HypertgTransfer):
 
     @staticmethod
     async def _pwrite(fd, data, offset):
-        total = len(data)
+        view = memoryview(data)
+        total = len(view)
         written = 0
         while written < total:
-            n = await to_thread(os.pwrite, fd, data[written:], offset + written)
+            n = await to_thread(os.pwrite, fd, view[written:], offset + written)
             if n == 0:
                 raise OSError(f"pwrite returned 0 at offset {offset + written}")
             written += n

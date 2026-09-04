@@ -4,6 +4,8 @@ from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from ...core.config_manager import Config
 from .inline_ui import style_inline_button
 
+URL_SCHEMES = ("http://", "https://", "tg://")
+
 
 def _btn_style(style=None):
     if Config.COLORED_BTNS and style:
@@ -13,6 +15,18 @@ def _btn_style(style=None):
 def _premium_label(label):
     """Compatibility wrapper for the shared inline-button styler."""
     return style_inline_button(label)
+
+
+def valid_url(link):
+    text = str(link or "").strip()
+    if not text.lower().startswith(URL_SCHEMES):
+        return ""
+    rest = text.split("://", 1)[1]
+    if not rest or rest.startswith(("/", "?", "#")):
+        return ""
+    if any(char.isspace() for char in text):
+        return ""
+    return text
 
 
 class ButtonMaker:
@@ -26,9 +40,15 @@ class ButtonMaker:
         }
 
     def url_button(self, key, link, position=None, style=None):
+        safe = valid_url(link)
+        if not safe:
+            from ... import LOGGER
+
+            LOGGER.warning("Dropping button %r with an unusable URL", key)
+            return
         self.buttons[position if position in self.buttons else "default"].append(
             InlineKeyboardButton(
-                text=style_inline_button(key), url=link, style=_btn_style(style)
+                text=style_inline_button(key), url=safe, style=_btn_style(style)
             )
         )
 

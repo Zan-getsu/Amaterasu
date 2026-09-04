@@ -138,6 +138,25 @@ async def add_mega_download(listener, path):
             mega_folder_dir = os.path.join(mega_base, "folder")
             await makedirs(mega_folder_dir, exist_ok=True)
             async_api.folder_api = folder_api = MegaApi("", mega_folder_dir, "Amaterasu", 4)
+
+            if mega_email and mega_password:
+                LOGGER.info("Mega: authenticating premium account for folder download")
+                await async_api.login(mega_email, mega_password)
+                if listener.is_cancelled or mega_listener.is_cancelled:
+                    return
+                if mega_listener.error:
+                    await listener.on_download_error(
+                        _mega_error_format(mega_listener.error)
+                    )
+                    return
+                account_auth = api.getAccountAuth()
+                if not account_auth:
+                    await listener.on_download_error(
+                        "Failed to obtain MEGA account authentication."
+                    )
+                    return
+                folder_api.setAccountAuth(account_auth)
+
             folder_listener = MegaFolderListener(async_api, listener)
             async_api._folder_listener = folder_listener
             folder_api.addListener(folder_listener)

@@ -58,7 +58,10 @@ def is_telegram_link(url: str):
 
 
 def is_mega_link(url: str):
-    return "mega.nz" in url or "mega.co.nz" in url
+    return urlparse(url).netloc.lower().removeprefix("www.") in (
+        "mega.nz",
+        "mega.co.nz",
+    )
 
 
 _TERABOX_DOMAINS = (
