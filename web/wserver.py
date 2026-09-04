@@ -1,6 +1,15 @@
 import mimetypes
 import re
-from asyncio import CancelledError, create_task, current_task, sleep, to_thread
+from asyncio import (
+    CancelledError,
+    create_subprocess_exec,
+    create_task,
+    current_task,
+    sleep,
+    to_thread,
+    wait_for,
+)
+from collections import OrderedDict
 from contextlib import asynccontextmanager, suppress
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
@@ -11,6 +20,8 @@ from os import environ
 from pathlib import Path
 from re import compile as re_compile
 from secrets import token_urlsafe
+from shutil import which
+from subprocess import PIPE
 from time import monotonic, time as wall_time
 from urllib.parse import quote, urlencode, urlparse
 
@@ -20,7 +31,13 @@ from aiohttp.client_exceptions import ClientError
 from aioqbt.client import create_client
 from aioqbt.exc import AQError
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
+from fastapi.responses import (
+    HTMLResponse,
+    JSONResponse,
+    RedirectResponse,
+    Response,
+    StreamingResponse,
+)
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -1638,6 +1655,25 @@ _filetolink_cache_writers = set()
 _filetolink_active_streams = {}
 _filetolink_cache_metrics = {"files": 0, "bytes": 0, "sampled_at": 0.0}
 _stream_client_health = {}
+_track_probe_cache = OrderedDict()
+_poster_cache = OrderedDict()
+_subtitle_cache = OrderedDict()
+_TRACK_PROBE_BYTES = 6 * 1024 * 1024
+_TRACK_CACHE_LIMIT = 128
+_POSTER_CACHE_LIMIT = 64
+_POSTER_MAX_BYTES = 2 * 1024 * 1024
+_POSTER_CACHE_MAX_BYTES = 32 * 1024 * 1024
+_COMPANION_SUBTITLE_MAX_BYTES = 8 * 1024 * 1024
+_SUBTITLE_CACHE_LIMIT = 48
+_SUBTITLE_CACHE_MAX_BYTES = 6 * 1024 * 1024
+_SUBTITLE_CACHE_TOTAL_MAX_BYTES = 48 * 1024 * 1024
+_FFMPEG_BIN = which("ffmpeg") or "/usr/bin/ffmpeg"
+_FFPROBE_BIN = which("ffprobe") or "/usr/bin/ffprobe"
+_DEFAULT_POSTER_PATH = Path(__file__).parent / "static" / "images" / "amaterasu-cover.jpg"
+try:
+    _DEFAULT_POSTER_BYTES = _DEFAULT_POSTER_PATH.read_bytes()
+except OSError:
+    _DEFAULT_POSTER_BYTES = b""
 
 
 def _filetolink_cache_usage() -> tuple[int, int]:
@@ -2272,6 +2308,244 @@ def _subtitle_label(filename: str) -> str:
     return cleaned.title() if cleaned else "Subtitle"
 
 
+_TRACK_LANGUAGES = {
+    "ara": "Arabic",
+    "ben": "Bengali",
+    "deu": "German",
+    "eng": "English",
+    "fra": "French",
+    "hin": "Hindi",
+    "ita": "Italian",
+    "jpn": "Japanese",
+    "kor": "Korean",
+    "por": "Portuguese",
+    "rus": "Russian",
+    "spa": "Spanish",
+    "tur": "Turkish",
+    "zho": "Chinese",
+}
+
+
+def _track_title(stream: dict, index: int) -> str:
+    tags = stream.get("tags") or {}
+    title = str(tags.get("title") or "").strip()
+    language = str(tags.get("language") or "").strip().lower()
+    language = _TRACK_LANGUAGES.get(
+        language,
+        language.upper() if language and language != "und" else "",
+    )
+    label_parts = list(dict.fromkeys(part for part in (title, language) if part))
+    label = " · ".join(label_parts) if label_parts else f"Track {index + 1}"
+
+    details = []
+    codec = str(stream.get("codec_name") or "").upper()
+    channels = stream.get("channels")
+    if codec:
+        details.append(codec)
+    if channels == 2:
+        details.append("Stereo")
+    elif channels == 6:
+        details.append("5.1")
+    elif channels == 8:
+        details.append("7.1")
+    if (stream.get("disposition") or {}).get("forced"):
+        details.append("Forced")
+    return f"{label} ({', '.join(details)})" if details else label
+
+
+def _bounded_cache_put(cache: OrderedDict, key, value, limit: int) -> None:
+    cache.pop(key, None)
+    cache[key] = value
+    while len(cache) > limit:
+        cache.popitem(last=False)
+
+
+def _bounded_bytes_cache_put(
+    cache: OrderedDict,
+    key,
+    value: bytes,
+    entry_limit: int,
+    byte_limit: int,
+) -> None:
+    if not value or len(value) > byte_limit:
+        return
+    cache.pop(key, None)
+    cache[key] = value
+    total = sum(len(item) for item in cache.values())
+    while len(cache) > entry_limit or total > byte_limit:
+        _, removed = cache.popitem(last=False)
+        total -= len(removed)
+
+
+async def _media_prefix(client_id, client, message, file_size: int) -> bytes:
+    if file_size <= 0:
+        return b""
+    end = min(int(file_size), _TRACK_PROBE_BYTES) - 1
+    parts = []
+    async for chunk in _iter_telegram_range(
+        client_id,
+        client,
+        message,
+        0,
+        end,
+        file_size,
+    ):
+        parts.append(chunk)
+    return b"".join(parts)
+
+
+async def _probe_media_tracks(
+    client_id,
+    client,
+    message,
+    chat_id,
+    message_id: int,
+    media,
+) -> dict:
+    unique_id = str(getattr(media, "file_unique_id", "") or "")
+    cache_key = (str(chat_id), int(message_id), unique_id)
+    cached = _track_probe_cache.get(cache_key)
+    if cached is not None:
+        _track_probe_cache.move_to_end(cache_key)
+        return cached
+
+    prefix = await _media_prefix(
+        client_id,
+        client,
+        message,
+        int(getattr(media, "file_size", 0) or 0),
+    )
+    if not prefix:
+        return {"audio": [], "subtitle": []}
+
+    try:
+        process = await create_subprocess_exec(
+            _FFPROBE_BIN,
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-print_format",
+            "json",
+            "-show_streams",
+            "-",
+            stdin=PIPE,
+            stdout=PIPE,
+            stderr=PIPE,
+        )
+    except FileNotFoundError:
+        LOGGER.warning("FileToLink track probing unavailable: ffprobe not found")
+        return {"audio": [], "subtitle": []}
+
+    try:
+        stdout, stderr = await wait_for(process.communicate(prefix), timeout=45)
+    except CancelledError:
+        with suppress(ProcessLookupError):
+            process.kill()
+        with suppress(CancelledError, Exception):
+            await process.wait()
+        raise
+    except Exception as error:
+        with suppress(ProcessLookupError):
+            process.kill()
+        with suppress(CancelledError, Exception):
+            await process.wait()
+        LOGGER.warning("FileToLink track probe failed: %s", error)
+        return {"audio": [], "subtitle": []}
+
+    if process.returncode not in (0, None) and stderr:
+        LOGGER.debug(
+            "FileToLink ffprobe output: %s",
+            stderr.decode("utf-8", errors="replace")[-600:],
+        )
+    try:
+        streams = json_loads(stdout).get("streams", [])
+    except (TypeError, ValueError):
+        streams = []
+
+    audio = []
+    subtitles = []
+    unsupported_subtitle_codecs = {
+        "dvd_subtitle",
+        "hdmv_pgs_subtitle",
+        "dvb_subtitle",
+    }
+    for stream in streams:
+        kind = stream.get("codec_type")
+        if kind == "audio":
+            index = len(audio)
+            audio.append(
+                {
+                    "index": index,
+                    "title": _track_title(stream, index),
+                    "codec": str(stream.get("codec_name") or "").lower(),
+                }
+            )
+        elif kind == "subtitle":
+            codec = str(stream.get("codec_name") or "").lower()
+            if codec in unsupported_subtitle_codecs:
+                continue
+            index = len(subtitles)
+            subtitles.append(
+                {
+                    "index": index,
+                    "title": _track_title(stream, index),
+                    "codec": codec,
+                }
+            )
+
+    result = {"audio": audio, "subtitle": subtitles}
+    _bounded_cache_put(_track_probe_cache, cache_key, result, _TRACK_CACHE_LIMIT)
+    return result
+
+
+async def _subtitle_to_vtt(data: bytes) -> bytes:
+    try:
+        process = await create_subprocess_exec(
+            _FFMPEG_BIN,
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-i",
+            "pipe:0",
+            "-vn",
+            "-an",
+            "-map",
+            "0:s:0?",
+            "-f",
+            "webvtt",
+            "pipe:1",
+            stdin=PIPE,
+            stdout=PIPE,
+            stderr=PIPE,
+        )
+    except FileNotFoundError as error:
+        raise HTTPException(status_code=503, detail="FFmpeg is unavailable") from error
+    try:
+        stdout, stderr = await wait_for(process.communicate(data), timeout=45)
+    except CancelledError:
+        with suppress(ProcessLookupError):
+            process.kill()
+        with suppress(CancelledError, Exception):
+            await process.wait()
+        raise
+    except Exception as error:
+        with suppress(ProcessLookupError):
+            process.kill()
+        with suppress(CancelledError, Exception):
+            await process.wait()
+        raise HTTPException(
+            status_code=422,
+            detail="Subtitle conversion failed",
+        ) from error
+    if process.returncode != 0 or not stdout:
+        detail = stderr.decode("utf-8", errors="replace")[-300:].strip()
+        raise HTTPException(
+            status_code=422,
+            detail=detail or "Subtitle conversion produced no captions",
+        )
+    return stdout
+
+
 async def _find_companion_subtitles(client, chat_id: int, message_id: int) -> list[dict]:
     subtitle_exts = {"srt", "vtt", "ass", "ssa"}
     subtitles = []
@@ -2302,7 +2576,7 @@ async def _find_companion_subtitles(client, chat_id: int, message_id: int) -> li
         )
         subtitles.append(
             {
-                "url": f"/stream/{token}?disposition=inline",
+                "url": f"/subtitle/{token}.vtt",
                 "label": _subtitle_label(filename),
                 "srclang": _detect_lang_from_filename(filename),
             }
@@ -2486,6 +2760,360 @@ async def stream_options(path: str = ""):
     return Response(headers={**CORS_HEADERS, "Access-Control-Max-Age": "86400"})
 
 
+@app.get("/api/tracks/{token}")
+async def media_tracks(token: str):
+    chat_id, message_id = _decode_stream_route_token(token)
+    client_id, client, message = await get_message_with_stream_client(
+        chat_id,
+        message_id,
+    )
+    try:
+        media = get_media(message)
+        tracks = await _probe_media_tracks(
+            client_id,
+            client,
+            message,
+            chat_id,
+            message_id,
+            media,
+        )
+        result = {
+            "audio": list(tracks.get("audio") or []),
+            "subtitle": [],
+        }
+        for subtitle in tracks.get("subtitle") or []:
+            item = dict(subtitle)
+            item["url"] = f"/subs/{token}/{item['index']}.vtt"
+            result["subtitle"].append(item)
+        return JSONResponse(
+            result,
+            headers={"Cache-Control": "private, max-age=3600"},
+        )
+    except Exception as error:
+        LOGGER.warning(
+            "FileToLink track discovery failed for %s/%s: %s",
+            chat_id,
+            message_id,
+            error,
+        )
+        return JSONResponse({"audio": [], "subtitle": []})
+    finally:
+        _release_stream_load(client_id)
+
+
+@app.get("/poster/{token}")
+async def media_poster(token: str, request: Request):
+    chat_id, message_id = _decode_stream_route_token(token)
+    cached = _poster_cache.get(token)
+    if cached is not None:
+        _poster_cache.move_to_end(token)
+    else:
+        client_id, client, message = await get_message_with_stream_client(
+            chat_id,
+            message_id,
+        )
+        try:
+            media = get_media(message)
+            target = None
+            if get_media_type(message) == "photo":
+                target = media
+            else:
+                thumbnails = getattr(media, "thumbs", None) or []
+                if thumbnails:
+                    target = max(
+                        thumbnails,
+                        key=lambda thumb: int(getattr(thumb, "file_size", 0) or 0),
+                    )
+            cached = None
+            if (
+                target is not None
+                and int(getattr(target, "file_size", 0) or 0) <= _POSTER_MAX_BYTES
+            ):
+                try:
+                    buffer = await client.download_media(target, in_memory=True)
+                    if buffer is not None:
+                        cached = (
+                            buffer.getvalue()
+                            if hasattr(buffer, "getvalue")
+                            else bytes(buffer)
+                        )
+                except Exception as error:
+                    LOGGER.debug(
+                        "Telegram poster unavailable for %s/%s: %s",
+                        chat_id,
+                        message_id,
+                        error,
+                    )
+            if not cached:
+                cached = _DEFAULT_POSTER_BYTES
+            if not cached:
+                raise HTTPException(status_code=404, detail="Poster is unavailable")
+            _bounded_bytes_cache_put(
+                _poster_cache,
+                token,
+                cached,
+                _POSTER_CACHE_LIMIT,
+                _POSTER_CACHE_MAX_BYTES,
+            )
+        finally:
+            _release_stream_load(client_id)
+
+    etag = f'"poster-{sha256(cached).hexdigest()[:24]}"'
+    headers = {
+        "Cache-Control": "private, max-age=86400",
+        "ETag": etag,
+        **CORS_HEADERS,
+    }
+    if request.headers.get("If-None-Match") == etag:
+        return Response(status_code=304, headers=headers)
+    return Response(cached, media_type="image/jpeg", headers=headers)
+
+
+@app.get("/subtitle/{token}.vtt")
+async def companion_subtitle(token: str):
+    chat_id, message_id = _decode_stream_route_token(token)
+    cache_key = ("companion", token)
+    cached = _subtitle_cache.get(cache_key)
+    if cached is not None:
+        _subtitle_cache.move_to_end(cache_key)
+        return Response(
+            cached,
+            media_type="text/vtt; charset=utf-8",
+            headers={"Cache-Control": "private, max-age=86400", **CORS_HEADERS},
+        )
+
+    client_id, client, message = await get_message_with_stream_client(
+        chat_id,
+        message_id,
+    )
+    try:
+        media = get_media(message)
+        size = int(getattr(media, "file_size", 0) or 0)
+        if size <= 0 or size > _COMPANION_SUBTITLE_MAX_BYTES:
+            raise HTTPException(status_code=413, detail="Subtitle file is too large")
+        buffer = await client.download_media(media, in_memory=True)
+        if buffer is None:
+            raise HTTPException(status_code=404, detail="Subtitle is unavailable")
+        data = buffer.getvalue() if hasattr(buffer, "getvalue") else bytes(buffer)
+        cached = await _subtitle_to_vtt(data)
+        _bounded_bytes_cache_put(
+            _subtitle_cache,
+            cache_key,
+            cached,
+            _SUBTITLE_CACHE_LIMIT,
+            _SUBTITLE_CACHE_TOTAL_MAX_BYTES,
+        )
+        return Response(
+            cached,
+            media_type="text/vtt; charset=utf-8",
+            headers={"Cache-Control": "private, max-age=86400", **CORS_HEADERS},
+        )
+    finally:
+        _release_stream_load(client_id)
+
+
+@app.get("/subs/{token}/{track_index}.vtt")
+async def embedded_subtitle(token: str, track_index: int):
+    if track_index < 0 or track_index > 31:
+        raise HTTPException(status_code=404, detail="Subtitle track does not exist")
+    chat_id, message_id = _decode_stream_route_token(token)
+    cache_key = (str(chat_id), int(message_id), int(track_index))
+    cached = _subtitle_cache.get(cache_key)
+    if cached is not None:
+        _subtitle_cache.move_to_end(cache_key)
+        return Response(
+            cached,
+            media_type="text/vtt; charset=utf-8",
+            headers={"Cache-Control": "private, max-age=86400", **CORS_HEADERS},
+        )
+
+    client_id, client, message = await get_message_with_stream_client(
+        chat_id,
+        message_id,
+    )
+    media = get_media(message)
+    file_size = int(getattr(media, "file_size", 0) or 0)
+    if file_size <= 0:
+        _release_stream_load(client_id)
+        raise HTTPException(status_code=404, detail="Media size is unavailable")
+
+    try:
+        process = await create_subprocess_exec(
+            _FFMPEG_BIN,
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-threads",
+            "1",
+            "-i",
+            "pipe:0",
+            "-map",
+            f"0:s:{track_index}",
+            "-vn",
+            "-an",
+            "-f",
+            "webvtt",
+            "-flush_packets",
+            "1",
+            "pipe:1",
+            stdin=PIPE,
+            stdout=PIPE,
+            stderr=PIPE,
+        )
+    except FileNotFoundError as error:
+        _release_stream_load(client_id)
+        raise HTTPException(status_code=503, detail="FFmpeg is unavailable") from error
+
+    async def feed_media():
+        try:
+            async for chunk in _iter_telegram_range(
+                client_id,
+                client,
+                message,
+                0,
+                file_size - 1,
+                file_size,
+            ):
+                process.stdin.write(chunk)
+                await process.stdin.drain()
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+        finally:
+            with suppress(Exception):
+                process.stdin.close()
+
+    async def subtitle_generator():
+        feeder = create_task(feed_media())
+        stderr_reader = create_task(process.stderr.read())
+        captured = []
+        captured_size = 0
+        try:
+            while True:
+                chunk = await process.stdout.read(64 * 1024)
+                if not chunk:
+                    break
+                if captured_size <= _SUBTITLE_CACHE_MAX_BYTES:
+                    captured_size += len(chunk)
+                    if captured_size <= _SUBTITLE_CACHE_MAX_BYTES:
+                        captured.append(chunk)
+                    else:
+                        captured.clear()
+                yield chunk
+            with suppress(Exception):
+                await feeder
+            try:
+                return_code = await wait_for(process.wait(), timeout=10)
+            except Exception:
+                return_code = None
+            stderr = await stderr_reader
+            if return_code == 0 and captured:
+                _bounded_bytes_cache_put(
+                    _subtitle_cache,
+                    cache_key,
+                    b"".join(captured),
+                    _SUBTITLE_CACHE_LIMIT,
+                    _SUBTITLE_CACHE_TOTAL_MAX_BYTES,
+                )
+            elif stderr:
+                LOGGER.warning(
+                    "FileToLink subtitle extraction failed: %s",
+                    stderr.decode("utf-8", errors="replace")[-600:],
+                )
+        finally:
+            with suppress(ProcessLookupError):
+                process.kill()
+            if not feeder.done():
+                feeder.cancel()
+            if not stderr_reader.done():
+                stderr_reader.cancel()
+            with suppress(CancelledError, Exception):
+                await feeder
+            with suppress(CancelledError, Exception):
+                await stderr_reader
+            with suppress(CancelledError, Exception):
+                await process.wait()
+            _release_stream_load(client_id)
+
+    return StreamingResponse(
+        subtitle_generator(),
+        media_type="text/vtt; charset=utf-8",
+        headers={"Cache-Control": "private, max-age=86400", **CORS_HEADERS},
+    )
+
+
+@app.get("/playlist/{token}", response_class=HTMLResponse)
+async def filetolink_playlist(token: str, request: Request):
+    if not re.fullmatch(r"[A-Za-z0-9_-]{8,64}", token):
+        raise HTTPException(status_code=404, detail="Playlist does not exist")
+    from bot.helper.ext_utils.db_handler import database
+
+    playlist = await database.get_filetolink_playlist(token)
+    if not playlist:
+        raise HTTPException(status_code=404, detail="Playlist does not exist")
+
+    items = []
+    for item in playlist.get("items") or []:
+        stream_token = str(item.get("token") or "")
+        try:
+            _decode_stream_route_token(stream_token)
+        except HTTPException:
+            continue
+        items.append(
+            {
+                "name": str(item.get("name") or "Media"),
+                "watch_url": f"/watch/{stream_token}",
+                "download_url": f"/dl/{stream_token}",
+                "poster_url": f"/poster/{stream_token}",
+            }
+        )
+    if not items:
+        raise HTTPException(status_code=404, detail="Playlist is empty")
+    return templates.TemplateResponse(
+        request,
+        "playlist.html",
+        {
+            "playlist_name": str(playlist.get("name") or "Playlist"),
+            "playlist_token": token,
+            "items": items,
+        },
+    )
+
+
+async def _filetolink_playlist_context(
+    playlist_token: str,
+    stream_token: str,
+) -> dict | None:
+    if not re.fullmatch(r"[A-Za-z0-9_-]{8,64}", playlist_token or ""):
+        return None
+    from bot.helper.ext_utils.db_handler import database
+
+    playlist = await database.get_filetolink_playlist(playlist_token)
+    if not playlist:
+        return None
+    tokens = [
+        str(item.get("token") or "")
+        for item in playlist.get("items") or []
+        if item.get("token")
+    ]
+    try:
+        index = tokens.index(stream_token)
+    except ValueError:
+        return None
+
+    def watch_url(position: int) -> str:
+        token = tokens[position]
+        return f"/watch/{token}?list={playlist_token}"
+
+    return {
+        "name": str(playlist.get("name") or "Playlist"),
+        "index": index + 1,
+        "total": len(tokens),
+        "url": f"/playlist/{playlist_token}",
+        "previous_url": watch_url(index - 1) if index > 0 else "",
+        "next_url": watch_url(index + 1) if index + 1 < len(tokens) else "",
+    }
+
+
 @app.api_route("/watch/{token}", methods=["GET"])
 async def watch_media_token(token: str, request: Request):
     chat_id, message_id = _decode_stream_route_token(token)
@@ -2521,7 +3149,12 @@ async def watch_media(chat_id: str, message_id: int, request: Request, filename:
         from bot.helper.ext_utils.status_utils import get_readable_file_size
         readable_size = get_readable_file_size(file_size)
             
-        if _route_stream_token_matches(secure_hash, chat_id, message_id):
+        route_token = _route_stream_token_matches(
+            secure_hash,
+            chat_id,
+            message_id,
+        )
+        if route_token:
             stream_url = f"/stream/{secure_hash}?disposition=inline"
             download_url = f"/dl/{secure_hash}"
         else:
@@ -2538,6 +3171,15 @@ async def watch_media(chat_id: str, message_id: int, request: Request, filename:
         )
         LOGGER.info(f"Watch page: {filename} | client={client_id} | type={file_type} | size={readable_size}")
         subtitles = await _find_companion_subtitles(client, chat_id, message_id) if file_type == "video" else []
+        poster_url = f"/poster/{secure_hash}" if route_token and file_type == "video" else ""
+        tracks_url = f"/api/tracks/{secure_hash}" if route_token and file_type == "video" else ""
+        playlist = None
+        playlist_token = request.query_params.get("list", "")
+        if route_token and playlist_token:
+            playlist = await _filetolink_playlist_context(
+                playlist_token,
+                secure_hash,
+            )
 
         return templates.TemplateResponse(request, "player.html", {
             "file_name": filename,
@@ -2551,6 +3193,9 @@ async def watch_media(chat_id: str, message_id: int, request: Request, filename:
             "file_extension": _file_extension(filename) or "file",
             "mime_type": mime_type,
             "subtitles": subtitles,
+            "poster_url": poster_url,
+            "tracks_url": tracks_url,
+            "playlist": playlist,
         })
     finally:
         _release_stream_load(client_id)

@@ -6,6 +6,7 @@ from json import loads as json_loads
 from math import isfinite
 from os import environ
 from pathlib import Path
+from secrets import token_urlsafe
 from time import time
 from urllib.parse import quote
 
@@ -17,6 +18,7 @@ from pyrogram.types import ReplyParameters
 from bot import LOGGER
 from bot.core.config_manager import Config
 from bot.helper.ext_utils.bot_utils import arg_parser, get_web_secret
+from bot.helper.ext_utils.db_handler import database
 from bot.helper.ext_utils.status_utils import (
     get_progress_bar_string,
     get_readable_file_size,
@@ -304,6 +306,17 @@ def _stream_token(chat_id, message_id, unique_id):
     )
 
 
+async def create_filetolink_playlist(name, items):
+    """Persist a playlist only when MongoDB is available to both processes."""
+    if len(items) < 2 or not Config.BASE_URL or not Config.DATABASE_URL:
+        return None
+    for _ in range(6):
+        token = token_urlsafe(12)
+        if await database.add_filetolink_playlist(token, name, items):
+            return f"{Config.BASE_URL.rstrip('/')}/playlist/{token}"
+    return None
+
+
 async def copy_to_bin(message):
     bin_channel = Config.effective_bin_channel()
 
@@ -478,6 +491,7 @@ async def link_command_handler(client, message):
         
         processed = 0
         failed = 0
+        playlist_items = []
         
         for msg_id in range(start_msg_id, start_msg_id + batch_count):
             try:
@@ -492,6 +506,9 @@ async def link_command_handler(client, message):
                 unique_id = getattr(stored_media, "file_unique_id", "")
                     
                 secure_hash = _stream_token(t_chat_id, t_message_id, unique_id)
+                playlist_items.append(
+                    {"token": secure_hash, "name": filename}
+                )
                     
                 markup, stream_link, download_link = await generate_link_markup(t_chat_id, t_message_id, filename, secure_hash)
                 
@@ -509,7 +526,26 @@ async def link_command_handler(client, message):
                 LOGGER.error(f"Failed to process batch message {msg_id}: {e}")
                 failed += 1
                 
-        await edit_message(status_msg, f"<b>✦ BATCH COMPLETED</b>\n\n<code>┌─ {'Processed':<9} : {processed}\n└─ {'Failed':<9} : {failed}</code>")
+        playlist_url = await create_filetolink_playlist(
+            f"FileToLink batch ({processed} files)",
+            playlist_items,
+        )
+        playlist_markup = None
+        if playlist_url:
+            buttons = ButtonMaker()
+            buttons.url_button(
+                "▶️ OPEN PLAYLIST",
+                playlist_url,
+                style=ButtonStyle.PRIMARY,
+            )
+            playlist_markup = buttons.build_menu(1)
+        await edit_message(
+            status_msg,
+            f"<b>✦ BATCH COMPLETED</b>\n\n"
+            f"<code>┌─ {'Processed':<9} : {processed}\n"
+            f"└─ {'Failed':<9} : {failed}</code>",
+            playlist_markup,
+        )
     else:
         await process_media_message(client, message, message.reply_to_message)
 

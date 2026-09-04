@@ -31,6 +31,27 @@ HANDLERS_PATH = Path(__file__).parents[1] / "bot" / "core" / "handlers.py"
 USER_SETTINGS_PATH = (
     Path(__file__).parents[1] / "bot" / "modules" / "users_settings.py"
 )
+PLAYER_TEMPLATE_PATH = Path(__file__).parents[1] / "web" / "templates" / "player.html"
+PLAYLIST_TEMPLATE_PATH = (
+    Path(__file__).parents[1] / "web" / "templates" / "playlist.html"
+)
+PLAYER_JS_PATH = Path(__file__).parents[1] / "web" / "static" / "js" / "player.js"
+LIBMEDIA_JS_PATH = (
+    Path(__file__).parents[1] / "web" / "static" / "js" / "libmedia-player.js"
+)
+DEFAULT_POSTER_PATH = (
+    Path(__file__).parents[1]
+    / "web"
+    / "static"
+    / "images"
+    / "amaterasu-cover.jpg"
+)
+DB_HANDLER_PATH = (
+    Path(__file__).parents[1] / "bot" / "helper" / "ext_utils" / "db_handler.py"
+)
+TASK_LISTENER_PATH = (
+    Path(__file__).parents[1] / "bot" / "helper" / "listeners" / "task_listener.py"
+)
 
 
 def load_functions(names, namespace):
@@ -338,6 +359,141 @@ def test_streaming_paths_publish_live_filetolink_metrics():
     assert '"Cache"' in source
     assert source.count("_update_filetolink_transfer(transfer_id, bytes_sent)") == 2
     assert source.count("_finish_filetolink_transfer(transfer_id)") == 2
+
+
+def test_wzmlx_media_features_are_wired_into_filetolink():
+    server = SOURCE_PATH.read_text(encoding="utf-8")
+    player = PLAYER_TEMPLATE_PATH.read_text(encoding="utf-8")
+    playlist = PLAYLIST_TEMPLATE_PATH.read_text(encoding="utf-8")
+    player_js = PLAYER_JS_PATH.read_text(encoding="utf-8")
+    libmedia_js = LIBMEDIA_JS_PATH.read_text(encoding="utf-8")
+    filetolink = FILETOLINK_MODULE_PATH.read_text(encoding="utf-8")
+    listener = TASK_LISTENER_PATH.read_text(encoding="utf-8")
+    database = DB_HANDLER_PATH.read_text(encoding="utf-8")
+
+    for route in (
+        '@app.get("/api/tracks/{token}")',
+        '@app.get("/poster/{token}")',
+        '@app.get("/subtitle/{token}.vtt")',
+        '@app.get("/subs/{token}/{track_index}.vtt")',
+        '@app.get("/playlist/{token}"',
+    ):
+        assert route in server
+    assert "_FFPROBE_BIN" in server
+    assert "_FFMPEG_BIN" in server
+    assert "_DEFAULT_POSTER_BYTES" in server
+    assert "_filetolink_playlist_context" in server
+    assert DEFAULT_POSTER_PATH.is_file()
+    assert DEFAULT_POSTER_PATH.stat().st_size > 10_000
+
+    assert 'poster="{{ poster_url }}"' in player
+    assert "tracksUrl" in player
+    assert "playlist-prev-btn" in player
+    assert "playlist-next-btn" in player
+    assert "am-control-row" in player
+    assert "am-transport-controls" in player
+    assert "am-player-tools" in player
+    assert "/static/js/libmedia-player.js" in player
+    assert "playlist_token" in playlist
+
+    assert "loadTrackInfo" in player_js
+    assert "selectSubtitle" in player_js
+    assert "selectAudioByIndex" in player_js
+    assert "Autoplay next" in player_js
+    assert 'target.addEventListener("timeupdate", () =>' in player_js
+    assert "subtitleCues.filter" in player_js
+    assert "await loadHlsIfNeeded();" in player_js
+    assert "!video.paused && !video.ended && !rafId" in player_js
+    assert "requestAnimationFrame(updateProgress)" not in player_js
+    assert '<a class="stream-download-btn" id="main-download-btn"' in player
+    assert '<main class="playlist-page">' not in playlist
+    assert "@libmedia/avplayer@1.3.1" in libmedia_js
+    assert "create_filetolink_playlist" in filetolink
+    assert "not Config.DATABASE_URL" in filetolink
+    assert "_create_leech_stream_playlist" in listener
+    assert "not Config.DATABASE_URL" in listener
+    assert "add_filetolink_playlist" in database
+    assert "get_filetolink_playlist" in database
+
+
+def test_media_feature_caches_are_bounded_by_entries_and_bytes():
+    from collections import OrderedDict
+
+    namespace = {"OrderedDict": OrderedDict}
+    load_functions({"_bounded_bytes_cache_put"}, namespace)
+    cache = OrderedDict()
+    put = namespace["_bounded_bytes_cache_put"]
+
+    put(cache, "one", b"1234", 3, 8)
+    put(cache, "two", b"5678", 3, 8)
+    put(cache, "three", b"90", 3, 8)
+
+    assert list(cache) == ["two", "three"]
+    assert sum(map(len, cache.values())) <= 8
+
+    put(cache, "oversized", b"x" * 9, 3, 8)
+    assert "oversized" not in cache
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("failure", "expected_error"),
+    [
+        (TimeoutError("timed out"), RuntimeError),
+        (asyncio.CancelledError(), asyncio.CancelledError),
+    ],
+)
+async def test_subtitle_conversion_reaps_ffmpeg_on_failure(
+    failure,
+    expected_error,
+):
+    class FakeProcess:
+        returncode = None
+
+        def __init__(self):
+            self.killed = False
+            self.waited = False
+
+        async def communicate(self, _data):
+            raise failure
+
+        def kill(self):
+            self.killed = True
+
+        async def wait(self):
+            self.waited = True
+            return -9
+
+    class FakeHTTPException(RuntimeError):
+        def __init__(self, status_code, detail):
+            super().__init__(detail)
+            self.status_code = status_code
+
+    process = FakeProcess()
+
+    async def create_process(*_args, **_kwargs):
+        return process
+
+    async def await_with_timeout(awaitable, timeout):
+        assert timeout == 45
+        return await awaitable
+
+    namespace = {
+        "CancelledError": asyncio.CancelledError,
+        "create_subprocess_exec": create_process,
+        "HTTPException": FakeHTTPException,
+        "PIPE": object(),
+        "suppress": suppress,
+        "wait_for": await_with_timeout,
+        "_FFMPEG_BIN": "ffmpeg",
+    }
+    load_functions({"_subtitle_to_vtt"}, namespace)
+
+    with pytest.raises(expected_error):
+        await namespace["_subtitle_to_vtt"](b"subtitle")
+
+    assert process.killed
+    assert process.waited
 
 
 @pytest.mark.asyncio

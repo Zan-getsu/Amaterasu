@@ -4,6 +4,7 @@ from time import time
 from mimetypes import guess_type
 from contextlib import suppress
 from os import path as ospath
+from secrets import token_urlsafe
 from pyrogram.enums import ButtonStyle
 
 from aiofiles.os import listdir, remove, path as aiopath
@@ -709,6 +710,44 @@ class TaskListener(TaskConfig):
             )
         return block + "\n"
 
+    async def _create_leech_stream_playlist(self, files):
+        if (
+            not Config.BASE_URL
+            or not Config.DATABASE_URL
+            or not isinstance(files, dict)
+            or len(files) < 2
+        ):
+            return None
+        items = []
+        for link, name in files.items():
+            try:
+                chat_id, message_id = link.split("/")[-2:]
+                normalized_chat_id = (
+                    chat_id
+                    if "pm" in link
+                    else f"-100{chat_id}" if chat_id.isdigit() else chat_id
+                )
+                stream_token = _stream_route_token(
+                    normalized_chat_id,
+                    message_id,
+                )
+            except (TypeError, ValueError):
+                continue
+            items.append({"token": stream_token, "name": str(name)})
+        if len(items) < 2:
+            return None
+        for _ in range(6):
+            playlist_token = token_urlsafe(12)
+            if await database.add_filetolink_playlist(
+                playlist_token,
+                self.name,
+                items,
+            ):
+                return (
+                    f"{Config.BASE_URL.rstrip('/')}/playlist/{playlist_token}"
+                )
+        return None
+
     async def _send_multi_leech_summary(self, snapshot):
         multi_tags.discard(self.multi_tag)
         header = _completion_header(
@@ -852,6 +891,16 @@ class TaskListener(TaskConfig):
             msg += _premium_row("Task By", self.tag, code=False, branch="╰─")
             msg += "\n"
             multi_leech_summary = getattr(self, "multi_leech_summary", None)
+            playlist_url = None
+            if multi_leech_summary is None:
+                playlist_url = await self._create_leech_stream_playlist(files)
+                if playlist_url:
+                    safe_playlist_url = escape(playlist_url, quote=True)
+                    msg += (
+                        "<b>✦ PLAYLIST</b>\n\n"
+                        f"╰─ <a href='{safe_playlist_url}'>"
+                        "Open all uploaded media</a>\n\n"
+                    )
             multi_snapshot = None
             if multi_leech_summary is not None:
                 multi_snapshot = await self._record_multi_leech_success(

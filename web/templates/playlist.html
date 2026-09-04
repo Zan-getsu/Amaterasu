@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+
+{% block title %}Amaterasu Playlist | {{ playlist_name }}{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="/static/css/player.css" />
+{% endblock %}
+
+{% block content %}
+<div class="playlist-page">
+  <header class="playlist-header">
+    <div>
+      <span class="playlist-eyebrow">AMATERASU PLAYLIST</span>
+      <h1>{{ playlist_name }}</h1>
+      <p>{{ items | length }} media files ready to stream.</p>
+    </div>
+    <a class="playlist-play-all" href="{{ items[0].watch_url }}?list={{ playlist_token }}">
+      <i data-lucide="play"></i>
+      Play from start
+    </a>
+  </header>
+
+  <section class="playlist-grid" aria-label="Playlist files">
+    {% for item in items %}
+    <article class="playlist-card">
+      <a class="playlist-art" href="{{ item.watch_url }}?list={{ playlist_token }}" aria-label="Play {{ item.name }}">
+        <img src="{{ item.poster_url }}" alt="" loading="lazy" onerror="this.hidden=true" />
+        <span class="playlist-index">{{ "%02d" | format(loop.index) }}</span>
+        <span class="playlist-play"><i data-lucide="play"></i></span>
+      </a>
+      <div class="playlist-card-body">
+        <a class="playlist-name" href="{{ item.watch_url }}?list={{ playlist_token }}">{{ item.name }}</a>
+        <a class="playlist-download" href="{{ item.download_url }}" aria-label="Download {{ item.name }}">
+          <i data-lucide="download"></i>
+        </a>
+      </div>
+    </article>
+    {% endfor %}
+  </section>
+</div>
+{% endblock %}

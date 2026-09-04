@@ -7,6 +7,8 @@ document.addEventListener("DOMContentLoaded", () => {
     const FILE_SIZE = config.fileSize || "";
     const MIME_TYPE = config.mimeType || "application/octet-stream";
     const SUBTITLES = Array.isArray(config.subtitles) ? config.subtitles : [];
+    const TRACKS_URL = config.tracksUrl || "";
+    const PLAYLIST = config.playlist || null;
     const LOG_PREFIX = "[Amaterasu Player]";
 
     const absoluteStreamUrl = config.absoluteFileUrl || new URL(FILE_URL, window.location.origin).href;
@@ -166,7 +168,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     const shell = document.getElementById("am-player");
-    const video = document.getElementById("player");
+    let video = document.getElementById("player");
     if (!shell || !video) return;
 
     const isTouch = window.matchMedia("(pointer: coarse)").matches;
@@ -207,6 +209,8 @@ document.addEventListener("DOMContentLoaded", () => {
     const statsPanel = document.getElementById("stats-panel");
     const gestureLeft = document.getElementById("gesture-left");
     const gestureRight = document.getElementById("gesture-right");
+    const subtitleOverlay = document.getElementById("subtitle-overlay");
+    const subtitleText = document.getElementById("subtitle-text");
     const panels = [settingsPanel, audioPanel, subtitlePanel];
 
     let rafId = 0;
@@ -219,6 +223,12 @@ document.addEventListener("DOMContentLoaded", () => {
     let helpPreviousFocus = null;
     let statsVisible = false;
     let hlsInstance = null;
+    let trackInfo = { audio: [], subtitle: [] };
+    let subtitleCues = [];
+    let subtitleCueKey = null;
+    let activeSubtitleUrl = "";
+    let activeAudioIndex = 0;
+    let autoplayNext = Boolean(PLAYLIST && PLAYLIST.next_url);
 
     function clamp(value, min, max, fallback = min) {
       const numeric = Number(value);
@@ -263,6 +273,11 @@ document.addEventListener("DOMContentLoaded", () => {
       shell.classList.toggle("is-paused", paused);
       if (playBtn) playBtn.setAttribute("aria-label", paused ? "Play" : "Pause");
       setIcon(playBtn, paused ? "play" : "pause");
+      if (rafId) {
+        window.cancelAnimationFrame(rafId);
+        rafId = 0;
+      }
+      updateProgress();
       showControls();
     }
 
@@ -340,7 +355,12 @@ document.addEventListener("DOMContentLoaded", () => {
       progress.setAttribute("aria-valuenow", String(Math.round(current)));
       progress.setAttribute("aria-valuetext", `${formatTime(current)} of ${formatTime(duration)}`);
       if (statsVisible) updateStats();
-      rafId = window.requestAnimationFrame(updateProgress);
+      if (!video.paused && !video.ended && !rafId) {
+        rafId = window.requestAnimationFrame(() => {
+          rafId = 0;
+          updateProgress();
+        });
+      }
     }
 
     function updateInfo() {
@@ -363,53 +383,216 @@ document.addEventListener("DOMContentLoaded", () => {
       return option;
     }
 
+    async function switchAudioTrack(index, label) {
+      const nativeTracks = video.audioTracks;
+      if (nativeTracks && nativeTracks.length > index) {
+        Array.from(nativeTracks).forEach((track, candidateIndex) => {
+          track.enabled = candidateIndex === index;
+        });
+        activeAudioIndex = index;
+        buildAudioTracks();
+        showToast(`Audio: ${label}`, "languages");
+        return;
+      }
+
+      if (typeof video.selectAudioByIndex === "function") {
+        await video.selectAudioByIndex(index);
+        activeAudioIndex = index;
+        buildAudioTracks();
+        showToast(`Audio: ${label}`, "languages");
+        return;
+      }
+
+      if (!window.AmaterasuLibmediaPlayer) {
+        throw new Error("Advanced decoder is unavailable");
+      }
+
+      const previous = video;
+      const state = {
+        currentTime: Number(previous.currentTime) || 0,
+        autoplay: !previous.paused,
+        volume: previous.volume,
+        muted: previous.muted,
+        playbackRate: previous.playbackRate,
+        loop: previous.loop,
+      };
+      previous.pause();
+      if (hlsInstance) {
+        hlsInstance.destroy();
+        hlsInstance = null;
+      }
+
+      const advanced = document.createElement("amaterasu-libmedia-player");
+      advanced.id = "player";
+      previous.replaceWith(advanced);
+      video = advanced;
+      bindMediaEvents(video);
+      video.loop = state.loop;
+      showToast("Starting advanced multi-track decoder…", "languages", 4200);
+      try {
+        await advanced.open(absoluteStreamUrl, {
+          audioIndex: index,
+          currentTime: state.currentTime,
+          autoplay: state.autoplay,
+          volume: state.volume,
+          muted: state.muted,
+          playbackRate: state.playbackRate,
+        });
+        activeAudioIndex = index;
+        buildAudioTracks();
+        updateInfo();
+        showToast(`Audio: ${label}`, "languages");
+      } catch (error) {
+        console.error(LOG_PREFIX, "Advanced decoder failed", error);
+        advanced.replaceWith(previous);
+        video = previous;
+        await loadHlsIfNeeded();
+        if (state.autoplay) previous.play().catch(() => undefined);
+        showToast("Could not switch this audio track", "triangle-alert", 4200);
+        throw error;
+      }
+    }
+
     function buildAudioTracks() {
-      const tracks = video.audioTracks;
-      if (!tracks || tracks.length <= 1) {
-        if (!tracks && (FILE_NAME || "").toLowerCase().endsWith(".mkv")) {
-          audioBtn.hidden = false;
-          audioList.innerHTML = "";
-          const note = document.createElement("div");
-          note.className = "am-track-option";
-          note.textContent = "This browser does not expose MKV audio tracks for switching.";
-          audioList.appendChild(note);
-        }
+      const nativeTracks = video.audioTracks ? Array.from(video.audioTracks) : [];
+      const discovered = Array.isArray(trackInfo.audio) ? trackInfo.audio : [];
+      const tracks = discovered.length > 1
+        ? discovered
+        : nativeTracks.map((track, index) => ({
+          index,
+          title: track.label || track.language || `Track ${index + 1}`,
+        }));
+      if (tracks.length <= 1) {
+        audioBtn.hidden = true;
+        audioList.innerHTML = "";
         return;
       }
       audioBtn.hidden = false;
       audioList.innerHTML = "";
-      Array.from(tracks).forEach((track, index) => {
-        const label = track.label || track.language || `Track ${index + 1}`;
-        audioList.appendChild(createRadioOption("audio-track", label, track.enabled, () => {
-          Array.from(tracks).forEach((candidate, candidateIndex) => {
-            candidate.enabled = candidateIndex === index;
-          });
-          showToast(`Audio: ${label}`, "languages");
+      tracks.forEach((track, index) => {
+        const label = track.title || `Track ${index + 1}`;
+        audioList.appendChild(createRadioOption("audio-track", label, index === activeAudioIndex, () => {
+          switchAudioTrack(Number(track.index ?? index), label).catch(() => undefined);
         }));
       });
     }
 
+    function parseSubtitleTimestamp(value) {
+      const parts = String(value).trim().replace(",", ".").split(":");
+      let seconds = 0;
+      parts.forEach((part) => {
+        seconds = seconds * 60 + Number(part);
+      });
+      return Number.isFinite(seconds) ? seconds : 0;
+    }
+
+    function parseWebVtt(text) {
+      const lines = String(text).replace(/\r/g, "").split("\n");
+      const cues = [];
+      for (let index = 0; index < lines.length; index += 1) {
+        if (!lines[index].includes("-->")) continue;
+        const timing = lines[index].split("-->");
+        const start = parseSubtitleTimestamp(timing[0]);
+        const end = parseSubtitleTimestamp(timing[1].trim().split(/\s+/)[0]);
+        const content = [];
+        index += 1;
+        while (index < lines.length && lines[index].trim()) {
+          content.push(lines[index]);
+          index += 1;
+        }
+        if (end > start) {
+          cues.push({
+            start,
+            end,
+            text: content.join("\n")
+              .replace(/<br\s*\/?>/gi, "\n")
+              .replace(/<[^>]*>/g, ""),
+          });
+        }
+      }
+      return cues.sort((left, right) => left.start - right.start);
+    }
+
+    function paintSubtitle() {
+      const current = Number(video.currentTime) || 0;
+      const active = subtitleCues.filter((cue) => current >= cue.start && current < cue.end);
+      const key = active.map((cue) => `${cue.start}:${cue.end}:${cue.text}`).join("|");
+      if (key === subtitleCueKey) return;
+      subtitleCueKey = key;
+      subtitleOverlay.hidden = active.length === 0;
+      subtitleText.textContent = active.map((cue) => cue.text).join("\n");
+    }
+
+    async function selectSubtitle(subtitle, label) {
+      activeSubtitleUrl = subtitle ? subtitle.url : "";
+      subtitleCues = [];
+      subtitleCueKey = null;
+      paintSubtitle();
+      if (!subtitle) {
+        showToast("Subtitles off", "captions");
+        return;
+      }
+      showToast("Loading subtitles…", "captions");
+      const response = await fetch(subtitle.url, { cache: "force-cache" });
+      if (!response.ok) throw new Error(`Subtitle request failed: ${response.status}`);
+      if (activeSubtitleUrl !== subtitle.url) return;
+      subtitleCues = parseWebVtt(await response.text());
+      subtitleCueKey = null;
+      paintSubtitle();
+      showToast(`Subtitles: ${label}`, "captions");
+    }
+
     function buildSubtitleTracks() {
-      const tracks = Array.from(video.textTracks || []);
-      if (!tracks.length && !SUBTITLES.length) return;
+      const embedded = Array.isArray(trackInfo.subtitle) ? trackInfo.subtitle : [];
+      const tracks = [
+        ...SUBTITLES.map((subtitle, index) => ({
+          ...subtitle,
+          title: subtitle.label || `Subtitle ${index + 1}`,
+        })),
+        ...embedded,
+      ];
+      if (!tracks.length) {
+        subtitleBtn.hidden = true;
+        subtitleList.innerHTML = "";
+        return;
+      }
       subtitleBtn.hidden = false;
       subtitleList.innerHTML = "";
       subtitleList.appendChild(createRadioOption("subtitle-track", "Off", true, () => {
-        tracks.forEach((track) => {
-          track.mode = "disabled";
-        });
-        showToast("Subtitles off", "captions");
+        selectSubtitle(null, "Off").catch(() => undefined);
       }));
       tracks.forEach((track, index) => {
-        const label = track.label || track.language || `Subtitle ${index + 1}`;
-        track.mode = "disabled";
+        const label = track.title || track.label || `Subtitle ${index + 1}`;
         subtitleList.appendChild(createRadioOption("subtitle-track", label, false, () => {
-          tracks.forEach((candidate, candidateIndex) => {
-            candidate.mode = candidateIndex === index ? "showing" : "disabled";
+          selectSubtitle(track, label).catch((error) => {
+            console.warn(LOG_PREFIX, "Subtitle load failed", error);
+            showToast("Could not load this subtitle track", "triangle-alert", 4200);
           });
-          showToast(`Subtitles: ${label}`, "captions");
         }));
       });
+    }
+
+    async function loadTrackInfo() {
+      if (!TRACKS_URL) {
+        buildAudioTracks();
+        buildSubtitleTracks();
+        return;
+      }
+      try {
+        const response = await fetch(TRACKS_URL, { cache: "no-store" });
+        if (response.ok) trackInfo = await response.json();
+      } catch (error) {
+        console.warn(LOG_PREFIX, "Track discovery failed", error);
+      }
+      buildAudioTracks();
+      buildSubtitleTracks();
+      if (
+        Array.isArray(trackInfo.audio)
+        && trackInfo.audio.length > 1
+        && window.AmaterasuLibmediaPlayer
+      ) {
+        window.AmaterasuLibmediaPlayer.preload();
+      }
     }
 
     function buildSpeeds() {
@@ -645,6 +828,33 @@ document.addEventListener("DOMContentLoaded", () => {
       updateMuteState();
     }
 
+    function bindMediaEvents(target) {
+      target.addEventListener("play", updatePlayState);
+      target.addEventListener("pause", updatePlayState);
+      target.addEventListener("volumechange", updateMuteState);
+      target.addEventListener("progress", updateBuffered);
+      target.addEventListener("timeupdate", () => {
+        updateProgress();
+        paintSubtitle();
+      });
+      target.addEventListener("seeked", () => {
+        updateProgress();
+        paintSubtitle();
+      });
+      target.addEventListener("loadedmetadata", () => {
+        updateInfo();
+        buildAudioTracks();
+        buildSubtitleTracks();
+        showControls();
+      });
+      target.addEventListener("error", showError);
+      target.addEventListener("ended", () => {
+        if (autoplayNext && PLAYLIST && PLAYLIST.next_url && !target.loop) {
+          window.location.assign(PLAYLIST.next_url);
+        }
+      });
+    }
+
     playBtn.addEventListener("click", togglePlay);
     backwardBtn.addEventListener("click", () => seekBy(-10));
     forwardBtn.addEventListener("click", () => seekBy(10));
@@ -677,9 +887,19 @@ document.addEventListener("DOMContentLoaded", () => {
       updateLoopButton();
       showToast(video.loop ? "Loop on" : "Loop off", "repeat");
     });
-    autoplayNextBtn.addEventListener("click", () => {
-      showToast("Send files as a Telegram batch, then open the next generated watch link.", "list-video", 4200);
-    });
+    if (PLAYLIST && PLAYLIST.next_url) {
+      autoplayNextBtn.textContent = "On";
+      autoplayNextBtn.setAttribute("aria-pressed", "true");
+      autoplayNextBtn.addEventListener("click", () => {
+        autoplayNext = !autoplayNext;
+        autoplayNextBtn.textContent = autoplayNext ? "On" : "Off";
+        autoplayNextBtn.setAttribute("aria-pressed", String(autoplayNext));
+        showToast(`Autoplay next ${autoplayNext ? "on" : "off"}`, "list-video");
+      });
+    } else {
+      autoplayNextBtn.textContent = "Unavailable";
+      autoplayNextBtn.disabled = true;
+    }
     helpBtn.addEventListener("click", () => toggleHelp(true));
     helpCloseBtn.addEventListener("click", () => toggleHelp(false));
     helpModal.addEventListener("click", (event) => {
@@ -862,20 +1082,11 @@ document.addEventListener("DOMContentLoaded", () => {
       }
     });
 
-    video.addEventListener("play", updatePlayState);
-    video.addEventListener("pause", updatePlayState);
-    video.addEventListener("volumechange", updateMuteState);
-    video.addEventListener("progress", updateBuffered);
-    video.addEventListener("loadedmetadata", () => {
-      updateInfo();
-      buildAudioTracks();
-      buildSubtitleTracks();
-      showControls();
-    });
-    video.addEventListener("error", showError);
+    bindMediaEvents(video);
 
     buildSpeeds();
     applyStoredPrefs();
+    loadTrackInfo();
     Array.from(speedGrid.children).forEach((child) => {
       child.classList.toggle("is-active", child.textContent === `${video.playbackRate}x`);
     });
@@ -889,7 +1100,6 @@ document.addEventListener("DOMContentLoaded", () => {
       shell.classList.add("is-ready");
       video.removeAttribute("controls");
       updatePlayState();
-      updateProgress();
       showControls();
       if (window.lucide) window.lucide.createIcons();
     });
@@ -899,6 +1109,7 @@ document.addEventListener("DOMContentLoaded", () => {
       window.clearTimeout(idleTimer);
       window.clearTimeout(hideGestureTimer);
       if (hlsInstance) hlsInstance.destroy();
+      if (typeof video.destroy === "function") video.destroy().catch(() => undefined);
     });
   } catch (error) {
     console.error("[Amaterasu Player]", error);

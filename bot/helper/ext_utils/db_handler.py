@@ -5,7 +5,7 @@ from uuid import uuid4
 from aiofiles import open as aiopen
 from aiofiles.os import path as aiopath
 from motor.motor_asyncio import AsyncIOMotorClient
-from pymongo.errors import PyMongoError
+from pymongo.errors import DuplicateKeyError, PyMongoError
 from pymongo.server_api import ServerApi
 
 from ... import LOGGER, qbit_options, rss_dict, user_data
@@ -671,6 +671,45 @@ class DbManager:
             {"$set": {f"{profile_id}.is_default": True}},
             upsert=True
         )
+
+    async def add_filetolink_playlist(self, token, name, items):
+        """Persist a compact FileToLink playlist shared by bot and web workers."""
+        if self._return or not token or not items:
+            return False
+        document = {
+            "_id": str(token),
+            "name": str(name or "Playlist")[:300],
+            "items": [
+                {
+                    "token": str(item["token"]),
+                    "name": str(item.get("name") or "Media")[:500],
+                }
+                for item in items[:100]
+                if item.get("token")
+            ],
+            "created_at": datetime.now(UTC),
+        }
+        if not document["items"]:
+            return False
+        try:
+            await self.db.filetolink_playlists[_part()].insert_one(document)
+            return True
+        except DuplicateKeyError:
+            return False
+        except PyMongoError as error:
+            LOGGER.error(f"add_filetolink_playlist error: {error}")
+            return False
+
+    async def get_filetolink_playlist(self, token):
+        if self._return or not token:
+            return None
+        try:
+            return await self.db.filetolink_playlists[_part()].find_one(
+                {"_id": str(token)}
+            )
+        except PyMongoError as error:
+            LOGGER.error(f"get_filetolink_playlist error: {error}")
+            return None
 
     # ────────────────────────────────────────────────────────────────────
     # Phase 1.5 — Blacklist system with MongoDB TTL index

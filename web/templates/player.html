@@ -12,12 +12,15 @@
     <div class="stream-player stream-player--{{ 'doc' if file_type == 'doc' else file_type }}">
       {% if file_type == 'video' %}
       <div class="am-player is-paused" id="am-player" data-player-shell>
-        <video id="player" playsinline controls preload="metadata">
+        <video id="player" playsinline controls preload="metadata"{% if poster_url %} poster="{{ poster_url }}"{% endif %}>
           <source src="{{ file_url }}" type="{{ mime_type }}" />
           {% for sub in subtitles %}
           <track kind="subtitles" src="{{ sub.url }}" label="{{ sub.label }}" srclang="{{ sub.srclang }}" />
           {% endfor %}
         </video>
+        <div class="am-subtitle-overlay" id="subtitle-overlay" aria-live="off" hidden>
+          <span id="subtitle-text"></span>
+        </div>
 
         <div class="am-topbar" aria-hidden="false">
           <button class="am-btn" id="help-btn" type="button" aria-label="Show keyboard shortcuts" title="Keyboard shortcuts">
@@ -90,12 +93,6 @@
 
         <div class="am-controls" id="controls">
           <div class="am-control-surface">
-            <button class="am-btn am-seek-btn" id="backward-btn" type="button" aria-label="Seek backward 10 seconds">-10s</button>
-            <button class="am-btn" id="play-btn" type="button" aria-label="Play">
-              <i data-lucide="play"></i>
-            </button>
-            <button class="am-btn am-seek-btn" id="forward-btn" type="button" aria-label="Seek forward 10 seconds">+10s</button>
-
             <div class="am-progress-wrap">
               <span class="am-time" id="current-time">0:00</span>
               <div class="am-progress" id="progress" role="slider" aria-label="Playback progress" aria-valuemin="0" aria-valuemax="0" aria-valuenow="0" tabindex="0">
@@ -106,25 +103,41 @@
               </div>
               <span class="am-time" id="duration-time">0:00</span>
             </div>
-
-            <button class="am-btn am-extra-desktop" id="mute-btn" type="button" aria-label="Mute">
-              <i data-lucide="volume-2"></i>
-            </button>
-            <button class="am-btn" id="audio-btn" type="button" aria-label="Audio tracks" hidden>
-              <i data-lucide="languages"></i>
-            </button>
-            <button class="am-btn" id="subtitle-btn" type="button" aria-label="Subtitle tracks" hidden>
-              <i data-lucide="captions"></i>
-            </button>
-            <button class="am-btn" id="settings-btn" type="button" aria-label="Settings">
-              <i data-lucide="settings"></i>
-            </button>
-            <button class="am-btn am-extra-desktop" id="theater-btn" type="button" aria-label="Toggle theater mode">
-              <i data-lucide="rectangle-horizontal"></i>
-            </button>
-            <button class="am-btn" id="fullscreen-btn" type="button" aria-label="Fullscreen">
-              <i data-lucide="maximize"></i>
-            </button>
+            <div class="am-control-row">
+              <div class="am-transport-controls">
+                <button class="am-btn am-seek-btn" id="backward-btn" type="button" aria-label="Seek backward 10 seconds" title="Back 10 seconds">-10</button>
+                <button class="am-btn am-play-btn" id="play-btn" type="button" aria-label="Play" title="Play or pause">
+                  <i data-lucide="play"></i>
+                </button>
+                <button class="am-btn am-seek-btn" id="forward-btn" type="button" aria-label="Seek forward 10 seconds" title="Forward 10 seconds">+10</button>
+                <a class="am-btn" id="playlist-prev-btn" href="{{ playlist.previous_url if playlist else '#' }}" aria-label="Previous playlist item" title="Previous episode"{% if not playlist or not playlist.previous_url %} hidden{% endif %}>
+                  <i data-lucide="skip-back"></i>
+                </a>
+                <a class="am-btn" id="playlist-next-btn" href="{{ playlist.next_url if playlist else '#' }}" aria-label="Next playlist item" title="Next episode"{% if not playlist or not playlist.next_url %} hidden{% endif %}>
+                  <i data-lucide="skip-forward"></i>
+                </a>
+              </div>
+              <div class="am-player-tools">
+                <button class="am-btn am-extra-desktop" id="mute-btn" type="button" aria-label="Mute" title="Volume">
+                  <i data-lucide="volume-2"></i>
+                </button>
+                <button class="am-btn" id="audio-btn" type="button" aria-label="Audio tracks" title="Audio tracks" hidden>
+                  <i data-lucide="languages"></i>
+                </button>
+                <button class="am-btn" id="subtitle-btn" type="button" aria-label="Subtitle tracks" title="Subtitles" hidden>
+                  <i data-lucide="captions"></i>
+                </button>
+                <button class="am-btn" id="settings-btn" type="button" aria-label="Settings" title="Playback settings">
+                  <i data-lucide="settings"></i>
+                </button>
+                <button class="am-btn am-extra-desktop" id="theater-btn" type="button" aria-label="Toggle theater mode" title="Theater mode">
+                  <i data-lucide="rectangle-horizontal"></i>
+                </button>
+                <button class="am-btn" id="fullscreen-btn" type="button" aria-label="Fullscreen" title="Fullscreen">
+                  <i data-lucide="maximize"></i>
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -168,13 +181,19 @@
         </div>
       </div>
 
+      {% if playlist %}
+      <a class="stream-playlist-context" href="{{ playlist.url }}">
+        <i data-lucide="list-video"></i>
+        <span>{{ playlist.name }}</span>
+        <strong>{{ playlist.index }} / {{ playlist.total }}</strong>
+      </a>
+      {% endif %}
+
       <div class="stream-actions" id="action-buttons"></div>
 
-      <a id="main-download-btn" href="#" style="text-decoration: none;">
-        <button class="stream-download-btn" type="button" aria-label="Download file">
-          <i data-lucide="download" style="width: 16px; height: 16px;"></i>
-          Download File
-        </button>
+      <a class="stream-download-btn" id="main-download-btn" href="#" aria-label="Download file">
+        <i data-lucide="download" style="width: 16px; height: 16px;"></i>
+        Download File
       </a>
 
       <div class="stream-security">
@@ -218,8 +237,12 @@ window.AMATERASU_PLAYER = {
   fileName: {{ file_name | tojson }},
   fileSize: {{ file_size | tojson }},
   mimeType: {{ mime_type | tojson }},
-  subtitles: {{ subtitles | tojson }}
+  subtitles: {{ subtitles | tojson }},
+  posterUrl: {{ poster_url | tojson }},
+  tracksUrl: {{ tracks_url | tojson }},
+  playlist: {{ playlist | tojson }}
 };
 </script>
+<script src="/static/js/libmedia-player.js" defer></script>
 <script src="/static/js/player.js" defer></script>
 {% endblock %}
