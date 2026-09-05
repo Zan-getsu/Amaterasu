@@ -216,6 +216,7 @@ document.addEventListener("DOMContentLoaded", () => {
     let rafId = 0;
     let idleTimer = 0;
     let draggingProgress = false;
+    let pendingProgressTime = null;
     let lastTapTime = 0;
     let touchState = null;
     let brightness = 1;
@@ -227,6 +228,7 @@ document.addEventListener("DOMContentLoaded", () => {
     let subtitleCues = [];
     let subtitleCueKey = null;
     let activeSubtitleUrl = "";
+    let subtitleSelectionId = 0;
     let activeAudioIndex = 0;
     let autoplayNext = Boolean(PLAYLIST && PLAYLIST.next_url);
 
@@ -322,13 +324,19 @@ document.addEventListener("DOMContentLoaded", () => {
       }, delay);
     }
 
-    function setProgressFromClientX(clientX) {
+    function setProgressFromClientX(clientX, commit = true) {
       if (!progress || !Number.isFinite(video.duration) || video.duration <= 0) return;
       const rect = progress.getBoundingClientRect();
       const pct = clamp((clientX - rect.left) / rect.width, 0, 1);
-      video.currentTime = pct * video.duration;
-      progress.setAttribute("aria-valuenow", String(Math.round(video.currentTime)));
+      const target = pct * video.duration;
+      progressFill.style.width = `${pct * 100}%`;
+      progressThumb.style.left = `${pct * 100}%`;
+      currentTimeEl.textContent = formatTime(target);
+      progress.setAttribute("aria-valuenow", String(Math.round(target)));
+      progress.setAttribute("aria-valuetext", `${formatTime(target)} of ${formatTime(video.duration)}`);
+      if (commit) video.currentTime = target;
       showControls();
+      return target;
     }
 
     function updateBuffered() {
@@ -347,13 +355,15 @@ document.addEventListener("DOMContentLoaded", () => {
       const duration = Number.isFinite(video.duration) ? video.duration : 0;
       const current = Number.isFinite(video.currentTime) ? video.currentTime : 0;
       const pct = duration > 0 ? clamp((current / duration) * 100, 0, 100) : 0;
-      progressFill.style.width = `${pct}%`;
-      progressThumb.style.left = `${pct}%`;
-      currentTimeEl.textContent = formatTime(current);
+      if (!draggingProgress) {
+        progressFill.style.width = `${pct}%`;
+        progressThumb.style.left = `${pct}%`;
+        currentTimeEl.textContent = formatTime(current);
+        progress.setAttribute("aria-valuenow", String(Math.round(current)));
+        progress.setAttribute("aria-valuetext", `${formatTime(current)} of ${formatTime(duration)}`);
+      }
       durationTimeEl.textContent = formatTime(duration);
       progress.setAttribute("aria-valuemax", String(Math.round(duration)));
-      progress.setAttribute("aria-valuenow", String(Math.round(current)));
-      progress.setAttribute("aria-valuetext", `${formatTime(current)} of ${formatTime(duration)}`);
       if (statsVisible) updateStats();
       if (!video.paused && !video.ended && !rafId) {
         rafId = window.requestAnimationFrame(() => {
@@ -383,7 +393,7 @@ document.addEventListener("DOMContentLoaded", () => {
       return option;
     }
 
-    async function activateAdvancedDecoder(audioIndex, label) {
+    async function activateAdvancedDecoder(audioIndex, label, subtitleIndex) {
       if (!window.AmaterasuLibmediaPlayer) {
         throw new Error("Advanced decoder is unavailable");
       }
@@ -433,6 +443,7 @@ document.addEventListener("DOMContentLoaded", () => {
           volume: state.volume,
           muted: state.muted,
           playbackRate: state.playbackRate,
+          subtitleIndex,
         });
         activeAudioIndex = Number.isInteger(audioIndex) ? audioIndex : 0;
         buildAudioTracks();
@@ -543,26 +554,53 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     async function selectSubtitle(subtitle, label) {
+      const selectionId = ++subtitleSelectionId;
       activeSubtitleUrl = subtitle ? subtitle.url : "";
       subtitleCues = [];
       subtitleCueKey = null;
       paintSubtitle();
       if (!subtitle) {
+        if (typeof video.setSubtitleEnabled === "function") {
+          await video.setSubtitleEnabled(false);
+        }
         showToast("Subtitles off", "captions");
         return;
       }
+
+      if (subtitle.embedded && window.AmaterasuLibmediaPlayer) {
+        try {
+          if (typeof video.selectSubtitleByIndex === "function") {
+            await video.selectSubtitleByIndex(subtitle.index);
+          } else {
+            await activateAdvancedDecoder(activeAudioIndex, "", subtitle.index);
+          }
+          if (selectionId !== subtitleSelectionId) return;
+          showToast(`Subtitles: ${label}`, "captions");
+          return;
+        } catch (error) {
+          console.warn(LOG_PREFIX, "Advanced subtitles unavailable; using WebVTT fallback", error);
+        }
+      }
+
+      if (typeof video.setSubtitleEnabled === "function") {
+        await video.setSubtitleEnabled(false);
+      }
+      if (selectionId !== subtitleSelectionId) return;
       showToast("Loading subtitles…", "captions");
       const response = await fetch(subtitle.url, { cache: "force-cache" });
       if (!response.ok) throw new Error(`Subtitle request failed: ${response.status}`);
-      if (activeSubtitleUrl !== subtitle.url) return;
-      subtitleCues = parseWebVtt(await response.text());
+      const subtitleText = await response.text();
+      if (selectionId !== subtitleSelectionId || activeSubtitleUrl !== subtitle.url) return;
+      subtitleCues = parseWebVtt(subtitleText);
       subtitleCueKey = null;
       paintSubtitle();
       showToast(`Subtitles: ${label}`, "captions");
     }
 
     function buildSubtitleTracks() {
-      const embedded = Array.isArray(trackInfo.subtitle) ? trackInfo.subtitle : [];
+      const embedded = Array.isArray(trackInfo.subtitle)
+        ? trackInfo.subtitle.map((subtitle) => ({ ...subtitle, embedded: true }))
+        : [];
       const tracks = [
         ...SUBTITLES.map((subtitle, index) => ({
           ...subtitle,
@@ -577,12 +615,12 @@ document.addEventListener("DOMContentLoaded", () => {
       }
       subtitleBtn.hidden = false;
       subtitleList.innerHTML = "";
-      subtitleList.appendChild(createRadioOption("subtitle-track", "Off", true, () => {
+      subtitleList.appendChild(createRadioOption("subtitle-track", "Off", !activeSubtitleUrl, () => {
         selectSubtitle(null, "Off").catch(() => undefined);
       }));
       tracks.forEach((track, index) => {
         const label = track.title || track.label || `Subtitle ${index + 1}`;
-        subtitleList.appendChild(createRadioOption("subtitle-track", label, false, () => {
+        subtitleList.appendChild(createRadioOption("subtitle-track", label, track.url === activeSubtitleUrl, () => {
           selectSubtitle(track, label).catch((error) => {
             console.warn(LOG_PREFIX, "Subtitle load failed", error);
             showToast("Could not load this subtitle track", "triangle-alert", 4200);
@@ -945,7 +983,7 @@ document.addEventListener("DOMContentLoaded", () => {
     progress.addEventListener("pointerdown", (event) => {
       draggingProgress = true;
       progress.setPointerCapture(event.pointerId);
-      setProgressFromClientX(event.clientX);
+      pendingProgressTime = setProgressFromClientX(event.clientX, false);
     });
     progress.addEventListener("pointermove", (event) => {
       const rect = progress.getBoundingClientRect();
@@ -953,13 +991,24 @@ document.addEventListener("DOMContentLoaded", () => {
       const preview = pct * (Number.isFinite(video.duration) ? video.duration : 0);
       progressTooltip.textContent = formatTime(preview);
       progressTooltip.style.left = `${pct * 100}%`;
-      if (draggingProgress) setProgressFromClientX(event.clientX);
+      if (draggingProgress) pendingProgressTime = setProgressFromClientX(event.clientX, false);
     });
     progress.addEventListener("pointerup", (event) => {
+      if (draggingProgress) {
+        pendingProgressTime = setProgressFromClientX(event.clientX, false);
+      }
       draggingProgress = false;
+      if (Number.isFinite(pendingProgressTime)) video.currentTime = pendingProgressTime;
+      pendingProgressTime = null;
+      updateProgress();
       if (progress.hasPointerCapture(event.pointerId)) {
         progress.releasePointerCapture(event.pointerId);
       }
+    });
+    progress.addEventListener("pointercancel", () => {
+      pendingProgressTime = null;
+      draggingProgress = false;
+      updateProgress();
     });
     progress.addEventListener("keydown", (event) => {
       if (event.key === "ArrowLeft") {

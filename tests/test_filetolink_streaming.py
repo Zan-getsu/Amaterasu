@@ -405,6 +405,14 @@ def test_wzmlx_media_features_are_wired_into_filetolink():
     assert 'advanced.addEventListener("advancedstreams"' in player_js
     assert "selectSubtitle" in player_js
     assert "selectAudioByIndex" in player_js
+    assert "selectSubtitleByIndex" in libmedia_js
+    assert "setSubtitleEnabled" in libmedia_js
+    assert "return this._run(async () =>" in libmedia_js
+    assert "subtitle.embedded && window.AmaterasuLibmediaPlayer" in player_js
+    assert "embedded: true" in player_js
+    assert "const selectionId = ++subtitleSelectionId" in player_js
+    assert "await video.setSubtitleEnabled(false)" in player_js
+    assert "selectionId !== subtitleSelectionId" in player_js
     assert "Autoplay next" in player_js
     assert 'target.addEventListener("timeupdate", () =>' in player_js
     assert "subtitleCues.filter" in player_js
@@ -417,6 +425,13 @@ def test_wzmlx_media_features_are_wired_into_filetolink():
     assert '[1, "Audio"].includes(stream.mediaType)' in player_js
     assert '[1, "Audio"].includes(stream.mediaType)' in libmedia_js
     assert '[0, "Video"].includes(item.mediaType)' in libmedia_js
+    assert "stream.codecparProxy?.width || stream.width" in libmedia_js
+    assert "stream.codecparProxy?.height || stream.height" in libmedia_js
+    assert "await this._seek(position)" not in libmedia_js
+    assert "_scheduleSeek(target)" in libmedia_js
+    assert "while (this._seekTarget !== null)" in libmedia_js
+    assert "setProgressFromClientX(event.clientX, false)" in player_js
+    assert 'progress.addEventListener("pointercancel"' in player_js
     assert "switchAudioTrack(index, label)" in player_js
     assert "switchAudioTrack(Number(track.index ?? index), label)" not in player_js
     assert "create_filetolink_playlist" in filetolink

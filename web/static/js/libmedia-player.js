@@ -48,7 +48,10 @@
       this._loop = false;
       this._started = false;
       this._loaded = false;
+      this._subtitleEnabled = false;
       this._pendingSeek = null;
+      this._seekTarget = null;
+      this._seekQueued = false;
       this._queue = Promise.resolve();
       this._source = "";
     }
@@ -153,6 +156,7 @@
 
       await player.load(url);
       this._streams = player.getStreams ? player.getStreams() : [];
+      if (typeof player.setSubtitleEnable === "function") player.setSubtitleEnable(false);
       this._duration = this._durationFrom(this._streams);
       this._readyState = 4;
       this._loaded = true;
@@ -164,8 +168,11 @@
       this.volume = options.volume === undefined ? this._volume : options.volume;
       this.muted = options.muted === undefined ? this._muted : options.muted;
       this.playbackRate = options.playbackRate || this._playbackRate;
-      if (Number.isInteger(options.audioIndex)) {
+      if (Number.isInteger(options.audioIndex) && options.audioIndex > 0) {
         await this.selectAudioByIndex(options.audioIndex);
+      }
+      if (Number.isInteger(options.subtitleIndex)) {
+        await this.selectSubtitleByIndex(options.subtitleIndex);
       }
       if (Number(options.currentTime) > 0) {
         this.currentTime = Number(options.currentTime);
@@ -219,8 +226,28 @@
       this._emit("timeupdate");
     }
 
+    _scheduleSeek(target) {
+      this._seekTarget = target;
+      if (this._seekQueued) return;
+      this._seekQueued = true;
+      this._run(async () => {
+        while (this._seekTarget !== null) {
+          const nextTarget = this._seekTarget;
+          this._seekTarget = null;
+          await this._seek(nextTarget);
+        }
+      }).catch((error) => this._emit("error", error)).finally(() => {
+        this._seekQueued = false;
+        if (this._seekTarget !== null) this._scheduleSeek(this._seekTarget);
+      });
+    }
+
     getAudioStreams() {
       return this._streams.filter((stream) => stream && [1, "Audio"].includes(stream.mediaType));
+    }
+
+    getSubtitleStreams() {
+      return this._streams.filter((stream) => stream && [3, "Subtitle"].includes(stream.mediaType));
     }
 
     selectAudioByIndex(index) {
@@ -228,12 +255,36 @@
         const streams = this.getAudioStreams();
         const selected = streams[index];
         if (!selected || !this._player) throw new Error("Audio track is unavailable");
-        const position = this._currentTime;
         await this._settle();
         await this._player.selectAudio(selected.id);
         await this._settle();
-        if (this._started && position > 0) await this._seek(position);
         return selected;
+      });
+    }
+
+    selectSubtitleByIndex(index) {
+      return this._run(async () => {
+        const selected = this.getSubtitleStreams()[index];
+        if (!selected || !this._player) throw new Error("Subtitle track is unavailable");
+        await this._settle();
+        await this._player.selectSubtitle(selected.id);
+        this._subtitleEnabled = true;
+        if (typeof this._player.setSubtitleEnable === "function") {
+          this._player.setSubtitleEnable(true);
+        }
+        return selected;
+      });
+    }
+
+    setSubtitleEnabled(enabled) {
+      const nextEnabled = Boolean(enabled);
+      this._subtitleEnabled = nextEnabled;
+      if (!this._player || typeof this._player.setSubtitleEnable !== "function") {
+        return Promise.resolve();
+      }
+      return this._run(async () => {
+        await this._settle();
+        this._player.setSubtitleEnable(nextEnabled);
       });
     }
 
@@ -256,7 +307,7 @@
         this._pendingSeek = target;
         this._emit("timeupdate");
       } else {
-        this._run(() => this._seek(target));
+        this._scheduleSeek(target);
       }
     }
     get volume() { return this._volume; }
@@ -289,11 +340,11 @@
     }
     get videoWidth() {
       const stream = this._streams.find((item) => item && [0, "Video"].includes(item.mediaType));
-      return Number(stream && stream.width) || this.clientWidth;
+      return Number(stream && (stream.codecparProxy?.width || stream.width)) || this.clientWidth;
     }
     get videoHeight() {
       const stream = this._streams.find((item) => item && [0, "Video"].includes(item.mediaType));
-      return Number(stream && stream.height) || this.clientHeight;
+      return Number(stream && (stream.codecparProxy?.height || stream.height)) || this.clientHeight;
     }
     get error() { return null; }
 
