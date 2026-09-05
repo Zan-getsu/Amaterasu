@@ -483,7 +483,7 @@ async def add_handlers():
         MessageHandler(
             gen_pyro_string,
             filters=command(BotCommands.GenPyroSessCommand, case_sensitive=True)
-            & CustomFilters.sudo,
+            & CustomFilters.authorized,
         )
     )
     TgClient.bot.add_handler(

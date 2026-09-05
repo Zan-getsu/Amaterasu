@@ -55,7 +55,7 @@ class BotCommands:
         "UserSet": ["uset", "usetting", "us"],
         "Select": ["select", "sel"],
         "NzbSearch": ["nzbsearch", "ns"],
-        "GenPyroSess": "exportsession",
+        "GenPyroSess": "sessiongen",
         "TokenGen": "tokengen",
         "CategorySelect": ["category", "ctsel"],
         "GDClean": ["gdclean", "gdc"],

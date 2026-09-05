@@ -84,6 +84,7 @@
 - [🗂️ File Sorting Mode](#file-sorting-mode)
 - [🎨 Encoding Profile Creator (Web UI)](#encoding-profile-creator-web-ui)
 - [🔐 Google Token Generator (Web UI)](#google-token-generator-web-ui)
+- [Telegram Session Generator (Web UI)](#telegram-session-generator-web-ui)
 - [🧰 Advanced Usage & Arguments](#advanced-usage--arguments)
   - [Argument Quick Reference](#argument-quick-reference)
   - [Telegram Link Downloads](#telegram-link-downloads)
@@ -1153,6 +1154,7 @@ credentials or perform account writes.
 |---|---|---|
 | `/usetting` | `/us` | Open your personal settings panel (thumbnail, prefix, upload destination, etc.) |
 | `/tokengen` | — | Open your private Google OAuth token generator and download manager |
+| `/sessiongen` | — | Open your private Telegram session generator |
 | `/stats` | `/st` | View server hardware stats (CPU, RAM, Disk, Network) |
 | `/ping` | — | Check bot response latency |
 | `/help` | `/h` | Show all available commands with descriptions |
@@ -1683,6 +1685,36 @@ public repository, paste them in chat, or share them with anyone.
 
 ---
 
+<a id="telegram-session-generator-web-ui"></a>
+
+## Telegram Session Generator (Web UI)
+
+Send `/sessiongen` as an authorized user. The bot returns a private, signed
+link bound to your Telegram user ID. The link expires after 15 minutes.
+
+The page collects your Telegram API ID and API hash, phone number, login code,
+and optional two-step verification password through a guided flow. These values
+stay only in the short-lived server login attempt and are never written to
+MongoDB. When sign-in succeeds, Amaterasu:
+
+- sends the new WZGram-compatible session string to that account's Saved Messages;
+- encrypts the session string with `AMATERASU_WEB_SECRET`;
+- makes it the user's current session and appends it to their encrypted history;
+- shows safe account metadata and decrypts a selected session only when its
+  **Copy session** button is pressed.
+
+Each user enters the API values for their own application from
+[my.telegram.org/apps](https://my.telegram.org/apps). Generating a new session
+automatically updates that user's active database record; no manual replacement
+action is required. Earlier generated sessions remain in that user's encrypted
+history and can be copied while using a valid private link.
+`BASE_URL` and `DATABASE_URL` are required.
+
+Keep the Saved Messages copy private. Anyone with the session string can access
+the Telegram account until the session is revoked.
+
+---
+
 <a id="advanced-usage--arguments"></a>
 
 ## 🧰 Advanced Usage & Arguments
@@ -1946,17 +1978,9 @@ This auto-leeches new anime releases in 1080p (mkv or mp4), excluding batch pack
   <summary><b>How to generate a WZGram String Session?</b></summary>
   <br>
 
-  ```python
-  # WZGram keeps the Pyrogram-compatible import namespace.
-  from pyrogram import Client
-
-  app = Client("my_account", api_id=YOUR_API_ID, api_hash="YOUR_API_HASH")
-
-  with app:
-      print(app.export_session_string())
-  ```
-
-  Run this script locally (not on the server), enter your phone number and OTP, and save the printed string as `USER_SESSION_STRING`.
+  Send `/sessiongen`, open the private link, and complete Telegram sign-in. The
+  encrypted session replaces your previous database record and is sent to your
+  Telegram Saved Messages.
 </details>
 
 ---

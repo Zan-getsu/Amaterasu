@@ -632,6 +632,83 @@ class DbManager:
             LOGGER.warning(f"Could not record Google token activation time: {exc}")
         return metadata["token_pickle"]
 
+    async def save_generated_telegram_session(
+        self,
+        user_id,
+        session_id,
+        encrypted_session,
+        telegram_user_id,
+        display_name,
+        username,
+        is_premium,
+        updated_at,
+    ):
+        """Set the active encrypted session and append it to user history."""
+
+        if self._return:
+            return False
+        bot_id = _bot_id()
+        history_entry = {
+            "session_id": str(session_id),
+            "session_string": encrypted_session,
+            "telegram_user_id": int(telegram_user_id),
+            "display_name": str(display_name),
+            "username": str(username or ""),
+            "is_premium": bool(is_premium),
+            "created_at": updated_at,
+        }
+        await self.db.telegram_sessions.update_one(
+            {"_id": f"{bot_id}_{int(user_id)}"},
+            {
+                "$set": {
+                    "bot_id": bot_id,
+                    "user_id": int(user_id),
+                    "current_session_id": str(session_id),
+                    "session_string": encrypted_session,
+                    "telegram_user_id": int(telegram_user_id),
+                    "display_name": str(display_name),
+                    "username": str(username or ""),
+                    "is_premium": bool(is_premium),
+                    "updated_at": updated_at,
+                },
+                "$push": {
+                    "history": {
+                        "$each": [history_entry],
+                        "$position": 0,
+                    }
+                },
+            },
+            upsert=True,
+        )
+        return True
+
+    async def get_generated_telegram_session(self, user_id):
+        """Return the user's saved session metadata and encrypted value."""
+
+        if self._return:
+            return None
+        record = await self.db.telegram_sessions.find_one(
+            {"_id": f"{_bot_id()}_{int(user_id)}"}
+        )
+        if not record or not record.get("session_string"):
+            return None
+        return record
+
+    async def get_generated_telegram_session_value(self, user_id, session_id):
+        """Return one encrypted session from the requesting user's history."""
+
+        record = await self.get_generated_telegram_session(user_id)
+        if not record:
+            return None
+        requested = str(session_id)
+        current_id = str(record.get("current_session_id") or "current")
+        if requested == current_id:
+            return record.get("session_string")
+        for item in record.get("history") or []:
+            if str(item.get("session_id")) == requested:
+                return item.get("session_string")
+        return None
+
     async def save_encode_profile(self, user_id, profile_id, profile_data):
         if self._return:
             return

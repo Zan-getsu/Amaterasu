@@ -1,0 +1,660 @@
+{% extends "base.html" %}
+
+{% block title %}Amaterasu | Telegram Session Generator{% endblock %}
+
+{% block extra_css %}
+<style>
+html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+body { overflow-x: hidden; }
+.session-page {
+  width: 100%;
+  min-width: 0;
+  padding: clamp(24px, 4vw, 48px) 0 clamp(48px, 7vw, 80px);
+}
+.session-container {
+  width: min(100%, 1180px);
+  min-width: 0;
+  margin: 0 auto;
+  padding-inline: clamp(12px, 3vw, 32px);
+}
+.session-header { margin-bottom: clamp(22px, 4vw, 32px); }
+.session-title {
+  margin: 0;
+  color: var(--bs-text-primary);
+  font-size: clamp(28px, 4vw, 38px);
+  line-height: 1.15;
+  letter-spacing: -.035em;
+}
+.session-subtitle {
+  max-width: 680px;
+  margin: 8px 0 0;
+  color: var(--bs-text-secondary);
+  font-size: clamp(14px, 2vw, 16px);
+  line-height: 1.55;
+}
+.session-alert {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-bottom: 18px;
+  padding: 13px 15px;
+  border: 1px solid var(--bs-border);
+  border-radius: var(--bs-radius-md);
+  background: var(--bs-graphite);
+  color: var(--bs-text-secondary);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.session-alert svg { flex: 0 0 auto; margin-top: 1px; }
+.session-alert--error { color: #ffb0a8; border-color: rgba(231, 76, 60, .35); background: var(--bs-error-dim); }
+.session-alert--success { color: #99e9b9; border-color: rgba(46, 204, 113, .32); background: var(--bs-success-dim); }
+.session-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.45fr) minmax(300px, .8fr);
+  gap: clamp(18px, 2.4vw, 26px);
+  align-items: start;
+}
+.session-layout > * { min-width: 0; }
+.session-panel {
+  min-width: 0;
+  border: 1px solid var(--bs-border);
+  border-radius: var(--bs-radius-lg);
+  background: linear-gradient(145deg, rgba(26, 36, 48, .72), rgba(19, 26, 34, .82));
+  box-shadow: var(--bs-shadow-sm);
+}
+.session-panel__body { padding: clamp(20px, 3vw, 30px); }
+.session-progress {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: 0 0 28px;
+  padding: 0;
+  list-style: none;
+}
+.session-progress__item {
+  position: relative;
+  min-width: 0;
+  display: grid;
+  justify-items: start;
+  gap: 8px;
+  color: var(--bs-text-disabled);
+  font-size: 11px;
+  font-weight: 650;
+}
+.session-progress__item:not(:last-child)::after {
+  content: "";
+  position: absolute;
+  top: 11px;
+  left: 28px;
+  right: 6px;
+  height: 1px;
+  background: var(--bs-border);
+}
+.session-progress__marker {
+  position: relative;
+  z-index: 1;
+  width: 23px;
+  height: 23px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--bs-border);
+  border-radius: 50%;
+  background: var(--bs-graphite);
+  color: inherit;
+}
+.session-progress__item.is-active { color: var(--bs-gold); }
+.session-progress__item.is-active .session-progress__marker {
+  border-color: var(--bs-gold-border);
+  background: var(--bs-gold-dim);
+  box-shadow: 0 0 0 4px rgba(212, 175, 55, .07);
+}
+.session-progress__item.is-complete { color: var(--bs-text-secondary); }
+.session-progress__item.is-complete .session-progress__marker {
+  border-color: rgba(46, 204, 113, .35);
+  background: var(--bs-success-dim);
+  color: var(--bs-success);
+}
+.session-progress__item.is-complete::after { background: rgba(46, 204, 113, .32); }
+.session-heading {
+  margin: 0;
+  color: var(--bs-text-primary);
+  font-size: clamp(20px, 2.6vw, 24px);
+  line-height: 1.3;
+  letter-spacing: -.02em;
+}
+.session-copy {
+  max-width: 64ch;
+  margin: 7px 0 20px;
+  color: var(--bs-text-muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+.field-group { min-width: 0; margin-top: 16px; }
+.field-label {
+  display: block;
+  margin-bottom: 7px;
+  color: var(--bs-text-secondary);
+  font-size: 12px;
+  font-weight: 650;
+}
+.session-input {
+  width: 100%;
+  min-width: 0;
+  min-height: 46px;
+  padding: 11px 13px;
+  border: 1px solid var(--bs-border);
+  border-radius: var(--bs-radius-md);
+  outline: none;
+  background: rgba(11, 15, 20, .48);
+  color: var(--bs-text-primary);
+  font-family: var(--bs-font-sans);
+  font-size: 14px;
+  line-height: 1.5;
+  transition: border-color 180ms cubic-bezier(.23, 1, .32, 1), box-shadow 180ms cubic-bezier(.23, 1, .32, 1), background-color 180ms cubic-bezier(.23, 1, .32, 1);
+}
+.session-input--mono { font-family: var(--bs-font-mono); }
+.session-input::placeholder { color: var(--bs-text-disabled); }
+.session-input:focus {
+  border-color: var(--bs-gold-border);
+  background: var(--bs-elevated);
+  box-shadow: 0 0 0 3px var(--bs-gold-dim);
+}
+.field-hint {
+  margin: 7px 0 0;
+  color: var(--bs-text-muted);
+  font-size: 11px;
+  line-height: 1.55;
+}
+.credential-note, .privacy-note {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 9px;
+  padding: 13px 14px;
+  border: 1px solid var(--bs-border);
+  border-radius: var(--bs-radius-md);
+  background: rgba(11, 15, 20, .34);
+  color: var(--bs-text-muted);
+  font-size: 11px;
+  line-height: 1.6;
+}
+.credential-note { margin-bottom: 18px; }
+.privacy-note { margin-top: 18px; }
+.credential-note svg, .privacy-note svg { margin-top: 1px; color: var(--bs-gold); }
+.credential-note a, .field-hint a { color: var(--bs-gold); }
+.form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 22px;
+}
+.session-button {
+  min-height: 46px;
+  min-width: 0;
+  padding: 10px 18px;
+  border: 1px solid transparent;
+  border-radius: var(--bs-radius-md);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--bs-text-primary);
+  background: transparent;
+  font-family: var(--bs-font-sans);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.2;
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: transform 140ms cubic-bezier(.23, 1, .32, 1), border-color 180ms cubic-bezier(.23, 1, .32, 1), background-color 180ms cubic-bezier(.23, 1, .32, 1), box-shadow 180ms cubic-bezier(.23, 1, .32, 1);
+}
+.session-button:active:not(:disabled) { transform: scale(.97); }
+.session-button:focus-visible { outline: 3px solid var(--bs-gold-dim); outline-offset: 2px; }
+.session-button--primary {
+  flex: 1 1 210px;
+  border-color: rgba(255, 255, 255, .18);
+  background: var(--bs-gradient-gold);
+  color: #0b0f14;
+  box-shadow: var(--bs-shadow-gold-inset);
+}
+.session-button--quiet { border-color: var(--bs-border); color: var(--bs-text-secondary); }
+.session-button:disabled { opacity: .55; cursor: wait; }
+.session-button__loader {
+  width: 14px;
+  height: 14px;
+  display: none;
+  border: 2px solid rgba(11, 15, 20, .28);
+  border-top-color: #0b0f14;
+  border-radius: 50%;
+  animation: session-spin .65s linear infinite;
+}
+.is-submitting .session-button__loader { display: block; }
+@keyframes session-spin { to { transform: rotate(360deg); } }
+.code-field { max-width: 330px; }
+.password-wrap { position: relative; max-width: 520px; }
+.password-wrap .session-input { padding-right: 48px; }
+.password-toggle {
+  position: absolute;
+  top: 50%;
+  right: 5px;
+  width: 38px;
+  height: 38px;
+  padding: 0;
+  border: 0;
+  display: grid;
+  place-items: center;
+  transform: translateY(-50%);
+  border-radius: calc(var(--bs-radius-md) - 3px);
+  background: transparent;
+  color: var(--bs-text-muted);
+  cursor: pointer;
+}
+.password-toggle:focus-visible { outline: 2px solid var(--bs-gold-border); }
+.saved-panel { position: sticky; top: 80px; }
+.saved-title {
+  margin: 0;
+  color: var(--bs-text-primary);
+  font-size: 20px;
+  line-height: 1.3;
+  letter-spacing: -.02em;
+}
+.saved-state {
+  min-height: 52px;
+  margin-top: 18px;
+  padding: 12px 14px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  border: 1px solid rgba(46, 204, 113, .28);
+  border-radius: var(--bs-radius-md);
+  background: var(--bs-success-dim);
+  color: var(--bs-success);
+  font-size: 14px;
+  font-weight: 700;
+}
+.history-list { margin-top: 14px; }
+.history-entry {
+  padding: 16px 0;
+  border-bottom: 1px solid var(--bs-border-subtle);
+}
+.history-entry:last-child { border-bottom: 0; padding-bottom: 0; }
+.history-entry__head {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.history-entry__account {
+  min-width: 0;
+  margin: 0;
+  color: var(--bs-text-primary);
+  font-size: 14px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+.history-entry__current {
+  flex: 0 0 auto;
+  padding: 4px 8px;
+  border: 1px solid rgba(46, 204, 113, .28);
+  border-radius: 999px;
+  color: var(--bs-success);
+  font-size: 10px;
+  font-weight: 700;
+}
+.saved-meta { margin: 10px 0 0; padding: 0; }
+.saved-meta__row {
+  min-width: 0;
+  padding: 9px 0;
+  display: grid;
+  grid-template-columns: 92px minmax(0, 1fr);
+  gap: 10px;
+  border-bottom: 1px solid var(--bs-border-subtle);
+}
+.saved-meta dt { color: var(--bs-text-muted); font-size: 12px; }
+.saved-meta dd { min-width: 0; margin: 0; color: var(--bs-text-secondary); font-size: 12px; overflow-wrap: anywhere; }
+.history-copy { width: 100%; min-height: 40px; margin-top: 12px; }
+.history-copy-status {
+  min-height: 17px;
+  margin: 7px 0 0;
+  color: var(--bs-text-muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+.empty-session {
+  margin-top: 18px;
+  padding: 20px 0 6px;
+  color: var(--bs-text-muted);
+  font-size: 13px;
+  line-height: 1.55;
+}
+.empty-session__icon {
+  width: 42px;
+  height: 42px;
+  margin-bottom: 12px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--bs-radius-md);
+  background: var(--bs-gold-dim);
+  color: var(--bs-gold);
+}
+.saved-action { width: 100%; margin-top: 20px; }
+.security-note {
+  margin-top: 20px;
+  padding-top: 18px;
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 9px;
+  border-top: 1px solid var(--bs-border);
+  color: var(--bs-text-muted);
+  font-size: 11px;
+  line-height: 1.6;
+}
+.security-note svg { color: var(--bs-gold); margin-top: 1px; }
+@media (hover: hover) and (pointer: fine) {
+  .session-button:hover:not(:disabled) { transform: translateY(-1px); }
+  .session-button--primary:hover:not(:disabled) { box-shadow: 0 8px 22px rgba(212, 175, 55, .24); }
+  .session-button--quiet:hover:not(:disabled) { border-color: var(--bs-gold-border); background: var(--bs-gold-dim); }
+}
+@media (max-width: 980px) {
+  .session-layout { grid-template-columns: minmax(0, 1fr); }
+  .saved-panel { position: static; }
+}
+@media (max-width: 640px) {
+  .session-page { padding-top: 25px; }
+  .session-container { padding-inline: 12px; }
+  .session-title { font-size: clamp(26px, 9vw, 32px); }
+  .session-panel__body { padding: 18px 16px; }
+  .session-input { font-size: 16px; }
+  .session-button { font-size: 14px; }
+  .form-actions { display: grid; grid-template-columns: minmax(0, 1fr); }
+  .session-button { width: 100%; }
+}
+@media (max-width: 380px) {
+  .session-progress__item { font-size: 10px; }
+  .session-progress__item:not(:last-child)::after { right: 4px; }
+  .saved-meta__row { grid-template-columns: minmax(0, 1fr); gap: 3px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .session-input, .session-button { transition: none; }
+  .session-button:hover:not(:disabled), .session-button:active:not(:disabled) { transform: none; }
+  .session-button__loader { animation-duration: 1.2s; }
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<section class="session-page">
+  <div class="session-container">
+    <header class="session-header">
+      <h1 class="session-title">Telegram Session Generator</h1>
+      <p class="session-subtitle">Create an encrypted WZGram session and receive it privately in Telegram Saved Messages.</p>
+    </header>
+
+    {% if error %}
+    <div class="session-alert session-alert--error" role="alert">
+      <i data-lucide="circle-alert" style="width:18px;height:18px"></i>
+      <span>{{ error }}</span>
+    </div>
+    {% endif %}
+    {% if success %}
+    <div class="session-alert session-alert--success" role="status">
+      <i data-lucide="circle-check" style="width:18px;height:18px"></i>
+      <span>Your new session is active, was added to your history, and was sent to your Telegram Saved Messages.</span>
+    </div>
+    {% endif %}
+
+    <div class="session-layout">
+      <section class="session-panel" aria-labelledby="session-form-title">
+        <div class="session-panel__body">
+          <ol class="session-progress" aria-label="Session generation progress">
+            <li class="session-progress__item{% if success %} is-complete{% elif step == 'details' %} is-active{% else %} is-complete{% endif %}">
+              <span class="session-progress__marker"><i data-lucide="smartphone" style="width:13px;height:13px"></i></span>
+              <span>Account</span>
+            </li>
+            <li class="session-progress__item{% if step == 'code' or step == 'password' %} is-active{% endif %}{% if success %} is-complete{% endif %}">
+              <span class="session-progress__marker"><i data-lucide="message-square" style="width:13px;height:13px"></i></span>
+              <span>Login code</span>
+            </li>
+            <li class="session-progress__item{% if success %} is-complete{% endif %}">
+              <span class="session-progress__marker"><i data-lucide="shield-check" style="width:13px;height:13px"></i></span>
+              <span>Secure vault</span>
+            </li>
+          </ol>
+
+          {% if step == 'details' %}
+          <h2 id="session-form-title" class="session-heading">Connect your Telegram account</h2>
+          <p class="session-copy">Telegram sends a login code to your account. Amaterasu never writes your phone, code, API hash, or password to the database.</p>
+
+          <form class="session-form" method="post" action="/api/session-generator/start?user_id={{ user_id }}&amp;token={{ page_token }}">
+            <div class="credential-note">
+              <i data-lucide="external-link" style="width:17px;height:17px"></i>
+              <span>Enter the API ID and API hash for your own Telegram application. You can create one at <a href="https://my.telegram.org/apps" target="_blank" rel="noopener noreferrer">my.telegram.org/apps</a>.</span>
+            </div>
+            <div class="field-group">
+              <label class="field-label" for="api-id">Telegram API ID</label>
+              <input id="api-id" class="session-input session-input--mono" name="api_id" type="text" inputmode="numeric" maxlength="10" autocomplete="off" spellcheck="false" placeholder="12345678" required autofocus>
+            </div>
+            <div class="field-group">
+              <label class="field-label" for="api-hash">Telegram API hash</label>
+              <input id="api-hash" class="session-input session-input--mono" name="api_hash" type="password" maxlength="32" autocomplete="off" spellcheck="false" required>
+              <p class="field-hint">Use the 32-character API hash shown beside your application.</p>
+            </div>
+            <div class="field-group">
+              <label class="field-label" for="phone">Phone number</label>
+              <input id="phone" class="session-input session-input--mono" name="phone" type="tel" maxlength="64" autocomplete="tel" placeholder="+14154566376" required>
+              <p class="field-hint">Include the country code and leading plus sign.</p>
+            </div>
+            <div class="privacy-note">
+              <i data-lucide="lock-keyhole" style="width:17px;height:17px"></i>
+              <span>Your sign-in stays in server memory for up to 10 minutes. Only the final session is encrypted and saved.</span>
+            </div>
+            <div class="form-actions">
+              <button class="session-button session-button--primary" type="submit">
+                <span class="session-button__loader" aria-hidden="true"></span>
+                <i class="session-button__icon" data-lucide="send" style="width:17px;height:17px"></i>
+                <span class="session-button__label">Send login code</span>
+              </button>
+            </div>
+          </form>
+
+          {% elif step == 'code' %}
+          <h2 id="session-form-title" class="session-heading">Enter the Telegram login code</h2>
+          <p class="session-copy">Telegram sent the code to {{ phone_hint }}. Spaces between digits are accepted.</p>
+          <form class="session-form" method="post" action="/api/session-generator/verify?user_id={{ user_id }}&amp;token={{ page_token }}">
+            <input type="hidden" name="attempt" value="{{ attempt_id }}">
+            <div class="field-group code-field">
+              <label class="field-label" for="code">Login code</label>
+              <input id="code" class="session-input session-input--mono" name="code" type="text" inputmode="numeric" maxlength="32" autocomplete="one-time-code" placeholder="1 2 3 4 5" required autofocus>
+            </div>
+            <div class="privacy-note">
+              <i data-lucide="shield" style="width:17px;height:17px"></i>
+              <span>The code is used once for this sign-in and is never written to the database.</span>
+            </div>
+            <div class="form-actions">
+              <button class="session-button session-button--primary" type="submit">
+                <span class="session-button__loader" aria-hidden="true"></span>
+                <i class="session-button__icon" data-lucide="key-round" style="width:17px;height:17px"></i>
+                <span class="session-button__label">Verify and create session</span>
+              </button>
+            </div>
+          </form>
+          <form method="post" action="/api/session-generator/cancel?user_id={{ user_id }}&amp;token={{ page_token }}">
+            <input type="hidden" name="attempt" value="{{ attempt_id }}">
+            <button class="session-button session-button--quiet saved-action" type="submit">Cancel sign-in</button>
+          </form>
+
+          {% else %}
+          <h2 id="session-form-title" class="session-heading">Complete two-step verification</h2>
+          <p class="session-copy">Your account requires its Telegram two-step verification password.</p>
+          <form class="session-form" method="post" action="/api/session-generator/password?user_id={{ user_id }}&amp;token={{ page_token }}">
+            <input type="hidden" name="attempt" value="{{ attempt_id }}">
+            <div class="field-group">
+              <label class="field-label" for="password">Two-step verification password</label>
+              <div class="password-wrap">
+                <input id="password" class="session-input" name="password" type="password" maxlength="256" autocomplete="current-password" required autofocus>
+                <button id="password-toggle" class="password-toggle" type="button" aria-label="Show password" aria-pressed="false">
+                  <i data-lucide="eye" style="width:18px;height:18px"></i>
+                </button>
+              </div>
+              {% if password_hint %}<p class="field-hint">Telegram hint: {{ password_hint }}</p>{% endif %}
+            </div>
+            <div class="privacy-note">
+              <i data-lucide="lock-keyhole" style="width:17px;height:17px"></i>
+              <span>Your password is sent directly to Telegram for verification and is never saved.</span>
+            </div>
+            <div class="form-actions">
+              <button class="session-button session-button--primary" type="submit">
+                <span class="session-button__loader" aria-hidden="true"></span>
+                <i class="session-button__icon" data-lucide="shield-check" style="width:17px;height:17px"></i>
+                <span class="session-button__label">Unlock and create session</span>
+              </button>
+            </div>
+          </form>
+          <form method="post" action="/api/session-generator/cancel?user_id={{ user_id }}&amp;token={{ page_token }}">
+            <input type="hidden" name="attempt" value="{{ attempt_id }}">
+            <button class="session-button session-button--quiet saved-action" type="submit">Cancel sign-in</button>
+          </form>
+          {% endif %}
+        </div>
+      </section>
+
+      <aside class="session-panel saved-panel" aria-labelledby="saved-session-title">
+        <div class="session-panel__body">
+          <h2 id="saved-session-title" class="saved-title">Session history</h2>
+          {% if session_history %}
+          <div class="saved-state">
+            <i data-lucide="database-zap" style="width:20px;height:20px"></i>
+            <span>{{ session_history|length }} encrypted session{{ "" if session_history|length == 1 else "s" }} saved</span>
+          </div>
+          <div class="history-list">
+            {% for saved in session_history %}
+            <article class="history-entry">
+              <div class="history-entry__head">
+                <h3 class="history-entry__account">{{ saved.account }}</h3>
+                {% if saved.is_current %}<span class="history-entry__current">Current</span>{% endif %}
+              </div>
+              <dl class="saved-meta">
+                <div class="saved-meta__row"><dt>Telegram ID</dt><dd>{{ saved.telegram_user_id }}</dd></div>
+                <div class="saved-meta__row"><dt>Premium</dt><dd>{{ "Yes" if saved.is_premium else "No" }}</dd></div>
+                <div class="saved-meta__row"><dt>Created</dt><dd>{{ saved.created }}</dd></div>
+              </dl>
+              <button class="session-button session-button--quiet history-copy" type="button" data-copy-session="{{ saved.session_id }}">
+                <i data-lucide="copy" style="width:16px;height:16px"></i>
+                <span class="history-copy__label">Copy session</span>
+              </button>
+              <p class="history-copy-status" role="status" aria-live="polite"></p>
+            </article>
+            {% endfor %}
+          </div>
+          {% else %}
+          <div class="empty-session">
+            <div class="empty-session__icon"><i data-lucide="fingerprint" style="width:21px;height:21px"></i></div>
+            <strong style="display:block;color:var(--bs-text-secondary);margin-bottom:4px">No session saved yet</strong>
+            Complete Telegram sign-in to create your private session record.
+          </div>
+          {% endif %}
+          <div class="security-note">
+            <i data-lucide="shield-check" style="width:18px;height:18px"></i>
+            <span>Sessions stay encrypted in the database and are decrypted only when you press Copy. A fresh private link from <code>/sessiongen</code> is required for every visit.</span>
+          </div>
+        </div>
+      </aside>
+    </div>
+  </div>
+</section>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.addEventListener("DOMContentLoaded", () => {
+  document.querySelectorAll(".session-form").forEach((form) => {
+    form.addEventListener("submit", () => {
+      form.classList.add("is-submitting");
+      const button = form.querySelector("button[type='submit']");
+      if (!button) return;
+      button.disabled = true;
+      button.setAttribute("aria-busy", "true");
+      const icon = button.querySelector(".session-button__icon");
+      if (icon) icon.style.display = "none";
+      const label = button.querySelector(".session-button__label");
+      if (label) label.textContent = "Connecting to Telegram...";
+    });
+  });
+
+  const copyEndpoint = "/api/session-generator/copy?user_id={{ user_id }}&token={{ page_token }}";
+  const writeSessionToClipboard = async (value) => {
+    if (navigator.clipboard && window.isSecureContext) {
+      try {
+        await navigator.clipboard.writeText(value);
+        return;
+      } catch (_error) {
+        // Use the short-lived fallback below when browser permissions block Clipboard API.
+      }
+    }
+    const field = document.createElement("textarea");
+    field.value = value;
+    field.setAttribute("readonly", "");
+    field.style.position = "fixed";
+    field.style.opacity = "0";
+    document.body.appendChild(field);
+    field.select();
+    const copied = document.execCommand("copy");
+    field.value = "";
+    field.remove();
+    if (!copied) throw new Error("Browser clipboard permission was denied");
+  };
+  document.querySelectorAll("[data-copy-session]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const label = button.querySelector(".history-copy__label");
+      const status = button.nextElementSibling;
+      const body = new FormData();
+      body.append("session_id", button.dataset.copySession);
+      button.disabled = true;
+      button.setAttribute("aria-busy", "true");
+      label.textContent = "Decrypting...";
+      status.textContent = "";
+      try {
+        const response = await fetch(copyEndpoint, {
+          method: "POST",
+          body,
+          credentials: "same-origin",
+          cache: "no-store",
+          headers: { "Accept": "application/json" },
+        });
+        let data = {};
+        try {
+          data = await response.json();
+        } catch (_error) {
+          // Non-JSON proxy errors are replaced with the safe recovery message below.
+        }
+        if (!response.ok || !data.session) {
+          throw new Error(data.detail || "Could not retrieve this session. Refresh your private link and try again.");
+        }
+        await writeSessionToClipboard(data.session);
+        data.session = "";
+        label.textContent = "Copied";
+        status.textContent = "Session copied to your clipboard.";
+      } catch (error) {
+        label.textContent = "Try again";
+        status.textContent = error.message || "Could not copy this session. Refresh your private link and try again.";
+      } finally {
+        button.disabled = false;
+        button.removeAttribute("aria-busy");
+      }
+    });
+  });
+
+  const password = document.getElementById("password");
+  document.getElementById("password-toggle")?.addEventListener("click", (event) => {
+    const button = event.currentTarget;
+    const showing = password.type === "text";
+    password.type = showing ? "password" : "text";
+    button.setAttribute("aria-pressed", String(!showing));
+    button.setAttribute("aria-label", showing ? "Show password" : "Hide password");
+    button.innerHTML = `<i data-lucide="${showing ? "eye" : "eye-off"}" style="width:18px;height:18px"></i>`;
+    lucide.createIcons();
+    password.focus();
+  });
+});
+</script>
+{% endblock %}

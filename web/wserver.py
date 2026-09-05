@@ -2,6 +2,7 @@ import mimetypes
 import re
 from asyncio import (
     CancelledError,
+    Lock,
     create_subprocess_exec,
     create_task,
     current_task,
@@ -86,6 +87,8 @@ _PIN_LEN = 4
 _PIN_RATE_LIMIT = 5
 _PIN_RATE_WINDOW = 60
 _pin_attempts: dict = {}
+_telegram_session_attempts: dict[str, dict] = {}
+_telegram_session_attempt_lock = Lock()
 
 def _load_config():
     try:
@@ -245,6 +248,7 @@ async def lifespan(app: FastAPI):
         if qbittorrent is not None:
             await qbittorrent.close()
         if Config.BOT_TOKEN:
+            await _clear_telegram_session_attempts()
             from bot.helper.telegram_helper.tg_stream import (
                 shutdown_adaptive_streams,
             )
@@ -356,6 +360,28 @@ def _require_google_token_database(database) -> None:
         )
 
 
+def _require_telegram_session_user(request: Request) -> int:
+    try:
+        user_id = int(request.query_params.get("user_id", ""))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid user_id") from exc
+    token = request.query_params.get("token")
+    if not verify_signed_token(token, _web_secret(), "telegram-session", user_id):
+        raise HTTPException(
+            status_code=403,
+            detail="This private session-generator link is invalid or expired",
+        )
+    return user_id
+
+
+def _require_telegram_session_database(database) -> None:
+    if database.db is None:
+        raise HTTPException(
+            status_code=503,
+            detail="The session database is unavailable. Configure DATABASE_URL and try again.",
+        )
+
+
 def _google_token_base_url() -> str:
     config = _get_config()
     base_url = (config.BASE_URL or "").strip().rstrip("/")
@@ -376,6 +402,103 @@ def _google_token_page_location(user_id: int, page_token: str, **values) -> str:
     query = {"user_id": int(user_id), "token": page_token}
     query.update({key: value for key, value in values.items() if value not in (None, "")})
     return f"/app/token-generator?{urlencode(query)}"
+
+
+def _telegram_session_page_location(user_id: int, page_token: str, **values) -> str:
+    query = {"user_id": int(user_id), "token": page_token}
+    query.update({key: value for key, value in values.items() if value not in (None, "")})
+    return f"/app/session-generator?{urlencode(query)}"
+
+
+async def _disconnect_telegram_session_client(client) -> None:
+    with suppress(Exception):
+        await client.disconnect()
+
+
+async def _dispose_telegram_session_attempt(attempt: dict) -> None:
+    expiry_task = attempt.get("expiry_task")
+    if expiry_task and expiry_task is not current_task():
+        expiry_task.cancel()
+        with suppress(CancelledError):
+            await expiry_task
+    await _disconnect_telegram_session_client(attempt["client"])
+
+
+async def _expire_telegram_session_attempt(attempt_id: str, expires_at: float) -> None:
+    await sleep(max(0, expires_at - monotonic()))
+    await _drop_telegram_session_attempt(attempt_id)
+
+
+async def _prune_telegram_session_attempts() -> None:
+    expired = []
+    now = monotonic()
+    async with _telegram_session_attempt_lock:
+        for attempt_id, attempt in list(_telegram_session_attempts.items()):
+            if attempt["expires_at"] <= now:
+                expired.append(_telegram_session_attempts.pop(attempt_id))
+    for attempt in expired:
+        await _dispose_telegram_session_attempt(attempt)
+
+
+async def _get_telegram_session_attempt(attempt_id: str, user_id: int):
+    if not attempt_id or len(attempt_id) > 128:
+        return None
+    await _prune_telegram_session_attempts()
+    async with _telegram_session_attempt_lock:
+        attempt = _telegram_session_attempts.get(attempt_id)
+        if not attempt or attempt["user_id"] != int(user_id):
+            return None
+        return attempt
+
+
+async def _claim_telegram_session_attempt(attempt_id: str, user_id: int):
+    if not attempt_id or len(attempt_id) > 128:
+        return None
+    await _prune_telegram_session_attempts()
+    async with _telegram_session_attempt_lock:
+        attempt = _telegram_session_attempts.get(attempt_id)
+        if (
+            not attempt
+            or attempt["user_id"] != int(user_id)
+            or attempt.get("busy")
+        ):
+            return None
+        attempt["busy"] = True
+        return attempt
+
+
+async def _release_telegram_session_attempt(attempt: dict) -> None:
+    async with _telegram_session_attempt_lock:
+        attempt["busy"] = False
+
+
+async def _save_telegram_session_attempt(attempt_id: str, attempt: dict) -> None:
+    replaced = []
+    async with _telegram_session_attempt_lock:
+        for old_id, old_attempt in list(_telegram_session_attempts.items()):
+            if old_attempt["user_id"] == attempt["user_id"]:
+                replaced.append(_telegram_session_attempts.pop(old_id))
+        attempt["expiry_task"] = create_task(
+            _expire_telegram_session_attempt(attempt_id, attempt["expires_at"])
+        )
+        _telegram_session_attempts[attempt_id] = attempt
+    for old_attempt in replaced:
+        await _dispose_telegram_session_attempt(old_attempt)
+
+
+async def _drop_telegram_session_attempt(attempt_id: str) -> None:
+    async with _telegram_session_attempt_lock:
+        attempt = _telegram_session_attempts.pop(attempt_id, None)
+    if attempt:
+        await _dispose_telegram_session_attempt(attempt)
+
+
+async def _clear_telegram_session_attempts() -> None:
+    async with _telegram_session_attempt_lock:
+        attempts = list(_telegram_session_attempts.values())
+        _telegram_session_attempts.clear()
+    for attempt in attempts:
+        await _dispose_telegram_session_attempt(attempt)
 
 
 def _no_store(response: Response) -> Response:
@@ -983,6 +1106,462 @@ async def download_generated_google_json(request: Request):
         headers={"Content-Disposition": 'attachment; filename="token.json"'},
     )
     return _no_store(response)
+
+
+async def _finish_telegram_session(user_id: int, attempt: dict, database) -> None:
+    from bot.helper.ext_utils.google_token import protect_blob
+
+    client = attempt["client"]
+    session_string = await client.export_session_string()
+    account = await client.get_me()
+    display_name = " ".join(
+        part for part in (account.first_name, account.last_name) if part
+    ).strip() or str(account.id)
+    username = account.username or ""
+    saved_at = datetime.now(UTC)
+    encrypted_session = protect_blob(
+        session_string.encode("utf-8"),
+        _web_secret(),
+        "telegram-session",
+    )
+    session_id = token_urlsafe(12)
+
+    await client.send_message(
+        "me",
+        "<b>Amaterasu Telegram Session</b>\n\n"
+        f"<code>{session_string}</code>\n\n"
+        "This session grants access to your Telegram account. Keep it private and revoke it if exposed.",
+        disable_web_page_preview=True,
+    )
+    saved = await database.save_generated_telegram_session(
+        user_id,
+        session_id,
+        encrypted_session,
+        account.id,
+        display_name,
+        username,
+        bool(getattr(account, "is_premium", False)),
+        saved_at,
+    )
+    if not saved:
+        raise RuntimeError("The generated session could not be saved.")
+
+
+@app.get("/app/session-generator", response_class=HTMLResponse)
+async def telegram_session_generator_page(
+    request: Request,
+    error: str = "",
+    success: str = "",
+    step: str = "details",
+    attempt: str = "",
+):
+    from bot.helper.ext_utils.db_handler import database
+
+    user_id = _require_telegram_session_user(request)
+    _require_telegram_session_database(database)
+    page_token = request.query_params.get("token", "")
+    pending = await _get_telegram_session_attempt(attempt, user_id) if attempt else None
+    if step not in {"details", "code", "password"}:
+        step = "details"
+    if step in {"code", "password"} and not pending:
+        step = "details"
+        error = "This sign-in attempt expired. Enter your details to start again."
+        attempt = ""
+    elif pending:
+        step = "password" if pending["state"] == "password" else "code"
+
+    record = await database.get_generated_telegram_session(user_id)
+    session_history = []
+    if record:
+        current_id = str(record.get("current_session_id") or "current")
+        history = record.get("history") or [
+            {
+                "session_id": current_id,
+                "telegram_user_id": record.get("telegram_user_id"),
+                "display_name": record.get("display_name"),
+                "username": record.get("username"),
+                "is_premium": record.get("is_premium"),
+                "created_at": record.get("updated_at"),
+            }
+        ]
+        for item in history:
+            username = str(item.get("username") or "")
+            item_id = str(item.get("session_id") or "")
+            if not item_id:
+                continue
+            session_history.append(
+                {
+                    "session_id": item_id,
+                    "account": f"@{username}"
+                    if username
+                    else str(item.get("display_name") or "Telegram account"),
+                    "telegram_user_id": item.get("telegram_user_id"),
+                    "is_premium": bool(item.get("is_premium")),
+                    "created": _display_datetime(item.get("created_at")),
+                    "is_current": item_id == current_id,
+                }
+            )
+
+    response = templates.TemplateResponse(
+        request,
+        "session_generator.html",
+        {
+            "user_id": user_id,
+            "page_token": page_token,
+            "step": step,
+            "attempt_id": attempt,
+            "phone_hint": pending.get("masked_phone", "") if pending else "",
+            "password_hint": pending.get("password_hint", "") if pending else "",
+            "session_history": session_history,
+            "error": error,
+            "success": success == "1",
+        },
+    )
+    return _no_store(response)
+
+
+@app.post("/api/session-generator/copy")
+async def telegram_session_generator_copy(
+    request: Request,
+    session_id: str = Form(""),
+):
+    from bot.helper.ext_utils.db_handler import database
+    from bot.helper.ext_utils.google_token import unprotect_blob
+
+    user_id = _require_telegram_session_user(request)
+    _require_telegram_session_database(database)
+    if not _SAFE_PROFILE_ID.fullmatch(session_id):
+        raise HTTPException(status_code=400, detail="Invalid session selection")
+    encrypted_session = await database.get_generated_telegram_session_value(
+        user_id, session_id
+    )
+    if not encrypted_session:
+        raise HTTPException(status_code=404, detail="That session is no longer available")
+    try:
+        session_string = unprotect_blob(
+            encrypted_session,
+            _web_secret(),
+            "telegram-session",
+        ).decode("utf-8")
+    except (UnicodeDecodeError, ValueError) as exc:
+        raise HTTPException(
+            status_code=409,
+            detail="That session could not be decrypted",
+        ) from exc
+    return _no_store(JSONResponse({"session": session_string}))
+
+
+@app.post("/api/session-generator/start")
+async def telegram_session_generator_start(
+    request: Request,
+    api_id: str = Form(""),
+    api_hash: str = Form(""),
+    phone: str = Form(""),
+):
+    from asyncio import get_running_loop
+
+    from pyrogram.errors import ApiIdInvalid, FloodWait, PhoneNumberInvalid
+
+    from bot.core.tg_client import (
+        MAX_CONCURRENT_TRANSMISSIONS,
+        TelegramClient,
+    )
+    from bot.helper.ext_utils.db_handler import database
+    from bot.helper.ext_utils.telegram_session import (
+        SESSION_ATTEMPT_TTL_SECONDS,
+        normalize_phone_number,
+        validate_telegram_api_credentials,
+    )
+    from bot.version import get_version
+
+    user_id = _require_telegram_session_user(request)
+    _require_telegram_session_database(database)
+    page_token = request.query_params.get("token", "")
+    try:
+        clean_api_id, clean_api_hash = validate_telegram_api_credentials(
+            api_id,
+            api_hash,
+        )
+        clean_phone = normalize_phone_number(phone)
+    except ValueError as exc:
+        location = _telegram_session_page_location(
+            user_id, page_token, error=str(exc)
+        )
+        return _no_store(RedirectResponse(location, status_code=303))
+
+    client = None
+    try:
+        client = TelegramClient.create(
+            f"Amaterasu-Web-{user_id}-{token_urlsafe(6)}",
+            in_memory=True,
+            api_id=clean_api_id,
+            api_hash=clean_api_hash,
+            workdir=str(Path.cwd()),
+            app_version=f"Amaterasu {get_version()}",
+            device_model="Amaterasu Web",
+            system_version="Amaterasu WZGram Server",
+            loop=get_running_loop(),
+            max_concurrent_transmissions=MAX_CONCURRENT_TRANSMISSIONS,
+        )
+        try:
+            await client.connect()
+        except ConnectionError:
+            await _disconnect_telegram_session_client(client)
+            await client.connect()
+        sent_code = await client.send_code(clean_phone)
+    except FloodWait as exc:
+        if client:
+            await _disconnect_telegram_session_client(client)
+        location = _telegram_session_page_location(
+            user_id,
+            page_token,
+            error=f"Telegram asked you to wait {int(exc.value)} seconds before trying again.",
+        )
+        return _no_store(RedirectResponse(location, status_code=303))
+    except ApiIdInvalid:
+        if client:
+            await _disconnect_telegram_session_client(client)
+        location = _telegram_session_page_location(
+            user_id, page_token, error="The Telegram API ID or API hash is invalid."
+        )
+        return _no_store(RedirectResponse(location, status_code=303))
+    except PhoneNumberInvalid:
+        if client:
+            await _disconnect_telegram_session_client(client)
+        location = _telegram_session_page_location(
+            user_id, page_token, error="Telegram rejected that phone number. Check it and try again."
+        )
+        return _no_store(RedirectResponse(location, status_code=303))
+    except Exception as exc:
+        LOGGER.warning("Telegram session start failed: %s", type(exc).__name__)
+        if client:
+            await _disconnect_telegram_session_client(client)
+        location = _telegram_session_page_location(
+            user_id,
+            page_token,
+            error="Telegram could not start sign-in. Check your details and try again.",
+        )
+        return _no_store(RedirectResponse(location, status_code=303))
+
+    attempt_id = token_urlsafe(32)
+    await _save_telegram_session_attempt(
+        attempt_id,
+        {
+            "user_id": user_id,
+            "client": client,
+            "phone": clean_phone,
+            "masked_phone": f"{clean_phone[:3]}{'*' * max(len(clean_phone) - 7, 3)}{clean_phone[-4:]}",
+            "phone_code_hash": sent_code.phone_code_hash,
+            "state": "code",
+            "failures": 0,
+            "expires_at": monotonic() + SESSION_ATTEMPT_TTL_SECONDS,
+        },
+    )
+    location = _telegram_session_page_location(
+        user_id, page_token, step="code", attempt=attempt_id
+    )
+    return _no_store(RedirectResponse(location, status_code=303))
+
+
+@app.post("/api/session-generator/verify")
+async def telegram_session_generator_verify(
+    request: Request,
+    attempt: str = Form(""),
+    code: str = Form(""),
+):
+    from pyrogram.errors import PhoneCodeExpired, PhoneCodeInvalid, SessionPasswordNeeded
+
+    from bot.helper.ext_utils.db_handler import database
+    from bot.helper.ext_utils.telegram_session import normalize_login_code
+
+    user_id = _require_telegram_session_user(request)
+    _require_telegram_session_database(database)
+    page_token = request.query_params.get("token", "")
+    pending = await _claim_telegram_session_attempt(attempt, user_id)
+    if not pending or pending["state"] != "code":
+        location = _telegram_session_page_location(
+            user_id,
+            page_token,
+            error="This login code expired. Start a new sign-in.",
+        )
+        return _no_store(RedirectResponse(location, status_code=303))
+    try:
+        clean_code = normalize_login_code(code)
+    except ValueError as exc:
+        await _release_telegram_session_attempt(pending)
+        location = _telegram_session_page_location(
+            user_id, page_token, step="code", attempt=attempt, error=str(exc)
+        )
+        return _no_store(RedirectResponse(location, status_code=303))
+
+    try:
+        await pending["client"].sign_in(
+            pending["phone"],
+            pending["phone_code_hash"],
+            phone_code=clean_code,
+        )
+    except PhoneCodeInvalid:
+        pending["failures"] += 1
+        if pending["failures"] >= 5:
+            await _drop_telegram_session_attempt(attempt)
+            location = _telegram_session_page_location(
+                user_id,
+                page_token,
+                error="Too many incorrect codes. Start a new sign-in.",
+            )
+        else:
+            await _release_telegram_session_attempt(pending)
+            location = _telegram_session_page_location(
+                user_id,
+                page_token,
+                step="code",
+                attempt=attempt,
+                error="That login code is incorrect. Check Telegram and try again.",
+            )
+        return _no_store(RedirectResponse(location, status_code=303))
+    except PhoneCodeExpired:
+        await _drop_telegram_session_attempt(attempt)
+        location = _telegram_session_page_location(
+            user_id, page_token, error="That login code expired. Start a new sign-in."
+        )
+        return _no_store(RedirectResponse(location, status_code=303))
+    except SessionPasswordNeeded:
+        hint = ""
+        with suppress(Exception):
+            hint = (await pending["client"].get_password_hint() or "")[:128]
+        pending["state"] = "password"
+        pending["password_hint"] = hint
+        await _release_telegram_session_attempt(pending)
+        location = _telegram_session_page_location(
+            user_id, page_token, step="password", attempt=attempt
+        )
+        return _no_store(RedirectResponse(location, status_code=303))
+    except Exception as exc:
+        LOGGER.warning("Telegram session verification failed: %s", type(exc).__name__)
+        await _drop_telegram_session_attempt(attempt)
+        location = _telegram_session_page_location(
+            user_id,
+            page_token,
+            error="Telegram could not verify that code. Start a new sign-in.",
+        )
+        return _no_store(RedirectResponse(location, status_code=303))
+
+    try:
+        await _finish_telegram_session(user_id, pending, database)
+    except Exception as exc:
+        LOGGER.warning("Telegram session save failed: %s", type(exc).__name__)
+        await _drop_telegram_session_attempt(attempt)
+        location = _telegram_session_page_location(
+            user_id,
+            page_token,
+            error="Login succeeded, but secure storage did not complete. Check Saved Messages, then run /sessiongen again.",
+        )
+        return _no_store(RedirectResponse(location, status_code=303))
+    await _drop_telegram_session_attempt(attempt)
+    location = _telegram_session_page_location(user_id, page_token, success="1")
+    return _no_store(RedirectResponse(location, status_code=303))
+
+
+@app.post("/api/session-generator/password")
+async def telegram_session_generator_password(
+    request: Request,
+    attempt: str = Form(""),
+    password: str = Form(""),
+):
+    from pyrogram.errors import FloodWait, PasswordHashInvalid
+
+    from bot.helper.ext_utils.db_handler import database
+    from bot.helper.ext_utils.telegram_session import validate_two_step_password
+
+    user_id = _require_telegram_session_user(request)
+    _require_telegram_session_database(database)
+    page_token = request.query_params.get("token", "")
+    pending = await _claim_telegram_session_attempt(attempt, user_id)
+    if not pending or pending["state"] != "password":
+        location = _telegram_session_page_location(
+            user_id,
+            page_token,
+            error="This two-step verification attempt expired. Start again.",
+        )
+        return _no_store(RedirectResponse(location, status_code=303))
+    try:
+        clean_password = validate_two_step_password(password)
+    except ValueError as exc:
+        await _release_telegram_session_attempt(pending)
+        location = _telegram_session_page_location(
+            user_id, page_token, step="password", attempt=attempt, error=str(exc)
+        )
+        return _no_store(RedirectResponse(location, status_code=303))
+
+    try:
+        await pending["client"].check_password(clean_password)
+    except PasswordHashInvalid:
+        pending["failures"] += 1
+        if pending["failures"] >= 5:
+            await _drop_telegram_session_attempt(attempt)
+            location = _telegram_session_page_location(
+                user_id,
+                page_token,
+                error="Too many incorrect passwords. Start a new sign-in.",
+            )
+        else:
+            await _release_telegram_session_attempt(pending)
+            location = _telegram_session_page_location(
+                user_id,
+                page_token,
+                step="password",
+                attempt=attempt,
+                error="That two-step verification password is incorrect.",
+            )
+        return _no_store(RedirectResponse(location, status_code=303))
+    except FloodWait as exc:
+        await _release_telegram_session_attempt(pending)
+        location = _telegram_session_page_location(
+            user_id,
+            page_token,
+            step="password",
+            attempt=attempt,
+            error=f"Telegram asked you to wait {int(exc.value)} seconds before trying again.",
+        )
+        return _no_store(RedirectResponse(location, status_code=303))
+    except Exception as exc:
+        LOGGER.warning("Telegram two-step verification failed: %s", type(exc).__name__)
+        await _drop_telegram_session_attempt(attempt)
+        location = _telegram_session_page_location(
+            user_id,
+            page_token,
+            error="Telegram could not complete two-step verification. Start again.",
+        )
+        return _no_store(RedirectResponse(location, status_code=303))
+
+    try:
+        await _finish_telegram_session(user_id, pending, database)
+    except Exception as exc:
+        LOGGER.warning("Telegram session save failed: %s", type(exc).__name__)
+        await _drop_telegram_session_attempt(attempt)
+        location = _telegram_session_page_location(
+            user_id,
+            page_token,
+            error="Login succeeded, but secure storage did not complete. Check Saved Messages, then run /sessiongen again.",
+        )
+        return _no_store(RedirectResponse(location, status_code=303))
+    await _drop_telegram_session_attempt(attempt)
+    location = _telegram_session_page_location(user_id, page_token, success="1")
+    return _no_store(RedirectResponse(location, status_code=303))
+
+
+@app.post("/api/session-generator/cancel")
+async def telegram_session_generator_cancel(
+    request: Request,
+    attempt: str = Form(""),
+):
+    user_id = _require_telegram_session_user(request)
+    page_token = request.query_params.get("token", "")
+    pending = await _get_telegram_session_attempt(attempt, user_id)
+    if pending:
+        await _drop_telegram_session_attempt(attempt)
+    location = _telegram_session_page_location(user_id, page_token)
+    return _no_store(RedirectResponse(location, status_code=303))
 
 @app.get("/api/profiles")
 async def list_profiles(request: Request):

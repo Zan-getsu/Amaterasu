@@ -478,7 +478,7 @@ def get_bot_commands():
         "AExec": "[OWNER] Run asynchronous Python code",
         "Exec": "[OWNER] Run Python code",
         "ClearLocals": "[OWNER] Clear stored exec variables",
-        "GenPyroSess": "[SUDO] Generate Pyrogram string session",
+        "GenPyroSess": "Open your private Telegram session generator",
         "TokenGen": "Create or download your private Google Drive token.pickle",
         "Authorize": "[SUDO] Authorize a user or chat",
         "UnAuthorize": "[SUDO] Remove authorization from a user or chat",
@@ -662,7 +662,7 @@ def get_help_string():
             help_lines.append(f"/{BotCommands.RssCommand}: RSS Menu.")
         elif key == "GenPyroSess":
             help_lines.append(
-                f"{cmd_str}: Generate a Pyrogram string session (Only Owner & Sudo)."
+                f"{cmd_str}: Open your private Telegram session generator."
             )
         elif key == "TokenGen":
             help_lines.append(
