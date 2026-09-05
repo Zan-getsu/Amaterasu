@@ -383,26 +383,7 @@ document.addEventListener("DOMContentLoaded", () => {
       return option;
     }
 
-    async function switchAudioTrack(index, label) {
-      const nativeTracks = video.audioTracks;
-      if (nativeTracks && nativeTracks.length > index) {
-        Array.from(nativeTracks).forEach((track, candidateIndex) => {
-          track.enabled = candidateIndex === index;
-        });
-        activeAudioIndex = index;
-        buildAudioTracks();
-        showToast(`Audio: ${label}`, "languages");
-        return;
-      }
-
-      if (typeof video.selectAudioByIndex === "function") {
-        await video.selectAudioByIndex(index);
-        activeAudioIndex = index;
-        buildAudioTracks();
-        showToast(`Audio: ${label}`, "languages");
-        return;
-      }
-
+    async function activateAdvancedDecoder(audioIndex, label) {
       if (!window.AmaterasuLibmediaPlayer) {
         throw new Error("Advanced decoder is unavailable");
       }
@@ -424,33 +405,71 @@ document.addEventListener("DOMContentLoaded", () => {
 
       const advanced = document.createElement("amaterasu-libmedia-player");
       advanced.id = "player";
+      advanced.addEventListener("advancedstreams", (event) => {
+        const audio = (event.detail || [])
+          .filter((stream) => stream && stream.mediaType === 1)
+          .map((stream, index) => {
+            const metadata = stream.metadata || {};
+            return {
+              index,
+              title: [metadata.title, metadata.language].filter(Boolean).join(" · ") || `Track ${index + 1}`,
+            };
+          });
+        if (audio.length > 1 && (!Array.isArray(trackInfo.audio) || trackInfo.audio.length <= 1)) {
+          trackInfo.audio = audio;
+          buildAudioTracks();
+        }
+      });
       previous.replaceWith(advanced);
       video = advanced;
       bindMediaEvents(video);
       video.loop = state.loop;
-      showToast("Starting advanced multi-track decoder…", "languages", 4200);
+      showToast("Starting advanced decoder…", "languages", 4200);
       try {
         await advanced.open(absoluteStreamUrl, {
-          audioIndex: index,
+          audioIndex,
           currentTime: state.currentTime,
           autoplay: state.autoplay,
           volume: state.volume,
           muted: state.muted,
           playbackRate: state.playbackRate,
         });
-        activeAudioIndex = index;
+        activeAudioIndex = Number.isInteger(audioIndex) ? audioIndex : 0;
         buildAudioTracks();
         updateInfo();
-        showToast(`Audio: ${label}`, "languages");
+        if (label) showToast(`Audio: ${label}`, "languages");
       } catch (error) {
         console.error(LOG_PREFIX, "Advanced decoder failed", error);
         advanced.replaceWith(previous);
         video = previous;
         await loadHlsIfNeeded();
         if (state.autoplay) previous.play().catch(() => undefined);
-        showToast("Could not switch this audio track", "triangle-alert", 4200);
+        showToast("Advanced decoder could not play this file", "triangle-alert", 4200);
         throw error;
       }
+    }
+
+    async function switchAudioTrack(index, label) {
+      const nativeTracks = video.audioTracks;
+      if (nativeTracks && nativeTracks.length > index) {
+        Array.from(nativeTracks).forEach((track, candidateIndex) => {
+          track.enabled = candidateIndex === index;
+        });
+        activeAudioIndex = index;
+        buildAudioTracks();
+        showToast(`Audio: ${label}`, "languages");
+        return;
+      }
+
+      if (typeof video.selectAudioByIndex === "function") {
+        await video.selectAudioByIndex(index);
+        activeAudioIndex = index;
+        buildAudioTracks();
+        showToast(`Audio: ${label}`, "languages");
+        return;
+      }
+
+      await activateAdvancedDecoder(index, label);
     }
 
     function buildAudioTracks() {
@@ -847,7 +866,19 @@ document.addEventListener("DOMContentLoaded", () => {
         buildSubtitleTracks();
         showControls();
       });
-      target.addEventListener("error", showError);
+      target.addEventListener("error", () => {
+        const unsupported = target.error && target.error.code === 4;
+        if (
+          target === video
+          && target.tagName === "VIDEO"
+          && unsupported
+          && window.AmaterasuLibmediaPlayer
+        ) {
+          activateAdvancedDecoder().catch(showError);
+          return;
+        }
+        showError();
+      });
       target.addEventListener("ended", () => {
         if (autoplayNext && PLAYLIST && PLAYLIST.next_url && !target.loop) {
           window.location.assign(PLAYLIST.next_url);

@@ -3,6 +3,7 @@ import asyncio
 import logging
 import re
 import sys
+from collections import OrderedDict
 from contextlib import suppress
 from hashlib import sha256
 from html import escape
@@ -397,6 +398,8 @@ def test_wzmlx_media_features_are_wired_into_filetolink():
     assert "playlist_token" in playlist
 
     assert "loadTrackInfo" in player_js
+    assert "activateAdvancedDecoder" in player_js
+    assert 'advanced.addEventListener("advancedstreams"' in player_js
     assert "selectSubtitle" in player_js
     assert "selectAudioByIndex" in player_js
     assert "Autoplay next" in player_js
@@ -414,6 +417,76 @@ def test_wzmlx_media_features_are_wired_into_filetolink():
     assert "not Config.DATABASE_URL" in listener
     assert "add_filetolink_playlist" in database
     assert "get_filetolink_playlist" in database
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("complete", [True, False])
+async def test_track_probe_expands_truncated_prefix_without_caching_failure(complete):
+    requested = []
+    probed = []
+    cache = OrderedDict()
+
+    async def media_prefix(
+        _client_id,
+        _client,
+        _message,
+        _file_size,
+        byte_limit,
+        start=0,
+    ):
+        requested.append((start, byte_limit))
+        return b"x" * (byte_limit - start)
+
+    class FakeProcess:
+        returncode = 0
+
+        async def communicate(self, data):
+            probed.append(len(data))
+            if complete and len(data) == 32:
+                return (
+                    b'{"streams":['
+                    b'{"codec_type":"audio","codec_name":"aac"},'
+                    b'{"codec_type":"subtitle","codec_name":"hdmv_pgs_subtitle"},'
+                    b'{"codec_type":"subtitle","codec_name":"ass"}]}',
+                    b"",
+                )
+            self.returncode = 1
+            return b'{"streams":[]}', b"File ended prematurely"
+
+    async def create_process(*_args, **_kwargs):
+        return FakeProcess()
+
+    namespace = {
+        "CancelledError": asyncio.CancelledError,
+        "LOGGER": logging.getLogger(__name__),
+        "PIPE": object(),
+        "_FFPROBE_BIN": "ffprobe",
+        "_TRACK_CACHE_LIMIT": 8,
+        "_TRACK_PROBE_INCOMPLETE_ERRORS": ("file ended prematurely", "end of file"),
+        "_TRACK_PROBE_LIMITS": (6, 16, 32),
+        "_bounded_cache_put": lambda target, key, value, _limit: target.update({key: value}),
+        "_media_prefix": media_prefix,
+        "_track_probe_cache": cache,
+        "_track_title": lambda _stream, index: f"Track {index + 1}",
+        "create_subprocess_exec": create_process,
+        "json_loads": __import__("json").loads,
+        "suppress": suppress,
+        "wait_for": asyncio.wait_for,
+    }
+    load_functions({"_probe_media_tracks"}, namespace)
+    media = SimpleNamespace(file_unique_id="unique", file_size=40)
+
+    result = await namespace["_probe_media_tracks"](
+        0, object(), object(), -100, 5, media
+    )
+
+    assert requested == [(0, 6), (6, 16), (16, 32)]
+    assert probed == [6, 16, 32]
+    assert result["audio"] == ([{"index": 0, "title": "Track 1", "codec": "aac"}] if complete else [])
+    assert result["subtitle"] == (
+        [{"index": 1, "title": "Track 2", "codec": "ass"}] if complete else []
+    )
+    assert bool(cache) is complete
 
 
 def test_media_feature_caches_are_bounded_by_entries_and_bytes():

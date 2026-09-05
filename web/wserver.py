@@ -2237,7 +2237,8 @@ _stream_client_health = {}
 _track_probe_cache = OrderedDict()
 _poster_cache = OrderedDict()
 _subtitle_cache = OrderedDict()
-_TRACK_PROBE_BYTES = 6 * 1024 * 1024
+_TRACK_PROBE_LIMITS = (6 * 1024 * 1024, 16 * 1024 * 1024, 32 * 1024 * 1024)
+_TRACK_PROBE_INCOMPLETE_ERRORS = ("file ended prematurely", "end of file")
 _TRACK_CACHE_LIMIT = 128
 _POSTER_CACHE_LIMIT = 64
 _POSTER_MAX_BYTES = 2 * 1024 * 1024
@@ -2956,16 +2957,25 @@ def _bounded_bytes_cache_put(
         total -= len(removed)
 
 
-async def _media_prefix(client_id, client, message, file_size: int) -> bytes:
+async def _media_prefix(
+    client_id,
+    client,
+    message,
+    file_size: int,
+    byte_limit: int,
+    start: int = 0,
+) -> bytes:
     if file_size <= 0:
         return b""
-    end = min(int(file_size), _TRACK_PROBE_BYTES) - 1
+    end = min(int(file_size), int(byte_limit)) - 1
+    if start > end:
+        return b""
     parts = []
     async for chunk in _iter_telegram_range(
         client_id,
         client,
         message,
-        0,
+        start,
         end,
         file_size,
     ):
@@ -2988,61 +2998,91 @@ async def _probe_media_tracks(
         _track_probe_cache.move_to_end(cache_key)
         return cached
 
-    prefix = await _media_prefix(
-        client_id,
-        client,
-        message,
-        int(getattr(media, "file_size", 0) or 0),
-    )
-    if not prefix:
+    file_size = int(getattr(media, "file_size", 0) or 0)
+    if file_size <= 0:
         return {"audio": [], "subtitle": []}
 
-    try:
-        process = await create_subprocess_exec(
-            _FFPROBE_BIN,
-            "-hide_banner",
-            "-loglevel",
-            "error",
-            "-print_format",
-            "json",
-            "-show_streams",
-            "-",
-            stdin=PIPE,
-            stdout=PIPE,
-            stderr=PIPE,
+    prefix = bytearray()
+    streams = []
+    incomplete = False
+    for byte_limit in _TRACK_PROBE_LIMITS:
+        target_size = min(file_size, byte_limit)
+        prefix.extend(
+            await _media_prefix(
+                client_id,
+                client,
+                message,
+                file_size,
+                target_size,
+                len(prefix),
+            )
         )
-    except FileNotFoundError:
-        LOGGER.warning("FileToLink track probing unavailable: ffprobe not found")
-        return {"audio": [], "subtitle": []}
+        if not prefix:
+            return {"audio": [], "subtitle": []}
 
-    try:
-        stdout, stderr = await wait_for(process.communicate(prefix), timeout=45)
-    except CancelledError:
-        with suppress(ProcessLookupError):
-            process.kill()
-        with suppress(CancelledError, Exception):
-            await process.wait()
-        raise
-    except Exception as error:
-        with suppress(ProcessLookupError):
-            process.kill()
-        with suppress(CancelledError, Exception):
-            await process.wait()
-        LOGGER.warning("FileToLink track probe failed: %s", error)
-        return {"audio": [], "subtitle": []}
+        try:
+            process = await create_subprocess_exec(
+                _FFPROBE_BIN,
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-print_format",
+                "json",
+                "-show_streams",
+                "-",
+                stdin=PIPE,
+                stdout=PIPE,
+                stderr=PIPE,
+            )
+        except FileNotFoundError:
+            LOGGER.warning("FileToLink track probing unavailable: ffprobe not found")
+            return {"audio": [], "subtitle": []}
 
-    if process.returncode not in (0, None) and stderr:
+        try:
+            stdout, stderr = await wait_for(
+                process.communicate(bytes(prefix)), timeout=45
+            )
+        except CancelledError:
+            with suppress(ProcessLookupError):
+                process.kill()
+            with suppress(CancelledError, Exception):
+                await process.wait()
+            raise
+        except Exception as error:
+            with suppress(ProcessLookupError):
+                process.kill()
+            with suppress(CancelledError, Exception):
+                await process.wait()
+            LOGGER.warning("FileToLink track probe failed: %s", error)
+            return {"audio": [], "subtitle": []}
+
+        error_text = stderr.decode("utf-8", errors="replace") if stderr else ""
+        if process.returncode not in (0, None) and error_text:
+            LOGGER.debug("FileToLink ffprobe output: %s", error_text[-600:])
+        try:
+            streams = json_loads(stdout).get("streams", [])
+        except (TypeError, ValueError):
+            streams = []
+
+        incomplete = (
+            not streams
+            and len(prefix) < file_size
+            and any(
+                marker in error_text.lower()
+                for marker in _TRACK_PROBE_INCOMPLETE_ERRORS
+            )
+        )
+        if not incomplete:
+            break
         LOGGER.debug(
-            "FileToLink ffprobe output: %s",
-            stderr.decode("utf-8", errors="replace")[-600:],
+            "FileToLink track probe needs more data: %s/%s bytes",
+            len(prefix),
+            file_size,
         )
-    try:
-        streams = json_loads(stdout).get("streams", [])
-    except (TypeError, ValueError):
-        streams = []
 
     audio = []
     subtitles = []
+    subtitle_index = 0
     unsupported_subtitle_codecs = {
         "dvd_subtitle",
         "hdmv_pgs_subtitle",
@@ -3060,10 +3100,11 @@ async def _probe_media_tracks(
                 }
             )
         elif kind == "subtitle":
+            index = subtitle_index
+            subtitle_index += 1
             codec = str(stream.get("codec_name") or "").lower()
             if codec in unsupported_subtitle_codecs:
                 continue
-            index = len(subtitles)
             subtitles.append(
                 {
                     "index": index,
@@ -3073,7 +3114,8 @@ async def _probe_media_tracks(
             )
 
     result = {"audio": audio, "subtitle": subtitles}
-    _bounded_cache_put(_track_probe_cache, cache_key, result, _TRACK_CACHE_LIMIT)
+    if streams or not incomplete:
+        _bounded_cache_put(_track_probe_cache, cache_key, result, _TRACK_CACHE_LIMIT)
     return result
 
 
