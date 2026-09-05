@@ -220,7 +220,7 @@
     }
 
     getAudioStreams() {
-      return this._streams.filter((stream) => stream && stream.mediaType === 1);
+      return this._streams.filter((stream) => stream && [1, "Audio"].includes(stream.mediaType));
     }
 
     selectAudioByIndex(index) {
@@ -288,11 +288,11 @@
       };
     }
     get videoWidth() {
-      const stream = this._streams.find((item) => item && item.mediaType === 0);
+      const stream = this._streams.find((item) => item && [0, "Video"].includes(item.mediaType));
       return Number(stream && stream.width) || this.clientWidth;
     }
     get videoHeight() {
-      const stream = this._streams.find((item) => item && item.mediaType === 0);
+      const stream = this._streams.find((item) => item && [0, "Video"].includes(item.mediaType));
       return Number(stream && stream.height) || this.clientHeight;
     }
     get error() { return null; }

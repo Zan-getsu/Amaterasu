@@ -411,6 +411,9 @@ def test_wzmlx_media_features_are_wired_into_filetolink():
     assert '<a class="stream-download-btn" id="main-download-btn"' in player
     assert '<main class="playlist-page">' not in playlist
     assert "@libmedia/avplayer@1.3.1" in libmedia_js
+    assert '[1, "Audio"].includes(stream.mediaType)' in player_js
+    assert '[1, "Audio"].includes(stream.mediaType)' in libmedia_js
+    assert '[0, "Video"].includes(item.mediaType)' in libmedia_js
     assert "create_filetolink_playlist" in filetolink
     assert "not Config.DATABASE_URL" in filetolink
     assert "_create_leech_stream_playlist" in listener

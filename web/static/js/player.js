@@ -407,7 +407,7 @@ document.addEventListener("DOMContentLoaded", () => {
       advanced.id = "player";
       advanced.addEventListener("advancedstreams", (event) => {
         const audio = (event.detail || [])
-          .filter((stream) => stream && stream.mediaType === 1)
+          .filter((stream) => stream && [1, "Audio"].includes(stream.mediaType))
           .map((stream, index) => {
             const metadata = stream.metadata || {};
             return {
