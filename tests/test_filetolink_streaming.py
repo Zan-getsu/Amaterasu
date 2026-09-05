@@ -414,6 +414,8 @@ def test_wzmlx_media_features_are_wired_into_filetolink():
     assert '[1, "Audio"].includes(stream.mediaType)' in player_js
     assert '[1, "Audio"].includes(stream.mediaType)' in libmedia_js
     assert '[0, "Video"].includes(item.mediaType)' in libmedia_js
+    assert "switchAudioTrack(index, label)" in player_js
+    assert "switchAudioTrack(Number(track.index ?? index), label)" not in player_js
     assert "create_filetolink_playlist" in filetolink
     assert "not Config.DATABASE_URL" in filetolink
     assert "_create_leech_stream_playlist" in listener

@@ -491,7 +491,7 @@ document.addEventListener("DOMContentLoaded", () => {
       tracks.forEach((track, index) => {
         const label = track.title || `Track ${index + 1}`;
         audioList.appendChild(createRadioOption("audio-track", label, index === activeAudioIndex, () => {
-          switchAudioTrack(Number(track.index ?? index), label).catch(() => undefined);
+          switchAudioTrack(index, label).catch(() => undefined);
         }));
       });
     }
