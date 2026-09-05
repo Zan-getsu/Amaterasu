@@ -394,7 +394,10 @@ def test_wzmlx_media_features_are_wired_into_filetolink():
     assert "am-control-row" in player
     assert "am-transport-controls" in player
     assert "am-player-tools" in player
-    assert "/static/js/libmedia-player.js" in player
+    assert "/static/js/libmedia-player.js?v={{ asset_version }}" in player
+    assert "/static/js/player.js?v={{ asset_version }}" in player
+    assert "/static/css/player.css?v={{ asset_version }}" in player
+    assert "/static/css/player.css?v={{ asset_version }}" in playlist
     assert "playlist_token" in playlist
 
     assert "loadTrackInfo" in player_js
@@ -422,6 +425,7 @@ def test_wzmlx_media_features_are_wired_into_filetolink():
     assert "not Config.DATABASE_URL" in listener
     assert "add_filetolink_playlist" in database
     assert "get_filetolink_playlist" in database
+    assert '"asset_version": _PLAYER_ASSET_VERSION' in server
 
 
 @pytest.mark.asyncio

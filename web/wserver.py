@@ -261,6 +261,16 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 app.mount("/static", StaticFiles(directory="web/static"), name="static")
 templates = Jinja2Templates(directory="web/templates")
+_PLAYER_ASSET_VERSION = sha256(
+    b"".join(
+        (Path(__file__).parent / "static" / relative_path).read_bytes()
+        for relative_path in (
+            "css/player.css",
+            "js/libmedia-player.js",
+            "js/player.js",
+        )
+    )
+).hexdigest()[:12]
 STREAM_TOKEN_LENGTH = 24
 
 
@@ -3696,6 +3706,7 @@ async def filetolink_playlist(token: str, request: Request):
             "playlist_name": str(playlist.get("name") or "Playlist"),
             "playlist_token": token,
             "items": items,
+            "asset_version": _PLAYER_ASSET_VERSION,
         },
     )
 
@@ -3817,6 +3828,7 @@ async def watch_media(chat_id: str, message_id: int, request: Request, filename:
             "poster_url": poster_url,
             "tracks_url": tracks_url,
             "playlist": playlist,
+            "asset_version": _PLAYER_ASSET_VERSION,
         })
     finally:
         _release_stream_load(client_id)

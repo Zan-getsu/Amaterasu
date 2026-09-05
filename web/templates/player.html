@@ -3,7 +3,7 @@
 {% block title %}Amaterasu Stream | {{ file_name }}{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="/static/css/player.css" />
+<link rel="stylesheet" href="/static/css/player.css?v={{ asset_version }}" />
 {% endblock %}
 
 {% block content %}
@@ -243,6 +243,6 @@ window.AMATERASU_PLAYER = {
   playlist: {{ playlist | tojson }}
 };
 </script>
-<script src="/static/js/libmedia-player.js" defer></script>
-<script src="/static/js/player.js" defer></script>
+<script src="/static/js/libmedia-player.js?v={{ asset_version }}" defer></script>
+<script src="/static/js/player.js?v={{ asset_version }}" defer></script>
 {% endblock %}
