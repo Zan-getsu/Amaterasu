@@ -39,6 +39,7 @@ def test_session_input_validation_accepts_friendly_formats():
         " 123456 ", "0123456789ABCDEF0123456789ABCDEF"
     ) == (123456, "0123456789abcdef0123456789abcdef")
     assert telegram_session.normalize_phone_number("+1 (415) 456-6376") == "+14154566376"
+    assert telegram_session.normalize_login_code("12345") == "12345"
     assert telegram_session.normalize_login_code("1 2 3 4 5") == "12345"
     assert telegram_session.validate_two_step_password("correct horse") == "correct horse"
 
@@ -112,6 +113,9 @@ def test_session_page_has_complete_secure_responsive_flow():
     assert "Replace saved session" not in template
     assert 'id="replace-session"' not in template
     assert 'autocomplete="one-time-code"' in template
+    assert 'pattern="[0-9]( [0-9]){4,5}"' in template
+    assert "spacing is added automatically" in template
+    assert "formatLoginCode" in template
     assert 'autocomplete="current-password"' in template
     assert "Saved Messages" in template
     assert "decrypted only when you press Copy" in template

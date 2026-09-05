@@ -230,6 +230,11 @@ body { overflow-x: hidden; }
 .is-submitting .session-button__loader { display: block; }
 @keyframes session-spin { to { transform: rotate(360deg); } }
 .code-field { max-width: 330px; }
+.code-field .session-input {
+  font-size: 18px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
 .password-wrap { position: relative; max-width: 520px; }
 .password-wrap .session-input { padding-right: 48px; }
 .password-toggle {
@@ -459,12 +464,13 @@ body { overflow-x: hidden; }
 
           {% elif step == 'code' %}
           <h2 id="session-form-title" class="session-heading">Enter the Telegram login code</h2>
-          <p class="session-copy">Telegram sent the code to {{ phone_hint }}. Spaces between digits are accepted.</p>
+          <p class="session-copy">Telegram sent the code to {{ phone_hint }}. Type or paste the digits normally; spacing is added automatically.</p>
           <form class="session-form" method="post" action="/api/session-generator/verify?user_id={{ user_id }}&amp;token={{ page_token }}">
             <input type="hidden" name="attempt" value="{{ attempt_id }}">
             <div class="field-group code-field">
               <label class="field-label" for="code">Login code</label>
-              <input id="code" class="session-input session-input--mono" name="code" type="text" inputmode="numeric" maxlength="32" autocomplete="one-time-code" placeholder="1 2 3 4 5" required autofocus>
+              <input id="code" class="session-input session-input--mono" name="code" type="text" inputmode="numeric" maxlength="11" autocomplete="one-time-code" placeholder="1 2 3 4 5" pattern="[0-9]( [0-9]){4,5}" aria-describedby="code-hint" required autofocus>
+              <p id="code-hint" class="field-hint">Enter the 5 or 6 digit code without adding spaces.</p>
             </div>
             <div class="privacy-note">
               <i data-lucide="shield" style="width:17px;height:17px"></i>
@@ -567,6 +573,27 @@ body { overflow-x: hidden; }
 {% block extra_js %}
 <script>
 document.addEventListener("DOMContentLoaded", () => {
+  const code = document.getElementById("code");
+  const formatLoginCode = () => {
+    const cursor = code.selectionStart ?? code.value.length;
+    const digitsBeforeCursor = code.value.slice(0, cursor).replace(/\D/g, "").length;
+    const digits = code.value.replace(/\D/g, "").slice(0, 6);
+    code.value = digits.split("").join(" ");
+    const nextCursor = Math.min(digitsBeforeCursor * 2, code.value.length);
+    code.setSelectionRange(nextCursor, nextCursor);
+  };
+  code?.addEventListener("keydown", (event) => {
+    if (
+      event.key === "Backspace"
+      && code.selectionStart === code.selectionEnd
+      && code.selectionStart > 0
+      && code.value[code.selectionStart - 1] === " "
+    ) {
+      code.setSelectionRange(code.selectionStart - 1, code.selectionStart - 1);
+    }
+  });
+  code?.addEventListener("input", formatLoginCode);
+
   document.querySelectorAll(".session-form").forEach((form) => {
     form.addEventListener("submit", () => {
       form.classList.add("is-submitting");
