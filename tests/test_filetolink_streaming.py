@@ -2,6 +2,8 @@ import ast
 import asyncio
 import logging
 import re
+import shutil
+import subprocess
 import sys
 from collections import OrderedDict
 from contextlib import suppress
@@ -12,6 +14,21 @@ from secrets import token_urlsafe
 from types import ModuleType, SimpleNamespace
 
 import pytest
+
+
+def test_player_runtime_behaviors():
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("Node.js is required for player runtime checks")
+    result = subprocess.run(
+        [node, "--test", str(Path(__file__).with_name("player_runtime.test.cjs"))],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
 
 SOURCE_PATH = Path(__file__).parents[1] / "web" / "wserver.py"
 BOT_SETTINGS_PATH = Path(__file__).parents[1] / "bot" / "modules" / "bot_settings.py"
@@ -408,7 +425,11 @@ def test_wzmlx_media_features_are_wired_into_filetolink():
     assert "selectSubtitleByIndex" in libmedia_js
     assert "setSubtitleEnabled" in libmedia_js
     assert "return this._run(async () =>" in libmedia_js
-    assert "subtitle.embedded && window.AmaterasuLibmediaPlayer" in player_js
+    assert (
+        "subtitle.embedded && !subtitlePlainText?.checked && window.AmaterasuLibmediaPlayer"
+        in player_js
+    )
+    assert 'id="subtitle-plain-text"' in player
     assert "embedded: true" in player_js
     assert "const selectionId = ++subtitleSelectionId" in player_js
     assert "await video.setSubtitleEnabled(false)" in player_js

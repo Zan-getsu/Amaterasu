@@ -59,6 +59,7 @@ tests/*
 !tests/test_status_network_metrics.py
 !tests/test_inline_ui_design.py
 !tests/test_filetolink_streaming.py
+!tests/player_runtime.test.cjs
 !tests/test_adaptive_tg_stream.py
 !tests/test_hyperdl_routing.py
 !tests/test_bot_settings_categories.py

@@ -19,6 +19,7 @@ document.addEventListener("DOMContentLoaded", () => {
     function showToast(message, icon = "info", duration = 2500) {
       const stack = document.getElementById("player-toasts") || document.getElementById("bs-toast-container");
       if (!stack) return;
+      if (stack.id === "player-toasts") stack.replaceChildren();
       const toast = document.createElement("div");
       toast.className = stack.id === "player-toasts" ? "am-toast" : "bs-toast bs-toast--info";
       toast.innerHTML = `<i data-lucide="${icon}"></i><span></span>`;
@@ -211,6 +212,10 @@ document.addEventListener("DOMContentLoaded", () => {
     const gestureRight = document.getElementById("gesture-right");
     const subtitleOverlay = document.getElementById("subtitle-overlay");
     const subtitleText = document.getElementById("subtitle-text");
+    const subtitleStatus = document.getElementById("subtitle-status");
+    const subtitleDelayInput = document.getElementById("subtitle-delay");
+    const subtitleDelayValue = document.getElementById("subtitle-delay-value");
+    const subtitlePlainText = document.getElementById("subtitle-plain-text");
     const panels = [settingsPanel, audioPanel, subtitlePanel];
 
     let rafId = 0;
@@ -228,7 +233,14 @@ document.addEventListener("DOMContentLoaded", () => {
     let subtitleCues = [];
     let subtitleCueKey = null;
     let activeSubtitleUrl = "";
+    let activeSubtitle = null;
     let subtitleSelectionId = 0;
+    let subtitleQueue = Promise.resolve();
+    let subtitleDelay = 0;
+    let subtitleRequest = null;
+    const subtitleCache = new Map();
+    let decoderStartup = null;
+    let audioSelectionId = 0;
     let activeAudioIndex = 0;
     let autoplayNext = Boolean(PLAYLIST && PLAYLIST.next_url);
 
@@ -260,13 +272,16 @@ document.addEventListener("DOMContentLoaded", () => {
       panels.forEach((panel) => {
         if (panel && panel !== exceptPanel) panel.hidden = true;
       });
+      [audioBtn, subtitleBtn, settingsBtn].forEach((button, index) => {
+        button.setAttribute("aria-expanded", String(![audioPanel, subtitlePanel, settingsPanel][index].hidden));
+      });
     }
 
     function togglePanel(panel) {
       if (!panel) return;
       const shouldOpen = panel.hidden;
-      closePanels(panel);
       panel.hidden = !shouldOpen;
+      closePanels(panel);
       showControls();
     }
 
@@ -320,7 +335,7 @@ document.addEventListener("DOMContentLoaded", () => {
       window.clearTimeout(idleTimer);
       const delay = isTouch ? 4000 : 3000;
       idleTimer = window.setTimeout(() => {
-        if (!video.paused && !draggingProgress) shell.classList.add("is-idle");
+        if (!video.paused && !draggingProgress && panels.every((panel) => panel.hidden)) shell.classList.add("is-idle");
       }, delay);
     }
 
@@ -393,7 +408,22 @@ document.addEventListener("DOMContentLoaded", () => {
       return option;
     }
 
-    async function activateAdvancedDecoder(audioIndex, label, subtitleIndex) {
+    async function activateAdvancedDecoder(audioIndex, label) {
+      if (!decoderStartup && video.tagName === "VIDEO") {
+        decoderStartup = startAdvancedDecoder().finally(() => { decoderStartup = null; });
+      }
+      if (decoderStartup) await decoderStartup;
+      video.setSubtitleDelay?.(subtitleDelay);
+      if (Number.isInteger(audioIndex)) {
+        await video.selectAudioByIndex(audioIndex);
+        activeAudioIndex = audioIndex;
+        buildAudioTracks();
+        if (label) showToast(`Audio: ${label}`, "languages");
+      }
+      return video;
+    }
+
+    async function startAdvancedDecoder() {
       if (!window.AmaterasuLibmediaPlayer) {
         throw new Error("Advanced decoder is unavailable");
       }
@@ -416,6 +446,7 @@ document.addEventListener("DOMContentLoaded", () => {
       const advanced = document.createElement("amaterasu-libmedia-player");
       advanced.id = "player";
       advanced.addEventListener("advancedstreams", (event) => {
+        if (video !== advanced) return;
         const audio = (event.detail || [])
           .filter((stream) => stream && [1, "Audio"].includes(stream.mediaType))
           .map((stream, index) => {
@@ -429,58 +460,89 @@ document.addEventListener("DOMContentLoaded", () => {
           trackInfo.audio = audio;
           buildAudioTracks();
         }
+        if (!trackInfo.subtitle.length) {
+          trackInfo.subtitle = (event.detail || [])
+            .filter((stream) => stream && [3, "Subtitle"].includes(stream.mediaType))
+            .map((stream, index) => ({
+              index,
+              title: [stream.metadata?.title, stream.metadata?.language].filter(Boolean).join(" · ") || `Subtitle ${index + 1}`,
+              url: TRACKS_URL ? `${TRACKS_URL.replace("/api/tracks/", "/subs/")}/${index}.vtt` : `embedded:${index}`,
+            }));
+          buildSubtitleTracks();
+        }
       });
       previous.replaceWith(advanced);
       video = advanced;
       bindMediaEvents(video);
       video.loop = state.loop;
+      video.style.filter = previous.style.filter;
+      shell.setAttribute("aria-busy", "true");
       showToast("Starting advanced decoder…", "languages", 4200);
       try {
         await advanced.open(absoluteStreamUrl, {
-          audioIndex,
+          audioIndex: activeAudioIndex,
           currentTime: state.currentTime,
           autoplay: state.autoplay,
           volume: state.volume,
           muted: state.muted,
           playbackRate: state.playbackRate,
-          subtitleIndex,
         });
-        activeAudioIndex = Number.isInteger(audioIndex) ? audioIndex : 0;
+        errorCard.hidden = true;
         buildAudioTracks();
         updateInfo();
-        if (label) showToast(`Audio: ${label}`, "languages");
       } catch (error) {
         console.error(LOG_PREFIX, "Advanced decoder failed", error);
         advanced.replaceWith(previous);
         video = previous;
         await loadHlsIfNeeded();
+        previous.currentTime = state.currentTime;
         if (state.autoplay) previous.play().catch(() => undefined);
         showToast("Advanced decoder could not play this file", "triangle-alert", 4200);
         throw error;
+      } finally {
+        shell.setAttribute("aria-busy", "false");
+        updatePlayState();
       }
     }
 
     async function switchAudioTrack(index, label) {
-      const nativeTracks = video.audioTracks;
-      if (nativeTracks && nativeTracks.length > index) {
-        Array.from(nativeTracks).forEach((track, candidateIndex) => {
-          track.enabled = candidateIndex === index;
-        });
-        activeAudioIndex = index;
-        buildAudioTracks();
-        showToast(`Audio: ${label}`, "languages");
-        return;
-      }
+      const selectionId = ++audioSelectionId;
+      audioList.setAttribute("aria-busy", "true");
+      try {
+        if (decoderStartup) await decoderStartup;
+        if (selectionId !== audioSelectionId) return;
+        const nativeTracks = video.audioTracks;
+        if (nativeTracks && nativeTracks.length > index) {
+          Array.from(nativeTracks).forEach((track, candidateIndex) => {
+            track.enabled = candidateIndex === index;
+          });
+          activeAudioIndex = index;
+          buildAudioTracks();
+          showToast(`Audio: ${label}`, "languages");
+          return;
+        }
 
-      if (typeof video.selectAudioByIndex === "function") {
-        await video.selectAudioByIndex(index);
-        activeAudioIndex = index;
-        buildAudioTracks();
-        showToast(`Audio: ${label}`, "languages");
-        return;
-      }
+        if (typeof video.selectAudioByIndex === "function") {
+          await video.selectAudioByIndex(index);
+          if (selectionId !== audioSelectionId) return;
+          activeAudioIndex = index;
+          buildAudioTracks();
+          showToast(`Audio: ${label}`, "languages");
+          return;
+        }
 
-      await activateAdvancedDecoder(index, label);
+        await activateAdvancedDecoder(index, label);
+      } catch (error) {
+        if (selectionId === audioSelectionId) {
+          console.warn(LOG_PREFIX, "Audio selection failed", error);
+          showToast("Could not switch audio. Try this track again.", "triangle-alert", 4200);
+        }
+      } finally {
+        if (selectionId === audioSelectionId) {
+          audioList.setAttribute("aria-busy", "false");
+          buildAudioTracks();
+        }
+      }
     }
 
     function buildAudioTracks() {
@@ -544,7 +606,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     function paintSubtitle() {
-      const current = Number(video.currentTime) || 0;
+      const current = (Number(video.currentTime) || 0) - subtitleDelay;
       const active = subtitleCues.filter((cue) => current >= cue.start && current < cue.end);
       const key = active.map((cue) => `${cue.start}:${cue.end}:${cue.text}`).join("|");
       if (key === subtitleCueKey) return;
@@ -553,54 +615,92 @@ document.addEventListener("DOMContentLoaded", () => {
       subtitleText.textContent = active.map((cue) => cue.text).join("\n");
     }
 
-    async function selectSubtitle(subtitle, label) {
+    function selectSubtitle(subtitle, label) {
       const selectionId = ++subtitleSelectionId;
+      subtitleRequest?.abort();
       activeSubtitleUrl = subtitle ? subtitle.url : "";
+      activeSubtitle = subtitle;
       subtitleCues = [];
       subtitleCueKey = null;
       paintSubtitle();
-      if (!subtitle) {
+      subtitleList.setAttribute("aria-busy", "true");
+      if (subtitleStatus) subtitleStatus.textContent = subtitle ? `Loading ${label}…` : "";
+      subtitleQueue = subtitleQueue.catch(() => undefined).then(async () => {
+        if (selectionId !== subtitleSelectionId) return;
+        if (decoderStartup) await decoderStartup;
+        if (selectionId !== subtitleSelectionId) return;
+        if (!subtitle) {
+          if (typeof video.setSubtitleEnabled === "function") {
+            await video.setSubtitleEnabled(false);
+          }
+          showToast("Subtitles off", "captions");
+          return;
+        }
+
+        if (subtitle.embedded && !subtitlePlainText?.checked && window.AmaterasuLibmediaPlayer) {
+          try {
+            if (typeof video.selectSubtitleByIndex === "function") {
+              await video.selectSubtitleByIndex(subtitle.index);
+            } else {
+              await activateAdvancedDecoder();
+              if (selectionId !== subtitleSelectionId) return;
+              await video.selectSubtitleByIndex(subtitle.index);
+            }
+            if (selectionId !== subtitleSelectionId) return;
+            if (subtitleStatus) subtitleStatus.textContent = label;
+            showToast(`Subtitles: ${label}`, "captions");
+            return;
+          } catch (error) {
+            if (selectionId !== subtitleSelectionId) return;
+            console.warn(LOG_PREFIX, "Advanced subtitles unavailable; using WebVTT fallback", error);
+          }
+        }
+
         if (typeof video.setSubtitleEnabled === "function") {
           await video.setSubtitleEnabled(false);
         }
-        showToast("Subtitles off", "captions");
-        return;
-      }
-
-      if (subtitle.embedded && window.AmaterasuLibmediaPlayer) {
-        try {
-          if (typeof video.selectSubtitleByIndex === "function") {
-            await video.selectSubtitleByIndex(subtitle.index);
-          } else {
-            await activateAdvancedDecoder(activeAudioIndex, "", subtitle.index);
-          }
-          if (selectionId !== subtitleSelectionId) return;
-          showToast(`Subtitles: ${label}`, "captions");
-          return;
-        } catch (error) {
-          console.warn(LOG_PREFIX, "Advanced subtitles unavailable; using WebVTT fallback", error);
+        if (selectionId !== subtitleSelectionId) return;
+        if (!subtitle.url || subtitle.url.startsWith("embedded:")) throw new Error("No subtitle fallback is available");
+        showToast("Loading subtitles…", "captions");
+        let cues = subtitleCache.get(subtitle.url);
+        if (!cues) {
+          subtitleRequest = new AbortController();
+          const response = await fetch(subtitle.url, { cache: "force-cache", signal: subtitleRequest.signal });
+          if (!response.ok) throw new Error(`Subtitle request failed: ${response.status}`);
+          cues = parseWebVtt(await response.text());
+          if (!cues.length) throw new Error("This subtitle track contains no readable cues");
+          if (subtitleCache.size >= 4) subtitleCache.delete(subtitleCache.keys().next().value);
+          subtitleCache.set(subtitle.url, cues);
         }
-      }
-
-      if (typeof video.setSubtitleEnabled === "function") {
-        await video.setSubtitleEnabled(false);
-      }
-      if (selectionId !== subtitleSelectionId) return;
-      showToast("Loading subtitles…", "captions");
-      const response = await fetch(subtitle.url, { cache: "force-cache" });
-      if (!response.ok) throw new Error(`Subtitle request failed: ${response.status}`);
-      const subtitleText = await response.text();
-      if (selectionId !== subtitleSelectionId || activeSubtitleUrl !== subtitle.url) return;
-      subtitleCues = parseWebVtt(subtitleText);
-      subtitleCueKey = null;
-      paintSubtitle();
-      showToast(`Subtitles: ${label}`, "captions");
+        if (selectionId !== subtitleSelectionId || activeSubtitleUrl !== subtitle.url) return;
+        subtitleCues = cues;
+        subtitleCueKey = null;
+        paintSubtitle();
+        showToast(`Subtitles: ${label}`, "captions");
+        if (subtitleStatus) subtitleStatus.textContent = label;
+      }).catch(async (error) => {
+        if (selectionId !== subtitleSelectionId || error.name === "AbortError") return;
+        activeSubtitleUrl = "";
+        activeSubtitle = null;
+        if (subtitleStatus) subtitleStatus.textContent = "Could not load this track. Select it to retry.";
+        await video.setSubtitleEnabled?.(false);
+        console.warn(LOG_PREFIX, "Subtitle load failed", error);
+        showToast("Could not load this subtitle track. Select it to retry.", "triangle-alert", 4200);
+      }).finally(() => {
+        if (selectionId === subtitleSelectionId) {
+          subtitleRequest = null;
+          subtitleList.setAttribute("aria-busy", "false");
+          buildSubtitleTracks();
+        }
+      });
+      return subtitleQueue;
     }
 
     function buildSubtitleTracks() {
       const embedded = Array.isArray(trackInfo.subtitle)
         ? trackInfo.subtitle.map((subtitle) => ({ ...subtitle, embedded: true }))
         : [];
+      document.getElementById("subtitle-compatibility").hidden = !embedded.some((track) => track.url && !track.url.startsWith("embedded:"));
       const tracks = [
         ...SUBTITLES.map((subtitle, index) => ({
           ...subtitle,
@@ -637,7 +737,12 @@ document.addEventListener("DOMContentLoaded", () => {
       }
       try {
         const response = await fetch(TRACKS_URL, { cache: "no-store" });
-        if (response.ok) trackInfo = await response.json();
+        if (response.ok) {
+          const discovered = await response.json();
+          for (const kind of ["audio", "subtitle"]) {
+            if (Array.isArray(discovered?.[kind]) && discovered[kind].length) trackInfo[kind] = discovered[kind];
+          }
+        }
       } catch (error) {
         console.warn(LOG_PREFIX, "Track discovery failed", error);
       }
@@ -813,14 +918,14 @@ document.addEventListener("DOMContentLoaded", () => {
         dropped = quality.droppedVideoFrames;
         total = quality.totalVideoFrames;
       }
-      let ahead = 0;
+      let ahead = null;
       for (let index = 0; index < video.buffered.length; index += 1) {
         if (video.buffered.start(index) <= video.currentTime && video.buffered.end(index) >= video.currentTime) {
           ahead = video.buffered.end(index) - video.currentTime;
           break;
         }
       }
-      statsPanel.textContent = `Buffered ahead: ${ahead.toFixed(1)}s\nDropped frames: ${dropped}/${total}\nReady state: ${readyStateLabel()}`;
+      statsPanel.textContent = `Buffered ahead: ${ahead === null ? "Unavailable" : `${ahead.toFixed(1)}s`}\nDropped frames: ${dropped}/${total}\nReady state: ${readyStateLabel()}`;
     }
 
     function toggleStats() {
@@ -831,7 +936,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     function showError() {
       const code = video.error ? video.error.code : "unknown";
-      errorMessage.textContent = `Error code: ${code}`;
+      errorMessage.textContent = video.error?.message || `Playback stopped (error ${code}). Retry or open the stream in an external player.`;
       errorDownload.href = absoluteDownloadUrl;
       errorCard.hidden = false;
       showToast("Playback error", "triangle-alert");
@@ -891,6 +996,7 @@ document.addEventListener("DOMContentLoaded", () => {
       target.addEventListener("volumechange", updateMuteState);
       target.addEventListener("progress", updateBuffered);
       target.addEventListener("timeupdate", () => {
+        if (target !== video) return;
         updateProgress();
         paintSubtitle();
       });
@@ -905,6 +1011,7 @@ document.addEventListener("DOMContentLoaded", () => {
         showControls();
       });
       target.addEventListener("error", () => {
+        if (target !== video || decoderStartup) return;
         const unsupported = target.error && target.error.code === 4;
         if (
           target === video
@@ -918,6 +1025,7 @@ document.addEventListener("DOMContentLoaded", () => {
         showError();
       });
       target.addEventListener("ended", () => {
+        if (target !== video) return;
         if (autoplayNext && PLAYLIST && PLAYLIST.next_url && !target.loop) {
           window.location.assign(PLAYLIST.next_url);
         }
@@ -945,6 +1053,24 @@ document.addEventListener("DOMContentLoaded", () => {
     settingsBtn.addEventListener("click", () => togglePanel(settingsPanel));
     audioBtn.addEventListener("click", () => togglePanel(audioPanel));
     subtitleBtn.addEventListener("click", () => togglePanel(subtitlePanel));
+    shell.querySelectorAll("[data-panel-close]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const panel = button.closest(".am-panel");
+        closePanels();
+        ({ "audio-panel": audioBtn, "subtitle-panel": subtitleBtn, "settings-panel": settingsBtn })[panel.id]?.focus();
+      });
+    });
+    subtitleDelayInput?.addEventListener("input", () => {
+      subtitleDelay = clamp(subtitleDelayInput.value, -5, 5);
+      subtitleDelayValue.textContent = `${subtitleDelay > 0 ? "+" : ""}${subtitleDelay.toFixed(2)}s`;
+      video.setSubtitleDelay?.(subtitleDelay);
+      paintSubtitle();
+    });
+    subtitlePlainText?.addEventListener("change", () => {
+      if (activeSubtitle?.embedded) {
+        selectSubtitle(activeSubtitle, activeSubtitle.title || activeSubtitle.label || "Subtitles").catch(() => undefined);
+      }
+    });
     pipBtn.addEventListener("click", togglePip);
     loopBtn.addEventListener("click", () => {
       video.loop = !video.loop;
@@ -974,13 +1100,23 @@ document.addEventListener("DOMContentLoaded", () => {
     helpModal.addEventListener("click", (event) => {
       if (event.target === helpModal) toggleHelp(false);
     });
-    retryBtn.addEventListener("click", () => {
+    retryBtn.addEventListener("click", async () => {
       errorCard.hidden = true;
-      video.load();
-      video.play().catch((error) => console.warn(LOG_PREFIX, "Retry play failed", error));
+      retryBtn.disabled = true;
+      try {
+        if (decoderStartup) await decoderStartup;
+        await video.load();
+        await video.play();
+      } catch (error) {
+        console.warn(LOG_PREFIX, "Retry play failed", error);
+        showError();
+      } finally {
+        retryBtn.disabled = false;
+      }
     });
 
     progress.addEventListener("pointerdown", (event) => {
+      if (event.isPrimary === false || event.button !== 0) return;
       draggingProgress = true;
       progress.setPointerCapture(event.pointerId);
       pendingProgressTime = setProgressFromClientX(event.clientX, false);
@@ -1017,6 +1153,9 @@ document.addEventListener("DOMContentLoaded", () => {
       } else if (event.key === "ArrowRight") {
         event.preventDefault();
         seekBy(10);
+      } else if (event.key === "Home" || event.key === "End") {
+        event.preventDefault();
+        if (Number.isFinite(video.duration)) video.currentTime = event.key === "Home" ? 0 : video.duration;
       }
     });
 
@@ -1031,6 +1170,10 @@ document.addEventListener("DOMContentLoaded", () => {
     });
     shell.addEventListener("click", (event) => {
       if (event.target === video || event.target.id === "tap-layer") {
+        if (panels.some((panel) => !panel.hidden)) {
+          closePanels();
+          return;
+        }
         if (!isTouch) {
           togglePlay();
           showControls();
@@ -1038,6 +1181,10 @@ document.addEventListener("DOMContentLoaded", () => {
       }
     });
     shell.addEventListener("touchstart", (event) => {
+      if (event.touches.length !== 1 || event.target.closest("button, a, input, .am-controls, .am-panel, .am-topbar")) {
+        touchState = null;
+        return;
+      }
       const touch = event.touches[0];
       const shellRect = shell.getBoundingClientRect();
       touchState = {
@@ -1104,10 +1251,12 @@ document.addEventListener("DOMContentLoaded", () => {
       }
       touchState = null;
     });
+    shell.addEventListener("touchcancel", () => { touchState = null; });
 
     document.addEventListener("keydown", (event) => {
+      if (event.defaultPrevented) return;
       const target = event.target;
-      const typing = target && ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName);
+      const typing = target && (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName));
       if (typing) return;
       if (event.ctrlKey && event.shiftKey && event.key.toLowerCase() === "d") {
         event.preventDefault();
@@ -1124,6 +1273,10 @@ document.addEventListener("DOMContentLoaded", () => {
       }
       switch (event.key.toLowerCase()) {
         case " ":
+          if (target?.closest("button, a, [role='button']")) return;
+          event.preventDefault();
+          togglePlay();
+          break;
         case "k":
           event.preventDefault();
           togglePlay();
@@ -1185,6 +1338,8 @@ document.addEventListener("DOMContentLoaded", () => {
     });
 
     window.addEventListener("pagehide", () => {
+      subtitleSelectionId += 1;
+      subtitleRequest?.abort();
       window.cancelAnimationFrame(rafId);
       window.clearTimeout(idleTimer);
       window.clearTimeout(hideGestureTimer);

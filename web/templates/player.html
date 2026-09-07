@@ -19,7 +19,7 @@
           {% endfor %}
         </video>
         <div class="am-subtitle-overlay" id="subtitle-overlay" aria-live="off" hidden>
-          <span id="subtitle-text"></span>
+          <span id="subtitle-text" dir="auto"></span>
         </div>
 
         <div class="am-topbar" aria-hidden="false">
@@ -52,21 +52,35 @@
         </div>
 
         <div class="am-panel" id="audio-panel" hidden>
+          <button class="am-panel-close" type="button" data-panel-close aria-label="Close audio tracks"><i data-lucide="x"></i></button>
           <h2>Audio tracks</h2>
           <div class="am-track-list" id="audio-track-list"></div>
         </div>
 
         <div class="am-panel" id="subtitle-panel" hidden>
+          <button class="am-panel-close" type="button" data-panel-close aria-label="Close subtitles"><i data-lucide="x"></i></button>
           <h2>Subtitles</h2>
+          <p class="am-track-status" id="subtitle-status" role="status"></p>
           <div class="am-track-list" id="subtitle-track-list"></div>
+          <div id="subtitle-compatibility" hidden>
+            <label class="am-track-option"><input id="subtitle-plain-text" type="checkbox" aria-describedby="subtitle-plain-text-help" /><span>Use plain text subtitles</span></label>
+            <p class="am-track-status" id="subtitle-plain-text-help">Try this if styled subtitles disappear after seeking. Styling is removed; the first load may take longer.</p>
+          </div>
+          <div class="am-panel-row">
+            <label for="subtitle-delay">Subtitle timing</label>
+            <output id="subtitle-delay-value" for="subtitle-delay">0.00s</output>
+          </div>
+          <input id="subtitle-delay" class="am-subtitle-delay" type="range" min="-5" max="5" step="0.25" value="0" aria-label="Subtitle delay in seconds" />
+          <p class="am-track-status">Negative: earlier. Positive: later.</p>
         </div>
 
         <div class="am-panel" id="settings-panel" hidden>
+          <button class="am-panel-close" type="button" data-panel-close aria-label="Close settings"><i data-lucide="x"></i></button>
           <h2>Settings</h2>
           <h3>Playback speed</h3>
           <div class="am-speed-grid" id="speed-grid"></div>
           <div class="am-panel-row">
-            <span>Resolution</span>
+            <span>Source resolution</span>
             <strong id="info-resolution">Unknown</strong>
           </div>
           <div class="am-panel-row">
@@ -121,13 +135,13 @@
                 <button class="am-btn am-extra-desktop" id="mute-btn" type="button" aria-label="Mute" title="Volume">
                   <i data-lucide="volume-2"></i>
                 </button>
-                <button class="am-btn" id="audio-btn" type="button" aria-label="Audio tracks" title="Audio tracks" hidden>
+                <button class="am-btn" id="audio-btn" type="button" aria-label="Audio tracks" aria-controls="audio-panel" aria-expanded="false" title="Audio tracks" hidden>
                   <i data-lucide="languages"></i>
                 </button>
-                <button class="am-btn" id="subtitle-btn" type="button" aria-label="Subtitle tracks" title="Subtitles" hidden>
+                <button class="am-btn" id="subtitle-btn" type="button" aria-label="Subtitle tracks" aria-controls="subtitle-panel" aria-expanded="false" title="Subtitles" hidden>
                   <i data-lucide="captions"></i>
                 </button>
-                <button class="am-btn" id="settings-btn" type="button" aria-label="Settings" title="Playback settings">
+                <button class="am-btn" id="settings-btn" type="button" aria-label="Settings" aria-controls="settings-panel" aria-expanded="false" title="Playback settings">
                   <i data-lucide="settings"></i>
                 </button>
                 <button class="am-btn am-extra-desktop" id="theater-btn" type="button" aria-label="Toggle theater mode" title="Theater mode">

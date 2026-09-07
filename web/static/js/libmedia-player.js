@@ -18,6 +18,9 @@
       };
       script.onerror = () => reject(new Error("Advanced decoder could not be loaded"));
       document.head.appendChild(script);
+    }).catch((error) => {
+      avPlayerLoading = null;
+      throw error;
     });
     return avPlayerLoading;
   }
@@ -49,11 +52,26 @@
       this._started = false;
       this._loaded = false;
       this._subtitleEnabled = false;
+      this._audioIndex = null;
+      this._subtitleIndex = null;
+      this._subtitleDelay = 0;
+      this._error = null;
+      this._seeking = false;
+      this._generation = 0;
       this._pendingSeek = null;
       this._seekTarget = null;
       this._seekQueued = false;
       this._queue = Promise.resolve();
       this._source = "";
+      this._resizeObserver = typeof ResizeObserver === "function" ? new ResizeObserver(() => this._resize()) : null;
+    }
+
+    connectedCallback() { this._resizeObserver?.observe(this._host); }
+
+    _resize() {
+      if (this._started && this._player && this.clientWidth > 0 && this.clientHeight > 0) {
+        this._player.resize?.(this.clientWidth, this.clientHeight);
+      }
     }
 
     static preload() {
@@ -85,7 +103,11 @@
     }
 
     _run(operation) {
-      const next = this._queue.then(operation, operation);
+      const generation = this._generation;
+      const next = this._queue.then(() => {
+        if (generation !== this._generation) throw new DOMException("Playback was closed", "AbortError");
+        return operation();
+      });
       this._queue = next.then(() => undefined, () => undefined);
       return next;
     }
@@ -99,19 +121,32 @@
     }
 
     _isTransient(status) {
-      return status === 2 || status === 3 || status === 10;
+      return status === 1 || status === 3 || status === 9 || status === 10;
+    }
+
+    _status() {
+      return this._player?.getStatus?.() ?? this._player?.status;
     }
 
     async _settle() {
-      for (let attempt = 0; this._player && this._isTransient(this._player.status) && attempt < 80; attempt += 1) {
+      const player = this._player;
+      for (let attempt = 0; player === this._player && this._isTransient(this._status()) && attempt < 80; attempt += 1) {
         await new Promise((resolve) => window.setTimeout(resolve, 25));
       }
+      if (!player || player !== this._player) throw new DOMException("Playback was closed", "AbortError");
+      if (this._isTransient(this._status())) throw new Error("Player is still busy. Please try again.");
     }
 
-    async open(url, options = {}) {
+    open(url, options = {}) {
+      return this._run(() => this._open(url, options));
+    }
+
+    async _open(url, options) {
+      const generation = this._generation;
       this._source = url;
       this._emit("loadstart");
       const AVPlayer = await loadAVPlayer();
+      if (generation !== this._generation) throw new DOMException("Playback was closed", "AbortError");
       if (this._player) {
         try {
           await this._player.destroy();
@@ -119,28 +154,45 @@
           console.warn("[Amaterasu Player] Could not reset advanced decoder", error);
         }
       }
+      if (generation !== this._generation) throw new DOMException("Playback was closed", "AbortError");
 
-      const player = new AVPlayer({ container: this._host, isLive: false });
+      this._loaded = this._started = this._ended = this._seeking = false;
+      this._paused = true;
+      this._error = null;
+      this._readyState = 0;
+      this._currentTime = Number(options.currentTime) || 0;
+      this._pendingSeek = this._currentTime > 0 ? this._currentTime : null;
+      this._seekTarget = null;
+      this._audioIndex = Number.isInteger(options.audioIndex) ? options.audioIndex : null;
+      this._subtitleIndex = Number.isInteger(options.subtitleIndex) ? options.subtitleIndex : null;
+      this._subtitleEnabled = this._subtitleIndex !== null;
+
+      // AVPlayer 1.3.1 worker proxies lose subtitle packet time bases without
+      // shared memory. Keep native/WebCodecs decoding, but avoid that proxy path.
+      const player = new AVPlayer({ container: this._host, isLive: false, enableWorker: false });
       this._player = player;
-      player.on("time", (pts) => {
-        this._currentTime = this._seconds(pts);
+      const on = (type, callback) => player.on(type, (...args) => {
+        if (this._player === player) callback(...args);
+      });
+      on("time", (pts) => {
+        if (!this.seeking && this._pendingSeek === null) this._currentTime = this._seconds(pts);
         this._emit("timeupdate");
       });
-      player.on("played", () => {
+      on("played", () => {
         this._paused = false;
         this._ended = false;
         this._started = true;
         this._emit("play");
       });
-      player.on("playing", () => {
+      on("playing", () => {
         this._paused = false;
         this._emit("playing");
       });
-      player.on("paused", () => {
+      on("paused", () => {
         this._paused = true;
         this._emit("pause");
       });
-      player.on("ended", () => {
+      on("ended", () => {
         if (this._loop) {
           this.currentTime = 0;
           this.play().catch(() => undefined);
@@ -150,14 +202,16 @@
         this._ended = true;
         this._emit("ended");
       });
-      player.on("seeking", () => this._emit("seeking"));
-      player.on("seeked", () => this._emit("seeked"));
-      player.on("error", (error) => this._emit("error", error));
+      on("error", (error) => {
+        this._error = error || new Error("Advanced playback failed");
+        this._emit("error", this._error);
+      });
 
       await player.load(url);
+      if (this._player !== player) throw new DOMException("Playback was closed", "AbortError");
       this._streams = player.getStreams ? player.getStreams() : [];
       if (typeof player.setSubtitleEnable === "function") player.setSubtitleEnable(false);
-      this._duration = this._durationFrom(this._streams);
+      this._duration = this._seconds(player.getDuration?.()) || this._durationFrom(this._streams);
       this._readyState = 4;
       this._loaded = true;
       this._emit("durationchange");
@@ -168,37 +222,48 @@
       this.volume = options.volume === undefined ? this._volume : options.volume;
       this.muted = options.muted === undefined ? this._muted : options.muted;
       this.playbackRate = options.playbackRate || this._playbackRate;
-      if (Number.isInteger(options.audioIndex) && options.audioIndex > 0) {
-        await this.selectAudioByIndex(options.audioIndex);
-      }
-      if (Number.isInteger(options.subtitleIndex)) {
-        await this.selectSubtitleByIndex(options.subtitleIndex);
-      }
-      if (Number(options.currentTime) > 0) {
-        this.currentTime = Number(options.currentTime);
-      }
-      if (options.autoplay) await this.play();
+      if (options.autoplay) await this._play();
       return this;
     }
 
     async _play() {
       if (!this._player || !this._loaded) return;
       await this._settle();
-      if (!this._isActive(this._player.status) && this._isPlayable(this._player.status)) {
-        await this._player.play();
-      }
-      this._started = true;
-      if (this._pendingSeek !== null) {
-        const target = this._pendingSeek;
-        this._pendingSeek = null;
-        await this._seek(target);
+      const player = this._player;
+      const firstPlay = !this._started;
+      // AVPlayer creates track renderers on play, not load. Apply selections only then.
+      if (firstPlay) player.setVolume(0);
+      try {
+        if (!this._isActive(this._status()) && this._isPlayable(this._status())) await player.play();
+        if (player !== this._player) return;
+        this._started = true;
+        if (firstPlay && this._audioIndex !== null) await this._selectAudio(this._audioIndex);
+        if (this._subtitleEnabled && this._subtitleIndex !== null) await this._selectSubtitle(this._subtitleIndex);
+        player.setSubtitleDelay?.(this._subtitleDelay);
+        if (this._pendingSeek !== null) {
+          const target = this._pendingSeek;
+          this._pendingSeek = null;
+          await this._seek(target);
+        }
+        if (!this._subtitleEnabled) player.setSubtitleEnable?.(false);
+        this._resize();
+      } finally {
+        if (player === this._player) player.setVolume(this._muted ? 0 : this._volume);
       }
     }
 
     play() {
       this._paused = false;
       this._emit("play");
-      return this._run(() => this._play());
+      return this._run(() => this._play()).catch((error) => {
+        if (error.name !== "AbortError") {
+          this._paused = true;
+          this._error = error;
+          this._emit("pause");
+          this._emit("error", error);
+        }
+        throw error;
+      });
     }
 
     pause() {
@@ -206,22 +271,28 @@
       this._emit("pause");
       return this._run(async () => {
         await this._settle();
-        if (this._player && this._started && this._isActive(this._player.status)) {
-          this._player.pause();
+        if (this._player && this._started && this._isActive(this._status())) {
+          await this._player.pause();
         }
       });
     }
 
     async _seek(seconds) {
       if (!this._player) return;
+      await this._settle();
+      const player = this._player;
+      this._seeking = true;
       this._emit("seeking");
       const milliseconds = Math.max(0, Math.round(seconds * 1000));
       try {
-        await this._player.seek(BigInt(milliseconds));
-      } catch (error) {
-        await this._player.seek(milliseconds);
+        await player.seek(BigInt(milliseconds));
+        if (player !== this._player) return;
+        if (this._seekTarget === null) this._currentTime = seconds;
+        this._ended = false;
+        if (!this._subtitleEnabled) player.setSubtitleEnable?.(false);
+      } finally {
+        this._seeking = false;
       }
-      this._currentTime = seconds;
       this._emit("seeked");
       this._emit("timeupdate");
     }
@@ -236,7 +307,12 @@
           this._seekTarget = null;
           await this._seek(nextTarget);
         }
-      }).catch((error) => this._emit("error", error)).finally(() => {
+      }).catch((error) => {
+        if (error.name !== "AbortError") {
+          this._error = error;
+          this._emit("error", error);
+        }
+      }).finally(() => {
         this._seekQueued = false;
         if (this._seekTarget !== null) this._scheduleSeek(this._seekTarget);
       });
@@ -251,57 +327,78 @@
     }
 
     selectAudioByIndex(index) {
-      return this._run(async () => {
-        const streams = this.getAudioStreams();
-        const selected = streams[index];
-        if (!selected || !this._player) throw new Error("Audio track is unavailable");
-        await this._settle();
-        await this._player.selectAudio(selected.id);
-        await this._settle();
-        return selected;
-      });
+      return this._run(() => this._selectAudio(index));
+    }
+
+    async _selectAudio(index) {
+      const streams = this.getAudioStreams();
+      const selected = streams[index];
+      if (!selected || !this._player) throw new Error("Audio track is unavailable");
+      this._audioIndex = index;
+      if (!this._started) return selected;
+      await this._settle();
+      if (this._player.getSelectedAudioStreamId?.() !== selected.id) await this._player.selectAudio(selected.id);
+      await this._settle();
+      if (!this._subtitleEnabled) this._player.setSubtitleEnable?.(false);
+      return selected;
     }
 
     selectSubtitleByIndex(index) {
-      return this._run(async () => {
-        const selected = this.getSubtitleStreams()[index];
-        if (!selected || !this._player) throw new Error("Subtitle track is unavailable");
-        await this._settle();
-        await this._player.selectSubtitle(selected.id);
-        this._subtitleEnabled = true;
-        if (typeof this._player.setSubtitleEnable === "function") {
-          this._player.setSubtitleEnable(true);
-        }
-        return selected;
-      });
+      return this._run(() => this._selectSubtitle(index));
+    }
+
+    async _selectSubtitle(index) {
+      const selected = this.getSubtitleStreams()[index];
+      if (!selected || !this._player) throw new Error("Subtitle track is unavailable");
+      const wasEnabled = this._subtitleEnabled;
+      this._subtitleIndex = index;
+      this._subtitleEnabled = true;
+      if (!this._started) return selected;
+      await this._settle();
+      if (this._player.getSelectedSubtitleStreamId?.() !== selected.id) await this._player.selectSubtitle(selected.id);
+      if (this._player.getSelectedSubtitleStreamId?.() !== undefined && this._player.getSelectedSubtitleStreamId() !== selected.id) {
+        throw new Error("This subtitle track is not supported by the decoder");
+      }
+      if (!wasEnabled && typeof this._player.setSubtitleEnable === "function") {
+        this._player.setSubtitleEnable(true);
+      }
+      return selected;
     }
 
     setSubtitleEnabled(enabled) {
       const nextEnabled = Boolean(enabled);
       this._subtitleEnabled = nextEnabled;
-      if (!this._player || typeof this._player.setSubtitleEnable !== "function") {
-        return Promise.resolve();
-      }
       return this._run(async () => {
-        await this._settle();
-        this._player.setSubtitleEnable(nextEnabled);
+        this._subtitleEnabled = nextEnabled;
+        if (this._player) this._player.setSubtitleEnable?.(nextEnabled);
       });
     }
 
+    setSubtitleDelay(seconds) {
+      const value = Number(seconds);
+      if (!Number.isFinite(value)) return;
+      this._subtitleDelay = Math.round(Math.max(-5, Math.min(5, value)) * 1000);
+      this._player?.setSubtitleDelay?.(this._subtitleDelay);
+    }
+
     load() {
-      if (this._source) return this.open(this._source);
+      if (this._source) return this.open(this._source, {
+        currentTime: this.currentTime, audioIndex: this._audioIndex,
+        subtitleIndex: this._subtitleEnabled ? this._subtitleIndex : null,
+      });
       return Promise.resolve(this);
     }
 
     get paused() { return this._paused; }
     get ended() { return this._ended; }
-    get seeking() { return false; }
+    get seeking() { return this._seeking || this._seekQueued; }
     get readyState() { return this._readyState; }
     get duration() { return this._duration; }
     get currentTime() { return this._currentTime; }
     set currentTime(value) {
-      const target = Number(value);
-      if (!Number.isFinite(target) || target < 0) return;
+      let target = Number(value);
+      if (!Number.isFinite(target)) return;
+      target = Math.max(0, Math.min(target, Number.isFinite(this._duration) ? this._duration : Infinity));
       this._currentTime = target;
       if (!this._player || !this._started) {
         this._pendingSeek = target;
@@ -331,24 +428,24 @@
     get loop() { return this._loop; }
     set loop(value) { this._loop = Boolean(value); }
     get buffered() {
-      const duration = Number.isFinite(this._duration) ? this._duration : 0;
-      return {
-        length: duration > 0 ? 1 : 0,
-        start: () => 0,
-        end: () => duration,
-      };
+      const media = this._host.querySelector("video, audio");
+      return media?.buffered || { length: 0, start() { throw new RangeError("No buffered range"); }, end() { throw new RangeError("No buffered range"); } };
     }
     get videoWidth() {
       const stream = this._streams.find((item) => item && [0, "Video"].includes(item.mediaType));
-      return Number(stream && (stream.codecparProxy?.width || stream.width)) || this.clientWidth;
+      return Number(stream && (stream.codecparProxy?.width || stream.width)) || 0;
     }
     get videoHeight() {
       const stream = this._streams.find((item) => item && [0, "Video"].includes(item.mediaType));
-      return Number(stream && (stream.codecparProxy?.height || stream.height)) || this.clientHeight;
+      return Number(stream && (stream.codecparProxy?.height || stream.height)) || 0;
     }
-    get error() { return null; }
+    get error() { return this._error; }
 
     async destroy() {
+      this._resizeObserver?.disconnect();
+      this._generation += 1;
+      this._pendingSeek = this._seekTarget = null;
+      this._loaded = this._started = false;
       if (!this._player) return;
       const player = this._player;
       this._player = null;
