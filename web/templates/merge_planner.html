@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+
+{% block title %}Amaterasu | Merge order{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="/static/css/merge-planner.css" />
+{% endblock %}
+
+{% block content %}
+<section class="merge-shell" data-plan-id="{{ plan_id }}">
+  <header class="merge-hero">
+    <div>
+      <p class="merge-eyebrow">Merge timeline</p>
+      <h1>Put every part in its place.</h1>
+      <p class="merge-intro">Drag the rows or choose a smart sort. Changes save automatically while downloads continue.</p>
+    </div>
+    <div class="merge-state" id="planState" aria-live="polite">
+      <span class="merge-state__dot"></span>
+      <span>Connecting</span>
+    </div>
+  </header>
+
+  <section class="merge-auth" id="authPanel" hidden>
+    <div>
+      <h2>Enter the planner PIN</h2>
+      <p>Tap <strong>Pincode</strong> in Telegram, then enter the code shown there.</p>
+    </div>
+    <form id="pinForm" class="merge-pin-form">
+      <label class="sr-only" for="pinInput">Planner PIN</label>
+      <input id="pinInput" inputmode="text" pattern="[A-Za-z0-9_-]{12}" maxlength="12" autocomplete="one-time-code" placeholder="Planner code" required />
+      <button class="bs-btn bs-btn--primary" type="submit">Open planner</button>
+    </form>
+  </section>
+
+  <div id="planner" hidden>
+    <section class="merge-summary">
+      <div>
+        <span class="merge-summary__label">Timeline</span>
+        <strong id="planTitle">Merged video</strong>
+      </div>
+      <div>
+        <span class="merge-summary__label">Items ready</span>
+        <strong><span id="readyCount">0</span> / <span id="itemCount">0</span></strong>
+      </div>
+      <div>
+        <span class="merge-summary__label">Saving</span>
+        <strong id="saveState">Up to date</strong>
+      </div>
+    </section>
+
+    <section class="merge-workspace">
+      <div class="merge-toolbar" aria-label="Order tools">
+        <button type="button" class="bs-btn bs-btn--secondary" data-sort="input">Input order</button>
+        <button type="button" class="bs-btn bs-btn--secondary" data-sort="filename">Filename</button>
+        <button type="button" class="bs-btn bs-btn--secondary" data-sort="episode">Episode</button>
+        <button type="button" class="bs-btn bs-btn--secondary" data-sort="reverse">Reverse</button>
+      </div>
+
+      <div class="merge-notice" id="planNotice" aria-live="polite">
+        <span data-lucide="info"></span>
+        <span>Downloads continue in the background. If you leave this page, Amaterasu uses the latest saved order.</span>
+      </div>
+
+      <ol class="merge-list" id="mergeList" aria-label="Video merge order"></ol>
+
+      <div class="merge-empty" id="emptyState" hidden>
+        <span class="merge-empty__sun"></span>
+        <h2>Collecting filenames</h2>
+        <p>This list updates automatically as each source is prepared.</p>
+      </div>
+    </section>
+  </div>
+
+  <section class="merge-error" id="errorPanel" hidden>
+    <h2>Planner unavailable</h2>
+    <p id="errorMessage">This merge plan is no longer available.</p>
+  </section>
+</section>
+{% endblock %}
+
+{% block extra_js %}
+<script src="/static/js/merge-planner.js" defer></script>
+{% endblock %}

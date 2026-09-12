@@ -126,6 +126,7 @@ class Mirror(TaskListener):
         bulk=None,
         multi_tag=None,
         options="",
+        multi_sources=None,
         multi_leech_summary=None,
         leech_dump_context=None,
         **kwargs,
@@ -140,6 +141,7 @@ class Mirror(TaskListener):
         self.options = options
         self.same_dir = same_dir
         self.bulk = bulk
+        self.multi_sources = list(multi_sources or [])
         self.multi_leech_summary = multi_leech_summary
         super().__init__()
         self.leech_dump_context = (
@@ -457,7 +459,11 @@ class Mirror(TaskListener):
         self.as_doc = args["-doc"]
         self.as_med = args["-med"]
         self.folder_name = f"/{args['-m']}".rstrip("/") if len(args["-m"]) > 0 else ""
-        if self.is_merge and multi_count > 1 and not self.folder_name:
+        if (
+            self.is_merge
+            and not self.folder_name
+            and (multi_count > 1 or "/Merged" in self.same_dir)
+        ):
             self.folder_name = "/Merged"
         self.bot_trans = args["-bt"]
         self.user_trans = args["-ut"]
@@ -505,6 +511,22 @@ class Mirror(TaskListener):
         ytdlp_fallback_name = ""
 
         self.multi = multi_count
+        if (
+            self.is_merge
+            and self.multi > 1
+            and not self.link
+            and not self.message.reply_to_message
+            and not self.multi_sources
+        ):
+            self.multi_sources = await self._get_recent_multi_sources(self.multi)
+            if len(self.multi_sources) != self.multi:
+                await send_message(
+                    self.message,
+                    f"I could not find {self.multi} consecutive files or links before "
+                    "this command. Send the files together, then run the command, or "
+                    "reply to the first file.",
+                )
+                return
         if self.multi_leech_summary is None and should_collect_multi_leech(
             self.is_leech,
             self.multi,
@@ -581,10 +603,14 @@ class Mirror(TaskListener):
 
         path = f"{DOWNLOAD_DIR}{self.mid}{self.folder_name}"
 
-        if not self.link and (reply_to := self.message.reply_to_message):
-            direct_media_reply = True
-            if reply_to.text:
-                self.link = reply_to.text.split("\n", 1)[0].strip()
+        if not self.link:
+            reply_to = self.message.reply_to_message or (
+                self.multi_sources[0] if self.multi_sources else None
+            )
+            if reply_to:
+                direct_media_reply = True
+                if reply_to.text:
+                    self.link = reply_to.text.split("\n", 1)[0].strip()
         if is_telegram_link(self.link):
             direct_media_reply = False
             try:
@@ -689,6 +715,7 @@ class Mirror(TaskListener):
             return
 
         self._set_mode_engine()
+        await self.prepare_merge_plan()
         await self.send_processing()
 
         # Phase 3.3 — Smart engine selection is already handled by the

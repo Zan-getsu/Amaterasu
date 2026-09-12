@@ -527,6 +527,7 @@ class YtDlp(TaskListener):
             return
 
         self._set_mode_engine()
+        await self.prepare_merge_plan()
 
         cookie_to_use = (
             usr_cookie
@@ -563,6 +564,18 @@ class YtDlp(TaskListener):
             return
         finally:
             await self.run_multi(input_list, YtDlp)
+
+        if self.is_merge and isinstance(result, dict) and result.get("entries"):
+            await self.set_merge_plan_candidates(
+                [
+                    entry.get("title")
+                    or entry.get("fulltitle")
+                    or entry.get("id")
+                    or f"Playlist item {index}"
+                    for index, entry in enumerate(result["entries"], start=1)
+                    if isinstance(entry, dict)
+                ]
+            )
 
         if not qual:
             qual = await YtSelection(self).get_quality(result)

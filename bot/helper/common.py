@@ -7,6 +7,7 @@ from re import sub
 from secrets import token_hex
 from shlex import split
 from shutil import disk_usage
+from urllib.parse import unquote, urlparse
 
 from aiofiles.os import listdir, makedirs, remove
 from aiofiles.os import path as aiopath
@@ -34,6 +35,7 @@ from .ext_utils.bot_utils import (
     fetch_drive_cat,
     get_size_bytes,
     get_valid_base_url,
+    merge_plan_buttons,
     new_task,
     sync_to_async,
 )
@@ -50,10 +52,12 @@ from .ext_utils.files_utils import (
 from .ext_utils.links_utils import (
     is_gdrive_id,
     is_gdrive_link,
+    is_magnet,
     is_mega_link,
     is_rclone_path,
     is_telegram_link,
     is_terabox_link,
+    is_url,
 )
 from .ext_utils.media_utils import (
     FFMpeg,
@@ -84,6 +88,39 @@ from .telegram_helper.message_utils import (
     send_message,
     send_status_message,
 )
+from web.merge_plan_store import (
+    create_plan as create_merge_plan,
+    register_source as register_merge_source,
+    replace_source_files as replace_merge_source_files,
+    set_plan_status as set_merge_plan_status,
+    sync_final_files as sync_merge_final_files,
+)
+
+
+MERGE_VIDEO_EXTENSIONS = {
+    ".3g2",
+    ".3gp",
+    ".asf",
+    ".avi",
+    ".f4v",
+    ".flv",
+    ".m2ts",
+    ".m4v",
+    ".mkv",
+    ".mov",
+    ".mp4",
+    ".mpeg",
+    ".mpg",
+    ".mts",
+    ".ogm",
+    ".ogv",
+    ".rm",
+    ".rmvb",
+    ".ts",
+    ".vob",
+    ".webm",
+    ".wmv",
+}
 
 
 class TaskConfig:
@@ -183,6 +220,8 @@ class TaskConfig:
         self.is_encode = False
         self.is_merge = False
         self.merge_output_name = ""
+        self.merge_plan_id = ""
+        self.merge_source_position = 1
         self.encode_profile = None
         self.encode_metadata = {}
         self.metadata_title = None
@@ -208,6 +247,158 @@ class TaskConfig:
         self.terabox_cookie_error = ""
         self.file_details = {}
         self.mode = tuple()
+
+    def _merge_source_label(self):
+        value = str(self.link or "").strip()
+        if value.startswith(("http://", "https://")):
+            parsed = urlparse(value)
+            name = unquote(ospath.basename(parsed.path.rstrip("/")))
+            return (name or parsed.netloc or value)[:240]
+        if value.startswith("magnet:"):
+            return f"Torrent source {self.merge_source_position}"
+        if value:
+            return value[:240]
+
+        reply = getattr(self.message, "reply_to_message", None)
+        if reply is not None:
+            media = (
+                getattr(reply, "document", None)
+                or getattr(reply, "video", None)
+                or getattr(reply, "audio", None)
+                or getattr(reply, "animation", None)
+            )
+            if media is not None and getattr(media, "file_name", None):
+                return str(media.file_name)[:240]
+            text = getattr(reply, "text", None) or getattr(reply, "caption", None)
+            if text:
+                return str(text).splitlines()[0][:240]
+        return f"Item {self.merge_source_position}"
+
+    async def prepare_merge_plan(self):
+        """Register one merge source and announce the non-blocking web planner."""
+        if not self.is_merge:
+            return
+        web_available = bool(get_valid_base_url())
+
+        shared_state = None
+        expected = max(1, int(self.multi or 1))
+        if self.folder_name and self.same_dir and self.folder_name in self.same_dir:
+            async with task_dict_lock:
+                shared_state = self.same_dir[self.folder_name]
+                expected = max(
+                    expected,
+                    int(shared_state.get("total", expected)),
+                    int(shared_state.get("merge_plan_expected", expected)),
+                )
+                plan_id = shared_state.get("merge_plan_id")
+                if not plan_id:
+                    plan_id = token_hex(12)
+                    shared_state["merge_plan_id"] = plan_id
+                    shared_state["merge_plan_expected"] = expected
+                    shared_state["merge_plan_announced"] = False
+                expected = int(shared_state.get("merge_plan_expected", expected))
+        else:
+            plan_id = self.merge_plan_id or token_hex(12)
+
+        self.merge_plan_id = plan_id
+        self.merge_source_position = (
+            max(1, expected - int(self.multi) + 1) if self.multi else 1
+        )
+        requested = ospath.basename(str(self.merge_output_name or "").strip())
+        title = requested or (
+            "Combined [Merged].mkv"
+            if self.folder_name.strip("/").casefold() == "merged"
+            else f"{self.folder_name.strip('/') or 'Merged video'} [Merged].mkv"
+        )
+        created = await sync_to_async(
+            create_merge_plan,
+            plan_id,
+            self.user_id,
+            self.message.chat.id,
+            title,
+            expected,
+        )
+        if not created:
+            LOGGER.warning("Could not create merge plan %s", plan_id)
+            return
+        data = await sync_to_async(
+            register_merge_source,
+            plan_id,
+            self.mid,
+            self.merge_source_position,
+            self._merge_source_label(),
+        )
+        if data is None:
+            return
+
+        should_announce = expected <= 1
+        if shared_state is not None:
+            source_count = len(
+                {item.get("source_id") for item in data.get("items", [])}
+            )
+            async with task_dict_lock:
+                if (
+                    source_count >= expected
+                    and not shared_state.get("merge_plan_announced")
+                ):
+                    shared_state["merge_plan_announced"] = True
+                    should_announce = True
+        elif getattr(self, "_merge_plan_announced", False):
+            should_announce = False
+        else:
+            self._merge_plan_announced = True
+
+        if should_announce and web_available:
+            await send_message(
+                self.message,
+                "<b>✦ Merge order is ready</b>\n\n"
+                "Downloads continue automatically. Arrange the files now, or "
+                "leave the planner untouched to use the default order.",
+                merge_plan_buttons(plan_id),
+            )
+
+    async def set_merge_plan_candidates(
+        self, names, *, ready=False, video_only=False
+    ):
+        if not self.merge_plan_id:
+            return
+        files = []
+        for index, item in enumerate(names, start=1):
+            if isinstance(item, dict):
+                candidate = dict(item)
+                candidate.setdefault("ordinal", index)
+                candidate.setdefault("ready", ready)
+            elif item:
+                candidate = {"name": str(item), "ordinal": index, "ready": ready}
+            else:
+                continue
+            if video_only and ospath.splitext(str(candidate.get("name", "")))[
+                1
+            ].casefold() not in MERGE_VIDEO_EXTENSIONS:
+                continue
+            if video_only:
+                candidate["ordinal"] = len(files) + 1
+                candidate["key"] = str(candidate.get("name", ""))
+            files.append(candidate)
+        if files:
+            await sync_to_async(
+                replace_merge_source_files,
+                self.merge_plan_id,
+                self.mid,
+                files,
+                self.merge_source_position,
+                ready,
+            )
+
+    async def update_merge_plan_status(self, status, *, locked=None, error=""):
+        if self.merge_plan_id:
+            await sync_to_async(
+                set_merge_plan_status,
+                self.merge_plan_id,
+                status,
+                locked=locked,
+                error=error,
+            )
 
     def _set_mode_engine(self):
         self.source_url = (
@@ -873,6 +1064,20 @@ class TaskConfig:
             or getattr(message, "caption", None)
         )
 
+    @staticmethod
+    def _is_recent_multi_source(message):
+        if not isinstance(message, Message) or getattr(message, "empty", False):
+            return False
+        if getattr(message, "media", None):
+            return True
+        text = (getattr(message, "text", None) or "").split("\n", 1)[0].strip()
+        return bool(
+            text == "tbx"
+            or is_url(text)
+            or is_magnet(text)
+            or is_rclone_path(text)
+        )
+
     async def _get_next_multi_source(self):
         reply_id = self.message.reply_to_message_id
         if reply_id is None:
@@ -915,6 +1120,42 @@ class TaskConfig:
                 if sender_id is None or self._multi_sender_id(candidate) == sender_id:
                     return candidate
         return None
+
+    async def _get_recent_multi_sources(self, count):
+        """Find a consecutive source batch immediately before a command."""
+        sender_id = self._multi_sender_id(self.message)
+        thread_id = getattr(self.message, "message_thread_id", None)
+        collected = []
+        last_id = self.message.id - 1
+        first_id = max(1, last_id - 999)
+        for end_id in range(last_id, first_id - 1, -100):
+            start_id = max(first_id, end_id - 99)
+            messages = await self.client.get_messages(
+                chat_id=self.message.chat.id,
+                message_ids=list(range(start_id, end_id + 1)),
+            )
+            if isinstance(messages, Message):
+                messages = [messages]
+            elif not isinstance(messages, list):
+                messages = []
+            for candidate in sorted(
+                (msg for msg in messages if isinstance(msg, Message)),
+                key=lambda msg: msg.id,
+                reverse=True,
+            ):
+                if sender_id is not None and self._multi_sender_id(candidate) != sender_id:
+                    continue
+                if (
+                    thread_id is not None
+                    and getattr(candidate, "message_thread_id", None) != thread_id
+                ):
+                    continue
+                if not self._is_recent_multi_source(candidate):
+                    return list(reversed(collected)) if len(collected) >= count else []
+                collected.append(candidate)
+                if len(collected) == count:
+                    return list(reversed(collected))
+        return []
 
     async def _record_unstarted_multi_leech(self, summary, count, error):
         if self.is_merge and self.folder_name in self.same_dir:
@@ -964,6 +1205,7 @@ class TaskConfig:
                 "Multi Task was cancelled before this item started.",
             )
             return
+        explicit_sources = getattr(self, "multi_sources", [])
         if len(self.bulk) != 0:
             msg = input_list[:1]
             msg.append(f"{self.bulk[0]} -i {self.multi - 1} {self.options}")
@@ -975,7 +1217,11 @@ class TaskConfig:
             msg = [s.strip() for s in input_list]
             index = msg.index("-i")
             msg[index + 1] = f"{self.multi - 1}"
-            next_source = await self._get_next_multi_source()
+            next_source = (
+                explicit_sources[1]
+                if len(explicit_sources) > 1
+                else await self._get_next_multi_source()
+            )
             if not isinstance(next_source, Message):
                 multi_tags.discard(self.multi_tag)
                 await self._record_unstarted_multi_leech(
@@ -1023,6 +1269,8 @@ class TaskConfig:
             return
 
         next_task_kwargs = {}
+        if explicit_sources:
+            next_task_kwargs["multi_sources"] = explicit_sources[1:]
         if multi_leech_summary is not None:
             next_task_kwargs["multi_leech_summary"] = multi_leech_summary
         next_task_kwargs["leech_dump_context"] = self.leech_dump_context
@@ -1592,37 +1840,13 @@ class TaskConfig:
 
         videos = []
         unreadable_videos = []
-        video_extensions = {
-            ".3g2",
-            ".3gp",
-            ".asf",
-            ".avi",
-            ".f4v",
-            ".flv",
-            ".m2ts",
-            ".m4v",
-            ".mkv",
-            ".mov",
-            ".mp4",
-            ".mpeg",
-            ".mpg",
-            ".mts",
-            ".ogm",
-            ".ogv",
-            ".rm",
-            ".rmvb",
-            ".ts",
-            ".vob",
-            ".webm",
-            ".wmv",
-        }
         for offset in range(0, len(paths), 4):
             batch = paths[offset : offset + 4]
             media_types = await gather(*(get_document_type(path) for path in batch))
             for path, media_type in zip(batch, media_types, strict=True):
                 if media_type[0]:
                     videos.append(path)
-                elif ospath.splitext(path)[1].casefold() in video_extensions:
+                elif ospath.splitext(path)[1].casefold() in MERGE_VIDEO_EXTENSIONS:
                     unreadable_videos.append(path)
         if unreadable_videos:
             unreadable = ospath.relpath(unreadable_videos[0], dl_path).replace(
@@ -1659,20 +1883,64 @@ class TaskConfig:
         async with task_dict_lock:
             task_dict[self.mid] = FFmpegStatus(self, ffmpeg, gid, "Merge")
 
-        confirm_order = getattr(self, "confirm_merge_order", None)
-        if confirm_order:
-            videos = await confirm_order(videos, dl_path, probe_by_path)
-            if not videos:
-                async with task_dict_lock:
-                    is_active = self.mid in task_dict
-                if is_active and not getattr(
-                    self, "_merge_cancel_cleanup_started", False
-                ):
-                    await self.on_download_error(
-                        getattr(self, "_merge_cancel_reason", "") or "Merge cancelled."
+        if self.merge_plan_id:
+            grouped = {}
+            for path in videos:
+                relative = ospath.relpath(path, dl_path).replace("\\", "/")
+                first_part = relative.split("/", 1)[0]
+                source_id = (
+                    first_part.removeprefix(".merge-source-")
+                    if first_part.startswith(".merge-source-")
+                    else self.mid
+                )
+                item_key = (
+                    relative.split("/", 1)[1]
+                    if first_part.startswith(".merge-source-") and "/" in relative
+                    else relative
+                )
+                grouped.setdefault(source_id, []).append((relative, path, item_key))
+            final_items = []
+            for position, (source_id, source_files) in enumerate(
+                grouped.items(), start=1
+            ):
+                source_files.sort(key=lambda item: natural_key(item[1]))
+                final_items.extend(
+                    {
+                        "source_id": source_id,
+                        "name": item_key,
+                        "path": relative,
+                        "key": item_key,
+                        "ordinal": ordinal,
+                        "position": position,
+                        "ready": True,
+                    }
+                    for ordinal, (relative, _, item_key) in enumerate(
+                        source_files, start=1
                     )
-                return False
-            probes = [probe_by_path[path] for path in videos]
+                )
+            plan = await sync_to_async(
+                sync_merge_final_files,
+                self.merge_plan_id,
+                final_items,
+            )
+            if plan:
+                path_by_relative = {
+                    ospath.relpath(path, dl_path).replace("\\", "/"): path
+                    for path in videos
+                }
+                planned = [
+                    path_by_relative[item["path"]]
+                    for item in plan.get("items", [])
+                    if item.get("path") in path_by_relative
+                ]
+                if len(planned) == len(videos) and set(planned) == set(videos):
+                    videos = planned
+                    probes = [probe_by_path[path] for path in videos]
+                else:
+                    LOGGER.warning(
+                        "Merge plan %s did not cover every final video; using natural order",
+                        self.merge_plan_id,
+                    )
 
         requested = ospath.basename(self.merge_output_name.strip())
         if requested:
@@ -1690,10 +1958,15 @@ class TaskConfig:
             result, error = await ffmpeg.merge_video_files(videos, output, probes)
         if not result:
             if not self.is_cancelled:
+                await self.update_merge_plan_status(
+                    "failed", locked=True, error=error
+                )
                 await self.on_download_error(
                     f"Unable to merge the selected videos: {error}"
                 )
             return False
+
+        await self.update_merge_plan_status("completed", locked=True)
 
         if not self.is_file:
             await rmtree(dl_path, ignore_errors=True)

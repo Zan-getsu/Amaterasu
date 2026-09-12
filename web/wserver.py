@@ -44,6 +44,11 @@ from fastapi.templating import Jinja2Templates
 
 from sabnzbdapi import SabnzbdClient
 from web.nodes import extract_file_ids, make_rclone_tree, make_terabox_tree, make_tree
+from web.merge_plan_store import (
+    public_plan as public_merge_plan,
+    read_plan as read_merge_plan,
+    update_order as update_merge_order,
+)
 from web.rclone_selection_store import (
     get_file_list as get_rclone_file_list,
     update_selected_ids as set_rclone_selected_ids,
@@ -1908,6 +1913,101 @@ async def handle_rclone(request: Request):
     )
 
 
+def _merge_plan_auth(plan_id, pin):
+    data = read_merge_plan(plan_id)
+    if data is None:
+        return None, "Merge plan not found or expired."
+    gid = f"merge_{plan_id}"
+    if not verify_short_token(pin, _web_secret(), "merge-plan", gid):
+        return None, "The planner PIN is incorrect."
+    return data, ""
+
+
+@app.get("/app/merge-plan", response_class=HTMLResponse)
+async def merge_plan_page(request: Request):
+    gid = request.query_params.get("gid", "")
+    if not gid.startswith("merge_") or not _SAFE_GID.fullmatch(gid):
+        raise HTTPException(status_code=400, detail="Invalid merge plan")
+    plan_id = gid.removeprefix("merge_")
+    if read_merge_plan(plan_id) is None:
+        raise HTTPException(status_code=404, detail="Merge plan not found or expired")
+    response = templates.TemplateResponse(
+        request,
+        "merge_planner.html",
+        {"plan_id": plan_id},
+    )
+    response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate, private"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
+    return response
+
+
+@app.api_route("/api/merge-plan/{plan_id}", methods=["GET", "POST"])
+async def merge_plan_api(plan_id: str, request: Request):
+    if not _SAFE_GID.fullmatch(plan_id):
+        return JSONResponse(
+            {"message": "Invalid merge plan."},
+            status_code=400,
+            headers={"Cache-Control": "no-store"},
+        )
+    pin = request.query_params.get("pin", "")
+    rate_key = f"merge-plan:{plan_id}"
+    if _pin_rate_limited(rate_key):
+        return JSONResponse(
+            {"message": f"Too many PIN attempts. Try again in {_PIN_RATE_WINDOW}s."},
+            status_code=429,
+            headers={"Cache-Control": "no-store"},
+        )
+    data, error = _merge_plan_auth(plan_id, pin)
+    if data is None:
+        if read_merge_plan(plan_id) is not None:
+            _record_pin_attempt(rate_key)
+            status_code = 403
+        else:
+            status_code = 404
+        return JSONResponse(
+            {"message": error},
+            status_code=status_code,
+            headers={"Cache-Control": "no-store"},
+        )
+    _pin_attempts.pop(rate_key, None)
+
+    if request.method == "POST":
+        try:
+            payload = await request.json()
+        except Exception:
+            return JSONResponse(
+                {"message": "Invalid request body."},
+                status_code=400,
+                headers={"Cache-Control": "no-store"},
+            )
+        if not isinstance(payload, dict):
+            return JSONResponse(
+                {"message": "Invalid request body."},
+                status_code=400,
+                headers={"Cache-Control": "no-store"},
+            )
+        updated, error = await to_thread(
+            update_merge_order,
+            plan_id,
+            payload.get("order"),
+            payload.get("revision"),
+        )
+        if error:
+            status_code = 409 if updated is not None else 400
+            return JSONResponse(
+                {"message": error, "plan": public_merge_plan(updated)},
+                status_code=status_code,
+                headers={"Cache-Control": "no-store"},
+            )
+        data = updated
+
+    return JSONResponse(
+        public_merge_plan(data),
+        headers={"Cache-Control": "no-store, no-cache, must-revalidate, private"},
+    )
+
+
 async def handle_rename(gid, data):
     try:
         qbit = _require_qbittorrent()
@@ -2017,6 +2117,8 @@ _ADMIN_PATH_PREFIXES = ("/app/", "/api/profiles", "/qbit/", "/nzb/")
 # remain reachable from Telegram even when the owner-only web login is enabled.
 _SIGNED_USER_TOOL_PATH_PREFIXES = (
     "/app/files",
+    "/app/merge-plan",
+    "/api/merge-plan",
     "/app/token-generator",
     "/api/token-generator",
     "/google-token/callback",

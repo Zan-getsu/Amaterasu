@@ -148,6 +148,11 @@ def test_merge_stream_signature_ignores_cover_art_and_detects_video_changes():
                 "channel_layout": "stereo",
                 "time_base": "1/1000",
             },
+            {
+                "codec_type": "attachment",
+                "codec_name": "ttf",
+                "extradata_hash": "SHA256:font",
+            },
         ]
     }
 
@@ -224,6 +229,8 @@ def test_merge_pipeline_is_stream_copy_and_validates_before_publish():
     assert "await check_merge_compatibility(files)" in method_source
     assert '"-c",\n                "copy"' in method_source
     assert '"-map_chapters",\n                "1"' in method_source
+    assert 'attachment_sources, start=2' in method_source
+    assert 'len(seen_attachments)' in method_source
     assert '"-copyts",\n                "-start_at_zero"' in method_source
     assert "Merged duration differs from the source total" in method_source
     assert "instead of near zero" in method_source

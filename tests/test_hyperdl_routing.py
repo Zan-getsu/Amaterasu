@@ -10,6 +10,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from web import merge_plan_store
 
 ROOT = Path(__file__).parents[1]
 DOWNLOAD_SOURCE = (
@@ -1265,6 +1266,9 @@ def test_merge_is_a_switch_and_does_not_consume_the_download_url():
         assert '"--merge": False' in source
         assert 'self.is_merge = args["--merge"]' in source
 
+    mirror = (ROOT / "bot/modules/mirror_leech.py").read_text(encoding="utf-8")
+    assert 'multi_count > 1 or "/Merged" in self.same_dir' in mirror
+
     ytdlp_download = (
         ROOT / "bot/helper/mirror_leech_utils/download_utils/yt_dlp_download.py"
     ).read_text(encoding="utf-8")
@@ -1274,13 +1278,27 @@ def test_merge_is_a_switch_and_does_not_consume_the_download_url():
     common = (ROOT / "bot/helper/common.py").read_text(encoding="utf-8")
     assert "probes, error = await check_merge_compatibility(videos)" in common
     assert "merge_video_files(videos, output, probes)" in common
+    assert "sync_merge_final_files" in common
 
     listener = (ROOT / "bot/helper/listeners/task_listener.py").read_text(
         encoding="utf-8"
     )
-    assert 'self._merge_cancel_reason = "Merge cancelled by user."' in listener
-    assert "self._merge_cancel_cleanup_started = True" in listener
-    assert "self._merge_event.set()" in listener
+    assert "_stage_merge_source_files" in listener
+    assert "confirm_merge_order" not in listener
+    assert "Merge order confirmation timed out" not in listener
+    assert '"MERGE PART READY" if merge_staged else "UPLOAD STOPPED"' in listener
+
+    for relative_path in (
+        "bot/modules/mirror_leech.py",
+        "bot/modules/ytdlp.py",
+        "bot/modules/uphoster.py",
+    ):
+        source = (ROOT / relative_path).read_text(encoding="utf-8")
+        assert "await self.prepare_merge_plan()" in source
+
+    web_server = (ROOT / "web/wserver.py").read_text(encoding="utf-8")
+    assert '"/app/merge-plan"' in web_server
+    assert '"/api/merge-plan/{plan_id}"' in web_server
 
     mirror = (ROOT / "bot/modules/mirror_leech.py").read_text(encoding="utf-8")
     assert 'args.get("--merge") and args.get("--c2c")' in mirror
@@ -1290,6 +1308,231 @@ def test_merge_is_a_switch_and_does_not_consume_the_download_url():
     ).read_text(encoding="utf-8")
     assert 'if self._cstatus == "Merge":' in ffmpeg_status
     assert "await self.listener.on_download_error(error)" in ffmpeg_status
+
+
+@pytest.fixture
+def merge_plan_store_fixture(tmp_path, monkeypatch):
+    base = tmp_path / "merge-plans"
+    monkeypatch.setattr(merge_plan_store, "_BASE_DIR", str(base))
+    return merge_plan_store
+
+
+def test_source_order_expands_into_final_files_without_blocking(
+    merge_plan_store_fixture,
+):
+    store = merge_plan_store_fixture
+    assert store.create_plan("batch1", 42, -1001, "Season 1", 2)
+    first = store.register_source("batch1", "task_1", 1, "Episode 1")
+    second = store.register_source("batch1", "task_2", 2, "Episode 2")
+
+    assert first["status"] == "collecting"
+    assert second["status"] == "downloading"
+    assert not second["locked"]
+    assert store.public_plan(second)["source_count"] == 2
+
+    reversed_ids = [item["id"] for item in reversed(second["items"])]
+    reordered, error = store.update_order(
+        "batch1", reversed_ids, second["revision"]
+    )
+    assert not error
+    assert [item["source_id"] for item in reordered["items"]] == [
+        "task_2",
+        "task_1",
+    ]
+
+    final = store.sync_final_files(
+        "batch1",
+        [
+            {
+                "source_id": "task_1",
+                "name": "Episode 01.mkv",
+                "path": ".merge-source-task_1/Episode 01.mkv",
+                "ordinal": 1,
+                "position": 1,
+            },
+            {
+                "source_id": "task_2",
+                "name": "Episode 02.mkv",
+                "path": ".merge-source-task_2/Episode 02.mkv",
+                "ordinal": 1,
+                "position": 2,
+            },
+        ],
+    )
+
+    assert final["locked"]
+    assert final["status"] == "merging"
+    assert [item["name"] for item in final["items"]] == [
+        "Episode 02.mkv",
+        "Episode 01.mkv",
+    ]
+
+
+def test_file_reorder_is_autosaved_and_paths_are_not_exposed(
+    merge_plan_store_fixture,
+):
+    store = merge_plan_store_fixture
+    assert store.create_plan("playlist1", 99, -1002, "Playlist", 1)
+    store.register_source("playlist1", "yt_task", 1, "Playlist")
+    candidates = store.replace_source_files(
+        "playlist1",
+        "yt_task",
+        [
+            {"name": "Episode 1", "ordinal": 1},
+            {"name": "Episode 2", "ordinal": 2},
+            {"name": "Episode 3", "ordinal": 3},
+        ],
+    )
+    custom = [
+        candidates["items"][1]["id"],
+        candidates["items"][2]["id"],
+        candidates["items"][0]["id"],
+    ]
+    saved, error = store.update_order(
+        "playlist1", custom, candidates["revision"]
+    )
+
+    assert not error
+    assert [item["name"] for item in saved["items"]] == [
+        "Episode 2",
+        "Episode 3",
+        "Episode 1",
+    ]
+    resolved = store.replace_source_files(
+        "playlist1",
+        "yt_task",
+        [
+            {"name": "01 - Episode 1.mkv", "key": "01 - Episode 1.mkv"},
+            {"name": "02 - Episode 2.mkv", "key": "02 - Episode 2.mkv"},
+            {"name": "03 - Episode 3.mkv", "key": "03 - Episode 3.mkv"},
+        ],
+        ready=True,
+    )
+    assert [item["name"] for item in resolved["items"]] == [
+        "02 - Episode 2.mkv",
+        "03 - Episode 3.mkv",
+        "01 - Episode 1.mkv",
+    ]
+    final = store.sync_final_files(
+        "playlist1",
+        [
+            {
+                "source_id": "yt_task",
+                "name": f"0{index} - Episode {index}.mkv",
+                "path": f"0{index} - Episode {index}.mkv",
+                "key": f"0{index} - Episode {index}.mkv",
+                "ordinal": index,
+                "position": 1,
+            }
+            for index in range(1, 4)
+        ],
+    )
+    assert [item["name"] for item in final["items"]] == [
+        "02 - Episode 2.mkv",
+        "03 - Episode 3.mkv",
+        "01 - Episode 1.mkv",
+    ]
+    public = store.public_plan(final)
+    assert public["source_count"] == 1
+    assert public["ready_count"] == 3
+    assert all("path" not in item for item in public["items"])
+
+
+def test_locked_merge_plan_rejects_late_reorder(merge_plan_store_fixture):
+    store = merge_plan_store_fixture
+    assert store.create_plan("locked1", 7, -1003, "Locked", 1)
+    plan = store.register_source("locked1", "task_7", 1, "Video")
+    assert store.set_plan_status("locked1", "merging", locked=True)
+
+    current, error = store.update_order(
+        "locked1", [plan["items"][0]["id"]], plan["revision"]
+    )
+    assert current["locked"]
+    assert error == "This merge has already started."
+
+
+def test_merge_planner_assets_keep_unattended_tasks_automatic():
+    javascript = (ROOT / "web/static/js/merge-planner.js").read_text(
+        encoding="utf-8"
+    )
+    listener = (ROOT / "bot/helper/listeners/task_listener.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert "setInterval(loadPlan, 3000)" in javascript
+    assert "saveOrder()" in javascript
+    assert "pendingSave = true" in javascript
+    assert "wait_for(self._merge_event.wait()" not in listener
+    assert 'if item.startswith(".merge-source-"):' in listener
+
+
+@pytest.mark.asyncio
+async def test_merge_multi_command_discovers_consecutive_previous_files():
+    source = COMMON_SOURCE.read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    task_config = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.ClassDef) and node.name == "TaskConfig"
+    )
+    selected = {
+        "_multi_sender_id",
+        "_is_recent_multi_source",
+        "_get_recent_multi_sources",
+    }
+    probe_class = ast.ClassDef(
+        name="TaskConfigProbe",
+        bases=[],
+        keywords=[],
+        body=[
+            node
+            for node in task_config.body
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and node.name in selected
+        ],
+        decorator_list=[],
+    )
+    module = ast.Module(body=[probe_class], type_ignores=[])
+    ast.fix_missing_locations(module)
+
+    class FakeMessage:
+        def __init__(self, message_id, sender_id, *, media=False, text=""):
+            self.id = message_id
+            self.from_user = SimpleNamespace(id=sender_id)
+            self.sender_chat = None
+            self.media = object() if media else None
+            self.text = text
+            self.empty = False
+            self.message_thread_id = None
+
+    namespace = {
+        "Message": FakeMessage,
+        "is_url": lambda value: value.startswith(("http://", "https://")),
+        "is_magnet": lambda value: value.startswith("magnet:"),
+        "is_rclone_path": lambda value: value.startswith("remote:"),
+    }
+    exec(compile(module, str(COMMON_SOURCE), "exec"), namespace)
+
+    messages = {
+        15: FakeMessage(15, 7, media=True),
+        16: FakeMessage(16, 7, media=True),
+        17: FakeMessage(17, 7, media=True),
+        18: FakeMessage(18, 99, text="another user's message"),
+    }
+
+    class FakeClient:
+        async def get_messages(self, *, chat_id, message_ids):
+            assert chat_id == -1001
+            return [messages[item] for item in message_ids if item in messages]
+
+    task = namespace["TaskConfigProbe"]()
+    task.message = FakeMessage(20, 7, text="/l -i 3 --merge")
+    task.message.chat = SimpleNamespace(id=-1001)
+    task.client = FakeClient()
+
+    found = await task._get_recent_multi_sources(3)
+
+    assert [item.id for item in found] == [15, 16, 17]
 
 
 def test_command_readers_collapse_repeated_whitespace():

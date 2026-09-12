@@ -28,9 +28,12 @@ new_name = """<b>New Name</b>: -n
 /cmd link -n new name
 Note: Doesn't work with torrents"""
 
-multi_link = """<b>Multi links only by replying to first link/file</b>: -i
+multi_link = """<b>Multiple consecutive links/files</b>: -i
 
 /cmd -i 10(number of links/files)
+
+Reply to the first source, or send the sources consecutively and run the command
+immediately after the last one. Merge tasks can use either method.
 
 Leech commands collect the uploaded file information and send one combined completion summary after all -i tasks finish."""
 
@@ -225,8 +228,9 @@ merge_video = """<b>Merge Videos</b>: --merge
 
 Combines every selected/downloaded video into one ordered MKV file.
 Works with playlists, torrent/NZB/JDownloader folders, bulk and -i downloads.
-The bot shows the detected order after downloading; reply with merge, reverse,
-a complete numeric order such as 2 3 1, or cancel.
+The secure web planner lets you drag files or sort by input order, filename,
+episode number, or reverse order while downloads continue. If left untouched,
+the task automatically merges in its default order without waiting.
 
 /cmd playlist-or-folder-link --merge
 /cmd playlist-or-folder-link --merge -en default

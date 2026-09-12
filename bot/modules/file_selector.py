@@ -132,6 +132,24 @@ async def confirm_selection(_, query):
         await query.answer("Invalid selection action.", show_alert=True)
         return
 
+    if data[2].startswith("merge_"):
+        from web.merge_plan_store import get_plan_owner_id
+
+        owner_id = get_plan_owner_id(data[2])
+        if owner_id is None:
+            await query.answer("This merge plan has expired!", show_alert=True)
+            await delete_message(message)
+            return
+        if user_id != owner_id:
+            await query.answer("This merge plan is not for you!", show_alert=True)
+            return
+        if data[1] == "pin":
+            await query.answer(
+                data[3] if len(data) >= 4 else "Missing PIN value.",
+                show_alert=True,
+            )
+        return
+
     if data[2].startswith("terabox_"):
         from ..helper.mirror_leech_utils.download_utils.terabox_download import (
             cancel_terabox_selection,
@@ -212,6 +230,11 @@ async def confirm_selection(_, query):
                 )[0]
                 path = tor_info.content_path.rsplit("/", 1)[0]
                 res = await TorrentManager.qbittorrent.torrents.files(id_)
+                if task.listener.is_merge and task.listener.merge_plan_id:
+                    await task.listener.set_merge_plan_candidates(
+                        [file_.name for file_ in res if file_.priority != 0],
+                        video_only=True,
+                    )
                 for f in res:
                     if f.priority == 0:
                         f_paths = [f"{path}/{f.name}", f"{path}/{f.name}.!qB"]

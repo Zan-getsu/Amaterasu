@@ -918,7 +918,10 @@ def _merge_stream_signature(probe):
     signatures = []
     for stream in probe.get("streams") or []:
         stream_type = stream.get("codec_type")
-        if stream_type not in {"video", "audio", "subtitle", "attachment", "data"}:
+        # Matroska attachments (usually subtitle fonts) are timeless resources,
+        # not concat timeline streams. They may legitimately differ per episode
+        # and are collected separately into the final file.
+        if stream_type not in {"video", "audio", "subtitle", "data"}:
             continue
         if stream_type == "video" and (stream.get("disposition") or {}).get(
             "attached_pic"
@@ -950,9 +953,16 @@ def _merge_stream_signature(probe):
 
 def _merge_mismatch_reason(reference, signature, position):
     if len(signature) != len(reference):
+        differences = []
+        for stream_type in ("video", "audio", "subtitle", "data"):
+            expected = sum(item[0] == stream_type for item in reference)
+            actual = sum(item[0] == stream_type for item in signature)
+            if actual != expected:
+                differences.append(f"{stream_type}={actual} (expected {expected})")
         return (
-            f"Item {position} has {len(signature)} mergeable streams; "
-            f"expected {len(reference)}."
+            f"Item {position} has a different timeline stream layout: "
+            + ", ".join(differences)
+            + "."
         )
     labels = (*_MERGE_STREAM_FIELDS, "stream metadata", "rotation", "disposition")
     for stream_index, (expected, actual) in enumerate(
@@ -2284,6 +2294,29 @@ class FFMpeg:
         chapter_path = f"{base}.chapters.ffmetadata"
         temp_output = f"{base}.part.mkv"
 
+        attachment_sources = []
+        seen_attachments = set()
+        for file_, probe in zip(files, probes, strict=True):
+            stream_indexes = []
+            for stream in probe.get("streams") or []:
+                if stream.get("codec_type") != "attachment":
+                    continue
+                stream_index = stream.get("index")
+                if stream_index is None:
+                    continue
+                tags = stream.get("tags") or {}
+                identity = (
+                    stream.get("extradata_hash") or (file_, stream_index),
+                    tags.get("filename"),
+                    tags.get("mimetype"),
+                )
+                if identity in seen_attachments:
+                    continue
+                seen_attachments.add(identity)
+                stream_indexes.append(stream_index)
+            if stream_indexes:
+                attachment_sources.append((file_, stream_indexes))
+
         def quote_path(path):
             path = ospath.abspath(path).replace("\\", "/")
             return "file '" + path.replace("'", "'\\''") + "'"
@@ -2338,8 +2371,27 @@ class FFMpeg:
                 "ffmetadata",
                 "-i",
                 chapter_path,
+            ]
+            attachment_maps = []
+            for input_index, (file_, stream_indexes) in enumerate(
+                attachment_sources, start=2
+            ):
+                cmd.extend(["-i", file_])
+                for stream_index in stream_indexes:
+                    attachment_maps.extend(
+                        ["-map", f"{input_index}:{stream_index}"]
+                    )
+            cmd.extend(
+                [
                 "-map",
-                "0",
+                "0:v?",
+                "-map",
+                "0:a?",
+                "-map",
+                "0:s?",
+                "-map",
+                "0:d?",
+                *attachment_maps,
                 "-map_metadata",
                 "1",
                 "-map_chapters",
@@ -2349,7 +2401,8 @@ class FFMpeg:
                 "-max_muxing_queue_size",
                 "4096",
                 temp_output,
-            ]
+                ]
+            )
             self._listener.subproc = await create_subprocess_exec(
                 *cmd, stdout=PIPE, stderr=PIPE
             )
@@ -2376,7 +2429,11 @@ class FFMpeg:
                     f"Merged output starts at {start_time:.3f}s instead of near zero."
                 )
             for stream_type in ("video", "audio", "subtitle", "attachment", "data"):
-                expected = _count_media_streams(probes[0], stream_type)
+                expected = (
+                    len(seen_attachments)
+                    if stream_type == "attachment"
+                    else _count_media_streams(probes[0], stream_type)
+                )
                 actual = _count_media_streams(output_probe, stream_type)
                 if actual != expected:
                     return False, (

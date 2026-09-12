@@ -1,6 +1,7 @@
 from aiofiles.os import remove, path as aiopath
 from aiofiles import open as aiopen
 from asyncio import sleep, TimeoutError
+from contextlib import suppress
 from aioqbt.api import AddFormBuilder
 from aioqbt.exc import AQError
 from aiohttp.client_exceptions import ClientError
@@ -92,6 +93,16 @@ async def add_qb_torrent(listener, path, ratio, seed_time):
         tor_info = tor_info[0]
         listener.name = tor_info.name
         ext_hash = tor_info.hash
+
+        if listener.is_merge and listener.merge_plan_id:
+            with suppress(Exception):
+                torrent_files = await TorrentManager.qbittorrent.torrents.files(
+                    ext_hash
+                )
+                await listener.set_merge_plan_candidates(
+                    [file_.name for file_ in torrent_files if file_.priority != 0],
+                    video_only=True,
+                )
 
         # Phase 4.1 — sequential torrent streaming. When --stream flag
         # is set, enable sequential download so pieces arrive in order

@@ -289,6 +289,28 @@ def rclone_selection_buttons(gid):
     return _selection_buttons(gid, "rclone")
 
 
+def merge_plan_buttons(plan_id):
+    gid = f"merge_{plan_id}"
+    token = make_short_token(get_web_secret(), "merge-plan", gid)
+    base_url = get_valid_base_url()
+    buttons = ButtonMaker()
+    url = f"{base_url}/app/merge-plan?gid={gid}"
+    if Config.WEB_PINCODE:
+        buttons.url_button(
+            "Arrange Merge Order",
+            url,
+            style=ButtonStyle.PRIMARY,
+        )
+        buttons.data_button("Pincode", f"sel pin {gid} {token}")
+    else:
+        buttons.url_button(
+            "Arrange Merge Order",
+            f"{url}&pin={token}",
+            style=ButtonStyle.PRIMARY,
+        )
+    return buttons.build_menu(2)
+
+
 async def get_telegraph_list(telegraph_content):
     path = [
         (

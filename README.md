@@ -1824,26 +1824,35 @@ ordered timeline first and runs one encoding job on the result. If you use
 > Amaterasu stops and reports which item or stream is incompatible instead of
 > silently producing a broken file or changing quality.
 
-#### Confirm or fix the order
+#### Arrange the order while downloading
 
-After all parts finish downloading, Amaterasu sends a **MERGE ORDER** message.
-Check the numbered list, then reply directly to that message with one of these
-choices:
+Amaterasu sends an **Arrange Merge Order** web button after the batch sources
+have been collected. The planner updates as filenames become available, while
+the downloads continue in the background.
 
-| Reply | Result |
-|---|---|
-| `merge` | Keep the displayed order and begin merging |
-| `reverse` | Reverse the entire order and begin merging |
-| `2 3 1` | Use your own order; include every item number exactly once |
-| `cancel` | Cancel the complete merge task |
+Inside the planner you can:
 
-For example, if the bot shows Episode 03, Episode 01, Episode 02, reply with
-`2 3 1` to produce Episode 01 → Episode 02 → Episode 03.
+- Drag and drop files into any order, including on a touch screen.
+- Restore the original input or playlist order.
+- Sort naturally by filename, so `Episode 2` comes before `Episode 10`.
+- Sort by common season and episode patterns such as `S01E03`, `1x03`, or
+  `Episode 3`.
+- Reverse the complete order.
+- Use the accessible up and down controls instead of dragging.
 
-Playlist entries retain their playlist order. Other downloaded collections use
-natural filename order, so `Episode 2` comes before `Episode 10`. The order
-prompt is the final check in case the source names are confusing or incorrect.
-It expires after 10 minutes if nobody confirms it.
+Changes save automatically. The planner never creates a post-download
+confirmation step: if you close it or never open it, Amaterasu merges and
+uploads automatically using the latest saved order. Once merging begins, the
+timeline is locked so a late browser edit cannot change an active FFmpeg job.
+
+Bulk and `-i` tasks receive the planner automatically as soon as all their
+sources are registered. Playlist and torrent tasks also receive the button, but
+their existing playlist or torrent order remains the default unless you change
+it.
+
+The planner requires a valid `BASE_URL`. When the web interface is unavailable,
+the task remains fully automatic and uses playlist/input order or natural
+filename order; it never waits for web confirmation.
 
 #### More recipes
 
@@ -1867,9 +1876,9 @@ It expires after 10 minutes if nobody confirms it.
 /uphoster COLLECTION_URL --merge -en default
 ```
 
-For `-i`, send or reply to the first source in the collection and make sure the
-following messages contain the remaining sources in the intended batch. The
-bot still gives you the merge-order confirmation before processing begins.
+For `-i`, either reply to the first source, or send all sources consecutively
+and run the command immediately after the last one. You can correct their final
+order in the web planner while they download.
 
 #### Safety and file handling
 

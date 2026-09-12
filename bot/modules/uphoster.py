@@ -406,6 +406,7 @@ class Uphoster(TaskListener):
             return
 
         self._set_mode_engine()
+        await self.prepare_merge_plan()
 
         if (
             not self.is_jd
