@@ -1478,6 +1478,7 @@ async def test_merge_multi_command_discovers_consecutive_previous_files():
     selected = {
         "_multi_sender_id",
         "_is_recent_multi_source",
+        "_get_reply_message",
         "_get_recent_multi_sources",
     }
     probe_class = ast.ClassDef(
@@ -1504,6 +1505,8 @@ async def test_merge_multi_command_discovers_consecutive_previous_files():
             self.text = text
             self.empty = False
             self.message_thread_id = None
+            self.reply_to_message = None
+            self.reply_to_message_id = None
 
     namespace = {
         "Message": FakeMessage,
@@ -1523,16 +1526,21 @@ async def test_merge_multi_command_discovers_consecutive_previous_files():
     class FakeClient:
         async def get_messages(self, *, chat_id, message_ids):
             assert chat_id == -1001
+            if isinstance(message_ids, int):
+                return messages.get(message_ids)
             return [messages[item] for item in message_ids if item in messages]
 
     task = namespace["TaskConfigProbe"]()
-    task.message = FakeMessage(20, 7, text="/l -i 3 --merge")
+    task.message = FakeMessage(20, 42, text="/l1 -i 3 --merge")
     task.message.chat = SimpleNamespace(id=-1001)
     task.client = FakeClient()
 
     found = await task._get_recent_multi_sources(3)
 
     assert [item.id for item in found] == [15, 16, 17]
+
+    task.message.reply_to_message_id = 15
+    assert (await task._get_reply_message()).id == 15
 
 
 def test_command_readers_collapse_repeated_whitespace():

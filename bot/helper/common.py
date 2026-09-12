@@ -1078,17 +1078,25 @@ class TaskConfig:
             or is_rclone_path(text)
         )
 
+    async def _get_reply_message(self):
+        reply = getattr(self.message, "reply_to_message", None)
+        if isinstance(reply, Message):
+            return reply
+        reply_id = getattr(self.message, "reply_to_message_id", None)
+        if reply_id is None:
+            return None
+        reply = await self.client.get_messages(
+            chat_id=self.message.chat.id,
+            message_ids=reply_id,
+        )
+        return reply if isinstance(reply, Message) and not reply.empty else None
+
     async def _get_next_multi_source(self):
         reply_id = self.message.reply_to_message_id
         if reply_id is None:
             return None
 
-        current_source = self.message.reply_to_message
-        if not isinstance(current_source, Message):
-            current_source = await self.client.get_messages(
-                chat_id=self.message.chat.id,
-                message_ids=reply_id,
-            )
+        current_source = await self._get_reply_message()
         sender_id = self._multi_sender_id(current_source)
         thread_id = getattr(current_source, "message_thread_id", None)
 
@@ -1123,9 +1131,9 @@ class TaskConfig:
 
     async def _get_recent_multi_sources(self, count):
         """Find a consecutive source batch immediately before a command."""
-        sender_id = self._multi_sender_id(self.message)
         thread_id = getattr(self.message, "message_thread_id", None)
         collected = []
+        source_sender_id = None
         last_id = self.message.id - 1
         first_id = max(1, last_id - 999)
         for end_id in range(last_id, first_id - 1, -100):
@@ -1143,15 +1151,23 @@ class TaskConfig:
                 key=lambda msg: msg.id,
                 reverse=True,
             ):
-                if sender_id is not None and self._multi_sender_id(candidate) != sender_id:
-                    continue
                 if (
                     thread_id is not None
                     and getattr(candidate, "message_thread_id", None) != thread_id
                 ):
                     continue
+                candidate_sender_id = self._multi_sender_id(candidate)
+                if (
+                    source_sender_id is not None
+                    and candidate_sender_id != source_sender_id
+                ):
+                    continue
                 if not self._is_recent_multi_source(candidate):
-                    return list(reversed(collected)) if len(collected) >= count else []
+                    if source_sender_id is None:
+                        continue
+                    return []
+                if source_sender_id is None:
+                    source_sender_id = candidate_sender_id
                 collected.append(candidate)
                 if len(collected) == count:
                     return list(reversed(collected))

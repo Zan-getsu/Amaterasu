@@ -511,11 +511,12 @@ class Mirror(TaskListener):
         ytdlp_fallback_name = ""
 
         self.multi = multi_count
+        source_reply = await self._get_reply_message()
         if (
             self.is_merge
             and self.multi > 1
             and not self.link
-            and not self.message.reply_to_message
+            and not self._is_recent_multi_source(source_reply)
             and not self.multi_sources
         ):
             self.multi_sources = await self._get_recent_multi_sources(self.multi)
@@ -604,7 +605,7 @@ class Mirror(TaskListener):
         path = f"{DOWNLOAD_DIR}{self.mid}{self.folder_name}"
 
         if not self.link:
-            reply_to = self.message.reply_to_message or (
+            reply_to = source_reply or (
                 self.multi_sources[0] if self.multi_sources else None
             )
             if reply_to:
