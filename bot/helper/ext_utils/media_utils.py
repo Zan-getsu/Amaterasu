@@ -936,7 +936,15 @@ def _merge_stream_signature(probe):
                 # 2997/125). Compare milliframes, not the raw strings.
                 frame_rate = round(parsed_rate, 3)
         signatures.append(
-            tuple(stream.get(key) for key in _MERGE_STREAM_FIELDS)
+            tuple(
+                None
+                if stream_type == "subtitle"
+                and stream.get("codec_name")
+                in {"ass", "ssa", "subrip", "webvtt", "mov_text", "text"}
+                and key == "extradata_hash"
+                else stream.get(key)
+                for key in _MERGE_STREAM_FIELDS
+            )
             + (
                 frame_rate,
                 tuple(

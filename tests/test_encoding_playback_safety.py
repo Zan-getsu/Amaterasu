@@ -140,6 +140,7 @@ def test_merge_stream_signature_ignores_cover_art_and_detects_video_changes():
                 "height": 1080,
                 "pix_fmt": "yuv420p",
                 "time_base": "1/1000",
+                "extradata_hash": "SHA256:video-header",
             },
             {
                 "codec_type": "video",
@@ -155,6 +156,13 @@ def test_merge_stream_signature_ignores_cover_art_and_detects_video_changes():
                 "time_base": "1/1000",
             },
             {
+                "codec_type": "subtitle",
+                "codec_name": "ass",
+                "time_base": "1/1000",
+                "extradata_hash": "SHA256:episode-one-subtitle-header",
+                "tags": {"language": "eng"},
+            },
+            {
                 "codec_type": "attachment",
                 "codec_name": "ttf",
                 "extradata_hash": "SHA256:font",
@@ -163,13 +171,41 @@ def test_merge_stream_signature_ignores_cover_art_and_detects_video_changes():
     }
 
     original = signature(probe)
-    assert len(original) == 2
+    assert len(original) == 3
+
+    probe["streams"][3]["extradata_hash"] = "SHA256:episode-two-subtitle-header"
+    assert signature(probe) == original
+
+    image_subtitle = {
+        "streams": [
+            {
+                "codec_type": "subtitle",
+                "codec_name": "hdmv_pgs_subtitle",
+                "time_base": "1/1000",
+                "extradata_hash": "SHA256:image-subtitle-header-one",
+            }
+        ]
+    }
+    image_signature = signature(image_subtitle)
+    image_subtitle["streams"][0]["extradata_hash"] = (
+        "SHA256:image-subtitle-header-two"
+    )
+    assert signature(image_subtitle) != image_signature
 
     probe["streams"][0]["height"] = 720
     changed = signature(probe)
     assert changed != original
     assert mismatch_reason(original, changed, 2) == (
         "Item 2 video stream 1 has a different height (720 instead of 1080)."
+    )
+
+    probe["streams"][0]["height"] = 1080
+    probe["streams"][0]["extradata_hash"] = "SHA256:different-video-header"
+    changed = signature(probe)
+    assert changed != original
+    assert mismatch_reason(original, changed, 2) == (
+        "Item 2 video stream 1 has a different extradata_hash "
+        "(SHA256:different-video-header instead of SHA256:video-header)."
     )
 
 
