@@ -1279,6 +1279,7 @@ def test_merge_is_a_switch_and_does_not_consume_the_download_url():
     assert "probes, error = await check_merge_compatibility(videos)" in common
     assert "merge_video_files(videos, output, probes)" in common
     assert "sync_merge_final_files" in common
+    assert "source_message = await self._get_reply_message()" in common
 
     listener = (ROOT / "bot/helper/listeners/task_listener.py").read_text(
         encoding="utf-8"
@@ -1286,7 +1287,8 @@ def test_merge_is_a_switch_and_does_not_consume_the_download_url():
     assert "_stage_merge_source_files" in listener
     assert "confirm_merge_order" not in listener
     assert "Merge order confirmation timed out" not in listener
-    assert '"MERGE PART READY" if merge_staged else "UPLOAD STOPPED"' in listener
+    assert "if not merge_staged:" in listener
+    assert '"MERGE PART READY"' not in listener
 
     for relative_path in (
         "bot/modules/mirror_leech.py",
@@ -1365,6 +1367,38 @@ def test_source_order_expands_into_final_files_without_blocking(
     assert [item["name"] for item in final["items"]] == [
         "Episode 02.mkv",
         "Episode 01.mkv",
+    ]
+
+
+def test_pending_source_is_bound_without_losing_drag_order(
+    merge_plan_store_fixture,
+):
+    store = merge_plan_store_fixture
+    assert store.create_plan("early1", 42, -1001, "Season 1", 3)
+    first = store.register_source("early1", "task_1", 1, "Episode 14")
+    second = store.register_source("early1", "pending_2", 2, "Episode 15")
+    third = store.register_source("early1", "pending_3", 3, "Episode 16")
+    assert first and second and third
+
+    custom = [
+        third["items"][2]["id"],
+        third["items"][0]["id"],
+        third["items"][1]["id"],
+    ]
+    reordered, error = store.update_order("early1", custom, third["revision"])
+    assert not error
+
+    bound = store.register_source("early1", "task_2", 2, "Episode 15.mkv")
+
+    assert [item["name"] for item in bound["items"]] == [
+        "Episode 16",
+        "Episode 14",
+        "Episode 15.mkv",
+    ]
+    assert [item["source_id"] for item in bound["items"]] == [
+        "pending_3",
+        "task_1",
+        "task_2",
     ]
 
 
@@ -1464,6 +1498,9 @@ def test_merge_planner_assets_keep_unattended_tasks_automatic():
     assert "pendingSave = true" in javascript
     assert "wait_for(self._merge_event.wait()" not in listener
     assert 'if item.startswith(".merge-source-"):' in listener
+    assert "Open the web planner" in (ROOT / "bot/helper/common.py").read_text(
+        encoding="utf-8"
+    )
 
 
 @pytest.mark.asyncio

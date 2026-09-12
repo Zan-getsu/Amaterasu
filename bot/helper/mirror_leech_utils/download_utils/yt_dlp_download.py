@@ -531,6 +531,9 @@ class YoutubeDLHelper:
             self.opts["outtmpl"] = {
                 "default": f"{path}/{self._listener.name}/{playlist_prefix}%(title,fulltitle,alt_title)s%(season_number& |)s%(season_number&S|)s%(season_number|)02d%(episode_number&E|)s%(episode_number|)02d%(height& |)s%(height|)s%(height&p|)s%(fps|)s%(fps&fps|)s%(tbr& |)s%(tbr|)d.%(ext)s",
                 "thumbnail": f"{start_path}/{playlist_prefix}%(title,fulltitle,alt_title)s%(season_number& |)s%(season_number&S|)s%(season_number|)02d%(episode_number&E|)s%(episode_number|)02d%(height& |)s%(height|)s%(height&p|)s%(fps|)s%(fps&fps|)s%(tbr& |)s%(tbr|)d.%(ext)s",
+                # Playlist artwork uses its own yt-dlp template type. Without
+                # this, yt-dlp falls back to a relative filename in the repo.
+                "pl_thumbnail": f"{start_path}/playlist.%(ext)s",
             }
         elif "download_ranges" in options:
             self.opts["outtmpl"] = {

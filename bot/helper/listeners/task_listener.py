@@ -1311,28 +1311,29 @@ class TaskListener(TaskConfig):
             if self.mid in task_dict:
                 del task_dict[self.mid]
             count = len(task_dict)
-        msg = (
-            _completion_header(
-                "MERGE PART READY" if merge_staged else "UPLOAD STOPPED",
-                self.name,
-                "✓" if merge_staged else "■",
+        if not merge_staged:
+            msg = (
+                _completion_header(
+                    "UPLOAD STOPPED",
+                    self.name,
+                    "■",
+                )
+                + _premium_row("Due To", escape(str(error)))
+                + _premium_row("Task Size", get_readable_file_size(self.size))
+                + _premium_row(
+                    "Time Taken",
+                    get_readable_time(time() - self.message.date.timestamp()),
+                )
+                + _premium_row("In Mode", self.mode[0], code=False)
+                + _premium_row("Out Mode", self.mode[1], code=False)
+                + _premium_row(
+                    "Task By",
+                    self.tag,
+                    code=False,
+                    branch="╰─",
+                )
             )
-            + _premium_row("Due To", escape(str(error)))
-            + _premium_row("Task Size", get_readable_file_size(self.size))
-            + _premium_row(
-                "Time Taken",
-                get_readable_time(time() - self.message.date.timestamp()),
-            )
-            + _premium_row("In Mode", self.mode[0], code=False)
-            + _premium_row("Out Mode", self.mode[1], code=False)
-            + _premium_row(
-                "Task By",
-                self.tag,
-                code=False,
-                branch="╰─",
-            )
-        )
-        await send_message(self.message, msg)
+            await send_message(self.message, msg)
         if multi_snapshot is not None:
             await self._send_multi_leech_summary(multi_snapshot)
         if count == 0:

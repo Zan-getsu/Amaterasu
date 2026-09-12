@@ -133,8 +133,24 @@ def register_source(plan_id, source_id, position, label):
                 return data
             items = data.get("items", [])
             if not any(item.get("source_id") == source_id for item in items):
-                items.append(_source_placeholder(source_id, position, label))
-                items.sort(key=lambda item: int(item.get("original_index", 0)))
+                pending_index = next(
+                    (
+                        index
+                        for index, item in enumerate(items)
+                        if item.get("placeholder")
+                        and str(item.get("source_id", "")).startswith("pending_")
+                        and int(item.get("original_index", 0)) == int(position)
+                    ),
+                    None,
+                )
+                replacement = _source_placeholder(source_id, position, label)
+                if pending_index is None:
+                    items.append(replacement)
+                    items.sort(key=lambda item: int(item.get("original_index", 0)))
+                else:
+                    # Keep the user's current drag order while binding the
+                    # placeholder to the real task that has just started.
+                    items[pending_index] = replacement
             data["items"] = items
             sources = {item.get("source_id") for item in items}
             if len(sources) >= int(data.get("expected_sources", 1)):

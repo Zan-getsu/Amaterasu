@@ -123,6 +123,12 @@ def test_extractor_filename_entities_are_decoded_and_download_uses_recovery():
     assert "with _build_resilient_ytdlp(self.opts) as ydl:" in source
 
 
+def test_playlist_thumbnail_is_scoped_to_the_task_directory():
+    source = SOURCE_PATH.read_text(encoding="utf-8")
+
+    assert '"pl_thumbnail": f"{start_path}/playlist.%(ext)s"' in source
+
+
 def test_ytdlp_download_reports_unexpected_errors_instead_of_hiding_them():
     tree = ast.parse(SOURCE_PATH.read_text(encoding="utf-8"))
     helper = next(

@@ -77,6 +77,40 @@ def test_clean_working_tree_fast_forwards(tmp_path, monkeypatch):
     _git(checkout, "pull", "--ff-only")
 
 
+def test_untracked_download_does_not_block_update(tmp_path, monkeypatch):
+    remote, seed, checkout = _repositories(tmp_path)
+    _add_upstream_commit(seed, "upstream\n")
+    downloaded = checkout / "playlist thumbnail.jpg"
+    downloaded.write_bytes(b"runtime media")
+    expected_head = _git(seed, "rev-parse", "HEAD")
+
+    monkeypatch.chdir(checkout)
+    monkeypatch.setattr(update, "_ALLOWLIST_PATTERNS", [re_compile(r".*")])
+
+    assert update._run_update(str(remote), "main", "test") is True
+    assert _git(checkout, "rev-parse", "HEAD") == expected_head
+    assert downloaded.read_bytes() == b"runtime media"
+
+
+def test_untracked_file_is_not_overwritten_by_update(tmp_path, monkeypatch):
+    remote, seed, checkout = _repositories(tmp_path)
+    incoming = seed / "new-module.py"
+    incoming.write_text("upstream version\n", encoding="utf-8")
+    _git(seed, "add", "new-module.py")
+    _git(seed, "commit", "-m", "add new module")
+    _git(seed, "push", "origin", "main")
+    local = checkout / "new-module.py"
+    local.write_text("local untracked version\n", encoding="utf-8")
+    original_head = _git(checkout, "rev-parse", "HEAD")
+
+    monkeypatch.chdir(checkout)
+    monkeypatch.setattr(update, "_ALLOWLIST_PATTERNS", [re_compile(r".*")])
+
+    assert update._run_update(str(remote), "main", "test") is False
+    assert _git(checkout, "rev-parse", "HEAD") == original_head
+    assert local.read_text(encoding="utf-8") == "local untracked version\n"
+
+
 def test_clean_local_commits_are_not_rewritten(tmp_path, monkeypatch):
     remote, _, checkout = _repositories(tmp_path)
     _git(checkout, "config", "user.email", "tests@example.invalid")

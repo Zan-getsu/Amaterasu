@@ -903,8 +903,6 @@ _MERGE_STREAM_FIELDS = (
     "chroma_location",
     "bits_per_raw_sample",
     "sample_aspect_ratio",
-    "avg_frame_rate",
-    "r_frame_rate",
     "sample_rate",
     "channels",
     "channel_layout",
@@ -927,9 +925,20 @@ def _merge_stream_signature(probe):
             "attached_pic"
         ):
             continue
+        frame_rate = None
+        if stream_type == "video":
+            parsed_rate = _parse_frame_rate(
+                stream.get("avg_frame_rate")
+            ) or _parse_frame_rate(stream.get("r_frame_rate"))
+            if parsed_rate:
+                # ffprobe may express the same nominal rate using slightly
+                # different derived rationals (for example 24000/1001 and
+                # 2997/125). Compare milliframes, not the raw strings.
+                frame_rate = round(parsed_rate, 3)
         signatures.append(
             tuple(stream.get(key) for key in _MERGE_STREAM_FIELDS)
             + (
+                frame_rate,
                 tuple(
                     (stream.get("tags") or {}).get(key)
                     for key in ("language", "filename", "mimetype")
@@ -964,7 +973,13 @@ def _merge_mismatch_reason(reference, signature, position):
             + ", ".join(differences)
             + "."
         )
-    labels = (*_MERGE_STREAM_FIELDS, "stream metadata", "rotation", "disposition")
+    labels = (
+        *_MERGE_STREAM_FIELDS,
+        "frame rate",
+        "stream metadata",
+        "rotation",
+        "disposition",
+    )
     for stream_index, (expected, actual) in enumerate(
         zip(reference, signature, strict=True), start=1
     ):

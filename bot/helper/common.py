@@ -36,6 +36,7 @@ from .ext_utils.bot_utils import (
     get_size_bytes,
     get_valid_base_url,
     merge_plan_buttons,
+    merge_plan_url,
     new_task,
     sync_to_async,
 )
@@ -248,31 +249,49 @@ class TaskConfig:
         self.file_details = {}
         self.mode = tuple()
 
-    def _merge_source_label(self):
-        value = str(self.link or "").strip()
+    @staticmethod
+    def _merge_value_label(value, position):
+        value = str(value or "").strip()
         if value.startswith(("http://", "https://")):
             parsed = urlparse(value)
             name = unquote(ospath.basename(parsed.path.rstrip("/")))
             return (name or parsed.netloc or value)[:240]
         if value.startswith("magnet:"):
-            return f"Torrent source {self.merge_source_position}"
+            return f"Torrent source {position}"
         if value:
             return value[:240]
+        return f"Item {position}"
 
-        reply = getattr(self.message, "reply_to_message", None)
-        if reply is not None:
-            media = (
-                getattr(reply, "document", None)
-                or getattr(reply, "video", None)
-                or getattr(reply, "audio", None)
-                or getattr(reply, "animation", None)
+    @classmethod
+    def _merge_message_label(cls, message, position):
+        if message is not None:
+            media = next(
+                (
+                    item
+                    for item in (
+                        getattr(message, "document", None),
+                        getattr(message, "video", None),
+                        getattr(message, "audio", None),
+                        getattr(message, "animation", None),
+                    )
+                    if item is not None
+                ),
+                None,
             )
             if media is not None and getattr(media, "file_name", None):
                 return str(media.file_name)[:240]
-            text = getattr(reply, "text", None) or getattr(reply, "caption", None)
+            text = getattr(message, "text", None) or getattr(message, "caption", None)
             if text:
-                return str(text).splitlines()[0][:240]
-        return f"Item {self.merge_source_position}"
+                return cls._merge_value_label(str(text).splitlines()[0], position)
+        return f"Item {position}"
+
+    def _merge_source_label(self, source_message=None):
+        if str(self.link or "").strip():
+            return self._merge_value_label(self.link, self.merge_source_position)
+        return self._merge_message_label(
+            source_message or getattr(self.message, "reply_to_message", None),
+            self.merge_source_position,
+        )
 
     async def prepare_merge_plan(self):
         """Register one merge source and announce the non-blocking web planner."""
@@ -321,26 +340,53 @@ class TaskConfig:
         if not created:
             LOGGER.warning("Could not create merge plan %s", plan_id)
             return
+        source_message = getattr(self.message, "reply_to_message", None)
+        if source_message is None and getattr(self.message, "reply_to_message_id", None):
+            source_message = await self._get_reply_message()
         data = await sync_to_async(
             register_merge_source,
             plan_id,
             self.mid,
             self.merge_source_position,
-            self._merge_source_label(),
+            self._merge_source_label(source_message),
         )
         if data is None:
             return
 
+        # The first -i task already knows the remaining Telegram messages or
+        # bulk links. Publish their names immediately so the planner is useful
+        # before the delayed child tasks start downloading.
+        if self.merge_source_position == 1 and expected > 1:
+            pending = []
+            if len(getattr(self, "multi_sources", [])) >= expected:
+                pending = [
+                    (position, self._merge_message_label(source, position))
+                    for position, source in enumerate(
+                        self.multi_sources[1:expected], start=2
+                    )
+                ]
+            elif getattr(self, "bulk", None):
+                pending = [
+                    (position, self._merge_value_label(source, position))
+                    for position, source in enumerate(
+                        self.bulk[: expected - 1], start=2
+                    )
+                ]
+            for position, label in pending:
+                updated = await sync_to_async(
+                    register_merge_source,
+                    plan_id,
+                    f"pending_{position}",
+                    position,
+                    label,
+                )
+                if updated is not None:
+                    data = updated
+
         should_announce = expected <= 1
         if shared_state is not None:
-            source_count = len(
-                {item.get("source_id") for item in data.get("items", [])}
-            )
             async with task_dict_lock:
-                if (
-                    source_count >= expected
-                    and not shared_state.get("merge_plan_announced")
-                ):
+                if not shared_state.get("merge_plan_announced"):
                     shared_state["merge_plan_announced"] = True
                     should_announce = True
         elif getattr(self, "_merge_plan_announced", False):
@@ -349,11 +395,13 @@ class TaskConfig:
             self._merge_plan_announced = True
 
         if should_announce and web_available:
+            planner_url = merge_plan_url(plan_id)
             await send_message(
                 self.message,
-                "<b>✦ Merge order is ready</b>\n\n"
-                "Downloads continue automatically. Arrange the files now, or "
-                "leave the planner untouched to use the default order.",
+                "<b>✦ Merge planner ready</b>\n\n"
+                f'<a href="{planner_url}">Open the web planner</a> to arrange '
+                "the files now. Downloads continue automatically; leave it "
+                "untouched to use the default order.",
                 merge_plan_buttons(plan_id),
             )
 

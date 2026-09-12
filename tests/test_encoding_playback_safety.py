@@ -26,6 +26,13 @@ def _load_media_helpers(*names):
         hours, minutes, seconds = str(value).split(":")
         return int(hours) * 3600 + int(minutes) * 60 + float(seconds)
 
+    def parse_frame_rate(value):
+        try:
+            parsed = float(Fraction(value))
+        except (TypeError, ValueError, ZeroDivisionError):
+            return 0
+        return parsed if isfinite(parsed) and parsed > 0 else 0
+
     namespace = {
         "_MATROSKA_EXTENSIONS": {".mkv", ".mka"},
         "_MP4_EXTENSIONS": {".mp4", ".m4v", ".mov"},
@@ -54,6 +61,7 @@ def _load_media_helpers(*names):
         "suppress": suppress,
         "ospath": ospath,
         "time_to_seconds": time_to_seconds,
+        "_parse_frame_rate": parse_frame_rate,
         "gather": gather,
         "_MERGE_STREAM_FIELDS": (
             "codec_type",
@@ -71,8 +79,6 @@ def _load_media_helpers(*names):
             "chroma_location",
             "bits_per_raw_sample",
             "sample_aspect_ratio",
-            "avg_frame_rate",
-            "r_frame_rate",
             "sample_rate",
             "channels",
             "channel_layout",
@@ -208,6 +214,63 @@ async def test_merge_compatibility_reports_the_specific_incompatible_field():
     assert result is None
     assert "Item 2 video stream 1 has a different height" in error
     assert "silently re-encoding" in error
+
+
+async def test_merge_compatibility_accepts_equivalent_frame_rate_metadata():
+    _, _, _, check_compatibility = _load_media_helpers(
+        "_probe_duration",
+        "_merge_stream_signature",
+        "_merge_mismatch_reason",
+        "check_merge_compatibility",
+    )
+    probes = {
+        "one.mkv": {
+            "format": {"duration": "10"},
+            "streams": [
+                {
+                    "codec_type": "video",
+                    "codec_name": "h264",
+                    "width": 1920,
+                    "height": 1080,
+                    "pix_fmt": "yuv420p",
+                    "avg_frame_rate": "24000/1001",
+                    "r_frame_rate": "24000/1001",
+                    "time_base": "1/1000",
+                }
+            ],
+        },
+        "two.mkv": {
+            "format": {"duration": "10"},
+            "streams": [
+                {
+                    "codec_type": "video",
+                    "codec_name": "h264",
+                    "width": 1920,
+                    "height": 1080,
+                    "pix_fmt": "yuv420p",
+                    "avg_frame_rate": "2997/125",
+                    "r_frame_rate": "2997/125",
+                    "time_base": "1/1000",
+                }
+            ],
+        },
+    }
+
+    async def probe(path):
+        return probes[path], ""
+
+    check_compatibility.__globals__["_probe_media_file"] = probe
+    result, error = await check_compatibility(["one.mkv", "two.mkv"])
+
+    assert result == [probes["one.mkv"], probes["two.mkv"]]
+    assert error == ""
+
+    probes["two.mkv"]["streams"][0]["avg_frame_rate"] = "30/1"
+    probes["two.mkv"]["streams"][0]["r_frame_rate"] = "30/1"
+    result, error = await check_compatibility(["one.mkv", "two.mkv"])
+
+    assert result is None
+    assert "different frame rate (30.0 instead of 23.976)" in error
 
 
 def test_merge_pipeline_is_stream_copy_and_validates_before_publish():

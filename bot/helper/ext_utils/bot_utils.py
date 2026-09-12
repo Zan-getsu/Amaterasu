@@ -289,12 +289,19 @@ def rclone_selection_buttons(gid):
     return _selection_buttons(gid, "rclone")
 
 
-def merge_plan_buttons(plan_id):
+def merge_plan_url(plan_id):
     gid = f"merge_{plan_id}"
     token = make_short_token(get_web_secret(), "merge-plan", gid)
     base_url = get_valid_base_url()
-    buttons = ButtonMaker()
     url = f"{base_url}/app/merge-plan?gid={gid}"
+    return url if Config.WEB_PINCODE else f"{url}&pin={token}"
+
+
+def merge_plan_buttons(plan_id):
+    gid = f"merge_{plan_id}"
+    token = make_short_token(get_web_secret(), "merge-plan", gid)
+    url = merge_plan_url(plan_id)
+    buttons = ButtonMaker()
     if Config.WEB_PINCODE:
         buttons.url_button(
             "Arrange Merge Order",
@@ -305,7 +312,7 @@ def merge_plan_buttons(plan_id):
     else:
         buttons.url_button(
             "Arrange Merge Order",
-            f"{url}&pin={token}",
+            url,
             style=ButtonStyle.PRIMARY,
         )
     return buttons.build_menu(2)

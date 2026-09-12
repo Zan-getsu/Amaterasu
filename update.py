@@ -255,7 +255,10 @@ def _git_error(action, result):
 
 
 def _working_tree_changes():
-    status = _run_git("status", "--porcelain=v1", "--untracked-files=normal")
+    # Untracked runtime/download artifacts do not make a fast-forward unsafe.
+    # Git itself will still refuse the merge if an incoming file would overwrite
+    # one of them, while tracked or staged operator changes remain protected.
+    status = _run_git("status", "--porcelain=v1", "--untracked-files=no")
     if status.returncode != 0:
         _git_error("inspect the working tree", status)
         return None
