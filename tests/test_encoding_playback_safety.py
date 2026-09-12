@@ -1,6 +1,7 @@
 import ast
 import os.path as ospath
 import re
+from asyncio import gather
 from contextlib import suppress
 from fractions import Fraction
 from math import isfinite
@@ -53,6 +54,31 @@ def _load_media_helpers(*names):
         "suppress": suppress,
         "ospath": ospath,
         "time_to_seconds": time_to_seconds,
+        "gather": gather,
+        "_MERGE_STREAM_FIELDS": (
+            "codec_type",
+            "codec_name",
+            "profile",
+            "level",
+            "width",
+            "height",
+            "pix_fmt",
+            "field_order",
+            "color_range",
+            "color_space",
+            "color_transfer",
+            "color_primaries",
+            "chroma_location",
+            "bits_per_raw_sample",
+            "sample_aspect_ratio",
+            "avg_frame_rate",
+            "r_frame_rate",
+            "sample_rate",
+            "channels",
+            "channel_layout",
+            "time_base",
+            "extradata_hash",
+        ),
     }
     exec(compile(module, str(MEDIA_UTILS_PATH), "exec"), namespace)
     return tuple(namespace[name] for name in names)
@@ -93,6 +119,128 @@ def test_encode_container_is_selected_for_codec_compatibility():
     assert get_output_path("movie.mp4", "libx264", "flac") == "movie_encoded.mkv"
     assert get_output_path("movie.avi", "libx264", "aac") == "movie_encoded.mkv"
     assert get_output_path("movie.mkv", "libsvtav1", "libopus") == "movie_encoded.mkv"
+
+
+def test_merge_stream_signature_ignores_cover_art_and_detects_video_changes():
+    signature, mismatch_reason = _load_media_helpers(
+        "_merge_stream_signature", "_merge_mismatch_reason"
+    )
+    probe = {
+        "streams": [
+            {
+                "codec_type": "video",
+                "codec_name": "h264",
+                "width": 1920,
+                "height": 1080,
+                "pix_fmt": "yuv420p",
+                "time_base": "1/1000",
+            },
+            {
+                "codec_type": "video",
+                "codec_name": "mjpeg",
+                "disposition": {"attached_pic": 1},
+            },
+            {
+                "codec_type": "audio",
+                "codec_name": "aac",
+                "sample_rate": "48000",
+                "channels": 2,
+                "channel_layout": "stereo",
+                "time_base": "1/1000",
+            },
+        ]
+    }
+
+    original = signature(probe)
+    assert len(original) == 2
+
+    probe["streams"][0]["height"] = 720
+    changed = signature(probe)
+    assert changed != original
+    assert mismatch_reason(original, changed, 2) == (
+        "Item 2 video stream 1 has a different height (720 instead of 1080)."
+    )
+
+
+async def test_merge_compatibility_reports_the_specific_incompatible_field():
+    _, _, _, check_compatibility = _load_media_helpers(
+        "_probe_duration",
+        "_merge_stream_signature",
+        "_merge_mismatch_reason",
+        "check_merge_compatibility",
+    )
+    probes = {
+        "one.mkv": {
+            "format": {"duration": "10"},
+            "streams": [
+                {
+                    "codec_type": "video",
+                    "codec_name": "h264",
+                    "width": 1920,
+                    "height": 1080,
+                }
+            ],
+        },
+        "two.mkv": {
+            "format": {"duration": "10"},
+            "streams": [
+                {
+                    "codec_type": "video",
+                    "codec_name": "h264",
+                    "width": 1920,
+                    "height": 720,
+                }
+            ],
+        },
+    }
+
+    async def probe(path):
+        return probes[path], ""
+
+    check_compatibility.__globals__["_probe_media_file"] = probe
+    result, error = await check_compatibility(["one.mkv", "two.mkv"])
+
+    assert result is None
+    assert "Item 2 video stream 1 has a different height" in error
+    assert "silently re-encoding" in error
+
+
+def test_merge_pipeline_is_stream_copy_and_validates_before_publish():
+    source = MEDIA_UTILS_PATH.read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    ffmpeg_class = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.ClassDef) and node.name == "FFMpeg"
+    )
+    merge_method = next(
+        node
+        for node in ffmpeg_class.body
+        if isinstance(node, ast.AsyncFunctionDef)
+        and node.name == "merge_video_files"
+    )
+    method_source = ast.get_source_segment(source, merge_method)
+
+    assert "await check_merge_compatibility(files)" in method_source
+    assert '"-c",\n                "copy"' in method_source
+    assert '"-map_chapters",\n                "1"' in method_source
+    assert '"-copyts",\n                "-start_at_zero"' in method_source
+    assert "Merged duration differs from the source total" in method_source
+    assert "instead of near zero" in method_source
+    assert (
+        'for stream_type in ("video", "audio", "subtitle", "attachment", "data")'
+        in method_source
+    )
+    assert "chapter_count != len(files)" in method_source
+    assert "for position in sorted(sample_positions):" in method_source
+    assert "await self._decode_encode_sample(" in method_source
+    assert "await replace(temp_output, output_file)" in method_source
+
+    common_source = (ROOT / "bot" / "helper" / "common.py").read_text(
+        encoding="utf-8"
+    )
+    assert "external subtitles require timestamp offsetting" in common_source
+    assert "a file looks like video but could not be read" in common_source
 
 
 def test_copied_audio_matroska_uses_seek_safe_automatic_timestamps():
@@ -795,6 +943,7 @@ def test_encode_pipeline_selects_copy_safe_timestamps_and_validates_before_succe
     assert "await self._repair_copied_audio(" in method_source
     assert 'a_codec == "copy"' in method_source
     assert "encoded file has no audio stream" in method_source
+    assert "output_chapters != source_chapters" in source
     assert '"audio decode check failed:"' in method_source
     assert "source_probe" in method_source
     assert "if not valid:" in method_source

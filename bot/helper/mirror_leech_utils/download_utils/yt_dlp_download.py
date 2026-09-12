@@ -436,7 +436,6 @@ class YoutubeDLHelper:
     ):
         self.extra_postprocess = extra_postprocess
         if playlist:
-            self.opts["ignoreerrors"] = True
             self.is_playlist = True
 
         self._gid = token_hex(5)
@@ -496,6 +495,11 @@ class YoutubeDLHelper:
         if options:
             self._set_options(options)
 
+        if playlist:
+            # A merged playlist must be complete. Enforce this after custom
+            # options so ignoreerrors cannot silently create a partial movie.
+            self.opts["ignoreerrors"] = not self._listener.is_merge
+
         self.opts["format"] = qual
 
         await sync_to_async(self._extract_meta_data)
@@ -521,9 +525,12 @@ class YoutubeDLHelper:
 
         start_path = path if self.keep_thumb else f"{path}/yt-dlp-thumb"
         if self.is_playlist:
+            playlist_prefix = (
+                "%(playlist_index)06d - " if self._listener.is_merge else ""
+            )
             self.opts["outtmpl"] = {
-                "default": f"{path}/{self._listener.name}/%(title,fulltitle,alt_title)s%(season_number& |)s%(season_number&S|)s%(season_number|)02d%(episode_number&E|)s%(episode_number|)02d%(height& |)s%(height|)s%(height&p|)s%(fps|)s%(fps&fps|)s%(tbr& |)s%(tbr|)d.%(ext)s",
-                "thumbnail": f"{start_path}/%(title,fulltitle,alt_title)s%(season_number& |)s%(season_number&S|)s%(season_number|)02d%(episode_number&E|)s%(episode_number|)02d%(height& |)s%(height|)s%(height&p|)s%(fps|)s%(fps&fps|)s%(tbr& |)s%(tbr|)d.%(ext)s",
+                "default": f"{path}/{self._listener.name}/{playlist_prefix}%(title,fulltitle,alt_title)s%(season_number& |)s%(season_number&S|)s%(season_number|)02d%(episode_number&E|)s%(episode_number|)02d%(height& |)s%(height|)s%(height&p|)s%(fps|)s%(fps&fps|)s%(tbr& |)s%(tbr|)d.%(ext)s",
+                "thumbnail": f"{start_path}/{playlist_prefix}%(title,fulltitle,alt_title)s%(season_number& |)s%(season_number&S|)s%(season_number|)02d%(episode_number&E|)s%(episode_number|)02d%(height& |)s%(height|)s%(height&p|)s%(fps|)s%(fps&fps|)s%(tbr& |)s%(tbr|)d.%(ext)s",
             }
         elif "download_ranges" in options:
             self.opts["outtmpl"] = {

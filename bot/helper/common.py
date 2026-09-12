@@ -6,6 +6,7 @@ from os import walk
 from re import sub
 from secrets import token_hex
 from shlex import split
+from shutil import disk_usage
 
 from aiofiles.os import listdir, makedirs, remove
 from aiofiles.os import path as aiopath
@@ -56,6 +57,7 @@ from .ext_utils.links_utils import (
 )
 from .ext_utils.media_utils import (
     FFMpeg,
+    check_merge_compatibility,
     create_thumb,
     download_image_thumb,
     get_document_type,
@@ -179,6 +181,8 @@ class TaskConfig:
         self.progress = True
         self.ffmpeg_cmds = None
         self.is_encode = False
+        self.is_merge = False
+        self.merge_output_name = ""
         self.encode_profile = None
         self.encode_metadata = {}
         self.metadata_title = None
@@ -913,6 +917,13 @@ class TaskConfig:
         return None
 
     async def _record_unstarted_multi_leech(self, summary, count, error):
+        if self.is_merge and self.folder_name in self.same_dir:
+            async with task_dict_lock:
+                state = self.same_dir[self.folder_name]
+                state["error"] = str(error)
+                state["total"] = max(
+                    len(state["tasks"]), state["total"] - count
+                )
         if summary is None:
             return
         snapshot = await summary.record_unstarted(
@@ -1545,6 +1556,148 @@ class TaskConfig:
                         )
                         return False
         return dl_path
+
+    async def proceed_merge(self, dl_path, gid):
+        """Merge every playable video below *dl_path* into one Matroska file."""
+        paths = []
+        if self.is_file:
+            paths = [dl_path]
+        else:
+            for dirpath, _, files in await sync_to_async(walk, dl_path):
+                if ospath.basename(dirpath) == "yt-dlp-thumb":
+                    continue
+                paths.extend(ospath.join(dirpath, file_) for file_ in files)
+
+        def natural_key(path):
+            relative = ospath.relpath(path, dl_path).replace("\\", "/")
+            return tuple(
+                (1, int(part)) if part.isdigit() else (0, part.casefold())
+                for part in re.split(r"(\d+)", relative)
+            )
+
+        paths.sort(key=natural_key)
+        external_subtitles = [
+            path
+            for path in paths
+            if ospath.splitext(path)[1].casefold()
+            in {".ass", ".idx", ".smi", ".srt", ".ssa", ".sub", ".sup", ".vtt"}
+        ]
+        if external_subtitles:
+            subtitle = ospath.relpath(external_subtitles[0], dl_path).replace("\\", "/")
+            await self.on_download_error(
+                "Merge stopped because external subtitles require timestamp offsetting "
+                f"and cannot be safely copied yet: {subtitle}"
+            )
+            return False
+
+        videos = []
+        unreadable_videos = []
+        video_extensions = {
+            ".3g2",
+            ".3gp",
+            ".asf",
+            ".avi",
+            ".f4v",
+            ".flv",
+            ".m2ts",
+            ".m4v",
+            ".mkv",
+            ".mov",
+            ".mp4",
+            ".mpeg",
+            ".mpg",
+            ".mts",
+            ".ogm",
+            ".ogv",
+            ".rm",
+            ".rmvb",
+            ".ts",
+            ".vob",
+            ".webm",
+            ".wmv",
+        }
+        for offset in range(0, len(paths), 4):
+            batch = paths[offset : offset + 4]
+            media_types = await gather(*(get_document_type(path) for path in batch))
+            for path, media_type in zip(batch, media_types, strict=True):
+                if media_type[0]:
+                    videos.append(path)
+                elif ospath.splitext(path)[1].casefold() in video_extensions:
+                    unreadable_videos.append(path)
+        if unreadable_videos:
+            unreadable = ospath.relpath(unreadable_videos[0], dl_path).replace(
+                "\\", "/"
+            )
+            await self.on_download_error(
+                "Merge stopped because a file looks like video but could not be read: "
+                f"{unreadable}"
+            )
+            return False
+        if len(videos) < 2:
+            await self.on_download_error(
+                "Merge needs at least two playable video files after selection."
+            )
+            return False
+
+        probes, error = await check_merge_compatibility(videos)
+        if probes is None:
+            await self.on_download_error(f"Unable to merge the selected videos: {error}")
+            return False
+        probe_by_path = dict(zip(videos, probes, strict=True))
+
+        required = sum(ospath.getsize(path) for path in videos)
+        output_dir = ospath.dirname(dl_path)
+        reserve = max(64 * 1024**2, required // 100)
+        if disk_usage(output_dir).free < required + reserve:
+            await self.on_download_error(
+                "There is not enough free disk space for the merged output and "
+                "a safe working reserve."
+            )
+            return False
+
+        ffmpeg = FFMpeg(self)
+        async with task_dict_lock:
+            task_dict[self.mid] = FFmpegStatus(self, ffmpeg, gid, "Merge")
+
+        confirm_order = getattr(self, "confirm_merge_order", None)
+        if confirm_order:
+            videos = await confirm_order(videos, dl_path, probe_by_path)
+            if not videos:
+                async with task_dict_lock:
+                    is_active = self.mid in task_dict
+                if is_active and not getattr(
+                    self, "_merge_cancel_cleanup_started", False
+                ):
+                    await self.on_download_error(
+                        getattr(self, "_merge_cancel_reason", "") or "Merge cancelled."
+                    )
+                return False
+            probes = [probe_by_path[path] for path in videos]
+
+        requested = ospath.basename(self.merge_output_name.strip())
+        if requested:
+            base = ospath.splitext(requested)[0] or "Merged"
+        else:
+            base = ospath.splitext(ospath.basename(dl_path.rstrip("/")))[0]
+            if base.casefold() == "merged":
+                base = "Combined"
+            base = f"{base or 'Merged'} [Merged]"
+        output = ospath.join(output_dir, f"{base}.mkv")
+
+        async with ff_lock:
+            if self.is_cancelled:
+                return False
+            result, error = await ffmpeg.merge_video_files(videos, output, probes)
+        if not result:
+            if not self.is_cancelled:
+                await self.on_download_error(
+                    f"Unable to merge the selected videos: {error}"
+                )
+            return False
+
+        if not self.is_file:
+            await rmtree(dl_path, ignore_errors=True)
+        return result
 
     async def generate_sample_video(self, dl_path, gid):
         data = (

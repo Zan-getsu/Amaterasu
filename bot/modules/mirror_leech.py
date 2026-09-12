@@ -373,6 +373,7 @@ class Mirror(TaskListener):
             # Phase 4.3 — cloud-to-cloud transfer flag. When set, both
             # source and destination must be rclone remotes.
             "--c2c": False,
+            "--merge": False,
         }
 
         arg_parser(input_list[1:], args)
@@ -406,6 +407,20 @@ class Mirror(TaskListener):
         if Config.DISABLE_ENCODE and args.get("-en"):
             await send_message(self.message, "Encoding is currently disabled.")
             return
+        if args.get("--merge") and args.get("-d"):
+            await send_message(
+                self.message,
+                "Merging cannot be combined with torrent seeding because the source "
+                "files must remain unchanged.",
+            )
+            return
+        if args.get("--merge") and args.get("--c2c"):
+            await send_message(
+                self.message,
+                "Merging requires local downloads and cannot be combined with "
+                "cloud-to-cloud transfer.",
+            )
+            return
 
         from .. import sudo_users, user_data
         user = self.message.from_user or self.message.sender_chat
@@ -416,7 +431,9 @@ class Mirror(TaskListener):
 
         self.select = args["-s"]
         self.seed = args["-d"]
-        self.name = args["-n"]
+        self.is_merge = args["--merge"]
+        self.merge_output_name = args["-n"] if self.is_merge else ""
+        self.name = "" if self.is_merge else args["-n"]
         self.up_dest = args["-up"]
         self.user_dump_selection = args["-ud"]
         self.category = args["-gc"]
@@ -440,6 +457,8 @@ class Mirror(TaskListener):
         self.as_doc = args["-doc"]
         self.as_med = args["-med"]
         self.folder_name = f"/{args['-m']}".rstrip("/") if len(args["-m"]) > 0 else ""
+        if self.is_merge and multi_count > 1 and not self.folder_name:
+            self.folder_name = "/Merged"
         self.bot_trans = args["-bt"]
         self.user_trans = args["-ut"]
         self.is_yt = args["-yt"]

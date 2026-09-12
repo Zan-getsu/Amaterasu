@@ -40,6 +40,7 @@ class MirrorStatus:
     STATUS_YT = "YouTube"
     STATUS_METADATA = "Metadata"
     STATUS_ENCODE = "Encode"
+    STATUS_MERGE = "Merge"
 
 
 class EngineStatus:
@@ -81,6 +82,7 @@ STATUSES = {
     "PA": MirrorStatus.STATUS_PAUSED,
     "CK": MirrorStatus.STATUS_CHECK,
     "EN": MirrorStatus.STATUS_ENCODE,
+    "MG": MirrorStatus.STATUS_MERGE,
 }
 
 
@@ -237,6 +239,7 @@ def _status_icon(status):
         MirrorStatus.STATUS_CONVERT: "🎞",
         MirrorStatus.STATUS_FFMPEG: "🎞",
         MirrorStatus.STATUS_ENCODE: "🎬",
+        MirrorStatus.STATUS_MERGE: "🔗",
         MirrorStatus.STATUS_METADATA: "🏷",
         MirrorStatus.STATUS_YT: "▶",
     }.get(status, "⚙")

@@ -45,6 +45,8 @@ class FFmpegStatus:
             return MirrorStatus.STATUS_SAMVID
         elif self._cstatus == "Encode":
             return MirrorStatus.STATUS_ENCODE
+        elif self._cstatus == "Merge":
+            return MirrorStatus.STATUS_MERGE
         else:
             return MirrorStatus.STATUS_FFMPEG
 
@@ -62,4 +64,8 @@ class FFmpegStatus:
                 self.listener.subproc.kill()
             except Exception:
                 pass
-        await self.listener.on_upload_error(f"{self._cstatus} stopped by user!")
+        error = f"{self._cstatus} stopped by user!"
+        if self._cstatus == "Merge":
+            await self.listener.on_download_error(error)
+        else:
+            await self.listener.on_upload_error(error)

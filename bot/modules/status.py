@@ -150,6 +150,7 @@ async def status_pages(_, query):
             "ConvertMedia": 0,
             "FFmpeg": 0,
             "Encode": 0,
+            "Merge": 0,
         }
         dl_speed = 0
         up_speed = 0
@@ -221,6 +222,8 @@ async def status_pages(_, query):
                     tasks["FFmpeg"] += 1
                 case MirrorStatus.STATUS_ENCODE:
                     tasks["Encode"] += 1
+                case MirrorStatus.STATUS_MERGE:
+                    tasks["Merge"] += 1
                 case _:
                     tasks["Download"] += 1
 
@@ -233,7 +236,7 @@ async def status_pages(_, query):
 ├─ {'Clone':<9}: {tasks["Clone"]} | {'CheckUp':<9}: {tasks["CheckUp"]}
 ├─ {'Paused':<9}: {tasks["Pause"]} | {'SamVideo':<9}: {tasks["SamVid"]}
 ├─ {'Convert':<9}: {tasks["ConvertMedia"]} | {'FFmpeg':<9}: {tasks["FFmpeg"]}
-├─ {'Encode':<9}: {tasks["Encode"]}
+├─ {'Encode':<9}: {tasks["Encode"]} | {'Merge':<9}: {tasks["Merge"]}
 ├─ ─── TOTAL SPEEDS ─────────────
 ├─ {'Download':<9}: {get_readable_file_size(dl_speed)}/s
 ├─ {'Upload':<9}: {get_readable_file_size(up_speed)}/s

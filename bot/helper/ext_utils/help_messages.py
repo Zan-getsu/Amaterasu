@@ -221,6 +221,23 @@ encode_msg = """<b>Encode Video</b>: -en
 /cmd link -en default (uses the default SVT-AV1 preset)
 Note: Only for SUDO users!"""
 
+merge_video = """<b>Merge Videos</b>: --merge
+
+Combines every selected/downloaded video into one ordered MKV file.
+Works with playlists, torrent/NZB/JDownloader folders, bulk and -i downloads.
+The bot shows the detected order after downloading; reply with merge, reverse,
+a complete numeric order such as 2 3 1, or cancel.
+
+/cmd playlist-or-folder-link --merge
+/cmd playlist-or-folder-link --merge -en default
+/cmd -i 3 --merge -n Combined.mkv
+
+Without -en, streams are copied without compression and must be compatible.
+With -en, the compatible timeline is merged first and encoded once.
+Embedded subtitles and matching font attachments are preserved; external subtitle
+files stop the merge until timestamp-offset concatenation is supported.
+Torrent seeding and cloud-to-cloud transfer cannot be combined with --merge."""
+
 yt_opt = """<b>Options</b>: -opt
 
 /cmd link -opt {"format": "bv*+mergeall[vcodec=none]", "nocheckcertificate": True, "playliststart": 10, "fragment_retries": float("inf"), "matchtitle": "S13", "writesubtitles": True, "live_from_start": True, "postprocessor_args": {"ffmpeg": ["-threads", "4"]}, "wait_for_video": (5, 100), "download_ranges": [{"start_time": 0, "end_time": 10}]}
@@ -354,6 +371,7 @@ YT_HELP_DICT = {
     "FFmpeg-Cmds": ffmpeg_cmds,
     "Metadata": metadata,
     "Encode": encode_msg,
+    "Merge-Videos": merge_video,
 }
 
 MIRROR_HELP_DICT = {
@@ -389,6 +407,7 @@ MIRROR_HELP_DICT = {
     "FFmpeg-Cmds": ffmpeg_cmds,
     "Metadata": metadata,
     "Encode": encode_msg,
+    "Merge-Videos": merge_video,
 }
 
 CLONE_HELP_DICT = {

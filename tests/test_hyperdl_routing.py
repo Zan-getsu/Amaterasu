@@ -1247,6 +1247,51 @@ def test_non_password_optional_flags_still_consume_one_value_only():
     assert args["link"] == "local-file.bin"
 
 
+def test_merge_is_a_switch_and_does_not_consume_the_download_url():
+    args = {"--merge": False, "link": ""}
+    load_extract_parser()("--merge https://example.com/playlist".split(), args)
+
+    assert args == {
+        "--merge": True,
+        "link": "https://example.com/playlist",
+    }
+
+    for relative_path in (
+        "bot/modules/mirror_leech.py",
+        "bot/modules/ytdlp.py",
+        "bot/modules/uphoster.py",
+    ):
+        source = (ROOT / relative_path).read_text(encoding="utf-8")
+        assert '"--merge": False' in source
+        assert 'self.is_merge = args["--merge"]' in source
+
+    ytdlp_download = (
+        ROOT / "bot/helper/mirror_leech_utils/download_utils/yt_dlp_download.py"
+    ).read_text(encoding="utf-8")
+    assert '"%(playlist_index)06d - " if self._listener.is_merge' in ytdlp_download
+    assert 'self.opts["ignoreerrors"] = not self._listener.is_merge' in ytdlp_download
+
+    common = (ROOT / "bot/helper/common.py").read_text(encoding="utf-8")
+    assert "probes, error = await check_merge_compatibility(videos)" in common
+    assert "merge_video_files(videos, output, probes)" in common
+
+    listener = (ROOT / "bot/helper/listeners/task_listener.py").read_text(
+        encoding="utf-8"
+    )
+    assert 'self._merge_cancel_reason = "Merge cancelled by user."' in listener
+    assert "self._merge_cancel_cleanup_started = True" in listener
+    assert "self._merge_event.set()" in listener
+
+    mirror = (ROOT / "bot/modules/mirror_leech.py").read_text(encoding="utf-8")
+    assert 'args.get("--merge") and args.get("--c2c")' in mirror
+
+    ffmpeg_status = (
+        ROOT / "bot/helper/mirror_leech_utils/status_utils/ffmpeg_status.py"
+    ).read_text(encoding="utf-8")
+    assert 'if self._cstatus == "Merge":' in ffmpeg_status
+    assert "await self.listener.on_download_error(error)" in ffmpeg_status
+
+
 def test_command_readers_collapse_repeated_whitespace():
     for relative_path in (
         "bot/modules/category_select.py",

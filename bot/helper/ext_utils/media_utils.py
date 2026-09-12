@@ -869,6 +869,9 @@ async def _probe_media_file(media_path):
                     "json",
                     "-show_format",
                     "-show_streams",
+                    "-show_chapters",
+                    "-show_data_hash",
+                    "sha256",
                     media_path,
                 ]
             ),
@@ -882,6 +885,116 @@ async def _probe_media_file(media_path):
         return json.loads(stdout), ""
     except (TypeError, json.JSONDecodeError) as error:
         return None, f"ffprobe returned invalid JSON: {error}"
+
+
+_MERGE_STREAM_FIELDS = (
+    "codec_type",
+    "codec_name",
+    "profile",
+    "level",
+    "width",
+    "height",
+    "pix_fmt",
+    "field_order",
+    "color_range",
+    "color_space",
+    "color_transfer",
+    "color_primaries",
+    "chroma_location",
+    "bits_per_raw_sample",
+    "sample_aspect_ratio",
+    "avg_frame_rate",
+    "r_frame_rate",
+    "sample_rate",
+    "channels",
+    "channel_layout",
+    "time_base",
+    "extradata_hash",
+)
+
+
+def _merge_stream_signature(probe):
+    """Fields that must match for a safe concat-demuxer stream copy."""
+    signatures = []
+    for stream in probe.get("streams") or []:
+        stream_type = stream.get("codec_type")
+        if stream_type not in {"video", "audio", "subtitle", "attachment", "data"}:
+            continue
+        if stream_type == "video" and (stream.get("disposition") or {}).get(
+            "attached_pic"
+        ):
+            continue
+        signatures.append(
+            tuple(stream.get(key) for key in _MERGE_STREAM_FIELDS)
+            + (
+                tuple(
+                    (stream.get("tags") or {}).get(key)
+                    for key in ("language", "filename", "mimetype")
+                ),
+                next(
+                    (
+                        side_data.get("rotation")
+                        for side_data in stream.get("side_data_list") or []
+                        if side_data.get("rotation") is not None
+                    ),
+                    None,
+                ),
+                tuple(
+                    (stream.get("disposition") or {}).get(key)
+                    for key in ("default", "forced", "hearing_impaired", "visual_impaired")
+                ),
+            )
+        )
+    return signatures
+
+
+def _merge_mismatch_reason(reference, signature, position):
+    if len(signature) != len(reference):
+        return (
+            f"Item {position} has {len(signature)} mergeable streams; "
+            f"expected {len(reference)}."
+        )
+    labels = (*_MERGE_STREAM_FIELDS, "stream metadata", "rotation", "disposition")
+    for stream_index, (expected, actual) in enumerate(
+        zip(reference, signature, strict=True), start=1
+    ):
+        for label, expected_value, actual_value in zip(
+            labels, expected, actual, strict=True
+        ):
+            if actual_value != expected_value:
+                stream_type = actual[0] or expected[0] or "media"
+                return (
+                    f"Item {position} {stream_type} stream {stream_index} has a "
+                    f"different {label} ({actual_value!s} instead of {expected_value!s})."
+                )
+    return f"Item {position} has an incompatible stream layout."
+
+
+async def check_merge_compatibility(files):
+    reference = None
+    probes = []
+    for offset in range(0, len(files), 4):
+        batch = await gather(
+            *(_probe_media_file(file_) for file_ in files[offset : offset + 4])
+        )
+        for position, (probe, error) in enumerate(batch, start=offset + 1):
+            if probe is None:
+                return None, f"Item {position} could not be inspected: {error}"
+            duration = _probe_duration(probe)
+            if duration <= 0:
+                return None, f"Item {position} has no finite duration."
+            signature = _merge_stream_signature(probe)
+            if not any(item[0] == "video" for item in signature):
+                return None, f"Item {position} has no playable video stream."
+            if reference is None:
+                reference = signature
+            elif signature != reference:
+                return None, (
+                    f"{_merge_mismatch_reason(reference, signature, position)} "
+                    "The merge was stopped instead of silently re-encoding it."
+                )
+            probes.append(probe)
+    return probes, ""
 
 
 async def get_streams(file):
@@ -1422,6 +1535,14 @@ class FFMpeg:
                     "encoded duration differs from source "
                     f"({output_duration:.3f}s vs {source_duration:.3f}s)"
                 )
+
+        source_chapters = len(source_probe.get("chapters") or [])
+        output_chapters = len(output_probe.get("chapters") or [])
+        if source_chapters and output_chapters != source_chapters:
+            return False, (
+                f"encoded file has {output_chapters} chapters; "
+                f"source has {source_chapters}"
+            )
 
         sample_positions = {
             0.0,
@@ -2144,6 +2265,152 @@ class FFMpeg:
             if await aiopath.exists(output):
                 await remove(output)
         return False
+
+    async def merge_video_files(self, files, output_file, probes=None):
+        """Concatenate compatible videos without changing their bitstreams."""
+        self.clear()
+        if self._listener.is_cancelled:
+            return False, "Merge was cancelled."
+        if probes is None:
+            probes, error = await check_merge_compatibility(files)
+            if probes is None:
+                return False, error
+
+        durations = [_probe_duration(probe) for probe in probes]
+        self._total_time = sum(durations)
+        self._listener.subsize = sum(ospath.getsize(file_) for file_ in files)
+        base = ospath.splitext(output_file)[0]
+        manifest_path = f"{base}.concat.txt"
+        chapter_path = f"{base}.chapters.ffmetadata"
+        temp_output = f"{base}.part.mkv"
+
+        def quote_path(path):
+            path = ospath.abspath(path).replace("\\", "/")
+            return "file '" + path.replace("'", "'\\''") + "'"
+
+        elapsed = 0
+        chapters = [";FFMETADATA1"]
+        for file_, duration in zip(files, durations, strict=True):
+            start = round(elapsed * 1000)
+            elapsed += duration
+            title = ospath.splitext(ospath.basename(file_))[0]
+            title = re.sub(r"^\d{1,8}\s+-\s+", "", title)
+            title = title.replace("\r", " ").replace("\n", " ")
+            title = title.replace("\\", "\\\\").replace("=", "\\=")
+            title = title.replace(";", "\\;").replace("#", "\\#")
+            chapters.extend(
+                (
+                    "[CHAPTER]",
+                    "TIMEBASE=1/1000",
+                    f"START={start}",
+                    f"END={round(elapsed * 1000)}",
+                    f"title={title}",
+                )
+            )
+
+        try:
+            with open(manifest_path, "w", encoding="utf-8", newline="\n") as manifest:
+                manifest.write("\n".join(quote_path(file_) for file_ in files) + "\n")
+            with open(chapter_path, "w", encoding="utf-8", newline="\n") as metadata:
+                metadata.write("\n".join(chapters) + "\n")
+
+            cmd = [
+                "taskset",
+                "-c",
+                f"{cores}",
+                BinConfig.FFMPEG_NAME,
+                "-y",
+                "-nostdin",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-progress",
+                "pipe:1",
+                "-copyts",
+                "-start_at_zero",
+                "-f",
+                "concat",
+                "-safe",
+                "0",
+                "-i",
+                manifest_path,
+                "-f",
+                "ffmetadata",
+                "-i",
+                chapter_path,
+                "-map",
+                "0",
+                "-map_metadata",
+                "1",
+                "-map_chapters",
+                "1",
+                "-c",
+                "copy",
+                "-max_muxing_queue_size",
+                "4096",
+                temp_output,
+            ]
+            self._listener.subproc = await create_subprocess_exec(
+                *cmd, stdout=PIPE, stderr=PIPE
+            )
+            await self._ffmpeg_progress()
+            _, stderr = await self._listener.subproc.communicate()
+            if self._listener.is_cancelled:
+                return False, "Merge was cancelled."
+            if self._listener.subproc.returncode != 0:
+                return False, stderr.decode(errors="replace").strip()
+
+            output_probe, probe_error = await _probe_media_file(temp_output)
+            if output_probe is None:
+                return False, f"Merged output is unreadable: {probe_error}"
+            output_duration = _probe_duration(output_probe)
+            if output_duration <= 0:
+                return False, "Merged output has no finite positive duration."
+            start_time = 0
+            with suppress(TypeError, ValueError):
+                start_time = float(
+                    (output_probe.get("format") or {}).get("start_time") or 0
+                )
+            if abs(start_time) > 0.5:
+                return False, (
+                    f"Merged output starts at {start_time:.3f}s instead of near zero."
+                )
+            for stream_type in ("video", "audio", "subtitle", "attachment", "data"):
+                expected = _count_media_streams(probes[0], stream_type)
+                actual = _count_media_streams(output_probe, stream_type)
+                if actual != expected:
+                    return False, (
+                        f"Merged output has {actual} {stream_type} streams; "
+                        f"expected {expected}."
+                    )
+            chapter_count = len(output_probe.get("chapters") or [])
+            if chapter_count != len(files):
+                return False, (
+                    f"Merged output has {chapter_count} chapters; expected {len(files)}."
+                )
+            tolerance = max(0.5, min(5.0, self._total_time * 0.005))
+            if abs(output_duration - self._total_time) > tolerance:
+                return False, (
+                    "Merged duration differs from the source total "
+                    f"({output_duration:.3f}s vs {self._total_time:.3f}s)."
+                )
+            sample_positions = {
+                0.0,
+                max(0.0, output_duration / 2),
+                max(0.0, output_duration - min(2.0, output_duration * 0.1)),
+            }
+            for position in sorted(sample_positions):
+                valid, reason = await self._decode_encode_sample(
+                    temp_output, position, "video"
+                )
+                if not valid:
+                    return False, reason
+            await replace(temp_output, output_file)
+            return output_file, ""
+        finally:
+            for path in (manifest_path, chapter_path, temp_output):
+                with suppress(Exception):
+                    await remove(path)
 
     async def sample_video(self, video_file, sample_duration, part_duration):
         self.clear()

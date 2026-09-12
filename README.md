@@ -87,6 +87,7 @@
 - [Telegram Session Generator (Web UI)](#telegram-session-generator-web-ui)
 - [🧰 Advanced Usage & Arguments](#advanced-usage--arguments)
   - [Argument Quick Reference](#argument-quick-reference)
+  - [Merge Videos into One File](#merge-videos-into-one-file)
   - [Telegram Link Downloads](#telegram-link-downloads)
   - [Rclone Paths](#rclone-paths)
   - [Upload Destination Shortcuts](#upload-destination-shortcuts)
@@ -1737,6 +1738,7 @@ Every mirror/leech command supports powerful inline arguments. Combine them free
 | `-i [count]` | Multi-link: process N consecutive messages. Leech commands send one combined file-list summary after the whole batch finishes. | `/leech -i 5`, `/qbleech -i 5`, `/jdleech -i 5` |
 | `-b` | Bulk: process links from a text file/message | `/leech -b` |
 | `-m [folder]` | Move all downloads into a single folder | `/mirror -i 3 -m MyFolder` |
+| `--merge` | Merge an ordered playlist, selected folder, torrent series, bulk, or `-i` collection into one MKV; add `-en` to encode the merged timeline once | `/ytdl playlist --merge`, `/qbleech magnet -s --merge`, `/leech -i 3 --merge -n Combined.mkv` |
 | `-j` | Join split files before processing | `/mirror link -j` |
 | `-d [ratio:time]` | Seed torrent (ratio and/or time in minutes) | `/qbmirror link -d 1.0:60` |
 | `-t [url]` | Custom thumbnail for this task | `/leech link -t https://img.url/thumb.jpg` |
@@ -1761,6 +1763,148 @@ Every mirror/leech command supports powerful inline arguments. Combine them free
 | `-au [user]` | Direct link auth username | `/mirror link -au admin` |
 | `-ap [pass]` | Direct link auth password | `/mirror link -ap secret` |
 | `-h [headers]` | Custom HTTP headers | `/mirror link -h Referer: https://site.com` |
+
+### Merge Videos into One File
+
+Add `--merge` to a supported download command when you want Amaterasu to
+download several videos and upload them as one ordered MKV file.
+
+It works with mirror, leech, qBittorrent, JDownloader, NZB, yt-dlp, and upload
+hoster tasks. The input can be a playlist, a torrent or downloaded folder, a
+bulk list, or a multi-link `-i` batch.
+
+#### Quick start
+
+Merge a YouTube playlist and upload the result to your cloud destination:
+
+```text
+/ytdl PLAYLIST_URL --merge
+```
+
+Merge a torrent series and upload the result to Telegram:
+
+```text
+/qbleech MAGNET_LINK -s --merge
+```
+
+Merge the next three links or Telegram files into one video:
+
+```text
+/leech -i 3 --merge -n "My Collection.mkv"
+```
+
+The `-n` name applies to the final combined video, not to each downloaded
+part. If you omit it, Amaterasu uses the playlist or folder name followed by
+`[Merged].mkv`. A multi-link task without a useful folder name becomes
+`Combined [Merged].mkv`.
+
+#### Choose the merge mode
+
+| Mode | Command | What happens |
+|---|---|---|
+| Fast, lossless merge | `--merge` | Copies the existing video, audio, subtitle, and attachment streams without re-encoding. This is the fastest mode and causes no additional quality loss. |
+| Merge, then encode | `--merge -en PRESET` | Creates one timeline first, then encodes that complete timeline once with the selected encoding preset. Encoding is restricted to SUDO users. |
+
+Examples:
+
+```text
+/ytdlleech PLAYLIST_URL --merge
+/ytdlleech PLAYLIST_URL --merge -en default
+/mirror FOLDER_LINK --merge -en my_av1_preset -n "Season 01.mkv"
+```
+
+Using `-en` does not encode every episode separately. Amaterasu merges the
+ordered timeline first and runs one encoding job on the result. If you use
+`-en` without a preset name, the normal encoding preset menu is shown.
+
+> [!IMPORTANT]
+> All inputs currently need compatible stream layouts in both modes. Adding
+> `-en` does not yet normalize videos with different resolutions, codecs,
+> frame rates, audio layouts, or subtitle structures. When they differ,
+> Amaterasu stops and reports which item or stream is incompatible instead of
+> silently producing a broken file or changing quality.
+
+#### Confirm or fix the order
+
+After all parts finish downloading, Amaterasu sends a **MERGE ORDER** message.
+Check the numbered list, then reply directly to that message with one of these
+choices:
+
+| Reply | Result |
+|---|---|
+| `merge` | Keep the displayed order and begin merging |
+| `reverse` | Reverse the entire order and begin merging |
+| `2 3 1` | Use your own order; include every item number exactly once |
+| `cancel` | Cancel the complete merge task |
+
+For example, if the bot shows Episode 03, Episode 01, Episode 02, reply with
+`2 3 1` to produce Episode 01 → Episode 02 → Episode 03.
+
+Playlist entries retain their playlist order. Other downloaded collections use
+natural filename order, so `Episode 2` comes before `Episode 10`. The order
+prompt is the final check in case the source names are confusing or incorrect.
+It expires after 10 minutes if nobody confirms it.
+
+#### More recipes
+
+```text
+# Mirror a selected torrent series to cloud storage
+/qbmirror MAGNET_LINK -s --merge -n "Complete Series.mkv"
+
+# Leech files downloaded by JDownloader as one video
+/jdleech DOWNLOAD_URL --merge
+
+# Mirror videos from an NZB collection as one file
+/nzbmirror NZB_LINK --merge
+
+# Merge links supplied through bulk mode
+/leech -b --merge -n "Course.mkv"
+
+# Merge five consecutive Telegram files or links
+/leech -i 5 --merge
+
+# Download, merge, encode once, and upload to a DDL host
+/uphoster COLLECTION_URL --merge -en default
+```
+
+For `-i`, send or reply to the first source in the collection and make sure the
+following messages contain the remaining sources in the intended batch. The
+bot still gives you the merge-order confirmation before processing begins.
+
+#### Safety and file handling
+
+- Every requested item must download successfully. If one item fails, the
+  entire merge stops; Amaterasu does not silently upload an incomplete video.
+- Amaterasu checks available disk space before merging and keeps the downloaded
+  parts until the final file passes media validation.
+- The final duration is checked against the combined input duration, and video
+  playback is tested near the start, middle, and end.
+- Each source becomes a chapter in the MKV, making episodes or playlist items
+  easier to navigate.
+- Compatible embedded subtitles and font attachments are preserved with
+  corrected timeline offsets.
+- External subtitle files such as `.srt`, `.ass`, or `.vtt` stop the task with
+  a clear error. Sidecar subtitle timeline merging is not supported yet.
+- Hard cuts are used between videos; transitions are not added.
+- A merged leech may still be split during upload when it exceeds Telegram's
+  file-size limit.
+
+`--merge` cannot be combined with torrent seeding (`-d`) or cloud-to-cloud
+transfer (`--c2c`). It is also not a clone operation: use a download command
+such as `/mirror`, `/ytdl`, or `/qbmirror` so Amaterasu has local media files to
+combine.
+
+#### When a merge is rejected
+
+The most common cause is that one source was created with different media
+settings. For the best result, use files from the same series, release, camera,
+or export profile. If Amaterasu reports a mismatch, make the named property
+consistent first—for example resolution, codec, frame rate, audio channel
+layout, or subtitle streams—and retry the command.
+
+Do not remove `--merge` and manually concatenate incompatible files with stream
+copy. The compatibility check exists to prevent timestamp problems, missing
+tracks, and files that fail partway through playback.
 
 ### Telegram Link Downloads
 

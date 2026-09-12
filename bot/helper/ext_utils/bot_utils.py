@@ -328,6 +328,7 @@ _SWITCH_ARGS = {
     "-ytdlp-fallback",
     "--stream",
     "--c2c",
+    "--merge",
 }
 
 _OPTIONAL_VALUE_ARGS = {

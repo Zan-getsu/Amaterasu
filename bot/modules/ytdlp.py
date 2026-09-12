@@ -341,6 +341,7 @@ class YtDlp(TaskListener):
             "-enmeta": "",
             "-ns": "",
             "-ff": set(),
+            "--merge": False,
         }
 
         arg_parser(input_list[1:], args)
@@ -400,7 +401,9 @@ class YtDlp(TaskListener):
             opt = {}
 
         self.select = args["-s"]
-        self.name = args["-n"]
+        self.is_merge = args["--merge"]
+        self.merge_output_name = args["-n"] if self.is_merge else ""
+        self.name = "" if self.is_merge else args["-n"]
         self.up_dest = args["-up"]
         self.user_dump_selection = args["-ud"]
         self.category = args["-gc"]
@@ -422,6 +425,8 @@ class YtDlp(TaskListener):
         self.as_doc = args["-doc"]
         self.as_med = args["-med"]
         self.folder_name = f"/{args['-m']}".rstrip("/") if len(args["-m"]) > 0 else ""
+        if self.is_merge and multi_count > 1 and not self.folder_name:
+            self.folder_name = "/Merged"
         self.bot_trans = args["-bt"]
         self.user_trans = args["-ut"]
         self.is_encode = args["-en"]

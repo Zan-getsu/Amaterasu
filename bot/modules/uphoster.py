@@ -129,6 +129,9 @@ class Uphoster(TaskListener):
             "-ns": "",
             "-tl": "",
             "-ff": set(),
+            "-en": False,
+            "-enmeta": "",
+            "--merge": False,
         }
 
         arg_parser(input_list[1:], args)
@@ -159,10 +162,34 @@ class Uphoster(TaskListener):
         if Config.DISABLE_FF_MODE and args.get("-ff"):
             await send_message(self.message, "FFmpeg commands are currently disabled.")
             return
+        if Config.DISABLE_ENCODE and args.get("-en"):
+            await send_message(self.message, "Encoding is currently disabled.")
+            return
+        if args.get("--merge") and args.get("-d"):
+            await send_message(
+                self.message,
+                "Merging cannot be combined with torrent seeding because the source "
+                "files must remain unchanged.",
+            )
+            return
+
+        from .. import sudo_users, user_data
+
+        user_ = self.message.from_user or self.message.sender_chat
+        is_sudo = (
+            user_.id == Config.OWNER_ID
+            or user_.id in sudo_users
+            or user_data.get(user_.id, {}).get("SUDO")
+        )
+        if args.get("-en") and not is_sudo:
+            await send_message(self.message, "Encoding is restricted to sudo users only.")
+            return
 
         self.select = args["-s"]
         self.seed = args["-d"]
-        self.name = args["-n"]
+        self.is_merge = args["--merge"]
+        self.merge_output_name = args["-n"] if self.is_merge else ""
+        self.name = "" if self.is_merge else args["-n"]
         self.up_dest = args["-up"]
         self.rc_flags = args["-rcf"]
         self.link = args["link"]
@@ -184,9 +211,13 @@ class Uphoster(TaskListener):
         self.as_doc = args["-doc"]
         self.as_med = args["-med"]
         self.folder_name = f"/{args['-m']}".rstrip("/") if len(args["-m"]) > 0 else ""
+        if self.is_merge and multi_count > 1 and not self.folder_name:
+            self.folder_name = "/Merged"
         self.bot_trans = args["-bt"]
         self.user_trans = args["-ut"]
         self.is_yt = args["-yt"]
+        self.is_encode = args["-en"]
+        self.encode_metadata = args["-enmeta"]
         self.metadata_dict = self.default_metadata_dict.copy()
         self.audio_metadata_dict = self.audio_metadata_dict.copy()
         self.video_metadata_dict = self.video_metadata_dict.copy()

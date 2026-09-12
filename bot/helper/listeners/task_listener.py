@@ -7,10 +7,10 @@ from os import path as ospath
 from secrets import token_urlsafe
 from pyrogram.enums import ButtonStyle
 
-from aiofiles.os import listdir, remove, path as aiopath
+from aiofiles.os import listdir, remove, replace, path as aiopath
 from requests import utils as rutils
-from pyrogram.handlers import CallbackQueryHandler
-from pyrogram.filters import regex
+from pyrogram.handlers import CallbackQueryHandler, MessageHandler
+from pyrogram.filters import chat, regex, user
 
 from ... import (
     intervals,
@@ -44,7 +44,7 @@ from ..ext_utils.files_utils import (
     move_and_merge,
 )
 from ..ext_utils.links_utils import is_gdrive_id
-from ..ext_utils.media_utils import download_custom_thumb
+from ..ext_utils.media_utils import download_custom_thumb, get_media_info
 from ..ext_utils.multi_leech_utils import paginate_text_blocks
 from ..ext_utils.status_utils import get_readable_file_size, get_readable_time
 from ..ext_utils.task_manager import check_running_tasks, start_from_queued
@@ -113,13 +113,17 @@ class TaskListener(TaskConfig):
         self.proceed_count = 0
         self.progress = True
 
-    async def remove_from_same_dir(self):
+    async def remove_from_same_dir(self, error=None):
         async with task_dict_lock:
             if (
                 self.folder_name
                 and self.same_dir
                 and self.mid in self.same_dir[self.folder_name]["tasks"]
             ):
+                if self.is_merge:
+                    self.same_dir[self.folder_name]["error"] = str(
+                        error or "One merge input did not complete."
+                    )
                 self.same_dir[self.folder_name]["tasks"].remove(self.mid)
                 self.same_dir[self.folder_name]["total"] -= 1
 
@@ -317,6 +321,105 @@ class TaskListener(TaskConfig):
 
         return await self.proceed_encode(up_path, gid)
 
+    async def _merge_order_input(self, _, message):
+        if (
+            not message.text
+            or not message.reply_to_message
+            or message.reply_to_message.id != self._merge_prompt.id
+        ):
+            return
+        value = message.text.strip().lower()
+        if value == "cancel":
+            self.is_cancelled = True
+            self._merge_cancel_reason = "Merge cancelled by user."
+            self._merge_order = None
+        elif value == "merge":
+            self._merge_order = self._merge_files
+        elif value == "reverse":
+            self._merge_order = list(reversed(self._merge_files))
+        else:
+            try:
+                order = [int(item) for item in value.replace(",", " ").split()]
+            except ValueError:
+                await send_message(
+                    message,
+                    "Invalid merge order. Reply with merge, reverse, cancel, or every "
+                    "item number exactly once.",
+                )
+                return
+            if sorted(order) != list(range(1, len(self._merge_files) + 1)):
+                await send_message(
+                    message,
+                    "Invalid merge order. Include every item number exactly once.",
+                )
+                return
+            self._merge_order = [self._merge_files[index - 1] for index in order]
+        self._merge_event.set()
+
+    async def confirm_merge_order(self, files, root, probe_by_path):
+        """Show the final order and accept one explicit confirmation/reorder."""
+        if self.is_cancelled:
+            return None
+        self._merge_files = files
+        self._merge_order = None
+        self._merge_cancel_reason = ""
+        self._merge_cancel_cleanup_started = False
+        self._merge_event = Event()
+        rows = []
+        # ponytail: Telegram text is the fallback planner; add the drag/drop web
+        # planner only when real large collections make this 30-row ceiling hurt.
+        for index, path in enumerate(files[:30], start=1):
+            duration = 0
+            with suppress(TypeError, ValueError):
+                duration = float(
+                    (probe_by_path[path].get("format") or {}).get("duration") or 0
+                )
+            if duration <= 0:
+                duration = (await get_media_info(path))[0]
+            name = ospath.relpath(path, root).replace("\\", "/")
+            original_name = name
+            while len(escape(name)) > 80:
+                name = name[:-1]
+            if name != original_name:
+                name = f"{name}…"
+            rows.append(
+                f"{index:02d}. {escape(name)} — "
+                f"{get_readable_time(duration)}"
+            )
+        if len(files) > 30:
+            rows.append(f"…and {len(files) - 30} more files")
+        text = (
+            "<b>✦ MERGE ORDER</b>\n\n<code>"
+            + "\n".join(rows)
+            + "</code>\n\nReply to this message with:\n"
+            "• <code>merge</code> to confirm\n"
+            "• <code>reverse</code> to reverse\n"
+            "• a complete order such as <code>2 3 1</code>\n"
+            "• <code>cancel</code> to stop\n\n"
+            "<b>Timeout</b> : <code>10 minutes</code>"
+        )
+        self._merge_prompt = await send_message(self.message, text)
+        if not hasattr(self._merge_prompt, "id"):
+            self.is_cancelled = True
+            self._merge_cancel_reason = "The merge order prompt could not be sent."
+            return None
+        handler = self.client.add_handler(
+            MessageHandler(
+                self._merge_order_input,
+                filters=user(self.user_id) & chat(self.message.chat.id),
+            ),
+            group=-1,
+        )
+        try:
+            await wait_for(self._merge_event.wait(), timeout=600)
+        except TimeoutError:
+            self.is_cancelled = True
+            self._merge_cancel_reason = "Merge order confirmation timed out."
+        finally:
+            self.client.remove_handler(*handler)
+            await delete_message(self._merge_prompt)
+        return self._merge_order
+
     async def on_download_complete(self):
         await sleep(2)
         if self.is_cancelled:
@@ -432,11 +535,34 @@ class TaskListener(TaskConfig):
             self.size = await get_path_size(up_dir)
             self.clear()
 
+        if self.is_merge:
+            merge_state = self.same_dir.get(self.folder_name, {}) if self.same_dir else {}
+            if merge_state.get("error"):
+                await self.on_download_error(
+                    f"Merge cancelled because an input failed: {merge_state['error']}"
+                )
+                return
+            merge_result = await self.proceed_merge(up_path, gid)
+            if not merge_result or self.is_cancelled:
+                return
+            up_path = merge_result
+            self.is_file = True
+            self.name = ospath.basename(up_path)
+            self.size = await get_path_size(up_path)
+            self.clear()
+
         if self.is_encode:
             encode_result = await self._handle_encode_pipeline(up_path, gid)
             if self.is_cancelled:
                 return
             if encode_result:
+                if self.is_merge:
+                    final_name = ospath.join(
+                        ospath.dirname(encode_result), ospath.basename(up_path)
+                    )
+                    if ospath.abspath(encode_result) != ospath.abspath(final_name):
+                        await replace(encode_result, final_name)
+                    encode_result = final_name
                 up_path = encode_result
                 self.is_file = await aiopath.isfile(up_path)
                 self.name = up_path.replace(f"{up_dir}/", "").split("/", 1)[0]
@@ -1118,13 +1244,19 @@ class TaskListener(TaskConfig):
         await start_from_queued()
 
     async def on_download_error(self, error, button=None, is_limit=False):
+        if self.is_merge:
+            self._merge_cancel_cleanup_started = True
+            if hasattr(self, "_merge_event"):
+                self._merge_order = None
+                self._merge_cancel_reason = str(error)
+                self._merge_event.set()
         await self.remove_processing()
         multi_snapshot = await self._record_multi_leech_failure(error)
         async with task_dict_lock:
             if self.mid in task_dict:
                 del task_dict[self.mid]
             count = len(task_dict)
-        await self.remove_from_same_dir()
+        await self.remove_from_same_dir(error)
         msg = (
             (
                 _completion_header("LIMIT BREACHED", self.name, "!")
@@ -1195,6 +1327,12 @@ class TaskListener(TaskConfig):
             await remove(self.thumb)
 
     async def on_upload_error(self, error):
+        if self.is_merge:
+            self._merge_cancel_cleanup_started = True
+            if hasattr(self, "_merge_event"):
+                self._merge_order = None
+                self._merge_cancel_reason = str(error)
+                self._merge_event.set()
         await self.remove_processing()
         multi_snapshot = await self._record_multi_leech_failure(error)
         async with task_dict_lock:
