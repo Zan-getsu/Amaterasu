@@ -164,6 +164,8 @@ def _origin(probe):
     for stream in probe.get("streams") or []:
         if stream.get("codec_type") not in {"video", "audio"}:
             continue
+        if (stream.get("disposition") or {}).get("attached_pic"):
+            continue
         if stream.get("start_time") is not None:
             starts.append(_chapter_timestamp(stream["start_time"]))
     return min(starts) if starts else Decimal(0)
@@ -171,7 +173,9 @@ def _origin(probe):
 
 def _video_span(probe):
     video = next(
-        (stream for stream in probe.get("streams") or [] if stream.get("codec_type") == "video"),
+        (stream for stream in probe.get("streams") or []
+         if stream.get("codec_type") == "video"
+         and not (stream.get("disposition") or {}).get("attached_pic")),
         None,
     )
     if video is None:
@@ -194,10 +198,6 @@ def _check_selected_streams(probes):
         for stream in probe.get("streams") or []:
             if stream.get("codec_type") == "data":
                 raise ValueError(f"Item {item_number} has a data stream this merge cannot preserve safely.")
-            if stream.get("codec_type") == "video" and (
-                stream.get("disposition") or {}
-            ).get("attached_pic"):
-                raise ValueError(f"Item {item_number} has video cover art this merge cannot preserve safely.")
 
 
 def _chapter_name(path):
@@ -310,7 +310,19 @@ async def _attachment_records(extractor, file_, attachments, working, listener):
 
 
 async def _select_attachments(executable, files, identities, working, listener):
-    if not any(info.get("attachments") for info in identities):
+    # MKVToolNix presents MP4 attached pictures as image attachments. Keep
+    # subtitle dependencies, but omit source artwork from the merged artifact.
+    kept_attachments = [
+        [
+            attachment for attachment in info.get("attachments") or []
+            if not str(attachment.get("content_type") or "").casefold().startswith("image/")
+            and not str(attachment.get("file_name") or "").casefold().endswith(
+                (".jpg", ".jpeg", ".png", ".webp", ".avif", ".gif", ".bmp")
+            )
+        ]
+        for info in identities
+    ]
+    if not any(kept_attachments):
         return [[] for _ in files], []
     extractor = _mkvextract_binary(executable)
     if not extractor:
@@ -320,9 +332,9 @@ async def _select_attachments(executable, files, identities, working, listener):
     seen_hashes = set()
     names = {}
     font_names = {}
-    for file_, info in zip(files, identities, strict=True):
+    for file_, attachments in zip(files, kept_attachments, strict=True):
         records = await _attachment_records(
-            extractor, file_, info.get("attachments") or [], working, listener
+            extractor, file_, attachments, working, listener
         )
         ids = []
         for record in records:
@@ -599,7 +611,11 @@ async def merge_copy(
             actual_duration = _chapter_timestamp((final_probe.get("format") or {}).get("duration"))
             if abs(actual_duration - expected_duration) > Decimal("0.05"):
                 raise ValueError("Final mux duration differs from the validated A/V timeline.")
-            if starts[0] != 0 or any(right <= left for left, right in zip(starts, starts[1:], strict=False)):
+            # MP4/AAC priming can make MKVToolNix place the first boundary a
+            # few milliseconds after zero even though no episode is missing.
+            if not 0 <= starts[0] <= Decimal("0.05") or any(
+                right <= left for left, right in zip(starts, starts[1:], strict=False)
+            ):
                 raise ValueError("The A/V timeline has missing or non-monotonic chapter boundaries.")
             actual_av = [
                 stream for stream in final_probe.get("streams") or []
@@ -701,7 +717,7 @@ async def merge_encode(listener, files, output_file, probes, profile, *, sidecar
             for index, (span, tracks) in enumerate(zip(spans, audio_tracks, strict=True)):
                 duration = format(span, "f")
                 video_chain = (
-                    f"[{index}:v:0]trim=duration={duration},setpts=PTS-STARTPTS,"
+                    f"[{index}:{video_tracks[index]['index']}]trim=duration={duration},setpts=PTS-STARTPTS,"
                     f"scale={width}:{height}:force_original_aspect_ratio=decrease,"
                     f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,setsar=1,format={pixel_format}[v{index}]"
                 )

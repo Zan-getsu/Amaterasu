@@ -12,6 +12,8 @@ from bot.helper.ext_utils.merge_media import (
     _check_selected_streams,
     _font_names,
     _mkvmerge_binary,
+    _origin,
+    _video_span,
     associate_sidecars,
     merge_copy,
     merge_encode,
@@ -71,6 +73,38 @@ def media(tmp_path_factory):
     return root, files
 
 
+@pytest.fixture(scope="module")
+def cover_media(tmp_path_factory):
+    if not (shutil.which("ffmpeg") and shutil.which("ffprobe") and _mkvmerge_binary()):
+        pytest.skip("FFmpeg and MKVToolNix are required for the media integration fixtures")
+    root = tmp_path_factory.mktemp("merge-cover")
+    base = root / "base.mp4"
+    art = root / "cover.jpg"
+    _run(
+        "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+        "-f", "lavfi", "-i", "color=c=blue:s=160x90:r=24:d=1.5",
+        "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000:duration=1.5",
+        "-map", "0:v:0", "-map", "1:a:0", "-c:v", "libx264",
+        "-preset", "ultrafast", "-pix_fmt", "yuv420p", "-c:a", "aac", str(base),
+    )
+    _run(
+        "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+        "-f", "lavfi", "-i", "color=c=red:s=64x64:r=1:d=1",
+        "-frames:v", "1", str(art),
+    )
+    files = []
+    for index in (1, 2):
+        target = root / f"episode-{index}.mp4"
+        _run(
+            "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+            "-i", str(base), "-i", str(art),
+            "-map", "0:v:0", "-map", "0:a:0", "-map", "1:v:0",
+            "-c", "copy", "-disposition:v:1", "attached_pic", str(target),
+        )
+        files.append(target)
+    return root, files
+
+
 def _listener():
     return SimpleNamespace(is_cancelled=False, subproc=None)
 
@@ -123,11 +157,43 @@ def test_continuous_profile_rejects_settings_it_cannot_honor():
     })
 
 
-def test_unhandled_data_or_cover_art_is_an_explicit_error():
+def test_data_is_rejected_but_attached_cover_is_not_timeline_video():
     with pytest.raises(ValueError, match="data stream"):
         _check_selected_streams([{"streams": [{"codec_type": "data"}]}])
-    with pytest.raises(ValueError, match="cover art"):
-        _check_selected_streams([{"streams": [{"codec_type": "video", "disposition": {"attached_pic": 1}}]}])
+    probe = {"streams": [
+        {"codec_type": "video", "disposition": {"attached_pic": 1}, "duration": "500", "start_time": "-2"},
+        {"codec_type": "video", "index": 1, "duration": "2", "start_time": "0"},
+    ]}
+    _check_selected_streams([probe])
+    assert _video_span(probe) == 2
+    assert _origin(probe) == 0
+
+
+@pytest.mark.asyncio
+async def test_source_cover_art_is_omitted_from_copy_and_encode(cover_media):
+    root, files = cover_media
+    probes = [_probe(path, "-show_streams", "-show_format") for path in files]
+    assert all(any((stream.get("disposition") or {}).get("attached_pic")
+                   for stream in probe["streams"]) for probe in probes)
+    for mode in ("copy", "encode"):
+        output_path = str(root / f"merged-{mode}.mkv")
+        if mode == "copy":
+            output, error = await merge_copy(
+                _listener(), list(map(str, files)), output_path, probes
+            )
+        else:
+            output, error = await merge_encode(
+                _listener(), list(map(str, files)), output_path, probes,
+                {"video_codec": "libx264", "audio_codec": "aac",
+                 "video_params": {"preset": "ultrafast", "crf": 28},
+                 "audio_params": {"channels": 1, "sample_rate": 48000}},
+            )
+        assert not error
+        info = _probe(output, "-show_streams", "-show_chapters")
+        assert [stream["codec_type"] for stream in info["streams"]] == ["video", "audio"]
+        assert len(info["chapters"]) == 2
+        mkv = json.loads(subprocess.check_output([_mkvmerge_binary(), "-J", output]))
+        assert not mkv.get("attachments")
 
 
 @pytest.mark.asyncio

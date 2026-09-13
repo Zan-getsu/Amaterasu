@@ -242,6 +242,7 @@ Unsafe audio, color, or profile differences stop with an explicit error.
 Embedded subtitles and matching font attachments are preserved; recognized external
 subtitle sidecars are associated with their video and shifted to the merged timeline.
 Missing, ambiguous, or incomplete sidecar pairs stop the merge with an error.
+Source cover art is omitted. Use -t to set a thumbnail for the upload.
 Torrent seeding and cloud-to-cloud transfer cannot be combined with --merge."""
 
 yt_opt = """<b>Options</b>: -opt

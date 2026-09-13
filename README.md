@@ -1895,6 +1895,8 @@ order in the web planner while they download.
 - Recognized external subtitle sidecars such as `.srt`, `.ass`, or `.vtt` are
   associated with their video and merged with the same chapter offset. Missing,
   ambiguous, or incomplete sidecar pairs stop the task with a clear error.
+- Cover art embedded in source videos is omitted from the merged MKV. Use `-t`
+  if you want to set the upload thumbnail for this task.
 - Hard cuts are used between videos; transitions are not added.
 - A merged leech may still be split during upload when it exceeds Telegram's
   file-size limit.
