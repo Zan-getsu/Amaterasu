@@ -1818,11 +1818,11 @@ ordered timeline first and runs one encoding job on the result. If you use
 `-en` without a preset name, the normal encoding preset menu is shown.
 
 > [!IMPORTANT]
-> All inputs currently need compatible stream layouts in both modes. Adding
-> `-en` does not yet normalize videos with different resolutions, codecs,
-> frame rates, audio layouts, or subtitle structures. When they differ,
-> Amaterasu stops and reports which item or stream is incompatible instead of
-> silently producing a broken file or changing quality.
+> Stream copy requires compatible video and audio layouts. With `-en`, the
+> continuous encoder can normalize supported video codec and resolution
+> differences while retaining the original selectable subtitle tracks.
+> Unsupported audio layout, color/HDR, or profile differences stop the merge
+> with an explicit error instead of silently dropping a track.
 
 #### Arrange the order while downloading
 
@@ -1886,14 +1886,15 @@ order in the web planner while they download.
   entire merge stops; Amaterasu does not silently upload an incomplete video.
 - Amaterasu checks available disk space before merging and keeps the downloaded
   parts until the final file passes media validation.
-- The final duration is checked against the combined input duration, and video
-  playback is tested near the start, middle, and end.
+- The final duration and track layout are checked, and bounded video/audio
+  playback samples are decoded near the start, middle, and end.
 - Each source becomes a chapter in the MKV, making episodes or playlist items
   easier to navigate.
 - Compatible embedded subtitles and font attachments are preserved with
   corrected timeline offsets.
-- External subtitle files such as `.srt`, `.ass`, or `.vtt` stop the task with
-  a clear error. Sidecar subtitle timeline merging is not supported yet.
+- Recognized external subtitle sidecars such as `.srt`, `.ass`, or `.vtt` are
+  associated with their video and merged with the same chapter offset. Missing,
+  ambiguous, or incomplete sidecar pairs stop the task with a clear error.
 - Hard cuts are used between videos; transitions are not added.
 - A merged leech may still be split during upload when it exceeds Telegram's
   file-size limit.

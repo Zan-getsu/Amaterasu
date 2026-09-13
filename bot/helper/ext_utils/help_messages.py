@@ -237,9 +237,11 @@ the task automatically merges in its default order without waiting.
 /cmd -i 3 --merge -n Combined.mkv
 
 Without -en, streams are copied without compression and must be compatible.
-With -en, the compatible timeline is merged first and encoded once.
-Embedded subtitles and matching font attachments are preserved; external subtitle
-files stop the merge until timestamp-offset concatenation is supported.
+With -en, supported video differences are normalized in one continuous encode.
+Unsafe audio, color, or profile differences stop with an explicit error.
+Embedded subtitles and matching font attachments are preserved; recognized external
+subtitle sidecars are associated with their video and shifted to the merged timeline.
+Missing, ambiguous, or incomplete sidecar pairs stop the merge with an error.
 Torrent seeding and cloud-to-cloud transfer cannot be combined with --merge."""
 
 yt_opt = """<b>Options</b>: -opt

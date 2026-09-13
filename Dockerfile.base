@@ -160,6 +160,7 @@ RUN set -eux; \
         qbittorrent-nox \
         p7zip-full \
         rclone \
+        mkvtoolnix \
         default-jre-headless \
         gunicorn \
         sabnzbdplus \
@@ -528,6 +529,7 @@ RUN set -eux; \
     which sabnzbdplus || echo "WARNING: sabnzbdplus not found"; \
     which 7z || echo "WARNING: 7z not found"; \
     which rclone || echo "WARNING: rclone not found"; \
+    which mkvmerge || echo "WARNING: mkvmerge not found"; \
     which cloudflared || echo "WARNING: cloudflared not found"; \
     which java || echo "WARNING: java not found"; \
     which gunicorn || echo "WARNING: gunicorn not found"; \

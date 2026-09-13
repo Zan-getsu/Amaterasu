@@ -39,8 +39,17 @@
         <strong id="planTitle">Merged video</strong>
       </div>
       <div>
-        <span class="merge-summary__label">Items ready</span>
-        <strong><span id="readyCount">0</span> / <span id="itemCount">0</span></strong>
+        <span class="merge-summary__label">Inventory</span>
+        <strong><span id="readyCount">0</span> ready / <span id="itemCount">0</span> listed</strong>
+        <small id="pendingCount">Preparing</small>
+      </div>
+      <div>
+        <span class="merge-summary__label">Mode</span>
+        <strong id="modeLabel">Copy</strong>
+      </div>
+      <div>
+        <span class="merge-summary__label">Duration</span>
+        <strong id="durationLabel">Calculating</strong>
       </div>
       <div>
         <span class="merge-summary__label">Saving</span>
@@ -54,12 +63,14 @@
         <button type="button" class="bs-btn bs-btn--secondary" data-sort="filename">Filename</button>
         <button type="button" class="bs-btn bs-btn--secondary" data-sort="episode">Episode</button>
         <button type="button" class="bs-btn bs-btn--secondary" data-sort="reverse">Reverse</button>
+        <button type="button" class="bs-btn bs-btn--primary" id="saveOrderButton" hidden>Save current order</button>
       </div>
 
       <div class="merge-notice" id="planNotice" aria-live="polite">
         <span data-lucide="info"></span>
         <span>Downloads continue in the background. If you leave this page, Amaterasu uses the latest saved order.</span>
       </div>
+      <p class="merge-subtitle-summary" id="subtitleSummary" hidden></p>
 
       <ol class="merge-list" id="mergeList" aria-label="Video merge order"></ol>
 

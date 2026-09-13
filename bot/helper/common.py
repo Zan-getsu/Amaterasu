@@ -68,6 +68,8 @@ from .ext_utils.media_utils import (
     get_document_type,
     take_ss,
 )
+from .ext_utils.merge_media import associate_sidecars
+from .ext_utils.merge_order import episode_sort_key
 from .ext_utils.metadata_utils import MetadataProcessor
 from .ext_utils.telegram_destinations import (
     format_leech_dump_destination,
@@ -93,6 +95,7 @@ from web.merge_plan_store import (
     create_plan as create_merge_plan,
     register_source as register_merge_source,
     replace_source_files as replace_merge_source_files,
+    set_plan_details as set_merge_plan_details,
     set_plan_status as set_merge_plan_status,
     sync_final_files as sync_merge_final_files,
 )
@@ -336,6 +339,8 @@ class TaskConfig:
             self.message.chat.id,
             title,
             expected,
+            "encode" if self.is_encode else "copy",
+            (self.encode_profile or {}).get("name", "") if self.is_encode else "",
         )
         if not created:
             LOGGER.warning("Could not create merge plan %s", plan_id)
@@ -1880,28 +1885,27 @@ class TaskConfig:
                     continue
                 paths.extend(ospath.join(dirpath, file_) for file_ in files)
 
-        def natural_key(path):
-            relative = ospath.relpath(path, dl_path).replace("\\", "/")
-            return tuple(
-                (1, int(part)) if part.isdigit() else (0, part.casefold())
-                for part in re.split(r"(\d+)", relative)
+        source_root = ospath.realpath(ospath.dirname(dl_path) if self.is_file else dl_path)
+        try:
+            escaped_source = any(
+                ospath.commonpath((source_root, ospath.realpath(path))) != source_root
+                for path in paths
             )
+        except ValueError:
+            escaped_source = True
+        if escaped_source:
+            await self.on_download_error(
+                "A selected merge file resolves outside its downloaded source directory."
+            )
+            return False
 
-        paths.sort(key=natural_key)
+        paths.sort(key=lambda path: episode_sort_key(ospath.relpath(path, dl_path)))
         external_subtitles = [
             path
             for path in paths
             if ospath.splitext(path)[1].casefold()
             in {".ass", ".idx", ".smi", ".srt", ".ssa", ".sub", ".sup", ".vtt"}
         ]
-        if external_subtitles:
-            subtitle = ospath.relpath(external_subtitles[0], dl_path).replace("\\", "/")
-            await self.on_download_error(
-                "Merge stopped because external subtitles require timestamp offsetting "
-                f"and cannot be safely copied yet: {subtitle}"
-            )
-            return False
-
         videos = []
         unreadable_videos = []
         for offset in range(0, len(paths), 4):
@@ -1927,25 +1931,23 @@ class TaskConfig:
             )
             return False
 
-        probes, error = await check_merge_compatibility(videos)
-        if probes is None:
-            await self.on_download_error(f"Unable to merge the selected videos: {error}")
+        try:
+            sidecars = associate_sidecars(videos, external_subtitles)
+        except ValueError as error:
+            await self.on_download_error(str(error))
             return False
-        probe_by_path = dict(zip(videos, probes, strict=True))
 
         required = sum(ospath.getsize(path) for path in videos)
         output_dir = ospath.dirname(dl_path)
         reserve = max(64 * 1024**2, required // 100)
-        if disk_usage(output_dir).free < required + reserve:
+        # The copy backend holds an A/V intermediate and a final candidate
+        # while the downloaded sources are still present.
+        if disk_usage(output_dir).free < required * 2 + reserve:
             await self.on_download_error(
-                "There is not enough free disk space for the merged output and "
-                "a safe working reserve."
+                "There is not enough free disk space for the A/V intermediate, "
+                "final merge candidate, and a safe working reserve."
             )
             return False
-
-        ffmpeg = FFMpeg(self)
-        async with task_dict_lock:
-            task_dict[self.mid] = FFmpegStatus(self, ffmpeg, gid, "Merge")
 
         if self.merge_plan_id:
             grouped = {}
@@ -1962,23 +1964,29 @@ class TaskConfig:
                     if first_part.startswith(".merge-source-") and "/" in relative
                     else relative
                 )
-                grouped.setdefault(source_id, []).append((relative, path, item_key))
+                display_name = item_key
+                if self.is_ytdlp:
+                    playlist_position = re.match(r"^(\d{6}) - ", ospath.basename(item_key))
+                    if playlist_position:
+                        item_key = f"playlist:{playlist_position.group(1)}"
+                grouped.setdefault(source_id, []).append((relative, path, item_key, display_name))
             final_items = []
             for position, (source_id, source_files) in enumerate(
                 grouped.items(), start=1
             ):
-                source_files.sort(key=lambda item: natural_key(item[1]))
+                if not self.is_ytdlp:
+                    source_files.sort(key=lambda item: episode_sort_key(item[3]))
                 final_items.extend(
                     {
                         "source_id": source_id,
-                        "name": item_key,
+                        "name": display_name,
                         "path": relative,
                         "key": item_key,
                         "ordinal": ordinal,
                         "position": position,
                         "ready": True,
                     }
-                    for ordinal, (relative, _, item_key) in enumerate(
+                    for ordinal, (relative, _, item_key, display_name) in enumerate(
                         source_files, start=1
                     )
                 )
@@ -1987,24 +1995,57 @@ class TaskConfig:
                 self.merge_plan_id,
                 final_items,
             )
-            if plan:
-                path_by_relative = {
-                    ospath.relpath(path, dl_path).replace("\\", "/"): path
-                    for path in videos
-                }
-                planned = [
-                    path_by_relative[item["path"]]
-                    for item in plan.get("items", [])
-                    if item.get("path") in path_by_relative
-                ]
-                if len(planned) == len(videos) and set(planned) == set(videos):
-                    videos = planned
-                    probes = [probe_by_path[path] for path in videos]
-                else:
-                    LOGGER.warning(
-                        "Merge plan %s did not cover every final video; using natural order",
-                        self.merge_plan_id,
-                    )
+            if not plan:
+                await self.on_download_error(
+                    "The merge order could not be frozen. A source may still be "
+                    "registering, or a saved file identity changed. The sources "
+                    "were not silently reordered."
+                )
+                return False
+            path_by_relative = {
+                ospath.relpath(path, dl_path).replace("\\", "/"): path
+                for path in videos
+            }
+            planned = [
+                path_by_relative[item["path"]]
+                for item in plan.get("items", [])
+                if item.get("path") in path_by_relative
+            ]
+            if len(planned) != len(videos) or set(planned) != set(videos):
+                await self.on_download_error(
+                    "The frozen merge plan did not cover every selected video."
+                )
+                return False
+            videos = planned
+
+        probes, error = await check_merge_compatibility(
+            videos, av_only=True, require_compatible=not self.is_encode
+        )
+        if probes is None:
+            await self.on_download_error(f"Unable to merge the selected videos: {error}")
+            return False
+        if self.merge_plan_id:
+            subtitle_count = sum(
+                stream.get("codec_type") == "subtitle"
+                for probe in probes for stream in probe.get("streams") or []
+            ) + sum(len(paths) for paths in sidecars.values())
+            await sync_to_async(
+                set_merge_plan_details,
+                self.merge_plan_id,
+                duration_seconds=sum(
+                    float((probe.get("format") or {}).get("duration") or 0)
+                    for probe in probes
+                ),
+                subtitle_summary=(
+                    f"{subtitle_count} original subtitle tracks; some cover individual episodes"
+                    if subtitle_count else "No subtitle tracks found"
+                ),
+            )
+
+        ffmpeg = FFMpeg(self)
+        async with task_dict_lock:
+            task_dict[self.mid] = FFmpegStatus(self, ffmpeg, gid, "Merge")
+        await self.update_merge_plan_status("processing", locked=True)
 
         requested = ospath.basename(self.merge_output_name.strip())
         if requested:
@@ -2019,7 +2060,10 @@ class TaskConfig:
         async with ff_lock:
             if self.is_cancelled:
                 return False
-            result, error = await ffmpeg.merge_video_files(videos, output, probes)
+            result, error = await ffmpeg.merge_video_files(
+                videos, output, probes, sidecars=sidecars,
+                profile=self.encode_profile if self.is_encode else None,
+            )
         if not result:
             if not self.is_cancelled:
                 await self.update_merge_plan_status(
@@ -2030,10 +2074,7 @@ class TaskConfig:
                 )
             return False
 
-        await self.update_merge_plan_status("completed", locked=True)
-
-        if not self.is_file:
-            await rmtree(dl_path, ignore_errors=True)
+        await self.update_merge_plan_status("validating", locked=True)
         return result
 
     async def generate_sample_video(self, dl_path, gid):

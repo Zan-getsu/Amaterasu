@@ -294,7 +294,8 @@ def merge_plan_url(plan_id):
     token = make_short_token(get_web_secret(), "merge-plan", gid)
     base_url = get_valid_base_url()
     url = f"{base_url}/app/merge-plan?gid={gid}"
-    return url if Config.WEB_PINCODE else f"{url}&pin={token}"
+    # URL fragments are not sent in HTTP requests or access logs.
+    return url if Config.WEB_PINCODE else f"{url}#pin={token}"
 
 
 def merge_plan_buttons(plan_id):

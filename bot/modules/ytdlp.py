@@ -527,6 +527,8 @@ class YtDlp(TaskListener):
             return
 
         self._set_mode_engine()
+        if not await self.resolve_merge_encode_profile():
+            return
         await self.prepare_merge_plan()
 
         cookie_to_use = (
@@ -565,15 +567,29 @@ class YtDlp(TaskListener):
         finally:
             await self.run_multi(input_list, YtDlp)
 
-        if self.is_merge and isinstance(result, dict) and result.get("entries"):
+        if self.is_merge and isinstance(result, dict) and "entries" in result:
+            entries = result.get("entries") or []
+            missing = next(
+                (index for index, entry in enumerate(entries, start=1)
+                 if not isinstance(entry, dict)),
+                None,
+            )
+            if missing is not None or not entries:
+                await self.on_download_error(
+                    f"Playlist item {missing or 1} is unavailable in the selected collection."
+                )
+                return
             await self.set_merge_plan_candidates(
                 [
-                    entry.get("title")
-                    or entry.get("fulltitle")
-                    or entry.get("id")
-                    or f"Playlist item {index}"
-                    for index, entry in enumerate(result["entries"], start=1)
-                    if isinstance(entry, dict)
+                    {
+                        "name": entry.get("title")
+                        or entry.get("fulltitle")
+                        or entry.get("id")
+                        or f"Playlist item {index}",
+                        "key": f"playlist:{int(entry.get('playlist_index') or index):06d}",
+                        "ordinal": int(entry.get("playlist_index") or index),
+                    }
+                    for index, entry in enumerate(entries, start=1)
                 ]
             )
 

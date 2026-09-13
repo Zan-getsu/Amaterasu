@@ -174,7 +174,10 @@ def test_merge_stream_signature_ignores_cover_art_and_detects_video_changes():
     assert len(original) == 3
 
     probe["streams"][3]["extradata_hash"] = "SHA256:episode-two-subtitle-header"
-    assert signature(probe) == original
+    assert signature(probe) != original
+    assert signature(probe, av_only=True) == signature(
+        {"streams": probe["streams"][:3]}, av_only=True
+    )
 
     image_subtitle = {
         "streams": [
@@ -307,46 +310,6 @@ async def test_merge_compatibility_accepts_equivalent_frame_rate_metadata():
 
     assert result is None
     assert "different frame rate (30.0 instead of 23.976)" in error
-
-
-def test_merge_pipeline_is_stream_copy_and_validates_before_publish():
-    source = MEDIA_UTILS_PATH.read_text(encoding="utf-8")
-    tree = ast.parse(source)
-    ffmpeg_class = next(
-        node
-        for node in tree.body
-        if isinstance(node, ast.ClassDef) and node.name == "FFMpeg"
-    )
-    merge_method = next(
-        node
-        for node in ffmpeg_class.body
-        if isinstance(node, ast.AsyncFunctionDef)
-        and node.name == "merge_video_files"
-    )
-    method_source = ast.get_source_segment(source, merge_method)
-
-    assert "await check_merge_compatibility(files)" in method_source
-    assert '"-c",\n                "copy"' in method_source
-    assert '"-map_chapters",\n                "1"' in method_source
-    assert 'attachment_sources, start=2' in method_source
-    assert 'len(seen_attachments)' in method_source
-    assert '"-copyts",\n                "-start_at_zero"' in method_source
-    assert "Merged duration differs from the source total" in method_source
-    assert "instead of near zero" in method_source
-    assert (
-        'for stream_type in ("video", "audio", "subtitle", "attachment", "data")'
-        in method_source
-    )
-    assert "chapter_count != len(files)" in method_source
-    assert "for position in sorted(sample_positions):" in method_source
-    assert "await self._decode_encode_sample(" in method_source
-    assert "await replace(temp_output, output_file)" in method_source
-
-    common_source = (ROOT / "bot" / "helper" / "common.py").read_text(
-        encoding="utf-8"
-    )
-    assert "external subtitles require timestamp offsetting" in common_source
-    assert "a file looks like video but could not be read" in common_source
 
 
 def test_copied_audio_matroska_uses_seek_safe_automatic_timestamps():

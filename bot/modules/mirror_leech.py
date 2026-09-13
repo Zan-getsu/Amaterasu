@@ -716,6 +716,8 @@ class Mirror(TaskListener):
             return
 
         self._set_mode_engine()
+        if not await self.resolve_merge_encode_profile():
+            return
         await self.prepare_merge_plan()
         await self.send_processing()
 

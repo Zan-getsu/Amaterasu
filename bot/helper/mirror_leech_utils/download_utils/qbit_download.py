@@ -15,6 +15,7 @@ from .... import (
 from ....core.config_manager import Config
 from ....core.torrent_manager import TorrentManager
 from ...ext_utils.bot_utils import bt_selection_buttons
+from ...ext_utils.merge_order import episode_sort_key
 from ...ext_utils.task_manager import check_running_tasks
 from ...listeners.qbit_listener import on_download_start
 from ..qbit_compat import PAUSED_STATES, is_metadata_state
@@ -100,7 +101,10 @@ async def add_qb_torrent(listener, path, ratio, seed_time):
                     ext_hash
                 )
                 await listener.set_merge_plan_candidates(
-                    [file_.name for file_ in torrent_files if file_.priority != 0],
+                    sorted(
+                        (file_.name for file_ in torrent_files if file_.priority != 0),
+                        key=episode_sort_key,
+                    ),
                     video_only=True,
                 )
 

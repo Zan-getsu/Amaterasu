@@ -63,6 +63,16 @@ async def main():
 
     await load_settings()
 
+    # A bot restart cannot safely resume a partially delivered merge. Keep
+    # its files and show an accurate terminal state in the existing planner.
+    from asyncio import to_thread
+
+    from web.merge_plan_store import mark_interrupted_plans
+
+    interrupted = await to_thread(mark_interrupted_plans)
+    if interrupted:
+        LOGGER.warning("Marked %s unfinished merge plan(s) interrupted", interrupted)
+
     if not Config.DISABLE_NZB:
         from bot import _sabnzbd_key, _update_sabnzbd_ini, sabnzbd_client
 

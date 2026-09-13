@@ -1276,8 +1276,11 @@ def test_merge_is_a_switch_and_does_not_consume_the_download_url():
     assert 'self.opts["ignoreerrors"] = not self._listener.is_merge' in ytdlp_download
 
     common = (ROOT / "bot/helper/common.py").read_text(encoding="utf-8")
-    assert "probes, error = await check_merge_compatibility(videos)" in common
-    assert "merge_video_files(videos, output, probes)" in common
+    assert common.rfind("sync_merge_final_files,") < common.rfind(
+        "probes, error = await check_merge_compatibility("
+    )
+    assert "using natural order" not in common
+    assert "await ffmpeg.merge_video_files(" in common
     assert "sync_merge_final_files" in common
     assert "source_message = await self._get_reply_message()" in common
 
@@ -1287,7 +1290,7 @@ def test_merge_is_a_switch_and_does_not_consume_the_download_url():
     assert "_stage_merge_source_files" in listener
     assert "confirm_merge_order" not in listener
     assert "Merge order confirmation timed out" not in listener
-    assert "if not merge_staged:" in listener
+    assert "if self.is_merge and not merge_staged:" in listener
     assert '"MERGE PART READY"' not in listener
 
     for relative_path in (
@@ -1363,7 +1366,7 @@ def test_source_order_expands_into_final_files_without_blocking(
     )
 
     assert final["locked"]
-    assert final["status"] == "merging"
+    assert final["status"] == "planning"
     assert [item["name"] for item in final["items"]] == [
         "Episode 02.mkv",
         "Episode 01.mkv",
@@ -1412,9 +1415,9 @@ def test_file_reorder_is_autosaved_and_paths_are_not_exposed(
         "playlist1",
         "yt_task",
         [
-            {"name": "Episode 1", "ordinal": 1},
-            {"name": "Episode 2", "ordinal": 2},
-            {"name": "Episode 3", "ordinal": 3},
+            {"name": "Episode 1", "key": "playlist:000001", "ordinal": 1},
+            {"name": "Episode 2", "key": "playlist:000002", "ordinal": 2},
+            {"name": "Episode 3", "key": "playlist:000003", "ordinal": 3},
         ],
     )
     custom = [
@@ -1436,9 +1439,9 @@ def test_file_reorder_is_autosaved_and_paths_are_not_exposed(
         "playlist1",
         "yt_task",
         [
-            {"name": "01 - Episode 1.mkv", "key": "01 - Episode 1.mkv"},
-            {"name": "02 - Episode 2.mkv", "key": "02 - Episode 2.mkv"},
-            {"name": "03 - Episode 3.mkv", "key": "03 - Episode 3.mkv"},
+            {"name": "01 - Episode 1.mkv", "key": "playlist:000001"},
+            {"name": "02 - Episode 2.mkv", "key": "playlist:000002"},
+            {"name": "03 - Episode 3.mkv", "key": "playlist:000003"},
         ],
         ready=True,
     )
@@ -1454,7 +1457,7 @@ def test_file_reorder_is_autosaved_and_paths_are_not_exposed(
                 "source_id": "yt_task",
                 "name": f"0{index} - Episode {index}.mkv",
                 "path": f"0{index} - Episode {index}.mkv",
-                "key": f"0{index} - Episode {index}.mkv",
+                "key": f"playlist:{index:06d}",
                 "ordinal": index,
                 "position": 1,
             }
@@ -1493,7 +1496,8 @@ def test_merge_planner_assets_keep_unattended_tasks_automatic():
         encoding="utf-8"
     )
 
-    assert "setInterval(loadPlan, 3000)" in javascript
+    assert "function schedulePoll" in javascript
+    assert "setInterval(loadPlan, 3000)" not in javascript
     assert "saveOrder()" in javascript
     assert "pendingSave = true" in javascript
     assert "wait_for(self._merge_event.wait()" not in listener

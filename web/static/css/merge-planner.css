@@ -76,7 +76,7 @@
 
 .merge-summary {
   display: grid;
-  grid-template-columns: 2fr 1fr 1fr;
+  grid-template-columns: 2fr repeat(4, minmax(0, 1fr));
   gap: 1px;
   overflow: hidden;
   margin-bottom: 14px;
@@ -107,6 +107,19 @@
   font-size: 14px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.merge-summary small {
+  display: block;
+  margin-top: 5px;
+  color: var(--bs-text-muted);
+  font: 500 10px/1.3 var(--bs-font-mono);
+}
+
+.merge-subtitle-summary {
+  margin: -6px 0 18px;
+  color: var(--bs-text-muted);
+  font-size: 12px;
 }
 
 .merge-workspace,

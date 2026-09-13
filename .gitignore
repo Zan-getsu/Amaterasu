@@ -74,3 +74,6 @@ tests/*
 !tests/test_encoding_playback_safety.py
 !tests/test_multimedia_stack.py
 !tests/test_telegram_session_generator.py
+!tests/test_merge_media.py
+!tests/test_merge_plan_integrity.py
+!tests/test_merge_planner_browser.py

@@ -1,4 +1,5 @@
 from asyncio import gather, sleep, Event, wait_for
+from copy import deepcopy
 from html import escape
 from time import time
 from mimetypes import guess_type
@@ -49,7 +50,10 @@ from ..ext_utils.links_utils import is_gdrive_id
 from ..ext_utils.media_utils import (
     download_custom_thumb,
     get_document_type,
+    normalize_encode_profile,
 )
+from ..ext_utils.merge_order import episode_sort_key, natural_key
+from ..ext_utils.merge_media import validate_merge_encode_profile
 from ..ext_utils.multi_leech_utils import paginate_text_blocks
 from ..ext_utils.status_utils import get_readable_file_size, get_readable_time
 from ..ext_utils.task_manager import check_running_tasks, start_from_queued
@@ -126,9 +130,9 @@ class TaskListener(TaskConfig):
                 and self.mid in self.same_dir[self.folder_name]["tasks"]
             ):
                 if self.is_merge:
-                    self.same_dir[self.folder_name]["error"] = str(
-                        error or "One merge input did not complete."
-                    )
+                    shared = self.same_dir[self.folder_name]
+                    if not shared.get("error"):
+                        shared["error"] = str(error or "One merge input did not complete.")
                 self.same_dir[self.folder_name]["tasks"].remove(self.mid)
                 self.same_dir[self.folder_name]["total"] -= 1
 
@@ -326,6 +330,53 @@ class TaskListener(TaskConfig):
 
         return await self.proceed_encode(up_path, gid)
 
+    async def resolve_merge_encode_profile(self):
+        """Freeze one authorized profile before any merge source downloads."""
+        if not self.is_merge or not self.is_encode:
+            return True
+        shared = self.same_dir.get(self.folder_name) if self.same_dir else None
+        if shared and shared.get("merge_encode_profile") is not None:
+            self.encode_profile = deepcopy(shared["merge_encode_profile"])
+            return True
+        chosen = None
+        if isinstance(self.is_encode, str) and self.is_encode.strip() and self.is_encode != "True":
+            profile_id = self.is_encode.strip().lower()
+            if profile_id == "default":
+                chosen = Config.DEFAULT_ENCODE_PRESET
+            else:
+                profiles = await database.get_encode_profiles(self.user_id) or {}
+                if isinstance(profiles, dict):
+                    for key, candidate in profiles.items():
+                        if key == "_id" or not isinstance(candidate, dict):
+                            continue
+                        if key.lower() == profile_id or str(candidate.get("name", "")).lower() == profile_id:
+                            chosen = candidate
+                            break
+        if chosen is None:
+            await self._prompt_encode_profile()
+            chosen = self.encode_profile
+        if self.is_cancelled or chosen is None:
+            return False
+        normalized, warnings = normalize_encode_profile(chosen)
+        if warnings:
+            await send_message(
+                self.message,
+                f"The merge encode profile needs correction before downloading: {warnings[0]}",
+            )
+            return False
+        problem = validate_merge_encode_profile(normalized)
+        if problem or self.encode_metadata:
+            await send_message(
+                self.message,
+                problem or "Custom encode metadata is not supported for one continuous merge.",
+            )
+            return False
+        self.encode_profile = deepcopy(normalized)
+        if shared is not None:
+            async with task_dict_lock:
+                shared["merge_encode_profile"] = deepcopy(self.encode_profile)
+        return True
+
     async def _stage_merge_source_files(self):
         """Publish completed source names and preserve their batch identity."""
         if not self.is_merge or not self.merge_plan_id or getattr(
@@ -354,9 +405,8 @@ class TaskListener(TaskConfig):
             for dirpath, _, names in await sync_to_async(walk, source_root)
             for name in names
         ]
-        paths.sort(
-            key=lambda path: ospath.relpath(path, source_root).replace("\\", "/").casefold()
-        )
+        order_key = natural_key if self.is_ytdlp else episode_sort_key
+        paths.sort(key=lambda path: order_key(ospath.relpath(path, source_root)))
         candidates = []
         for offset in range(0, len(paths), 4):
             batch = paths[offset : offset + 4]
@@ -366,11 +416,16 @@ class TaskListener(TaskConfig):
                     continue
                 relative = ospath.relpath(path, source_root).replace("\\", "/")
                 future_path = f"{future_prefix}/{relative}" if future_prefix else relative
+                key = relative
+                if self.is_ytdlp:
+                    position = re_search(r"^(\d{6}) - ", ospath.basename(relative))
+                    if position:
+                        key = f"playlist:{position.group(1)}"
                 candidates.append(
                     {
                         "name": relative,
                         "path": future_path,
-                        "key": relative,
+                        "key": key,
                         "ordinal": len(candidates) + 1,
                         "ready": True,
                     }
@@ -410,6 +465,11 @@ class TaskListener(TaskConfig):
                                 LOGGER.info(f"Moving files from {self.mid} to {des_id}")
                                 await move_and_merge(spath, des_path, self.mid)
                                 multi_links = True
+                            elif self.is_merge:
+                                shared = self.same_dir[self.folder_name]
+                                if shared.get("merge_finalizer_claimed"):
+                                    return
+                                shared["merge_finalizer_claimed"] = self.mid
                             break
                     await sleep(1)
         async with task_dict_lock:
@@ -417,6 +477,10 @@ class TaskListener(TaskConfig):
                 return
             if self.mid not in task_dict:
                 return
+            if self.is_merge:
+                if getattr(self, "_merge_finalizer_started", False):
+                    return
+                self._merge_finalizer_started = True
             download = task_dict[self.mid]
             self.name = download.name()
             gid = download.gid()
@@ -519,7 +583,7 @@ class TaskListener(TaskConfig):
             self.size = await get_path_size(up_path)
             self.clear()
 
-        if self.is_encode:
+        if self.is_encode and not self.is_merge:
             encode_result = await self._handle_encode_pipeline(up_path, gid)
             if self.is_cancelled:
                 return
@@ -636,6 +700,9 @@ class TaskListener(TaskConfig):
             LOGGER.info(f"Start from Queued/Upload: {self.name}")
 
         self.size = await get_path_size(up_dir)
+
+        if self.is_merge:
+            await self.update_merge_plan_status("uploading", locked=True)
 
         if self.is_yt:
             LOGGER.info(f"Up to yt Name: {self.name}")
@@ -979,7 +1046,16 @@ class TaskListener(TaskConfig):
             await send_message(self.message, user_message, button, photo=self.thumb or "IMAGES")
 
         elif self.is_leech:
-            msg += _premium_row("Total Files", folders)
+            if self.is_merge:
+                msg += _premium_row("Upload Parts", len(files) if isinstance(files, dict) else folders)
+                if getattr(self, "merge_subtitle_count", 0):
+                    msg += _premium_row(
+                        "Subtitles",
+                        "Original tracks preserved; switch tracks at episode chapters if needed.",
+                        code=False,
+                    )
+            else:
+                msg += _premium_row("Total Files", folders)
             if mime_type != 0:
                 msg += _premium_row("Corrupted Files", mime_type)
             msg += _premium_row("Task By", self.tag, code=False, branch="╰─")
@@ -1184,6 +1260,8 @@ class TaskListener(TaskConfig):
                 await send_message(Config.MIRROR_LOG_ID, msg, button, photo=self.thumb or "IMAGES")
 
             await send_message(self.message, group_msg, button, photo=self.thumb or "IMAGES")
+        if self.is_merge:
+            await self.update_merge_plan_status("completed", locked=True)
         if self.seed:
             await clean_target(self.up_dir)
             async with queue_dict_lock:
@@ -1212,7 +1290,15 @@ class TaskListener(TaskConfig):
         await start_from_queued()
 
     async def on_download_error(self, error, button=None, is_limit=False):
+        report_failure = True
         if self.is_merge:
+            if self.folder_name and self.same_dir and self.folder_name in self.same_dir:
+                async with task_dict_lock:
+                    shared = self.same_dir[self.folder_name]
+                    report_failure = not shared.get("merge_terminal_reported", False)
+                    shared["merge_terminal_reported"] = True
+                    if not shared.get("error"):
+                        shared["error"] = str(error)
             await self.update_merge_plan_status(
                 "cancelled" if self.is_cancelled else "failed",
                 locked=True,
@@ -1257,7 +1343,8 @@ class TaskListener(TaskConfig):
             )
         )
 
-        await send_message(self.message, msg, button)
+        if report_failure:
+            await send_message(self.message, msg, button)
         if multi_snapshot is not None:
             await self._send_multi_leech_summary(multi_snapshot)
         if count == 0:
@@ -1288,14 +1375,21 @@ class TaskListener(TaskConfig):
 
         await start_from_queued()
         await sleep(3)
-        await clean_download(self.dir)
-        if self.up_dir:
-            await clean_download(self.up_dir)
+        if not self.is_merge:
+            await clean_download(self.dir)
+            if self.up_dir:
+                await clean_download(self.up_dir)
         if self.thumb and await aiopath.exists(self.thumb):
             await remove(self.thumb)
 
     async def on_upload_error(self, error, merge_staged=False):
+        report_failure = not merge_staged
         if self.is_merge and not merge_staged:
+            if self.folder_name and self.same_dir and self.folder_name in self.same_dir:
+                async with task_dict_lock:
+                    shared = self.same_dir[self.folder_name]
+                    report_failure = not shared.get("merge_terminal_reported", False)
+                    shared["merge_terminal_reported"] = True
             await self.update_merge_plan_status(
                 "cancelled" if self.is_cancelled else "failed",
                 locked=True,
@@ -1311,7 +1405,7 @@ class TaskListener(TaskConfig):
             if self.mid in task_dict:
                 del task_dict[self.mid]
             count = len(task_dict)
-        if not merge_staged:
+        if report_failure:
             msg = (
                 _completion_header(
                     "UPLOAD STOPPED",
@@ -1364,7 +1458,8 @@ class TaskListener(TaskConfig):
 
         await start_from_queued()
         await sleep(3)
-        await clean_download(self.dir)
+        if not self.is_merge or merge_staged:
+            await clean_download(self.dir)
         if self.up_dir:
             await clean_download(self.up_dir)
         if self.thumb and await aiopath.exists(self.thumb):

@@ -911,7 +911,7 @@ _MERGE_STREAM_FIELDS = (
 )
 
 
-def _merge_stream_signature(probe):
+def _merge_stream_signature(probe, *, av_only=False):
     """Fields that must match for a safe concat-demuxer stream copy."""
     signatures = []
     for stream in probe.get("streams") or []:
@@ -920,6 +920,8 @@ def _merge_stream_signature(probe):
         # not concat timeline streams. They may legitimately differ per episode
         # and are collected separately into the final file.
         if stream_type not in {"video", "audio", "subtitle", "data"}:
+            continue
+        if av_only and stream_type not in {"video", "audio"}:
             continue
         if stream_type == "video" and (stream.get("disposition") or {}).get(
             "attached_pic"
@@ -936,15 +938,7 @@ def _merge_stream_signature(probe):
                 # 2997/125). Compare milliframes, not the raw strings.
                 frame_rate = round(parsed_rate, 3)
         signatures.append(
-            tuple(
-                None
-                if stream_type == "subtitle"
-                and stream.get("codec_name")
-                in {"ass", "ssa", "subrip", "webvtt", "mov_text", "text"}
-                and key == "extradata_hash"
-                else stream.get(key)
-                for key in _MERGE_STREAM_FIELDS
-            )
+            tuple(stream.get(key) for key in _MERGE_STREAM_FIELDS)
             + (
                 frame_rate,
                 tuple(
@@ -1003,7 +997,7 @@ def _merge_mismatch_reason(reference, signature, position):
     return f"Item {position} has an incompatible stream layout."
 
 
-async def check_merge_compatibility(files):
+async def check_merge_compatibility(files, *, av_only=False, require_compatible=True):
     reference = None
     probes = []
     for offset in range(0, len(files), 4):
@@ -1016,12 +1010,12 @@ async def check_merge_compatibility(files):
             duration = _probe_duration(probe)
             if duration <= 0:
                 return None, f"Item {position} has no finite duration."
-            signature = _merge_stream_signature(probe)
+            signature = _merge_stream_signature(probe, av_only=av_only)
             if not any(item[0] == "video" for item in signature):
                 return None, f"Item {position} has no playable video stream."
             if reference is None:
                 reference = signature
-            elif signature != reference:
+            elif require_compatible and signature != reference:
                 return None, (
                     f"{_merge_mismatch_reason(reference, signature, position)} "
                     "The merge was stopped instead of silently re-encoding it."
@@ -2299,198 +2293,29 @@ class FFMpeg:
                 await remove(output)
         return False
 
-    async def merge_video_files(self, files, output_file, probes=None):
-        """Concatenate compatible videos without changing their bitstreams."""
+    async def merge_video_files(self, files, output_file, probes=None, sidecars=None, profile=None):
+        """Copy compatible A/V while preserving original subtitles independently."""
         self.clear()
         if self._listener.is_cancelled:
             return False, "Merge was cancelled."
         if probes is None:
-            probes, error = await check_merge_compatibility(files)
+            probes, error = await check_merge_compatibility(
+                files, av_only=True, require_compatible=profile is None
+            )
             if probes is None:
                 return False, error
-
-        durations = [_probe_duration(probe) for probe in probes]
-        self._total_time = sum(durations)
+        self._total_time = sum(_probe_duration(probe) for probe in probes)
         self._listener.subsize = sum(ospath.getsize(file_) for file_ in files)
-        base = ospath.splitext(output_file)[0]
-        manifest_path = f"{base}.concat.txt"
-        chapter_path = f"{base}.chapters.ffmetadata"
-        temp_output = f"{base}.part.mkv"
+        from .merge_media import merge_copy, merge_encode
 
-        attachment_sources = []
-        seen_attachments = set()
-        for file_, probe in zip(files, probes, strict=True):
-            stream_indexes = []
-            for stream in probe.get("streams") or []:
-                if stream.get("codec_type") != "attachment":
-                    continue
-                stream_index = stream.get("index")
-                if stream_index is None:
-                    continue
-                tags = stream.get("tags") or {}
-                identity = (
-                    stream.get("extradata_hash") or (file_, stream_index),
-                    tags.get("filename"),
-                    tags.get("mimetype"),
-                )
-                if identity in seen_attachments:
-                    continue
-                seen_attachments.add(identity)
-                stream_indexes.append(stream_index)
-            if stream_indexes:
-                attachment_sources.append((file_, stream_indexes))
-
-        def quote_path(path):
-            path = ospath.abspath(path).replace("\\", "/")
-            return "file '" + path.replace("'", "'\\''") + "'"
-
-        elapsed = 0
-        chapters = [";FFMETADATA1"]
-        for file_, duration in zip(files, durations, strict=True):
-            start = round(elapsed * 1000)
-            elapsed += duration
-            title = ospath.splitext(ospath.basename(file_))[0]
-            title = re.sub(r"^\d{1,8}\s+-\s+", "", title)
-            title = title.replace("\r", " ").replace("\n", " ")
-            title = title.replace("\\", "\\\\").replace("=", "\\=")
-            title = title.replace(";", "\\;").replace("#", "\\#")
-            chapters.extend(
-                (
-                    "[CHAPTER]",
-                    "TIMEBASE=1/1000",
-                    f"START={start}",
-                    f"END={round(elapsed * 1000)}",
-                    f"title={title}",
-                )
+        if profile is not None:
+            normalized, warnings = normalize_encode_profile(profile)
+            if warnings:
+                return False, f"The merge encode profile needs correction: {warnings[0]}"
+            return await merge_encode(
+                self._listener, files, output_file, probes, normalized, sidecars=sidecars
             )
-
-        try:
-            with open(manifest_path, "w", encoding="utf-8", newline="\n") as manifest:
-                manifest.write("\n".join(quote_path(file_) for file_ in files) + "\n")
-            with open(chapter_path, "w", encoding="utf-8", newline="\n") as metadata:
-                metadata.write("\n".join(chapters) + "\n")
-
-            cmd = [
-                "taskset",
-                "-c",
-                f"{cores}",
-                BinConfig.FFMPEG_NAME,
-                "-y",
-                "-nostdin",
-                "-hide_banner",
-                "-loglevel",
-                "error",
-                "-progress",
-                "pipe:1",
-                "-copyts",
-                "-start_at_zero",
-                "-f",
-                "concat",
-                "-safe",
-                "0",
-                "-i",
-                manifest_path,
-                "-f",
-                "ffmetadata",
-                "-i",
-                chapter_path,
-            ]
-            attachment_maps = []
-            for input_index, (file_, stream_indexes) in enumerate(
-                attachment_sources, start=2
-            ):
-                cmd.extend(["-i", file_])
-                for stream_index in stream_indexes:
-                    attachment_maps.extend(
-                        ["-map", f"{input_index}:{stream_index}"]
-                    )
-            cmd.extend(
-                [
-                "-map",
-                "0:v?",
-                "-map",
-                "0:a?",
-                "-map",
-                "0:s?",
-                "-map",
-                "0:d?",
-                *attachment_maps,
-                "-map_metadata",
-                "1",
-                "-map_chapters",
-                "1",
-                "-c",
-                "copy",
-                "-max_muxing_queue_size",
-                "4096",
-                temp_output,
-                ]
-            )
-            self._listener.subproc = await create_subprocess_exec(
-                *cmd, stdout=PIPE, stderr=PIPE
-            )
-            await self._ffmpeg_progress()
-            _, stderr = await self._listener.subproc.communicate()
-            if self._listener.is_cancelled:
-                return False, "Merge was cancelled."
-            if self._listener.subproc.returncode != 0:
-                return False, stderr.decode(errors="replace").strip()
-
-            output_probe, probe_error = await _probe_media_file(temp_output)
-            if output_probe is None:
-                return False, f"Merged output is unreadable: {probe_error}"
-            output_duration = _probe_duration(output_probe)
-            if output_duration <= 0:
-                return False, "Merged output has no finite positive duration."
-            start_time = 0
-            with suppress(TypeError, ValueError):
-                start_time = float(
-                    (output_probe.get("format") or {}).get("start_time") or 0
-                )
-            if abs(start_time) > 0.5:
-                return False, (
-                    f"Merged output starts at {start_time:.3f}s instead of near zero."
-                )
-            for stream_type in ("video", "audio", "subtitle", "attachment", "data"):
-                expected = (
-                    len(seen_attachments)
-                    if stream_type == "attachment"
-                    else _count_media_streams(probes[0], stream_type)
-                )
-                actual = _count_media_streams(output_probe, stream_type)
-                if actual != expected:
-                    return False, (
-                        f"Merged output has {actual} {stream_type} streams; "
-                        f"expected {expected}."
-                    )
-            chapter_count = len(output_probe.get("chapters") or [])
-            if chapter_count != len(files):
-                return False, (
-                    f"Merged output has {chapter_count} chapters; expected {len(files)}."
-                )
-            tolerance = max(0.5, min(5.0, self._total_time * 0.005))
-            if abs(output_duration - self._total_time) > tolerance:
-                return False, (
-                    "Merged duration differs from the source total "
-                    f"({output_duration:.3f}s vs {self._total_time:.3f}s)."
-                )
-            sample_positions = {
-                0.0,
-                max(0.0, output_duration / 2),
-                max(0.0, output_duration - min(2.0, output_duration * 0.1)),
-            }
-            for position in sorted(sample_positions):
-                valid, reason = await self._decode_encode_sample(
-                    temp_output, position, "video"
-                )
-                if not valid:
-                    return False, reason
-            await replace(temp_output, output_file)
-            return output_file, ""
-        finally:
-            for path in (manifest_path, chapter_path, temp_output):
-                with suppress(Exception):
-                    await remove(path)
+        return await merge_copy(self._listener, files, output_file, probes, sidecars=sidecars)
 
     async def sample_video(self, video_file, sample_duration, part_duration):
         self.clear()

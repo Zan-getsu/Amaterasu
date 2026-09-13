@@ -11,6 +11,15 @@ ENV LANG=C.UTF-8 \
 
 WORKDIR /usr/src/app
 
+# The published base image may predate the MKVToolNix addition in
+# Dockerfile.base. Install the command-line mux/extract tools in the image
+# actually used by ordinary builds.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends mkvtoolnix \
+    && rm -rf /var/lib/apt/lists/* \
+    && command -v mkvmerge \
+    && command -v mkvextract
+
 # Create the virtual environment WITH --system-site-packages.
 # This is CRITICAL: the Mega SDK Python bindings are installed in system
 # Python's site-packages (by Dockerfile.base Block 7). Without this flag,

@@ -1936,10 +1936,7 @@ async def merge_plan_page(request: Request):
         "merge_planner.html",
         {"plan_id": plan_id},
     )
-    response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate, private"
-    response.headers["Pragma"] = "no-cache"
-    response.headers["Expires"] = "0"
-    return response
+    return _no_store(response)
 
 
 @app.api_route("/api/merge-plan/{plan_id}", methods=["GET", "POST"])
@@ -1950,7 +1947,7 @@ async def merge_plan_api(plan_id: str, request: Request):
             status_code=400,
             headers={"Cache-Control": "no-store"},
         )
-    pin = request.query_params.get("pin", "")
+    pin = request.headers.get("X-Merge-Plan-Pin") or request.query_params.get("pin", "")
     rate_key = f"merge-plan:{plan_id}"
     if _pin_rate_limited(rate_key):
         return JSONResponse(
@@ -1991,7 +1988,7 @@ async def merge_plan_api(plan_id: str, request: Request):
             update_merge_order,
             plan_id,
             payload.get("order"),
-            payload.get("revision"),
+            payload.get("order_revision", payload.get("revision")),
         )
         if error:
             status_code = 409 if updated is not None else 400
