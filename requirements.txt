@@ -9,7 +9,7 @@ aioaria2
 aioqbt
 imdbio
 cloudscraper
-curl_cffi>=0.16.1
+curl_cffi>=0.16.2
 dnspython
 feedparser
 # Keep the Google token generator and bot runtime on the same current releases.
