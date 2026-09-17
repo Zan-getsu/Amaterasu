@@ -117,6 +117,12 @@ async def _run(arguments, listener, *, timeout=12 * 60 * 60):
             except TimeoutError:
                 elapsed += 1
         stdout, stderr = await communication
+        # Inspection commands write their machine-readable payload to stdout.
+        # Tools may also emit harmless warnings on stderr while succeeding;
+        # returning that warning or truncating a large payload would corrupt
+        # otherwise valid JSON or framemd5 output. Bound only error diagnostics.
+        if process.returncode == 0:
+            return 0, stdout.decode(errors="replace").strip()
         diagnostic = (stderr or stdout).decode(errors="replace")[-16000:].strip()
         return process.returncode, diagnostic
     finally:

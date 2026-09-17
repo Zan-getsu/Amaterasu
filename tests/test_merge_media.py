@@ -4,6 +4,7 @@ import json
 import shutil
 import struct
 import subprocess
+import sys
 from types import SimpleNamespace
 
 import pytest
@@ -11,6 +12,7 @@ import pytest
 from bot.helper.ext_utils.merge_media import (
     _check_selected_streams,
     _font_names,
+    _json_command,
     _mkvmerge_binary,
     _origin,
     _video_span,
@@ -107,6 +109,22 @@ def cover_media(tmp_path_factory):
 
 def _listener():
     return SimpleNamespace(is_cancelled=False, subproc=None)
+
+
+@pytest.mark.asyncio
+async def test_json_inspection_uses_stdout_when_tool_warns_on_stderr():
+    result = await _json_command(
+        [
+            sys.executable,
+            "-c",
+            "import json, sys; sys.stderr.write('harmless warning\\n'); "
+            "sys.stdout.write(json.dumps({'tracks': [], 'padding': 'x' * 20000}))",
+        ],
+        _listener(),
+    )
+
+    assert result["tracks"] == []
+    assert len(result["padding"]) == 20000
 
 
 def _font_bytes(family="Example", postscript="Example-Regular"):
