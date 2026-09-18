@@ -168,8 +168,7 @@ class YoutubeDLHelper:
             },
             "extractor_args": {
                 "youtube": {
-                    "player_client": ["mweb"],
-                    "skip": ["webpage", "configs"],
+                    "skip": ["webpage"],
                 },
                 "youtubetab": {"skip": ["webpage", "authcheck"]},
             },
