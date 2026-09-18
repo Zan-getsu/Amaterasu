@@ -171,7 +171,7 @@ class YoutubeDLHelper:
                     "player_client": ["mweb"],
                     "skip": ["webpage", "configs"],
                 },
-                "youtubetab": {"skip": ["webpage"]},
+                "youtubetab": {"skip": ["webpage", "authcheck"]},
             },
             "hls_use_mpegts": True,
             "fragment_retries": 10,
