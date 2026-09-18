@@ -15,10 +15,16 @@ WORKDIR /usr/src/app
 # Dockerfile.base. Install the command-line mux/extract tools in the image
 # actually used by ordinary builds.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends mkvtoolnix \
+    && apt-get install -y --no-install-recommends mkvtoolnix unzip \
     && rm -rf /var/lib/apt/lists/* \
     && command -v mkvmerge \
     && command -v mkvextract
+
+# Install Deno — required by yt-dlp for solving YouTube's n-sig challenge.
+# Without a JS runtime, yt-dlp fails with "n challenge solving failed" and
+# "The page needs to be reloaded", making all video formats unavailable.
+RUN curl -fsSL https://deno.land/install.sh | DENO_INSTALL=/usr/local sh \
+    && deno --version
 
 # Create the virtual environment WITH --system-site-packages.
 # This is CRITICAL: the Mega SDK Python bindings are installed in system
