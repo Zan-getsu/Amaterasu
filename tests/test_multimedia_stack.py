@@ -64,3 +64,11 @@ def test_manual_image_verifier_checks_exact_stack_and_codec_availability():
     assert "${AMATERASU_FFMPEG_VERSION#n}" not in verifier
     for codec in ("libsvtav1", "libaom-av1", "libdav1d"):
         assert f'grep -F "{codec}"' in verifier
+
+
+def test_runtime_image_installs_and_verifies_the_archive_extractor():
+    dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+
+    assert "apt-get install -y --no-install-recommends mkvtoolnix p7zip-full unzip" in dockerfile
+    assert "command -v 7z" in dockerfile
+    assert "7z i >/dev/null" in dockerfile

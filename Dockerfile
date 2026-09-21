@@ -11,14 +11,15 @@ ENV LANG=C.UTF-8 \
 
 WORKDIR /usr/src/app
 
-# The published base image may predate the MKVToolNix addition in
-# Dockerfile.base. Install the command-line mux/extract tools in the image
-# actually used by ordinary builds.
+# Keep the media and archive tools required by the app in the runtime image
+# instead of relying on the currently published base-image contents.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends mkvtoolnix unzip \
+    && apt-get install -y --no-install-recommends mkvtoolnix p7zip-full unzip \
     && rm -rf /var/lib/apt/lists/* \
     && command -v mkvmerge \
-    && command -v mkvextract
+    && command -v mkvextract \
+    && command -v 7z \
+    && 7z i >/dev/null
 
 # Install Deno — required by yt-dlp for solving YouTube's n-sig challenge.
 # Without a JS runtime, yt-dlp fails with "n challenge solving failed" and
