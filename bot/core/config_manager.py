@@ -150,7 +150,6 @@ class Config:
     LEECH_CAPTION = ""
     LEECH_SUFFIX = ""
     LEECH_FONT = ""
-    LEECH_SPLIT_SIZE = 2097152000
     MEDIA_GROUP = False
     USE_HYPER = True
     HYPER_THREADS = 0
@@ -259,10 +258,7 @@ class Config:
     RCLONE_ONEDRIVE_REMOTE = ""
     RCLONE_DROPBOX_REMOTE = ""
 
-    # Phase 4.8 — Telegram Premium bot detection. Set automatically at
-    # startup by TgClient.start_bot() via client.get_me().is_premium.
-    # When True, telegram_uploader uses 4 GB split size (vs 2 GB standard).
-    # Operators should NOT set this manually — it's auto-detected.
+    # Telegram Premium bot detection. Set automatically at startup.
     IS_PREMIUM_BOT = False
 
     # Phase 5.5 — per-user quota system. 0 = unlimited (default).

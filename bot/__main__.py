@@ -117,32 +117,23 @@ async def main():
     # (with FloodWait retries inside start_bot).
     await TgClient.start_bot()
 
-    # Start the user session, helper bots, and helper users in the
-    # BACKGROUND (non-blocking) by default. Provisioning stream bots first
-    # tries to establish the user session, but never prevents the main bot
-    # from starting if that optional setup cannot run.
-    # We use create_tracked_task (which wraps bot_loop.create_task)
-    # so failures are logged instead of silently dropped.
+    # Resolve the user session before upload limits are initialized.
     from .helper.ext_utils.bot_utils import create_tracked_task as _ctt
-    provision_stream_bots = False
-    if Config.AUTO_PROVISION_STREAM_BOTS:
-        if not Config.USER_SESSION_STRING:
+    await TgClient.start_user()
+    provision_stream_bots = (
+        Config.AUTO_PROVISION_STREAM_BOTS and TgClient.user is not None
+    )
+    if Config.AUTO_PROVISION_STREAM_BOTS and not provision_stream_bots:
+        if Config.USER_SESSION_STRING:
+            LOGGER.warning(
+                "AUTO_PROVISION_STREAM_BOTS could not start USER_SESSION_STRING. "
+                "Skipping stream-bot provisioning for this boot."
+            )
+        else:
             LOGGER.warning(
                 "AUTO_PROVISION_STREAM_BOTS requires USER_SESSION_STRING. "
                 "Skipping stream-bot provisioning for this boot."
             )
-        else:
-            await TgClient.start_user()
-            if TgClient.user is None:
-                LOGGER.warning(
-                    "AUTO_PROVISION_STREAM_BOTS could not start "
-                    "USER_SESSION_STRING. Skipping stream-bot provisioning "
-                    "for this boot."
-                )
-            else:
-                provision_stream_bots = True
-    else:
-        _ctt(TgClient.start_user())
     if provision_stream_bots:
         # Start helpers first so a token assigned to both roles is reused by
         # the temporary provisioning pool instead of opening twice.

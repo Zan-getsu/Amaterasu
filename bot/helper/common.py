@@ -1038,8 +1038,7 @@ class TaskConfig:
                     self.split_size = get_size_bytes(self.split_size)
             self.split_size = (
                 self.split_size
-                or self.user_dict.get("LEECH_SPLIT_SIZE")
-                or Config.LEECH_SPLIT_SIZE
+                or TgClient.MAX_SPLIT_SIZE
             )
             self.equal_splits = (
                 self.user_dict.get("EQUAL_SPLITS")

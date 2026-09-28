@@ -66,6 +66,19 @@ def load_callback_handler(namespace):
     return namespace["edit_bot_settings"]
 
 
+def test_split_size_is_derived_after_premium_session_detection():
+    main = (ROOT / "bot" / "__main__.py").read_text(encoding="utf-8")
+    common = (ROOT / "bot" / "helper" / "common.py").read_text(encoding="utf-8")
+    settings = SETTINGS_SOURCE.read_text(encoding="utf-8")
+
+    assert main.index("await TgClient.start_user()") < main.index(
+        "await gather(load_configurations(), update_variables())"
+    )
+    assert "or TgClient.MAX_SPLIT_SIZE" in common
+    assert 'get("LEECH_SPLIT_SIZE")' not in common
+    assert "LEECH_SPLIT_SIZE" not in settings
+
+
 def test_common_and_feature_variables_have_canonical_categories():
     namespace = load_category_namespace()
     category_for = namespace["_config_category_for_key"]

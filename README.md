@@ -610,7 +610,6 @@ All variables go inside `config.py`. Copy `config_sample.py` as your starting te
 | Variable | Type | Default | Description |
 |---|---|---|---|
 | `DEFAULT_UPLOAD` | `str` | `""` | Default upload mode: `gd` (Google Drive), `rc` (Rclone), or `mega` |
-| `LEECH_SPLIT_SIZE` | `int` | `0` | Max file size per split in bytes (0 = Telegram default: 2 GB for premium, 4 GB for bots) |
 | `AS_DOCUMENT` | `bool` | `False` | Upload files as documents instead of media (preserves original filename) |
 | `EQUAL_SPLITS` | `bool` | `False` | Split files into equal-sized parts instead of Telegram's default |
 | `MEDIA_GROUP` | `bool` | `False` | Send split files as a media group (album) |
@@ -2068,7 +2067,6 @@ This auto-leeches new anime releases in 1080p (mkv or mp4), excluding batch pack
   <br>
 
   - You need `USER_SESSION_STRING` from a Telegram Premium account.
-  - Or set `LEECH_SPLIT_SIZE` to a value below 2 GB to auto-split files.
 </details>
 
 <details>

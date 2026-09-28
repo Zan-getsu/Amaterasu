@@ -45,7 +45,6 @@ BANNED_CHANNELS = ""
 # 4. LEECH & UPLOADS
 # ==========================================
 DEFAULT_UPLOAD = ""  # gd, rc, or mega
-LEECH_SPLIT_SIZE = 0
 AS_DOCUMENT = False
 EQUAL_SPLITS = False
 MEDIA_GROUP = False

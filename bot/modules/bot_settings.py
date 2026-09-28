@@ -49,7 +49,7 @@ from ..helper.ext_utils.bot_utils import (
 )
 from ..core.auto_restart import schedule_auto_restart
 from ..core.config_manager import Config, DEFAULT_CONFIG
-from ..core.tg_client import TgClient, db_partition_id
+from ..core.tg_client import db_partition_id
 from ..core.torrent_manager import TorrentManager
 from ..core.startup import (
     start_web_server,
@@ -103,7 +103,6 @@ DEFAULT_VALUES = {
     "FILETOLINK_PREFETCH_CHUNKS": 4,
     "USE_LEECH_DUMP_AS_BIN_CHANNEL": False,
     "SET_COMMANDS": True,
-    "LEECH_SPLIT_SIZE": TgClient.MAX_SPLIT_SIZE,
     "RSS_DELAY": 600,
     "STATUS_UPDATE_INTERVAL": 15,
     "PROGRESS_BAR": "█:░",
@@ -177,7 +176,7 @@ DEFAULT_DESP = {
     "DISABLE_RSS": "Disable RSS feed monitoring. Saves CPU cycles. Default: False.",
     "DISABLE_SEARCH": "Disable torrent search plugins. Saves network I/O. Default: False.",
     "DISABLE_YTDLP": "Disable YouTube/YT-DLP downloads. Default: False.",
-    "EQUAL_SPLITS": "Split files into equal parts of LEECH_SPLIT_SIZE. Default: False.",
+    "EQUAL_SPLITS": "Split oversized files into equal parts. Default: False.",
     "EXCLUDED_EXTENSIONS": "File extensions to exclude from upload/clone. Space-separated.",
     "FFMPEG_CMDS": "Custom FFmpeg command presets. Dict format.",
     "FILELION_API": "FileLion.cc API key for direct download support.",
@@ -240,7 +239,6 @@ DEFAULT_DESP = {
     ),
     "LEECH_SUFFIX": "Suffix added to leeched file names.",
     "LEECH_FONT": "Font style for captions: b, i, u, s, code, spoiler.",
-    "LEECH_SPLIT_SIZE": "Split size for Telegram uploads in bytes. Default: 2GB (4GB for premium).",
     "MEDIA_GROUP": "Upload split parts as media group. Default: False.",
     "USE_HYPER": "Use HyperDL as the primary path for eligible Telegram downloads, with WZGram overflow/fallback, and enable HyperUP acceleration. Default: True.",
     "HYPER_THREADS": "Number of parallel download parts (clients). 0 = auto.",
@@ -436,7 +434,6 @@ CONFIG_CATEGORIES = {
             "LEECH_SUFFIX",
             "LEECH_FONT",
             "LEECH_CAPTION",
-            "LEECH_SPLIT_SIZE",
             "MEDIA_GROUP",
             "NAME_SWAP",
             "UPLOAD_PATHS",
@@ -1081,8 +1078,6 @@ async def edit_variable(_, message, pre_message, key):
     elif key == "TORRENT_TIMEOUT":
         await TorrentManager.change_aria2_option("bt-stop-timeout", value)
         value = int(value)
-    elif key == "LEECH_SPLIT_SIZE":
-        value = min(int(value), TgClient.MAX_SPLIT_SIZE)
     elif key == "EXCLUDED_EXTENSIONS":
         fx = value.split()
         excluded_extensions.clear()
@@ -1701,8 +1696,6 @@ async def edit_bot_settings(client, query):
         if data[2] in ("IMAGES", "SEARCH_PLUGINS", "USENET_SERVERS", "YT_TAGS", "IMG_SOURCES"):
             value = deepcopy(DEFAULT_CONFIG.get(data[2], []))
         elif data[2] in DEFAULT_VALUES:
-            if data[2] == "LEECH_SPLIT_SIZE":
-                value = TgClient.MAX_SPLIT_SIZE
             if (
                 data[2] == "STATUS_UPDATE_INTERVAL"
                 and len(task_dict) != 0

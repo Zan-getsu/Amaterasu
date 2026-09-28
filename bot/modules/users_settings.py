@@ -20,7 +20,6 @@ from .. import auth_chats, excluded_extensions, sudo_users, user_data
 from ..core.config_manager import Config
 from ..core.tg_client import TgClient
 from ..helper.ext_utils.bot_utils import (
-    get_size_bytes,
     get_web_secret,
     new_task,
     update_user_ldata,
@@ -65,7 +64,6 @@ def _display_value(value, fallback="None"):
 
 leech_options = [
     "THUMBNAIL",
-    "LEECH_SPLIT_SIZE",
     "LEECH_DUMP",
     "LEECH_PREFIX",
     "LEECH_SUFFIX",
@@ -125,11 +123,6 @@ user_settings_text = {
         "",
         "",
         "<i>Send your <code>token.pickle</code> to use as your Upload Dest to GDrive</i> \n┖ <b>Time Left :</b> <code>60 sec</code>",
-    ),
-    "LEECH_SPLIT_SIZE": (
-        "",
-        "",
-        f"Send Leech split size in bytes or use gb or mb. Example: 40000000 or 2.5gb or 1000mb. PREMIUM_USER: {TgClient.IS_PREMIUM_USER}.</i> \n┖ <b>Time Left :</b> <code>60 sec</code>",
     ),
     "LEECH_DUMP": (
         "String",
@@ -513,11 +506,6 @@ async def get_user_settings(from_user, stype="main"):
         thumbpath = f"thumbnails/{user_id}.jpg"
         buttons.data_button("✦ THUMBNAIL", f"userset {user_id} menu THUMBNAIL")
         thumbmsg = "Exists" if await aiopath.exists(thumbpath) else "Not Exists"
-        buttons.data_button("✦ Leech Split Size", f"userset {user_id} menu LEECH_SPLIT_SIZE")
-        if user_dict.get("LEECH_SPLIT_SIZE", False):
-            split_size = user_dict["LEECH_SPLIT_SIZE"]
-        else:
-            split_size = Config.LEECH_SPLIT_SIZE
         buttons.data_button("✦ Leech Dump", f"userset {user_id} menu LEECH_DUMP")
         try:
             leech_dumps = normalize_named_leech_dumps(
@@ -630,7 +618,7 @@ async def get_user_settings(from_user, stype="main"):
 <code>┌─ {'Name':<15}: {user_name}
 ├─ {'Type':<15}: {ltype}
 ├─ {'Thumbnail':<15}: {thumbmsg}
-├─ {'Split Size':<15}: {get_readable_file_size(split_size)}
+├─ {'Split Size':<15}: {get_readable_file_size(TgClient.MAX_SPLIT_SIZE)} (automatic)
 ├─ {'Equal Splits':<15}: {equal_splits}
 ├─ {'Media Group':<15}: {media_group}
 ├─ {'Prefix':<15}: {escape(lprefix)}
@@ -1397,11 +1385,7 @@ async def set_option(_, message, option, rfunc):
     user_id = message.from_user.id
     handler_dict[user_id] = False
     value = message.text
-    if option == "LEECH_SPLIT_SIZE":
-        if not value.isdigit():
-            value = get_size_bytes(value)
-        value = min(int(value), TgClient.MAX_SPLIT_SIZE)
-    elif option == "EXCLUDED_EXTENSIONS":
+    if option == "EXCLUDED_EXTENSIONS":
         fx = value.split()
         value = ["aria2", "!qB"]
         for x in fx:
@@ -1572,8 +1556,6 @@ async def get_menu(option, message, user_id):
     val = user_dict.get(option)
     if option in file_dict and await aiopath.exists(file_dict[option]):
         val = "Exists"
-    elif option == "LEECH_SPLIT_SIZE":
-        val = get_readable_file_size(val)
     elif option == "METADATA":
         current_meta_val = user_dict.get(option)
         if isinstance(current_meta_val, dict) and current_meta_val:
