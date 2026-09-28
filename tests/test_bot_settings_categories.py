@@ -79,6 +79,16 @@ def test_split_size_is_derived_after_premium_session_detection():
     assert "LEECH_SPLIT_SIZE" not in settings
 
 
+def test_group_uploads_do_not_require_user_admin_privileges():
+    common = (ROOT / "bot" / "helper" / "common.py").read_text(encoding="utf-8")
+    user_access_check = common.split("if self.transmission_mode in (\"user\", \"both\"):", 1)[1]
+    user_access_check = user_access_check.split("try:\n                    chat = await self.client.get_chat", 1)[0]
+
+    assert "elif chat.type == ChatType.CHANNEL:" in user_access_check
+    assert "can_post_messages" in user_access_check
+    assert "can_manage_chat" not in user_access_check
+
+
 def test_common_and_feature_variables_have_canonical_categories():
     namespace = load_category_namespace()
     category_for = namespace["_config_category_for_key"]

@@ -981,11 +981,11 @@ class TaskConfig:
                                 ChatType.FORUM,
                             ]:
                                 self.transmission_mode = "bot"
-                            else:
+                            elif chat.type == ChatType.CHANNEL:
                                 member = await chat.get_member(uploader_id)
                                 if (
-                                    not member.privileges.can_manage_chat
-                                    or not member.privileges.can_delete_messages
+                                    not member.privileges
+                                    or not member.privileges.can_post_messages
                                 ):
                                     self.transmission_mode = "bot"
 
