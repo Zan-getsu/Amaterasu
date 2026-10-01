@@ -304,6 +304,12 @@ async def split_file(f_path, split_size, listener):
         except Exception:
             stderr = "Unable to decode the error!"
         LOGGER.error(f"{stderr}. Split Document: {f_path}")
+        part_prefix = ospath.basename(out_path)
+        part_dir = ospath.dirname(f_path) or "."
+        for part in await listdir(part_dir):
+            if re_search(rf"^{escape(part_prefix)}\d{{3}}$", part):
+                await remove(ospath.join(part_dir, part))
+        return False
     return True
 
 

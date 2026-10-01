@@ -2180,16 +2180,35 @@ class TaskConfig:
                 if not self.as_doc and (await get_document_type(f_path))[0]:
                     self.progress = True
                     res = await ffmpeg.split(f_path, file_, parts, split_size)
+                    if not res and not self.is_cancelled:
+                        LOGGER.warning(
+                            "Playable split failed; falling back to document parts: %s",
+                            f_path,
+                        )
+                        self.progress = False
+                        res = await split_file(f_path, split_size, self)
                 else:
                     self.progress = False
                     res = await split_file(f_path, split_size, self)
                 if self.is_cancelled:
                     return False
-                if res or f_size >= self.max_split_size:
-                    try:
-                        await remove(f_path)
-                    except Exception:
-                        self.is_cancelled = True
+                if not res:
+                    if f_size < self.max_split_size:
+                        LOGGER.warning(
+                            "Split failed, uploading the original file within Telegram's limit: %s",
+                            f_path,
+                        )
+                        continue
+                    self.is_cancelled = True
+                    await self.on_download_error(
+                        f"Unable to split {file_} completely. No partial files were uploaded."
+                    )
+                    return False
+                try:
+                    await remove(f_path)
+                except Exception:
+                    self.is_cancelled = True
+                    return False
 
     def parse_metadata_string(self, metadata_str):
         return self.metadata_processor.parse_string(metadata_str)

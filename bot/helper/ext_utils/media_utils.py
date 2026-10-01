@@ -2412,6 +2412,13 @@ class FFMpeg:
         split_size -= 3000000
         start_time = 0
         i = 1
+        outputs = []
+
+        async def discard_outputs():
+            for output in outputs:
+                with suppress(Exception):
+                    await remove(output)
+
         while i <= parts or start_time < duration - 4:
             out_path = f_path.replace(file_, f"{base_name}.part{i:03}{extension}")
             cmd = [
@@ -2478,6 +2485,7 @@ class FFMpeg:
                     LOGGER.warning(
                         f"{stderr}. Unable to split this video, if it's size less than {self._listener.max_split_size} will be uploaded as it is. Path: {f_path}"
                     )
+                await discard_outputs()
                 return False
             out_size = await aiopath.getsize(out_path)
             if out_size > self._listener.max_split_size:
@@ -2492,20 +2500,27 @@ class FFMpeg:
                 LOGGER.error(
                     f"Something went wrong while splitting, mostly file is corrupted. Path: {f_path}"
                 )
-                break
+                with suppress(Exception):
+                    await remove(out_path)
+                await discard_outputs()
+                return False
             elif duration == lpd:
                 LOGGER.warning(
-                    f"This file has been splitted with default stream and audio, so you will only see one part with less size from orginal one because it doesn't have all streams and audios. This happens mostly with MKV videos. Path: {f_path}"
+                    f"FFmpeg produced only one incomplete split part. Falling back to document splitting. Path: {f_path}"
                 )
-                break
+                with suppress(Exception):
+                    await remove(out_path)
+                await discard_outputs()
+                return False
             elif lpd <= 3:
                 await remove(out_path)
                 break
+            outputs.append(out_path)
             self._last_processed_time += lpd
             self._last_processed_bytes += out_size
             start_time += lpd - 3
             i += 1
-        return True
+        return bool(outputs)
 
 
 section_dict = {"General": "🗒", "Video": "🎞", "Audio": "🔊", "Text": "🔠", "Menu": "🗃"}

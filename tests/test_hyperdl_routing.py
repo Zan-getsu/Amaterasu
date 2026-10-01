@@ -581,6 +581,185 @@ def test_split_parts_upload_in_order_while_unrelated_files_remain_parallel():
     assert uploader.max_active == 2
 
 
+def test_split_helpers_reject_incomplete_output_and_preserve_source_on_failure():
+    removed = []
+
+    class Process:
+        returncode = 1
+
+        async def communicate(self):
+            return b"", b"disk full"
+
+    async def create_subprocess_exec(*_args, **_kwargs):
+        return Process()
+
+    split_file = load_top_level_functions(
+        FILES_UTILS_SOURCE,
+        {"split_file"},
+        {
+            "LOGGER": SimpleNamespace(error=lambda *_args: None),
+            "PIPE": object(),
+            "create_subprocess_exec": create_subprocess_exec,
+            "escape": re.escape,
+            "listdir": lambda _path: asyncio.sleep(0, result=["movie.mkv.001"]),
+            "ospath": os.path,
+            "re_search": re.search,
+            "remove": lambda path: asyncio.sleep(0, result=removed.append(path)),
+        },
+    )["split_file"]
+    listener = SimpleNamespace(is_cancelled=False, subproc=None)
+    assert asyncio.run(split_file("movie.mkv", 100, listener)) is False
+    assert Path(removed.pop()).name == "movie.mkv.001"
+
+    media_calls = 0
+
+    class MediaProcess:
+        returncode = 0
+
+        async def communicate(self):
+            return b"", b""
+
+    async def create_media_subprocess(*_args, **_kwargs):
+        return MediaProcess()
+
+    async def get_media_info(_path):
+        nonlocal media_calls
+        media_calls += 1
+        return (120 if media_calls <= 2 else 0, None, None)
+
+    async def remove(path):
+        removed.append(path)
+
+    class AsyncPath:
+        @staticmethod
+        async def getsize(_path):
+            return 50
+
+    ffmpeg_split = load_method(
+        MEDIA_UTILS_SOURCE,
+        "FFMpeg",
+        "split",
+        {
+            "BinConfig": SimpleNamespace(FFMPEG_NAME="ffmpeg"),
+            "LOGGER": SimpleNamespace(error=lambda *_args: None, warning=lambda *_args: None),
+            "PIPE": object(),
+            "aiopath": AsyncPath,
+            "cores": "0",
+            "create_subprocess_exec": create_media_subprocess,
+            "get_media_info": get_media_info,
+            "ospath": os.path,
+            "remove": remove,
+            "suppress": suppress,
+            "threads": 1,
+        },
+    )
+
+    class DummyFFmpeg:
+        _listener = SimpleNamespace(is_cancelled=False, max_split_size=100)
+        _last_processed_time = 0
+        _last_processed_bytes = 0
+
+        def clear(self):
+            pass
+
+        async def _ffmpeg_progress(self):
+            pass
+
+    DummyFFmpeg.split = ffmpeg_split
+    assert (
+        asyncio.run(DummyFFmpeg().split("downloads/movie.mkv", "movie.mkv", 2, 100))
+        is False
+    )
+    assert len(removed) == 1
+    assert Path(removed[0]).name == "movie.part001.mkv"
+
+
+def test_video_split_falls_back_to_document_parts_without_uploading_partials():
+    proceed_split = load_method(
+        COMMON_SOURCE,
+        "TaskConfig",
+        "proceed_split",
+        {},
+    )
+
+    class AsyncLock:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return False
+
+    async def run_case(document_split_result):
+        events = []
+
+        async def get_path_size(_path):
+            return 250
+
+        async def get_document_type(_path):
+            return True, False, False
+
+        async def split_file(_path, _size, _listener):
+            events.append("document")
+            return document_split_result
+
+        async def remove(_path):
+            events.append("remove-source")
+
+        class FakeFFmpeg:
+            def __init__(self, _listener):
+                pass
+
+            async def split(self, *_args):
+                events.append("media")
+                return False
+
+        class Task:
+            is_file = True
+            split_size = 100
+            max_split_size = 100
+            size = 250
+            as_doc = False
+            equal_splits = False
+            is_cancelled = False
+            mid = "task"
+            name = "movie.mkv"
+            proceed_count = 0
+            progress = False
+
+            async def on_download_error(self, message):
+                events.append(message)
+
+        namespace = proceed_split.__globals__
+        namespace.update(
+            {
+                "FFMpeg": FakeFFmpeg,
+                "FFmpegStatus": lambda *_args: object(),
+                "LOGGER": SimpleNamespace(info=lambda *_args: None, warning=lambda *_args: None),
+                "get_document_type": get_document_type,
+                "get_path_size": get_path_size,
+                "ospath": os.path,
+                "remove": remove,
+                "split_file": split_file,
+                "task_dict": {},
+                "task_dict_lock": AsyncLock(),
+            }
+        )
+        task = Task()
+        result = await proceed_split(task, "downloads/movie.mkv", "gid")
+        return task, events, result
+
+    success_task, success_events, _ = asyncio.run(run_case(True))
+    assert success_task.is_cancelled is False
+    assert success_events == ["media", "document", "remove-source"]
+
+    failed_task, failed_events, failed_result = asyncio.run(run_case(False))
+    assert failed_result is False
+    assert failed_task.is_cancelled is True
+    assert failed_events[:2] == ["media", "document"]
+    assert "remove-source" not in failed_events
+    assert "No partial files were uploaded" in failed_events[-1]
+
+
 def test_multiple_leech_dump_destinations_support_chats_topics_pm_and_deduplication():
     parse, _ = load_leech_dump_destinations()
 
