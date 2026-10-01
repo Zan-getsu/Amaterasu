@@ -1,6 +1,6 @@
 asyncio
 aiofiles
-aioterabox==0.2.3
+aioterabox==0.3.0
 aiohttp
 aioshutil
 anytree
@@ -13,10 +13,10 @@ curl_cffi>=0.16.1
 dnspython
 feedparser
 # Keep the Google token generator and bot runtime on the same current releases.
-google-auth==2.56.3
-google-auth-oauthlib==1.4.0
-google-auth-httplib2==0.4.1
-google-api-python-client==2.199.0
+google-auth==2.58.1
+google-auth-oauthlib==1.4.1
+google-auth-httplib2==0.4.2
+google-api-python-client==2.200.0
 cryptography>=50.0.0
 gunicorn
 langcodes
@@ -38,20 +38,20 @@ urllib3
 uvloop
 xattr
 yt-dlp-ejs
-wzgram[fast]==3.1.0
+wzgram[fast]==3.1.2
 # Keep the Rust MTProto backend explicit so dependency pruning cannot silently
 # remove the accelerator required by WZGram 3.1.0.
 warpcrypto==2.0.7
 yt-dlp[default,curl-cffi]==2026.8.19
 fastapi==0.141.1
 python-multipart>=0.0.32,<1
-uvicorn==0.52.4
+uvicorn==0.54.0
 motor==3.7.1
-pymongo==4.17.0
+pymongo==4.18.2
 aioaria2
 aioqbt
 apscheduler==3.11.3
-rapidfuzz==3.14.5
+rapidfuzz==3.14.6
 httpx[http2]==0.28.1
 mongomock-motor
 pytest-asyncio
