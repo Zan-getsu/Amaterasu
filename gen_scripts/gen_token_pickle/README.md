@@ -1,156 +1,60 @@
-# Generate Google Drive Token
+# Google Desktop app token generator
 
-> Authenticates with Google Drive API and generates a token file for use with other scripts.
+Run this on your own computer (Python 3.10+), with the browser on the same
+computer. Desktop OAuth uses a local loopback callback, not the bot's Web URL.
 
-## Quick Info
+## Token lifetime
 
-- **Purpose**: Create OAuth 2.0 token for Google Drive API access
-- **Output**: `tokens/token.pickle`
-- **Required**: `config/credentials.json`
+Desktop clients do not automatically get longer-lived tokens. Google's
+External projects in **Testing** issue refresh tokens that expire after
+**7 days** when requesting Drive scopes. For longer-lived access, change
+Google Cloud Console > Google Auth Platform > Audience to **In production**,
+then generate a fresh token. Follow Google's verification requirements where
+applicable. Tokens can still expire or be revoked; no permanent lifetime is guaranteed.
+The bot refreshes short-lived access tokens using the refresh token.
 
----
+Official reference: https://developers.google.com/identity/protocols/oauth2#expiration
 
-## Which User Are You?
+## Downloaded from /tokengen
 
-- **Newbie**: Start with "Step-by-Step for Beginners" below
-- **Pro**: Jump to "CLI Reference" for advanced options
+1. Extract the ZIP into a private folder.
+2. Enable Google Drive API in your Google Cloud project.
+3. Configure the OAuth audience and consent screen. If still Testing, add your
+   account as a test user (the seven-day limit still applies).
+4. Create an OAuth client ID of type **Desktop app**, download its JSON, and
+   place it beside `script.py` as `credentials.json`.
+5. Open a terminal in that folder:
 
----
-
-## Getting Started
-
-### Prerequisites
-
-1. **Google Cloud Project** with Google Drive API enabled
-2. **OAuth 2.0 Credentials** (Desktop app type) downloaded as `credentials.json`
-3. **Python dependencies** installed:
-   ```bash
-   pip install -r config/requirements-cli.txt
-   ```
-
-### File Structure
-
-```
-gen_scripts/
-├── config/
-│   └── credentials.json    # Your OAuth credentials
-└── tokens/
-    └── token.pickle       # Generated token (auto-created)
+```powershell
+python -m pip install google-auth-oauthlib
+python script.py --credentials credentials.json --output token.pickle --scopes https://www.googleapis.com/auth/drive
 ```
 
----
+6. Complete authorization in your local browser. If the browser does not open,
+   open the printed URL on the same computer. The script waits up to five minutes.
+7. In Telegram, open `/userset > GDrive Tools > TOKEN.PICKLE` and upload
+   `token.pickle`. This replaces your active bot token; the token saved by the
+   Web generator remains separate. Owners may place it at the bot's configured
+   `token.pickle` path instead.
 
-## For Newbies (Step-by-Step)
+Only load tokens you generated yourself. Keep credentials, tokens, and printed
+OAuth URLs private. Desktop credentials cannot use the hosted Web form.
 
-### Step 1: Get Google Credentials
+## Running from this repository
 
-1. Go to [Google Cloud Console](https://console.cloud.google.com/)
-2. Create a new project (or use existing)
-3. Go to **APIs & Services** → **Enabled APIs & services**
-4. Enable **Google Drive API**
-5. Go to **OAuth consent screen** → Create (External)
-6. Go to **Credentials** → **Create Credentials** → **OAuth client ID**
-7. Choose **Desktop app** → Download JSON
-
-### Step 2: Place Credentials
-
-Move the downloaded JSON file to:
-```
-gen_scripts/config/credentials.json
+```powershell
+python -m pip install google-auth-oauthlib
+python gen_scripts/gen_token_pickle/script.py
 ```
 
-### Step 3: Run the Script
+Without flags, paths resolve from the script location:
+`gen_scripts/config/credentials.json` and `gen_scripts/tokens/token.pickle`.
+The default Drive + YouTube scopes are preserved for the existing setup scripts.
+Use the explicit Drive-only command above for Amaterasu.
+Existing valid tokens are reused; expired tokens are refreshed where possible.
+Move an old token aside or choose a new `--output` path to force new authorization
+(e.g. after changing the OAuth project or publishing status).
 
-```bash
-cd gen_scripts/gen_token_pickle
-python script.py
-```
-
-### What to Expect
-
-1. Script checks for existing valid token
-2. If expired, attempts automatic refresh
-3. If no token, opens browser for OAuth authentication
-4. Token saved to `tokens/token.pickle`
-
-### After Completion
-
-- ✅ Token is ready for use
-- ✅ You can now run other Google Drive scripts
-- ✅ Token auto-refreshes when expired
-
----
-
-## For Pro Users
-
-### CLI Reference
-
-This script uses automatic token management. No CLI flags needed for basic use.
-
-| Behavior | Description |
-|----------|-------------|
-| Auto-detect token | Checks `tokens/token.pickle` first |
-| Auto-refresh | Refreshes expired tokens automatically |
-| Browser auth | Opens default browser for OAuth (if available) |
-| Console fallback | Falls back to console input if browser fails |
-
-### Token File Location
-
-| File | Default Path | Description |
-|------|--------------|-------------|
-| Token | `../tokens/token.pickle` | OAuth 2.0 refresh token |
-
-### Environment Variables
-
-No environment variables required. All paths are relative to script location.
-
-### Workflow Examples
-
-```bash
-# Standard run (token auto-generated)
-cd gen_scripts/gen_token_pickle
-python script.py
-
-# Alternative: Run from gen_scripts root
-python -m gen_token_pickle.script
-```
-
----
-
-## Troubleshooting
-
-| Error | Cause | Solution |
-|-------|-------|----------|
-| `credentials.json not found` | File missing | See "Get Google Credentials" above |
-| `OAuth failed` | Invalid credentials | Check API enabled, redownload credentials |
-| `Token refresh failed` | Expired refresh token | Delete `token.pickle` and re-run |
-| `Browser not opening` | No GUI available | Console auth will be used automatically |
-
-### Common Issues
-
-**"Missing credentials.json"**
-- Download from Google Cloud Console → Credentials
-- Ensure Google Drive API is enabled
-- File must be named exactly `credentials.json`
-
-**"Token expired"**
-- Script automatically refreshes
-- If refresh fails, delete `tokens/token.pickle` and re-run
-
----
-
-## Next Steps
-
-| Goal | Script |
-|------|--------|
-| Add drives to search list | `../driveid/` |
-| Create service accounts | `../gen_sa_accounts/` |
-| Full bot setup | See main project README |
-
----
-
-## Related Scripts
-
-- **gen_sa_accounts** - Create service accounts for Team Drive access
-- **add_to_team_drive** - Add service accounts to Team Drive
-- **driveid** - Configure which drives the bot can search
+Console copy/paste authorization is no longer used. If sign-in fails, check the
+Desktop client type, Drive API, audience/test users, network, and local firewall,
+then rerun on a computer with a browser.

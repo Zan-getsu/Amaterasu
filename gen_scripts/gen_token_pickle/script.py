@@ -6,17 +6,18 @@ This script authenticates with Google Drive API and generates a token file
 for use with other Google Drive-related scripts.
 """
 
-import sys
 import pickle
-import socket
-import webbrowser
-
+import sys
+from argparse import ArgumentParser
+from json import loads
 from os.path import exists
+from pathlib import Path
+
 from google.auth.transport.requests import Request
 from google_auth_oauthlib.flow import InstalledAppFlow
 
-CREDENTIALS_FILE = "../config/credentials.json"
-TOKEN_FILE = "../tokens/token.pickle"
+CREDENTIALS_FILE = Path(__file__).resolve().parents[1] / "config/credentials.json"
+TOKEN_FILE = Path(__file__).resolve().parents[1] / "tokens/token.pickle"
 SCOPES = [
     "https://www.googleapis.com/auth/drive",
     "https://www.googleapis.com/auth/youtube.upload",
@@ -50,20 +51,6 @@ def print_step(step: int, total: int, message: str) -> None:
     print(f"\n[{step}/{total}] {message}")
 
 
-def port_available(port: int) -> bool:
-    """Check if a port is available for use."""
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        return s.connect_ex(("localhost", port)) != 0
-
-
-def find_port(start: int = 8080, end: int = 8090) -> int:
-    """Find an available port in the given range."""
-    for port in range(start, end):
-        if port_available(port):
-            return port
-    return None
-
-
 def load_token() -> pickle:
     """Load existing token from file."""
     if not exists(TOKEN_FILE):
@@ -78,6 +65,7 @@ def load_token() -> pickle:
 def save_token(creds) -> None:
     """Save credentials to token file."""
     try:
+        Path(TOKEN_FILE).parent.mkdir(parents=True, exist_ok=True)
         with open(TOKEN_FILE, "wb") as f:
             dump_legacy_compatible_credentials(creds, f)
         print(f"\n[OK] Token saved to: {TOKEN_FILE}")
@@ -96,7 +84,7 @@ def refresh_token(creds) -> pickle:
 
 
 def run_flow():
-    """Run OAuth flow with browser and console fallback."""
+    """Authorize on the user's computer with a loopback callback and PKCE."""
     if not exists(CREDENTIALS_FILE):
         print("\n[ERROR] credentials.json not found!")
         print(f"\nPlease ensure '{CREDENTIALS_FILE}' exists.")
@@ -109,36 +97,21 @@ def run_flow():
         sys.exit(1)
 
     print("\n[INFO] Starting OAuth authentication...")
-    flow = InstalledAppFlow.from_client_secrets_file(CREDENTIALS_FILE, SCOPES)
-
-    # Try browser-based auth first
-    port = find_port()
-    if port:
-        try:
-            print("\n[INFO] Opening browser for authentication...")
-            auth_url, _ = flow.authorization_url(prompt="consent")
-            try:
-                webbrowser.open(auth_url)
-            except Exception:
-                pass
-            print(f"[INFO] If browser didn't open, visit: {auth_url}")
-            print(f"[INFO] Waiting for authentication on port {port}...")
-            return flow.run_local_server(port=port, open_browser=False)
-        except Exception as e:
-            print(f"[WARN] Browser auth failed: {e}")
-            print("[INFO] Falling back to console authentication...")
-
-    # Fallback to console auth
-    try:
-        print("[INFO] Running console authentication...")
-        return flow.run_console()
-    except Exception:
-        print("\n[ERROR] OAuth authentication failed!")
-        print("\nTroubleshooting:")
-        print("- Check your credentials.json is valid")
-        print("- Ensure Google Drive API is enabled")
-        print("- Check your internet connection")
-        sys.exit(1)
+    config = loads(Path(CREDENTIALS_FILE).read_text(encoding="utf-8"))
+    if not isinstance(config, dict) or not isinstance(config.get("installed"), dict):
+        raise ValueError("Use a Google OAuth Desktop app credentials.json for this script.")
+    flow = InstalledAppFlow.from_client_config(config, SCOPES, autogenerate_code_verifier=True)
+    creds = flow.run_local_server(
+        host="127.0.0.1",
+        port=0,
+        open_browser=True,
+        timeout_seconds=300,
+        access_type="offline",
+        prompt="consent",
+    )
+    if not creds.refresh_token:
+        raise ValueError("Google returned no refresh token. Revoke the app's access and try again.")
+    return creds
 
 
 def get_credentials():
@@ -148,6 +121,8 @@ def get_credentials():
     # Step 1: Check for existing token
     print_step(1, 3, "Checking for existing token...")
     creds = load_token()
+    if creds and (not creds.refresh_token or not creds.has_scopes(SCOPES)):
+        creds = None
 
     if creds and creds.valid:
         print("[OK] Valid token found!")
@@ -170,9 +145,18 @@ def get_credentials():
 
 
 def main():
+    global CREDENTIALS_FILE, TOKEN_FILE, SCOPES
+    parser = ArgumentParser(description="Generate a Google OAuth Desktop app token locally.")
+    parser.add_argument("--credentials", type=Path, default=CREDENTIALS_FILE)
+    parser.add_argument("--output", type=Path, default=TOKEN_FILE)
+    parser.add_argument("--scopes", nargs="+", default=SCOPES)
+    args = parser.parse_args()
+    CREDENTIALS_FILE, TOKEN_FILE, SCOPES = args.credentials, args.output, args.scopes
     try:
         print("\nThis script will authenticate with Google Drive API")
         print("and save a token for future use.\n")
+        print("Google External/Testing projects issue refresh tokens that expire after 7 days.")
+        print("Use In production for longer-lived access; Desktop alone does not change expiry.")
 
         creds = get_credentials()
 

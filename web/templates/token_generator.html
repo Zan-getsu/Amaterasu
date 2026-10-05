@@ -435,9 +435,26 @@ body { overflow-x: hidden; }
     </div>
     {% endif %}
 
+    <div class="token-alert token-alert--warning" role="status">
+      <i data-lucide="clock" style="width:18px;height:18px"></i>
+      <span>For longer-lived Google Drive access, set your Google OAuth Audience publishing status to <strong>In production</strong>, then generate a new token. External projects in Testing issue refresh tokens that expire after 7 days, for both Web and Desktop clients. The private page link's 15-minute expiry is separate.</span>
+    </div>
+
     <div class="token-layout">
       <section class="token-panel" aria-labelledby="oauth-config-title">
         <div class="token-panel__body">
+          <div class="token-step">
+            <h2 class="token-step__title">Desktop app token generator</h2>
+            <p class="token-step__copy">Authorize on your own computer using a Desktop app OAuth client. Download and extract the ZIP, then follow README.md. Python 3.10+ is required.</p>
+            <a class="token-button token-button--outline" href="/api/token-generator/desktop?user_id={{ user_id }}&amp;token={{ page_token }}" download="amaterasu-desktop-tokengen.zip"><i data-lucide="monitor" style="width:17px;height:17px"></i>Download desktop generator</a>
+            <ol class="setup-guide__list">
+              <li>Create a Google OAuth <strong>Desktop app</strong> client and save its JSON as <code>credentials.json</code> beside the extracted <code>script.py</code>.</li>
+              <li>Open a terminal in that folder and run <code>python -m pip install google-auth-oauthlib</code>.</li>
+              <li>Run <code>python script.py --credentials credentials.json --output token.pickle --scopes https://www.googleapis.com/auth/drive</code>. Complete sign-in in a browser on the same computer.</li>
+              <li>Upload the generated file through <code>/userset &gt; GDrive Tools &gt; TOKEN.PICKLE</code>. It becomes your active bot token; this page's saved web token is separate.</li>
+            </ol>
+            <p class="field-hint">Desktop credentials use a local callback and cannot be submitted to the Web form below. Keep credentials.json and token.pickle private.</p>
+          </div>
           <div class="token-step">
             <h2 id="oauth-config-title" class="token-step__title">1. Configure Google OAuth</h2>
             <p class="token-step__copy">Create a Web application OAuth client in Google Cloud and add this exact callback URL.</p>

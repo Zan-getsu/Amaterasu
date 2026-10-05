@@ -77,3 +77,4 @@ tests/*
 !tests/test_merge_media.py
 !tests/test_merge_plan_integrity.py
 !tests/test_merge_planner_browser.py
+!tests/test_google_token_generator.py

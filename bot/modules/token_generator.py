@@ -45,6 +45,9 @@ async def token_generator(_, message):
     text = (
         "<b>Google Token Generator</b>\n\n"
         "Create, replace, or download your private <code>token.pickle</code>. "
+        "The page also offers a Desktop app generator to run on your computer. "
+        "For longer-lived access, use a Google OAuth project with publishing status "
+        "<b>In production</b>; Desktop clients also expire after 7 days in Testing.\n\n"
         "This link belongs only to you and expires in 15 minutes. "
         "Run <code>/tokengen</code> again whenever you need a fresh link."
     )
