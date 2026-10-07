@@ -88,7 +88,10 @@ def parse_google_credentials_file(data: bytes) -> tuple[str, str]:
     if not isinstance(web, dict):
         if isinstance(payload.get("installed"), dict):
             raise ValueError(
-                "This is a Desktop app credential. Create a Google OAuth Web application instead."
+                "This is a Desktop app credential. Google requires a callback on your own "
+                "computer for Desktop clients, so it cannot use this hosted portal. "
+                "Upload a Google OAuth Web application credential with the redirect URI "
+                "shown on this page."
             )
         raise ValueError("credentials.json must contain a Google OAuth Web application client.")
     return validate_google_client_values(web.get("client_id", ""), web.get("client_secret", ""))

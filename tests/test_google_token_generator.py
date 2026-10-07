@@ -2,19 +2,16 @@
 
 from __future__ import annotations
 
-import ast
 import json
 import pickle
 import sys
 from asyncio import run
 from datetime import UTC, datetime, timedelta
 from importlib.util import module_from_spec, spec_from_file_location
-from io import BytesIO
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from unittest.mock import MagicMock
 from urllib.parse import parse_qs, urlparse
-from zipfile import ZipFile
 
 import pytest
 
@@ -55,7 +52,7 @@ def test_credentials_json_web_client_is_supported():
 def test_credentials_json_rejects_desktop_client():
     data = json.dumps({"installed": {"client_id": "desktop", "client_secret": "secret"}}).encode()
 
-    with pytest.raises(ValueError, match="Desktop app"):
+    with pytest.raises(ValueError, match="cannot use this hosted portal"):
         parse_google_credentials_file(data)
 
 
@@ -320,53 +317,10 @@ def test_desktop_flow_uses_loopback_pkce_and_requires_refresh_token(monkeypatch,
     save.assert_called_once_with(replacement)
 
 
-def test_desktop_download_is_private_and_contains_only_generator_files(monkeypatch):
-    from fastapi import HTTPException, Request
-    from fastapi.responses import Response
-
-    from web import security
-
-    # Execute the real route/auth functions without starting external bot services.
-    source = ROOT / "web/wserver.py"
-    tree = ast.parse(source.read_text(encoding="utf-8"))
-    names = {"_require_google_token_user", "_no_store", "google_token_generator_desktop"}
-    nodes = [
-        node
-        for node in tree.body
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name in names
-    ]
-    assert len(nodes) == 3
-    for node in nodes:
-        node.decorator_list = []
-    namespace = {
-        "__file__": str(source),
-        "Path": Path,
-        "Request": Request,
-        "Response": Response,
-        "HTTPException": HTTPException,
-        "_web_secret": lambda: "download-secret",
-        "verify_signed_token": security.verify_signed_token,
-    }
-    exec(compile(ast.Module(body=nodes, type_ignores=[]), str(source), "exec"), namespace)
-    monkeypatch.setattr(security, "time", lambda: 1000)
-    token = security.make_signed_token("download-secret", "google-token", 42, ttl=900)
-    route = namespace["google_token_generator_desktop"]
-    request = SimpleNamespace(query_params={"user_id": "42", "token": token})
-    response = run(route(request))
-    assert "no-store" in response.headers["Cache-Control"]
-    assert response.media_type == "application/zip"
-    with ZipFile(BytesIO(response.body)) as bundle:
-        assert set(bundle.namelist()) == {"script.py", "README.md"}
-        assert (
-            bundle.read("script.py")
-            == (ROOT / "gen_scripts/gen_token_pickle/script.py").read_bytes()
-        )
-    request.query_params["user_id"] = "43"
-    with pytest.raises(HTTPException) as exc:
-        run(route(request))
-    assert exc.value.status_code == 403
-    request.query_params["user_id"] = "42"
-    monkeypatch.setattr(security, "time", lambda: 1901)
-    with pytest.raises(HTTPException) as exc:
-        run(route(request))
-    assert exc.value.status_code == 403
+def test_portal_has_no_separate_desktop_download():
+    template = (ROOT / "web/templates/token_generator.html").read_text(encoding="utf-8")
+    source = (ROOT / "web/wserver.py").read_text(encoding="utf-8")
+    assert "Download desktop generator" not in template
+    assert "/api/token-generator/desktop" not in template
+    assert "/api/token-generator/desktop" not in source
+    assert "/api/token-generator/start" in template

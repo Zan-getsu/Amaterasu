@@ -15,9 +15,9 @@ The bot refreshes short-lived access tokens using the refresh token.
 
 Official reference: https://developers.google.com/identity/protocols/oauth2#expiration
 
-## Downloaded from /tokengen
+## Standalone Desktop script
 
-1. Extract the ZIP into a private folder.
+1. Copy this script into a private folder on your computer.
 2. Enable Google Drive API in your Google Cloud project.
 3. Configure the OAuth audience and consent screen. If still Testing, add your
    account as a test user (the seven-day limit still applies).

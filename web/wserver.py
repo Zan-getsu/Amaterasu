@@ -809,27 +809,6 @@ async def google_token_generator_page(
     return _no_store(response)
 
 
-@app.get("/api/token-generator/desktop")
-async def google_token_generator_desktop(request: Request):
-    """Download only the local desktop generator and its instructions."""
-    from io import BytesIO
-    from zipfile import ZIP_DEFLATED, ZipFile
-
-    _require_google_token_user(request)
-    folder = Path(__file__).resolve().parents[1] / "gen_scripts/gen_token_pickle"
-    archive = BytesIO()
-    with ZipFile(archive, "w", compression=ZIP_DEFLATED) as bundle:
-        for name in ("script.py", "README.md"):
-            bundle.writestr(name, (folder / name).read_bytes())
-    return _no_store(
-        Response(
-            archive.getvalue(),
-            media_type="application/zip",
-            headers={"Content-Disposition": 'attachment; filename="amaterasu-desktop-tokengen.zip"'},
-        )
-    )
-
-
 @app.post("/api/token-generator/start")
 async def google_token_generator_start(
     request: Request,
