@@ -1,6 +1,0 @@
-# Optional override when the VPS's default DNS cannot resolve MongoDB SRV records.
-services:
-  amaterasu:
-    dns:
-      - 1.1.1.1
-      - 8.8.8.8

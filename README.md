@@ -355,8 +355,7 @@ docker inspect amaterasu-bot --format 'RAM={{.HostConfig.Memory}} RAM+swap={{.Ho
 ```
 
 For `10g`, both inspected values should be `10737418240` bytes. Use
-`-f docker-compose.dev.yml` for a source build, or keep the DNS override's
-`-f` arguments if using it. At the cap, Linux may kill a process or the
+`-f docker-compose.dev.yml` for a source build. At the cap, Linux may kill a process or the
 container; the existing restart policy restarts the container if it exits.
 Choose a cap below the VPS's total RAM to leave room for the OS and other services.
 
@@ -2170,24 +2169,24 @@ This auto-leeches new anime releases in 1080p (mkv or mp4), excluding batch pack
   nslookup -type=SRV _mongodb._tcp.YOUR_CLUSTER.mongodb.net 1.1.1.1
   ```
 
-  If that resolver works, apply the supplied DNS override and recreate the bot:
+  Both Compose files configure upstream resolvers `1.1.1.1` and `8.8.8.8`.
+  If the lookup works, recreate the bot to apply the settings:
 
   ```bash
-  docker compose -f docker-compose.yml -f docker-compose.dns.yml up -d --force-recreate amaterasu
-  docker compose -f docker-compose.yml -f docker-compose.dns.yml logs --tail=100 amaterasu
+  docker compose up -d --force-recreate amaterasu
+  docker compose logs --tail=100 amaterasu
   ```
 
-  For a source build, replace `docker-compose.yml` with `docker-compose.dev.yml`.
-  Use the same override on subsequent Compose commands. It configures upstream
-  resolvers `1.1.1.1` and `8.8.8.8`; Docker may still show `127.0.0.11` in the
+  For a source build, add `-f docker-compose.dev.yml` after `docker compose`.
+  Docker may still show `127.0.0.11` in the
   container's resolver configuration. If your VPS requires its provider's DNS
-  or private DNS, use those reachable resolvers in the override instead. Public
+  or private DNS, use those reachable resolvers in your Compose file instead. Public
   DNS requires outbound UDP/TCP port 53 access.
 
   Verify SRV resolution inside the recreated container:
 
   ```bash
-  docker compose -f docker-compose.yml -f docker-compose.dns.yml exec amaterasu python -c "import dns.resolver; print(dns.resolver.resolve('_mongodb._tcp.YOUR_CLUSTER.mongodb.net', 'SRV'))"
+  docker compose exec amaterasu python -c "import dns.resolver; print(dns.resolver.resolve('_mongodb._tcp.YOUR_CLUSTER.mongodb.net', 'SRV'))"
   ```
 
   When MongoDB is unreachable at connection time, Amaterasu keeps local
