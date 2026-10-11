@@ -368,7 +368,7 @@ sudo docker compose logs -f
 ```
 
 The `docker-compose.yml` is pre-configured with:
-- **`network_mode: bridge`** — uses the container engine's default bridge and publishes the portal on host port `82`. Download engines communicate inside the bot container, and the optional tunnel shares its network namespace. The container uses the configured upstream DNS servers directly; Podman's default bridge avoids an Aardvark DNS listener that could conflict with a VPS's `dnsmasq` on port 53. Service-name DNS between separate containers is unavailable on the default bridge.
+- **`network_mode: bridge`** — uses the container engine's default bridge and publishes the portal on host port `82`. Download engines communicate inside the bot container, and the optional tunnel shares its network namespace. DNS uses the engine's host-derived resolver configuration instead of forcing public DNS servers, so provider/private DNS and Tailscale settings can be inherited. Podman's default bridge avoids an Aardvark DNS listener that could conflict with a VPS's `dnsmasq` on port 53. Service-name DNS between separate containers is unavailable on the default bridge.
 - **`restart: always`** — auto-restarts on crash or server reboot.
 - **Volume mount** (`.:/usr/src/app:z`) — your local `config.py`, `token.pickle`, etc. are live-synced into the container.
 - **Safe update default** (`AUTO_UPDATE=false`) — container startup does not modify the bind-mounted Git checkout. Compose passes `AUTO_UPDATE` through only when it is explicitly set, so an unset environment does not override `config.py` or the System & Automation setting saved in MongoDB. The entry in `.env.example` is intentionally commented; uncomment it only when an environment-level override is desired.
@@ -2162,11 +2162,11 @@ This auto-leeches new anime releases in 1080p (mkv or mp4), excluding batch pack
 </details>
 
 <details>
-  <summary><b>MongoDB DNS timeout on Docker startup</b></summary>
+  <summary><b>MongoDB DNS timeout on Docker or Podman startup</b></summary>
   <br>
 
-  `ConfigurationError: The resolution lifetime expired ... 127.0.0.11@53`
-  means Docker's DNS lookup timed out. A `mongodb+srv://` connection needs SRV
+  `ConfigurationError: The resolution lifetime expired` means a DNS lookup
+  timed out. A `mongodb+srv://` connection needs SRV
   and TXT lookups before it can contact MongoDB. This does not prove the saved
   config is missing or the MongoDB password is wrong.
 
@@ -2174,22 +2174,27 @@ This auto-leeches new anime releases in 1080p (mkv or mp4), excluding batch pack
   the hostname from your MongoDB connection string (without credentials):
 
   ```bash
-  nslookup -type=SRV _mongodb._tcp.YOUR_CLUSTER.mongodb.net 1.1.1.1
+  nslookup -type=SRV _mongodb._tcp.YOUR_CLUSTER.mongodb.net
   ```
 
-  Both Compose files configure upstream resolvers `1.1.1.1` and `8.8.8.8`.
-  If the lookup works, recreate the bot to apply the settings:
+  Both Compose files use the container engine's host-derived DNS defaults.
+  They do not force `1.1.1.1` or `8.8.8.8`: some VPSs require provider/private
+  DNS or use Tailscale DNS. If the host lookup works, recreate the bot to pick
+  up the current settings:
 
   ```bash
   docker compose up -d --force-recreate amaterasu
   docker compose logs --tail=100 amaterasu
   ```
 
-  For a source build, add `-f docker-compose.dev.yml` after `docker compose`.
-  Docker may still show `127.0.0.11` in the
-  container's resolver configuration. If your VPS requires its provider's DNS
-  or private DNS, use those reachable resolvers in your Compose file instead. Public
-  DNS requires outbound UDP/TCP port 53 access.
+  For Podman, replace `docker compose` with `podman compose`; keep `sudo` if
+  using rootful containers. For a source build, add `-f docker-compose.dev.yml`
+  after the Compose command. If the container lookup still fails while the
+  host succeeds, compare their `/etc/resolv.conf` files and check bridge
+  routing, NAT, and firewall access to the resolver on UDP/TCP port 53.
+  A resolver bound only to the host's loopback address is not directly
+  reachable from a bridge container. If an explicit DNS override is needed,
+  add reachable provider/private resolvers to `dns:` in your Compose file.
 
   Verify SRV resolution inside the recreated container:
 
