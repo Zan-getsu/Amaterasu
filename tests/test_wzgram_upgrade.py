@@ -269,6 +269,7 @@ async def test_mongodb_pool_does_not_force_idle_dns_connections(monkeypatch):
         def __init__(self, url, **kwargs):
             self.url = url
             self.options = kwargs
+            self.admin = SimpleNamespace(command=AsyncMock(return_value={"ok": 1}))
             self.amaterasu = Database()
 
         def close(self):

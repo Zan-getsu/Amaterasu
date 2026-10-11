@@ -132,10 +132,16 @@ async def update_nzb_options():
 async def load_settings():
     if not Config.DATABASE_URL:
         return
+    await database.connect()
+    if database.db is None:
+        LOGGER.warning(
+            "MongoDB is unavailable; keeping local credential files and using local config. "
+            "Database-backed settings and token/session generation are unavailable for this boot."
+        )
+        return
     for p in ["thumbnails", "tokens", "rclone"]:
         if await aiopath.exists(p):
             await rmtree(p, ignore_errors=True)
-    await database.connect()
     await database.migrate_from_wzmlx()
     if database.db is not None:
         if TgClient.PARTITION:

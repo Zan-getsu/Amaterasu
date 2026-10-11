@@ -2081,6 +2081,7 @@ async def load_config():
     if Config.DATABASE_URL:
         await database.connect()
 
+    if Config.DATABASE_URL and database.db is not None:
         from os import environ
 
         settings = sys.modules.get("config")

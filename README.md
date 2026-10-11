@@ -334,6 +334,32 @@ Choose one of the following deployment methods:
 
 #### Method A: Docker Compose ⭐ (Recommended)
 
+To cap the bot container's memory, set this in the checkout's `.env` file:
+
+```dotenv
+AMATERASU_MEMORY_LIMIT=10g
+```
+
+`10g` means 10 GiB. Change it to your chosen Docker memory value, such as `4g`.
+The cap covers all processes inside the bot container, including FFmpeg and
+download engines. Swap is disabled when a positive cap is set, so it cannot
+consume additional memory through swap. The optional tunnel sidecar is a
+separate container and is not included in this cap. Unset or `0` preserves
+the existing unlimited default; this setting belongs in `.env`, not `config.py`.
+
+Apply changes by recreating the container (`restart` alone does not apply them):
+
+```bash
+docker compose up -d --force-recreate amaterasu
+docker inspect amaterasu-bot --format 'RAM={{.HostConfig.Memory}} RAM+swap={{.HostConfig.MemorySwap}}'
+```
+
+For `10g`, both inspected values should be `10737418240` bytes. Use
+`-f docker-compose.dev.yml` for a source build, or keep the DNS override's
+`-f` arguments if using it. At the cap, Linux may kill a process or the
+container; the existing restart policy restarts the container if it exits.
+Choose a cap below the VPS's total RAM to leave room for the OS and other services.
+
 ```bash
 # Build the image and start in detached mode
 sudo docker compose up --build -d
@@ -2126,6 +2152,49 @@ This auto-leeches new anime releases in 1080p (mkv or mp4), excluding batch pack
 
   - Set `BASE_URL` to your public URL, for example `https://stream.example.com`.
   - Set `PORT` to the local web server port Amaterasu should bind.
+</details>
+
+<details>
+  <summary><b>MongoDB DNS timeout on Docker startup</b></summary>
+  <br>
+
+  `ConfigurationError: The resolution lifetime expired ... 127.0.0.11@53`
+  means Docker's DNS lookup timed out. A `mongodb+srv://` connection needs SRV
+  and TXT lookups before it can contact MongoDB. This does not prove the saved
+  config is missing or the MongoDB password is wrong.
+
+  Check the SRV lookup on the VPS, replacing `YOUR_CLUSTER.mongodb.net` with
+  the hostname from your MongoDB connection string (without credentials):
+
+  ```bash
+  nslookup -type=SRV _mongodb._tcp.YOUR_CLUSTER.mongodb.net 1.1.1.1
+  ```
+
+  If that resolver works, apply the supplied DNS override and recreate the bot:
+
+  ```bash
+  docker compose -f docker-compose.yml -f docker-compose.dns.yml up -d --force-recreate amaterasu
+  docker compose -f docker-compose.yml -f docker-compose.dns.yml logs --tail=100 amaterasu
+  ```
+
+  For a source build, replace `docker-compose.yml` with `docker-compose.dev.yml`.
+  Use the same override on subsequent Compose commands. It configures upstream
+  resolvers `1.1.1.1` and `8.8.8.8`; Docker may still show `127.0.0.11` in the
+  container's resolver configuration. If your VPS requires its provider's DNS
+  or private DNS, use those reachable resolvers in the override instead. Public
+  DNS requires outbound UDP/TCP port 53 access.
+
+  Verify SRV resolution inside the recreated container:
+
+  ```bash
+  docker compose -f docker-compose.yml -f docker-compose.dns.yml exec amaterasu python -c "import dns.resolver; print(dns.resolver.resolve('_mongodb._tcp.YOUR_CLUSTER.mongodb.net', 'SRV'))"
+  ```
+
+  When MongoDB is unreachable at connection time, Amaterasu keeps local
+  credential files and starts using local config. Database-backed settings,
+  `/tokengen`, and `/sessiongen` remain unavailable for that boot. After fixing
+  DNS, restart the bot to reload MongoDB settings. If DNS works but connection
+  still fails, check MongoDB reachability and the Atlas IP access list.
 </details>
 
 <details>

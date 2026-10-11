@@ -9,6 +9,8 @@ services:
     pull_policy: never
     container_name: amaterasu-bot
     restart: always
+    mem_limit: ${AMATERASU_MEMORY_LIMIT:-0}
+    memswap_limit: ${AMATERASU_MEMORY_LIMIT:-0}
     environment:
       - TZ=Asia/Dhaka
       - BIND_TO_LOOPBACK=${BIND_TO_LOOPBACK:-true}

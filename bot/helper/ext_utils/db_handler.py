@@ -42,6 +42,8 @@ class DbManager:
         return self.db.tasks[_bot_id()]
 
     async def connect(self):
+        self.db = None
+        self._return = True
         try:
             if self._conn is not None:
                 self._conn.close()
@@ -59,6 +61,8 @@ class DbManager:
                 serverSelectionTimeoutMS=5000,
                 connectTimeoutMS=5000,
             )
+            # Motor connects lazily; constructing a client does not verify DNS or access.
+            await self._conn.admin.command("ping")
             self.db = self._conn.amaterasu
             self._return = False
             # Phase 1.5 — create TTL index on blacklisted_users.expires_at.
@@ -108,6 +112,8 @@ class DbManager:
                 LOGGER.warning(f"Phase 3.10 index creation: {e}")
         except PyMongoError as e:
             LOGGER.error(f"Error in DB connection: {e}")
+            if self._conn is not None:
+                self._conn.close()
             self.db = None
             self._return = True
             self._conn = None

@@ -78,3 +78,4 @@ tests/*
 !tests/test_merge_plan_integrity.py
 !tests/test_merge_planner_browser.py
 !tests/test_google_token_generator.py
+!tests/test_database_connection_readiness.py
