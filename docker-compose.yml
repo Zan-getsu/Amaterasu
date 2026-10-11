@@ -8,6 +8,10 @@ services:
     memswap_limit: ${AMATERASU_MEMORY_LIMIT:-0}
     # Podman's default bridge avoids an Aardvark DNS listener on host port 53.
     network_mode: bridge
+    # Host-only resolvers such as Tailscale's Quad100 may be unreachable here.
+    dns:
+      - ${AMATERASU_DNS_PRIMARY:-1.1.1.1}
+      - ${AMATERASU_DNS_SECONDARY:-8.8.8.8}
     environment:
       - TZ=Asia/Dhaka
       - BIND_TO_LOOPBACK=${BIND_TO_LOOPBACK:-true}

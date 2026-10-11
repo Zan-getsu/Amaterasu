@@ -368,7 +368,8 @@ sudo docker compose logs -f
 ```
 
 The `docker-compose.yml` is pre-configured with:
-- **`network_mode: bridge`** — uses the container engine's default bridge and publishes the portal on host port `82`. Download engines communicate inside the bot container, and the optional tunnel shares its network namespace. DNS uses the engine's host-derived resolver configuration instead of forcing public DNS servers, so provider/private DNS and Tailscale settings can be inherited. Podman's default bridge avoids an Aardvark DNS listener that could conflict with a VPS's `dnsmasq` on port 53. Service-name DNS between separate containers is unavailable on the default bridge.
+- **`network_mode: bridge`** — uses the container engine's default bridge and publishes the portal on host port `82`. Download engines communicate inside the bot container, and the optional tunnel shares its network namespace. Podman's default bridge avoids an Aardvark DNS listener that could conflict with a VPS's `dnsmasq` on port 53. Service-name DNS between separate containers is unavailable on the default bridge.
+- **Container DNS** — defaults to `1.1.1.1` and `8.8.8.8`, avoiding inherited host-only resolvers that bridge containers cannot reach. For provider/private DNS, set `AMATERASU_DNS_PRIMARY` and `AMATERASU_DNS_SECONDARY` to reachable resolver IPs in `.env`, then recreate the container. Public DNS does not resolve private Tailscale names; deployments using those names need a reachable private resolver. The VPS host's DNS configuration is unchanged.
 - **`restart: always`** — auto-restarts on crash or server reboot.
 - **Volume mount** (`.:/usr/src/app:z`) — your local `config.py`, `token.pickle`, etc. are live-synced into the container.
 - **Safe update default** (`AUTO_UPDATE=false`) — container startup does not modify the bind-mounted Git checkout. Compose passes `AUTO_UPDATE` through only when it is explicitly set, so an unset environment does not override `config.py` or the System & Automation setting saved in MongoDB. The entry in `.env.example` is intentionally commented; uncomment it only when an environment-level override is desired.
@@ -2219,10 +2220,10 @@ This auto-leeches new anime releases in 1080p (mkv or mp4), excluding batch pack
   nslookup -type=SRV _mongodb._tcp.YOUR_CLUSTER.mongodb.net
   ```
 
-  Both Compose files use the container engine's host-derived DNS defaults.
-  They do not force `1.1.1.1` or `8.8.8.8`: some VPSs require provider/private
-  DNS or use Tailscale DNS. If the host lookup works, recreate the bot to pick
-  up the current settings:
+  Both Compose files default to `1.1.1.1` and `8.8.8.8` for container DNS.
+  If these are blocked by your VPS provider, set `AMATERASU_DNS_PRIMARY` and
+  `AMATERASU_DNS_SECONDARY` in `.env` to provider/private resolver IPs that
+  are reachable from the container. Recreate the bot to apply DNS changes:
 
   ```bash
   docker compose up -d --force-recreate amaterasu
@@ -2235,8 +2236,9 @@ This auto-leeches new anime releases in 1080p (mkv or mp4), excluding batch pack
   host succeeds, compare their `/etc/resolv.conf` files and check bridge
   routing, NAT, and firewall access to the resolver on UDP/TCP port 53.
   A resolver bound only to the host's loopback address is not directly
-  reachable from a bridge container. If an explicit DNS override is needed,
-  add reachable provider/private resolvers to `dns:` in your Compose file.
+  reachable from a bridge container. An inherited Tailscale resolver such as
+  `100.100.100.100` can time out even while public resolvers work. Test each
+  resolver from inside the container before selecting an override.
 
   Verify SRV resolution inside the recreated container:
 
