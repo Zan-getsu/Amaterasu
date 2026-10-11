@@ -80,3 +80,4 @@ tests/*
 !tests/test_google_token_generator.py
 !tests/test_database_connection_readiness.py
 !tests/test_podman_firewall.py
+!tests/test_shutdown_signals.py

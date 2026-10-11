@@ -330,7 +330,7 @@ import signal
 _shutdown_event = _asyncio.Event()
 
 
-def _signal_handler(signum, _frame):
+def _signal_handler(signum, _frame=None):
     LOGGER.info(f"Received signal {signum} ({signal.Signals(signum).name}), "
                 "initiating graceful shutdown...")
     _shutdown_event.set()
