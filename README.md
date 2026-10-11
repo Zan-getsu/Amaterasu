@@ -20,7 +20,7 @@
   <br>
   <a href="#"><img src="https://img.shields.io/badge/Powered%20By-Python_3.11-blue?style=for-the-badge&logo=python"></a>
   <a href="#"><img src="https://img.shields.io/badge/Deployed_Via-Docker-2496ED?style=for-the-badge&logo=docker"></a>
-  <a href="#"><img src="https://img.shields.io/badge/Framework-WZGram_3.1.0-green?style=for-the-badge&logo=telegram"></a>
+  <a href="#"><img src="https://img.shields.io/badge/Framework-WZGram_3.1.5-green?style=for-the-badge&logo=telegram"></a>
 </p>
 
 [**Telegram Channel**](#) • [**Support Group**](#) • [**Report a Bug**](#)
@@ -200,7 +200,7 @@ graph TD
 | Component | Technology |
 |---|---|
 | Language | Python 3.11 |
-| Telegram Framework | WZGram 3.1.0 (`pyrogram` API) |
+| Telegram Framework | WZGram 3.1.5 (`pyrogram` API) |
 | Web Server | FastAPI + Uvicorn |
 | Database | MongoDB (Motor async driver) |
 | Containerization | Docker / Podman |
