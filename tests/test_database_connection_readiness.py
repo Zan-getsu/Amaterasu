@@ -7,7 +7,9 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from pymongo.errors import ConfigurationError, PyMongoError
+from pymongo import MongoClient
+from pymongo.errors import ConfigurationError, PyMongoError, ServerSelectionTimeoutError
+from pymongo.server_api import ServerApi
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -73,3 +75,61 @@ def test_startup_preserves_credentials_when_database_is_unavailable():
     database.connect.assert_awaited_once()
     database.migrate_from_wzmlx.assert_not_awaited()
     remove_tree.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    "uri,selection_timeout,connect_timeout",
+    [
+        ("mongodb://database.example", 30, 20),
+        (
+            "mongodb://database.example/?serverSelectionTimeoutMS=45000&connectTimeoutMS=25000",
+            45,
+            25,
+        ),
+    ],
+)
+def test_cold_discovery_uses_driver_defaults_or_uri_timeouts(
+    uri, selection_timeout, connect_timeout
+):
+    collection = SimpleNamespace(create_index=AsyncMock())
+    db = SimpleNamespace(
+        blacklisted_users=collection,
+        user_stats=collection,
+        google_oauth_states=collection,
+    )
+    clients = []
+
+    def client_factory(url, **kwargs):
+        # Parse effective options with the actual driver, without opening sockets.
+        with MongoClient(url, connect=False, **kwargs) as parser:
+            options = parser.options
+
+        def ping(command):
+            assert command == "ping"
+            # Model a cold replica-set discovery that needs eight seconds.
+            if options.server_selection_timeout < 8:
+                raise ServerSelectionTimeoutError("Discovery exceeded selection timeout")
+            return {"ok": 1}
+
+        client = SimpleNamespace(
+            options=options,
+            admin=SimpleNamespace(command=AsyncMock(side_effect=ping)),
+            amaterasu=db,
+            close=MagicMock(),
+        )
+        clients.append(client)
+        return client
+
+    namespace = {
+        "AsyncIOMotorClient": client_factory,
+        "Config": SimpleNamespace(DATABASE_URL=uri),
+        "ServerApi": ServerApi,
+        "LOGGER": MagicMock(),
+        "PyMongoError": PyMongoError,
+    }
+    manager = load_definition("bot/helper/ext_utils/db_handler.py", "DbManager", namespace)()
+    run(manager.connect())
+    assert manager.db is db and not manager._return
+    assert clients[0].options.server_selection_timeout == selection_timeout
+    assert clients[0].options.pool_options.connect_timeout == connect_timeout
+    clients[0].close.assert_not_called()

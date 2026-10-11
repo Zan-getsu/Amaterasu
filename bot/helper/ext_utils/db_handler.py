@@ -52,14 +52,13 @@ class DbManager:
             # temporary Docker DNS outage that produces background
             # AutoReconnect tracebacks even when Amaterasu is not using the
             # database. Connections are still pooled up to maxPoolSize once
-            # requested, while both selection and TCP setup fail fast.
+            # requested. Use driver/URI timeouts so cold Atlas discovery is
+            # not cut off after five seconds while the updater can connect.
             self._conn = AsyncIOMotorClient(
                 Config.DATABASE_URL,
                 server_api=ServerApi("1"),
                 maxPoolSize=50,
                 minPoolSize=0,
-                serverSelectionTimeoutMS=5000,
-                connectTimeoutMS=5000,
             )
             # Motor connects lazily; constructing a client does not verify DNS or access.
             await self._conn.admin.command("ping")

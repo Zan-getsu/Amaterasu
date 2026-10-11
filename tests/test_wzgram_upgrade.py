@@ -284,8 +284,8 @@ async def test_mongodb_pool_does_not_force_idle_dns_connections(monkeypatch):
     assert manager._return is False
     assert manager._conn.options["maxPoolSize"] == 50
     assert manager._conn.options["minPoolSize"] == 0
-    assert manager._conn.options["serverSelectionTimeoutMS"] == 5000
-    assert manager._conn.options["connectTimeoutMS"] == 5000
+    assert "serverSelectionTimeoutMS" not in manager._conn.options
+    assert "connectTimeoutMS" not in manager._conn.options
 
 
 def test_failed_media_sessions_are_bounded_and_recognized():
