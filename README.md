@@ -413,6 +413,48 @@ collision without changing the VPS's DNS services or Podman's global DNS port.
 An existing deployment switches networks when its container is recreated;
 no manual removal of the old project network is required.
 
+If Docker also runs on the VPS, its forwarding firewall can block rootful
+Podman even when DNS works on the host. Install the forwarding maintenance
+once on the **VPS host** (requires Python 3, systemd, and iptables):
+
+```bash
+sudo python3 scripts/setup_podman_firewall.py
+```
+
+This installs a systemd timer that checks every 15 seconds, detects the bot's
+current IPv4 address on Podman's default bridge, and maintains exceptions in
+`DOCKER-USER`. It allows the bot's outbound traffic, replies, and new inbound
+traffic only through explicitly forwarded ports. It leaves the forwarding
+policy and other firewall rules intact, clears old bot addresses when the
+container stops or changes, and does nothing when `DOCKER-USER` is absent.
+After reboot, recreation, or a firewall reload, recovery can take about 16
+seconds once the network exists. Run the setup command again after updating
+this tool to refresh its installed copy.
+
+```bash
+sudo systemctl status amaterasu-podman-firewall.timer
+sudo journalctl -u amaterasu-podman-firewall.service --no-pager -n 30
+```
+
+If you previously added temporary rules for `10.88.0.2`, remove those two
+rules after verifying connectivity with the maintenance service installed;
+otherwise the old address keeps its exception after recreation:
+
+```bash
+sudo iptables -w -D DOCKER-USER -i podman0 -s 10.88.0.2/32 -m conntrack --ctstate NEW,ESTABLISHED,RELATED -j ACCEPT
+sudo iptables -w -D DOCKER-USER -o podman0 -d 10.88.0.2/32 -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+```
+
+To stop maintenance and remove only this tool's exceptions:
+
+```bash
+sudo systemctl disable --now amaterasu-podman-firewall.timer
+sudo systemctl stop amaterasu-podman-firewall.service
+sudo iptables -w -D DOCKER-USER -j AMATERASU-PODMAN
+sudo iptables -w -F AMATERASU-PODMAN
+sudo iptables -w -X AMATERASU-PODMAN
+```
+
 #### Method D: Cloud Platforms (Heroku / Railway / Render / CapRover)
 
 1. **Fork** this repository to your GitHub account.
