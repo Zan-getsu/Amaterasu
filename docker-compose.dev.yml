@@ -11,6 +11,8 @@ services:
     restart: always
     mem_limit: ${AMATERASU_MEMORY_LIMIT:-0}
     memswap_limit: ${AMATERASU_MEMORY_LIMIT:-0}
+    # Podman's default bridge avoids an Aardvark DNS listener on host port 53.
+    network_mode: bridge
     dns:
       - 1.1.1.1
       - 8.8.8.8

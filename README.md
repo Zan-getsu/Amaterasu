@@ -368,7 +368,7 @@ sudo docker compose logs -f
 ```
 
 The `docker-compose.yml` is pre-configured with:
-- **`network_mode: host`** — the container shares your server's network stack directly (no port mapping needed, qBittorrent/Aria2c work without extra config).
+- **`network_mode: bridge`** — uses the container engine's default bridge and publishes the portal on host port `82`. Download engines communicate inside the bot container, and the optional tunnel shares its network namespace. The container uses the configured upstream DNS servers directly; Podman's default bridge avoids an Aardvark DNS listener that could conflict with a VPS's `dnsmasq` on port 53. Service-name DNS between separate containers is unavailable on the default bridge.
 - **`restart: always`** — auto-restarts on crash or server reboot.
 - **Volume mount** (`.:/usr/src/app:z`) — your local `config.py`, `token.pickle`, etc. are live-synced into the container.
 - **Safe update default** (`AUTO_UPDATE=false`) — container startup does not modify the bind-mounted Git checkout. Compose passes `AUTO_UPDATE` through only when it is explicitly set, so an unset environment does not override `config.py` or the System & Automation setting saved in MongoDB. The entry in `.env.example` is intentionally commented; uncomment it only when an environment-level override is desired.
@@ -391,19 +391,27 @@ sudo docker logs -f amaterasu
 
 #### Method C: Podman
 
-```bash
-# Build the image
-sudo podman build -t amaterasu .
+Use the same Compose files and `.env` memory limit as Docker. For rootful
+Podman with a Docker Compose provider, enable its API socket once during setup:
 
-# Run with auto-restart and port mapping
-sudo podman run -d --name amaterasu --restart always \
-  --network host \
-  -v $(pwd):/usr/src/app:z \
-  amaterasu
+```bash
+sudo systemctl enable --now podman.socket
+
+# Start or recreate the bot
+sudo podman compose up -d --force-recreate amaterasu
 
 # View logs
-sudo podman logs -f amaterasu
+sudo podman compose logs -f amaterasu
 ```
+
+For a source build, add `-f docker-compose.dev.yml` after `podman compose`
+and use `up --build -d --force-recreate amaterasu`. If using the optional
+tunnel profile, recreate both containers with
+`sudo podman compose --profile tunnel up -d --force-recreate`.
+Recreation interrupts running tasks. The default bridge avoids the port-53
+collision without changing the VPS's DNS services or Podman's global DNS port.
+An existing deployment switches networks when its container is recreated;
+no manual removal of the old project network is required.
 
 #### Method D: Cloud Platforms (Heroku / Railway / Render / CapRover)
 
