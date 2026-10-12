@@ -1,14 +1,17 @@
 import asyncio as _asyncio
 from ast import literal_eval
 from asyncio import CancelledError, Lock, gather, get_running_loop, sleep, wait_for
+from functools import partial
 from hashlib import sha256
 from importlib import import_module
 from inspect import signature
+from os import getenv
 from time import monotonic
 
 from pyrogram import Client, enums
 from pyrogram import __version__ as WZGRAM_VERSION
 from pyrogram.errors import FloodWait
+from pyrogram.methods.rate_limiter import AdaptiveBucket
 from pyrogram.types import ChatPrivileges
 
 from .. import LOGGER, bot_loop
@@ -112,6 +115,48 @@ def is_wzgram_media_session_failure(error):
     return False
 
 
+class _WzgramUploadPacer:
+    """Pace parts and retries across all media sessions belonging to one client."""
+
+    def __init__(self, client):
+        me = getattr(client, "me", None)
+        if getattr(me, "is_bot", False):
+            rate = int(getenv("WZGRAM_UPLOAD_RATE_BOT", "32"))
+        elif getattr(me, "is_premium", False):
+            rate = int(getenv("WZGRAM_UPLOAD_RATE_PREMIUM", "300"))
+        else:
+            rate = int(getenv("WZGRAM_UPLOAD_RATE_USER", "32"))
+        self.bucket = AdaptiveBucket(rate=rate, ceiling=max(rate, 300), burst=1, step=1.0)
+        self.lock = Lock()
+        self.flood_until = 0.0
+
+    async def invoke(self, operation, query, *args, **kwargs):
+        if _query_name(query).split(".")[-1] not in {"SaveFilePart", "SaveBigFilePart"}:
+            return await operation(query, *args, **kwargs)
+
+        async with self.lock:
+            while True:
+                delay = self.flood_until - monotonic()
+                if delay > 0:
+                    await sleep(delay)
+                    continue
+                await self.bucket.acquire()
+                # Another in-flight RPC can extend the cooldown while admission waits.
+                if self.flood_until <= monotonic():
+                    break
+        try:
+            result = await operation(query, *args, **kwargs)
+        except (FloodWait, FloodPremiumWait) as error:
+            self.flood_until = max(
+                self.flood_until, monotonic() + max(float(error.value), 1.0) + 1.0
+            )
+            self.bucket.on_flood()
+            raise
+        if result:
+            self.bucket.on_success()
+        return result
+
+
 def _configure_wzgram_media_pool(pool):
     """Bound per-session restart loops so the outer retry can rebuild the pool."""
     for session in pool:
@@ -119,6 +164,14 @@ def _configure_wzgram_media_pool(pool):
             int(getattr(session, "MAX_RETRIES", WZGRAM_MEDIA_RESTART_ATTEMPTS)),
             WZGRAM_MEDIA_RESTART_ATTEMPTS,
         )
+        client = getattr(session, "client", None)
+        if client is not None and not getattr(session, "_amaterasu_upload_pacer", None):
+            pacer = getattr(client, "_amaterasu_upload_pacer", None)
+            if pacer is None:
+                pacer = client._amaterasu_upload_pacer = _WzgramUploadPacer(client)
+            # Native part retries call session.invoke directly, bypassing the file pacer.
+            session.invoke = partial(pacer.invoke, session.invoke)
+            session._amaterasu_upload_pacer = pacer
     return pool
 
 

@@ -2,17 +2,21 @@ import ast
 import asyncio
 import gc
 import warnings
+from contextlib import asynccontextmanager
 from importlib import import_module
 from importlib.metadata import version as package_version
+from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pyrogram
+import pytest
 import warpcrypto
 from pyrogram import Client
 from pyrogram.crypto import aes
 from pyrogram.dispatcher import Dispatcher
+from pyrogram.errors import FloodPremiumWait, FloodWait
 from pyrogram.handlers import (
     ConnectHandler,
     DisconnectHandler,
@@ -21,6 +25,7 @@ from pyrogram.handlers import (
 )
 from pyrogram.methods.advanced import save_file
 
+from bot.core import tg_client
 from bot.core.tg_client import (
     WZGRAM_MEDIA_RESET_COOLDOWN,
     WZGRAM_MEDIA_RESTART_ATTEMPTS,
@@ -335,6 +340,149 @@ async def test_failed_media_pool_is_stopped_and_removed():
     client._amaterasu_media_reset_at[2] -= WZGRAM_MEDIA_RESET_COOLDOWN
     assert await client.reset_media_session_pool(reason="TimeoutError") == 1
     assert replacement in stopped
+
+
+@pytest.mark.parametrize("flood_type", [FloodWait, FloodPremiumWait])
+@pytest.mark.parametrize("wait_seconds", [1, 600])
+async def test_upload_part_flood_pauses_all_sessions_for_the_full_wait(
+    monkeypatch, flood_type, wait_seconds
+):
+    clock = [100.0]
+    observed = []
+
+    async def pause(delay):
+        clock[0] += delay
+        await asyncio.sleep(0)
+
+    async def accepted(query, **kwargs):
+        observed.append((clock[0], query, kwargs))
+        return True
+
+    monkeypatch.setattr(tg_client, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(tg_client, "sleep", pause)
+    client = SimpleNamespace(me=SimpleNamespace(is_bot=True, is_premium=False))
+    first = SimpleNamespace(
+        client=client, invoke=AsyncMock(side_effect=flood_type(wait_seconds)),
+    )
+    second = SimpleNamespace(client=client, invoke=AsyncMock(side_effect=accepted))
+    _configure_wzgram_media_pool([first, second])
+    part = pyrogram.raw.functions.upload.SaveBigFilePart(
+        file_id=123, file_part=0, file_total_parts=2, bytes=b"part",
+    )
+    with pytest.raises(flood_type):
+        await first.invoke(part, sleep_threshold=0)
+
+    await asyncio.gather(*(second.invoke(part, sleep_threshold=0) for _ in range(3)))
+
+    assert len(observed) == 3
+    assert all(when >= 100 + wait_seconds + 1 for when, _, _ in observed)
+    assert all(query is part and kwargs == {"sleep_threshold": 0} for _, query, kwargs in observed)
+    assert first._amaterasu_upload_pacer is second._amaterasu_upload_pacer
+
+
+async def test_upload_part_guard_preserves_other_calls_and_installation_is_idempotent():
+    client = SimpleNamespace(me=SimpleNamespace(is_bot=True, is_premium=False))
+    invoke = AsyncMock(return_value=True)
+    session = SimpleNamespace(client=client, invoke=invoke)
+    _configure_wzgram_media_pool([session])
+    guarded = session.invoke
+    _configure_wzgram_media_pool([session])
+    assert session.invoke is guarded
+    session._amaterasu_upload_pacer.flood_until = float("inf")
+    query = SimpleNamespace(QUALNAME="upload.GetFile")
+
+    assert await session.invoke(query, timeout=5) is True
+    invoke.assert_awaited_once_with(query, timeout=5)
+
+
+async def test_upload_part_guard_preserves_failures_and_cancellation():
+    client = SimpleNamespace(me=SimpleNamespace(is_bot=True, is_premium=False))
+    error = OSError("connection lost")
+    session = SimpleNamespace(client=client, invoke=AsyncMock(side_effect=error))
+    _configure_wzgram_media_pool([session])
+    part = pyrogram.raw.functions.upload.SaveFilePart(file_id=123, file_part=0, bytes=b"part")
+    with pytest.raises(OSError) as caught:
+        await session.invoke(part)
+    assert caught.value is error
+
+    cancelled = SimpleNamespace(client=client, invoke=AsyncMock(side_effect=asyncio.CancelledError()))
+    _configure_wzgram_media_pool([cancelled])
+    with pytest.raises(asyncio.CancelledError):
+        await cancelled.invoke(part)
+
+
+async def test_native_simultaneous_uploads_recover_without_losing_parts(monkeypatch):
+    clock = [100.0]
+    accepted = []
+    flooded = []
+
+    async def pause(delay):
+        clock[0] += delay
+        await asyncio.sleep(0)
+
+    class AsyncioProxy:
+        sleep = staticmethod(pause)
+
+        def __getattr__(self, name):
+            return getattr(asyncio, name)
+
+    async def send_part(query, **_kwargs):
+        if not flooded:
+            flooded.append(query)
+            raise FloodWait(1)
+        accepted.append((clock[0], query.file_id, query.file_part))
+        return True
+
+    monkeypatch.setenv("WZGRAM_UPLOAD_RATE_BOT", "1000")
+    monkeypatch.setattr(tg_client, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(tg_client, "sleep", pause)
+    monkeypatch.setattr(save_file, "asyncio", AsyncioProxy())
+    file_ids = iter([123, 456])
+    client = SimpleNamespace(
+        me=SimpleNamespace(is_bot=True, is_premium=False),
+        save_file_semaphore=asyncio.Semaphore(2),
+        loop=asyncio.get_running_loop(),
+        executor=None,
+        read_ahead_slots=asyncio.Semaphore(16),
+        storage=SimpleNamespace(dc_id=AsyncMock(return_value=2)),
+        rnd_id=lambda: next(file_ids),
+    )
+    sessions = [SimpleNamespace(client=client, invoke=send_part) for _ in range(2)]
+
+    @asynccontextmanager
+    async def media_pool(_dc_id, _pool_size):
+        async def ready():
+            return _configure_wzgram_media_pool(sessions)
+
+        yield asyncio.create_task(ready())
+
+    client._media_pool = media_pool
+    data = b"x" * (12 * 1024 * 1024)
+    results = await asyncio.wait_for(
+        asyncio.gather(*(
+            save_file.SaveFile.save_file(client, BytesIO(data)) for _ in range(2)
+        )),
+        timeout=5,
+    )
+
+    assert all(isinstance(result, pyrogram.raw.types.InputFileBig) for result in results)
+    assert all(result.parts == 24 for result in results)
+    assert len(accepted) == 48
+    assert {(file_id, part) for _, file_id, part in accepted} == {
+        (file_id, part) for file_id in [123, 456] for part in range(24)
+    }
+    assert all(when >= 102 for when, _, _ in accepted)
+
+
+async def test_upload_cooldown_is_separate_for_other_accounts():
+    clients = [SimpleNamespace(me=SimpleNamespace(is_bot=True)) for _ in range(2)]
+    sessions = [SimpleNamespace(client=client, invoke=AsyncMock(return_value=True)) for client in clients]
+    _configure_wzgram_media_pool(sessions)
+    sessions[0]._amaterasu_upload_pacer.flood_until = float("inf")
+    part = pyrogram.raw.functions.upload.SaveFilePart(file_id=123, file_part=0, bytes=b"part")
+
+    assert await sessions[1].invoke(part) is True
+    assert sessions[0]._amaterasu_upload_pacer is not sessions[1]._amaterasu_upload_pacer
 
 
 async def test_wzgram_upload_queue_unblocks_when_every_consumer_has_failed():
