@@ -120,5 +120,5 @@ def _style_legacy_tree(match):
 def style_inline_text(text, has_buttons=False):
     """Apply premium cards while preserving intentional preformatted panels."""
     del has_buttons
-    styled = style_panel_text(text)
+    styled = style_panel_text(str(text))
     return _LEGACY_TREE_BLOCK.sub(_style_legacy_tree, styled)

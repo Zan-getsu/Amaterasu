@@ -887,6 +887,37 @@ async def test_legacy_gallery_animation_document_id_falls_back(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_message_helpers_deliver_exception_text():
+    from bot.helper.telegram_helper.message_utils import (
+        edit_message,
+        send_file,
+        send_message,
+    )
+
+    error = ValueError("You must use the same token to clone!")
+    delivered = SimpleNamespace(id=99)
+    message = SimpleNamespace(
+        id=42,
+        media=None,
+        reply=AsyncMock(return_value=delivered),
+        edit=AsyncMock(return_value=delivered),
+        reply_document=AsyncMock(return_value=delivered),
+        edit_caption=AsyncMock(return_value=delivered),
+    )
+
+    assert await send_message(message, error) is delivered
+    assert message.reply.await_args.kwargs["text"] == str(error)
+    assert await edit_message(message, error) is delivered
+    assert message.edit.await_args.kwargs["text"] == str(error)
+    assert await send_file(message, "report.txt", caption=error) is delivered
+    assert message.reply_document.await_args.kwargs["caption"] == str(error)
+
+    message.media = True
+    assert await edit_message(message, error) is delivered
+    assert message.edit_caption.await_args.kwargs["caption"] == str(error)
+
+
+@pytest.mark.asyncio
 async def test_send_message_does_not_retry_an_unknown_peer(monkeypatch):
     from pyrogram.errors import PeerIdInvalid
 

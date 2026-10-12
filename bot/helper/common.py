@@ -655,10 +655,9 @@ class TaskConfig:
                     ) and (
                         self.user_dict.get("USER_TOKENS", False)
                         or (
-                            # Auto-detect: if the user has uploaded their
-                            # own token.pickle, use mtp: mode for downloads
-                            # too (mirror of the upload-side fix).
-                            self.user_id
+                            # Auto-detection must not override an explicit OWNER choice.
+                            "USER_TOKENS" not in self.user_dict
+                            and self.user_id
                             and await aiopath.exists(f"tokens/{self.user_id}.pickle")
                         )
                     ):
@@ -833,17 +832,12 @@ class TaskConfig:
                 ) and (
                     self.user_dict.get("USER_TOKENS", False)
                     or (
-                        # Auto-detect: if the user has uploaded their own
-                        # token.pickle AND set their own GDRIVE_ID, use
-                        # mtp: mode automatically. Previously the user
-                        # had to manually toggle "Swap to USER token" in
-                        # /userset, which was a UX trap — they'd upload
-                        # token.pickle + GDRIVE_ID and still get "File
-                        # not found" because the bot used the operator's
-                        # token against the user's drive folder.
-                        self.user_dict.get("GDRIVE_ID")
+                        # Auto-detect only when no token choice is saved and a token exists.
+                        "USER_TOKENS" not in self.user_dict
+                        and self.user_dict.get("GDRIVE_ID")
                         and self.user_dict.get("GDRIVE_ID") != Config.GDRIVE_ID
                         and self.user_id
+                        and await aiopath.exists(f"tokens/{self.user_id}.pickle")
                     )
                 ):
                     if not self.user_dict.get("USER_TOKENS", False):

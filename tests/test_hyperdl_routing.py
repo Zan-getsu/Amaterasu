@@ -8,6 +8,7 @@ import runpy
 from contextlib import suppress
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 from web import merge_plan_store
@@ -246,6 +247,73 @@ def load_method(path, class_name, method_name, namespace):
     )
     exec(compile(ast.Module([method], type_ignores=[]), str(path), "exec"), namespace)
     return namespace[method_name]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "preference,source_prefix,dest_prefix,personal_token_exists,expected_token",
+    [
+        (False, "", "", True, "token.pickle"),
+        (False, "", "tp:", True, "token.pickle"),
+        (False, "tp:", "", True, "token.pickle"),
+        (True, "", "", True, "tokens/777.pickle"),
+        (None, "", "", True, "tokens/777.pickle"),
+        (None, "", "", False, "token.pickle"),
+        (True, "tp:", "tp:", True, "token.pickle"),
+        (False, "mtp:", "mtp:", True, "tokens/777.pickle"),
+    ],
+)
+async def test_gdrive_clone_respects_explicit_token_preference(
+    preference, source_prefix, dest_prefix, personal_token_exists, expected_token
+):
+    config = SimpleNamespace(
+        GDRIVE_ID="1" * 33,
+        USE_SERVICE_ACCOUNTS=False,
+        NAME_SWAP="",
+        RCLONE_FLAGS="",
+        TRANSMISSION_MODE="",
+        UPLOAD_PATHS={},
+        STOP_DUPLICATE=False,
+        DEFAULT_UPLOAD="gd",
+        _normalize_default_upload=lambda value: value,
+    )
+    links = runpy.run_path(str(ROOT / "bot/helper/ext_utils/links_utils.py"))
+    namespace = {
+        "Config": config,
+        "aiopath": SimpleNamespace(exists=AsyncMock(return_value=personal_token_exists)),
+        "excluded_extensions": [],
+        "LOGGER": logging.getLogger(__name__),
+        "is_gdrive_link": links["is_gdrive_link"],
+        "is_gdrive_id": links["is_gdrive_id"],
+        "is_rclone_path": links["is_rclone_path"],
+    }
+    before_start = load_method(COMMON_SOURCE, "TaskConfig", "before_start", namespace)
+    get_token_path = load_method(COMMON_SOURCE, "TaskConfig", "get_token_path", namespace)
+    task = SimpleNamespace(
+        user_id=777,
+        user_dict={"GDRIVE_ID": "2" * 33},
+        link=f"{source_prefix}https://drive.google.com/drive/folders/source-folder-id",
+        up_dest=dest_prefix + "2" * 33,
+        is_clone=True,
+        is_leech=False,
+        is_jd=False,
+        is_uphoster=False,
+        name_swap="",
+        rc_flags="",
+        category="",
+        ffmpeg_cmds=None,
+        _prepare_leech_dumps=AsyncMock(),
+        is_token_exists=AsyncMock(),
+    )
+    task.get_token_path = lambda value: get_token_path(task, value)
+    if preference is not None:
+        task.user_dict["USER_TOKENS"] = preference
+
+    await before_start(task)
+
+    assert task.get_token_path(task.link) == expected_token
+    assert task.get_token_path(task.up_dest) == expected_token
+    assert task.is_token_exists.await_count == 2
 
 
 def load_extract_parser():
