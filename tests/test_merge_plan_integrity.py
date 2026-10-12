@@ -195,3 +195,14 @@ def test_episode_sort_uses_season_folder_and_is_deterministic():
         "Season 02/Episode 01.mkv",
     ]
     assert sorted(names[3:], key=natural_key) == ["Episode.mkv", "episode.mkv"]
+
+
+def test_failed_write_never_acknowledges_order_or_freeze(plans, monkeypatch):
+    plan = _two_source_plan(plans)
+    monkeypatch.setattr(plans, "_write_unlocked", lambda *args, **kwargs: False)
+    saved, error = plans.update_order("batch", [item["id"] for item in reversed(plan["items"])], plan["order_revision"])
+    assert saved is None
+    assert error == "Could not save the merge order."
+    assert plans.sync_final_files("batch", _final_files()) is None
+    assert not plans.read_plan("batch")["locked"]
+    assert plans.read_plan("batch")["items"] == plan["items"]

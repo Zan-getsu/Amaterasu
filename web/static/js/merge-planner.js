@@ -32,9 +32,20 @@
   let conflict = false;
   let retryTimer = null;
   let pollTimer = null;
+  let loading = false;
+  let editRevision = 0;
+  let authenticated = false;
+  let unavailable = false;
+
+  const localOrder = () => [...list.children].map(row => row.dataset.id);
+  const terminal = () => current && ['completed', 'failed', 'cancelled', 'interrupted'].includes(current.status);
+  const request = (options = {}) => fetch(apiUrl(), {
+    cache: 'no-store', ...options, signal: AbortSignal.timeout(15000),
+  });
 
   const apiUrl = () => `/api/merge-plan/${encodeURIComponent(planId)}`;
   const authHeaders = () => ({ 'X-Merge-Plan-Pin': pin });
+  const icon = paths => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths}</svg>`;
 
   function showError(message) {
     planner.hidden = true;
@@ -43,10 +54,17 @@
     errorMessage.textContent = message;
   }
 
-  function showAuth() {
+  function showAuth(message = 'Enter the 12-character code from Telegram.') {
+    authenticated = false;
+    clearTimeout(retryTimer);
+    retryTimer = null;
+    pendingSave = false;
     planner.hidden = true;
     errorPanel.hidden = true;
     authPanel.hidden = false;
+    const hint = document.getElementById('pinHint');
+    if (hint) hint.textContent = message;
+    state.lastElementChild.textContent = 'PIN required';
     pinInput.focus();
   }
 
@@ -85,6 +103,14 @@
     return left[0] - right[0] || left[1] - right[1] || collator.compare(left[2], right[2]);
   }
 
+  function refreshMoveButtons() {
+    [...list.children].forEach((row, index) => {
+      row.querySelectorAll('.merge-row-actions button').forEach((button, direction) => {
+        button.disabled = current.locked || (direction === 0 ? index === 0 : index === list.children.length - 1);
+      });
+    });
+  }
+
   function moveRow(row, direction) {
     if (!row || current?.locked) return;
     const sibling = direction < 0 ? row.previousElementSibling : row.nextElementSibling;
@@ -92,6 +118,8 @@
     if (direction < 0) list.insertBefore(row, sibling);
     else list.insertBefore(sibling, row);
     dirty = true;
+    editRevision += 1;
+    refreshMoveButtons();
     saveOrder();
   }
 
@@ -108,25 +136,26 @@
     handle.type = 'button';
     handle.disabled = current.locked;
     handle.setAttribute('aria-label', `Drag ${item.name}`);
-    handle.innerHTML = '<span data-lucide="grip-vertical"></span>';
+    handle.innerHTML = icon('<path d="M9 5h.01M9 12h.01M9 19h.01M15 5h.01M15 12h.01M15 19h.01"/>');
 
     const file = document.createElement('div');
     file.className = 'merge-file';
     const title = document.createElement('strong');
     title.textContent = item.name || 'Preparing item';
+    title.title = item.name || '';
     const detail = document.createElement('span');
     detail.textContent = item.placeholder ? 'Resolving filename' : item.ready ? 'Ready' : 'Queued';
     file.append(title, detail);
 
     const actions = document.createElement('div');
     actions.className = 'merge-row-actions';
-    for (const [label, icon, direction] of [['Move up', 'chevron-up', -1], ['Move down', 'chevron-down', 1]]) {
+    for (const [label, path, direction] of [['Move up', 'm6 15 6-6 6 6', -1], ['Move down', 'm6 9 6 6 6-6', 1]]) {
       const button = document.createElement('button');
       button.type = 'button';
       button.className = 'bs-btn bs-btn--ghost bs-btn--icon';
       button.disabled = current.locked;
       button.setAttribute('aria-label', `${label}: ${item.name}`);
-      button.innerHTML = `<span data-lucide="${icon}"></span>`;
+      button.innerHTML = icon(`<path d="${path}"/>`);
       button.addEventListener('click', () => moveRow(row, direction));
       actions.append(button);
     }
@@ -134,14 +163,18 @@
     row.append(handle, file, actions);
 
     row.addEventListener('dragstart', () => {
+      if (current.locked) return;
       dragging = row;
       row.classList.add('is-dragging');
     });
     row.addEventListener('dragend', () => {
+      if (!dragging) return;
       row.classList.remove('is-dragging');
       document.querySelectorAll('.is-drop-target').forEach(el => el.classList.remove('is-drop-target'));
       dragging = null;
       dirty = true;
+      editRevision += 1;
+      refreshMoveButtons();
       saveOrder();
     });
     row.addEventListener('dragover', event => {
@@ -166,12 +199,16 @@
       if (!target || target === dragging) return;
       const before = event.clientY < target.getBoundingClientRect().top + target.offsetHeight / 2;
       list.insertBefore(dragging, before ? target : target.nextSibling);
+      // Reparenting a row releases pointer capture; retain the drag's end event.
+      handle.setPointerCapture(event.pointerId);
     });
     const finishPointerDrag = event => {
       if (!dragging || event.pointerType === 'mouse') return;
       row.classList.remove('is-dragging');
       dragging = null;
       dirty = true;
+      editRevision += 1;
+      refreshMoveButtons();
       saveOrder();
     };
     handle.addEventListener('pointerup', finishPointerDrag);
@@ -187,6 +224,7 @@
     handle.disabled = locked;
     handle.setAttribute('aria-label', `Drag ${item.name}`);
     row.querySelector('.merge-file strong').textContent = item.name || 'Preparing item';
+    row.querySelector('.merge-file strong').title = item.name || '';
     row.querySelector('.merge-file span').textContent = item.placeholder ? 'Resolving filename' : item.ready ? 'Ready' : 'Queued';
     row.querySelectorAll('.merge-row-actions button').forEach((button, index) => {
       button.disabled = locked;
@@ -198,7 +236,7 @@
     const items = new Map(data.items.map(item => [item.id, item]));
     const serverIds = data.items.map(item => item.id);
     const localIds = [...list.children].map(row => row.dataset.id);
-    const keepLocal = dirty && !data.locked;
+    const keepLocal = (dirty || dragging) && !data.locked;
     const desired = keepLocal ? localIds.filter(id => items.has(id)) : [...serverIds];
     if (keepLocal) {
       for (const id of serverIds) {
@@ -219,6 +257,7 @@
       oldRows.delete(id);
     }
     oldRows.forEach(row => row.remove());
+    refreshMoveButtons();
     if (focused && !focused.isConnected && typeof focused.focus === 'function') {
       focused.focus({ preventScroll: true });
     }
@@ -232,9 +271,17 @@
       saveState.textContent = 'Order locked';
     }
     current = data;
+    unavailable = false;
+    authenticated = true;
     authPanel.hidden = true;
     errorPanel.hidden = true;
     planner.hidden = false;
+    if (data.locked) {
+      clearTimeout(retryTimer);
+      retryTimer = null;
+      pendingSave = false;
+      saveState.textContent = 'Order locked';
+    }
     document.getElementById('planTitle').textContent = data.title || 'Merged video';
     document.getElementById('readyCount').textContent = data.ready_count;
     document.getElementById('itemCount').textContent = data.items.length;
@@ -243,8 +290,9 @@
       : data.enumeration_complete ? 'All sources found' : 'Preparing sources';
     document.getElementById('modeLabel').textContent = data.mode === 'encode'
       ? `Encode${data.profile_name ? ` · ${data.profile_name}` : ''}` : 'Stream copy';
+    const seconds = Math.round(data.duration_seconds || 0);
     document.getElementById('durationLabel').textContent = data.duration_seconds == null
-      ? 'Calculating' : `${Math.round(data.duration_seconds / 60)} min`;
+      ? 'Calculating' : `${Math.floor(seconds / 60)} min ${seconds % 60} sec`;
     subtitleSummary.textContent = data.subtitle_summary || '';
     subtitleSummary.hidden = !data.subtitle_summary;
     state.dataset.state = data.status;
@@ -254,55 +302,78 @@
     list.hidden = data.items.length === 0;
     notice.dataset.kind = data.locked ? 'locked' : 'active';
     notice.lastElementChild.textContent = data.error || data.inventory_error || (data.locked
-      ? 'The timeline is locked. This is the order used for processing.'
+      ? data.status === 'completed' ? 'Merge completed. Open Telegram for your uploaded video.'
+        : 'Processing has started. The saved order is now locked.'
       : conflict ? 'The file list or saved order changed. Review your unsaved order, then save it again.'
         : 'Downloads continue in the background. If you leave this page, Amaterasu uses the latest saved order.');
     document.querySelectorAll('[data-sort]').forEach(button => { button.disabled = data.locked; });
-    saveButton.hidden = !conflict || data.locked;
+    saveButton.hidden = (!dirty && !conflict) || data.locked || saving;
     if (!data.locked && !conflict && dirty) saveState.textContent = 'Unsaved order';
-    if (window.lucide) window.lucide.createIcons();
   }
 
   async function loadPlan() {
-    if (saving || dragging) return;
+    if (saving || dragging || loading) return;
+    if (!pin) return showAuth();
+    loading = true;
     try {
-      const response = await fetch(apiUrl(), { cache: 'no-store', headers: authHeaders() });
-      if (response.status === 403) return showAuth();
+      const response = await request({ headers: authHeaders() });
+      if (response.status === 403) return showAuth('That code is incorrect. Tap Pincode in Telegram and try again.');
       const data = await response.json();
-      if (!response.ok) return showError(data.message || 'This merge plan is unavailable.');
+      if (!response.ok) {
+        if (response.status === 404) unavailable = true;
+        return showError(data.message || 'Unable to load the merge plan. Try again.');
+      }
+      if (saving || dragging) return;
+      if (current && data.revision < current.revision) return;
       render(data);
     } catch (_) {
       saveState.textContent = 'Reconnecting';
+      state.lastElementChild.textContent = 'Reconnecting';
+      if (!current) showError('Could not connect. Check your connection and try again.');
+    } finally {
+      loading = false;
     }
   }
 
   async function saveOrder() {
-    if (!current || current.locked) return;
+    if (!current || current.locked || !authenticated || conflict) return;
     if (saving) {
       pendingSave = true;
       return;
     }
     saving = true;
+    saveButton.hidden = true;
     saveState.textContent = 'Saving…';
-    const order = [...list.children].map(row => row.dataset.id);
+    const order = localOrder();
+    const sentRevision = editRevision;
     try {
-      const response = await fetch(apiUrl(), {
+      const response = await request({
         method: 'POST',
         cache: 'no-store',
         headers: { 'Content-Type': 'application/json', ...authHeaders() },
         body: JSON.stringify({ order, order_revision: current.order_revision }),
       });
+      if (response.status === 403) return showAuth('Your planner code was rejected. Enter the code from Telegram again.');
       const data = await response.json();
       if (!response.ok) {
-        saveState.textContent = 'List updated';
-        conflict = true;
-        if (data.plan) render(data.plan);
+        if (response.status === 409 && data.plan) {
+          saveState.textContent = 'Review order';
+          conflict = true;
+          pendingSave = false;
+          render(data.plan);
+        } else {
+          saveState.textContent = 'Not saved';
+          saveButton.hidden = false;
+          notice.lastElementChild.textContent = data.message || 'Could not save. Try saving again.';
+        }
       } else {
         current = data;
-        dirty = false;
+        dirty = editRevision !== sentRevision;
         conflict = false;
-        saveState.textContent = 'Up to date';
+        pendingSave = dirty;
+        saveState.textContent = dirty ? 'Saving latest order…' : 'Up to date';
         saveButton.hidden = true;
+        render(data);
       }
     } catch (_) {
       saveState.textContent = 'Retrying';
@@ -316,6 +387,7 @@
       }, 1500);
     } finally {
       saving = false;
+      saveButton.hidden = (!dirty && !conflict) || current?.locked;
       if (pendingSave && !retryTimer) {
         pendingSave = false;
         saveOrder();
@@ -329,11 +401,12 @@
     if (!/^[A-Za-z0-9_-]{12}$/.test(pin)) return;
     params.set('pin', pin);
     history.replaceState(null, '', `${location.pathname}${location.search}#${params}`);
-    loadPlan();
+    loadPlan().finally(() => schedulePoll());
   });
 
   document.querySelectorAll('[data-sort]').forEach(button => {
     button.addEventListener('click', () => {
+      if (!current || current.locked) return;
       const rows = [...list.children];
       switch (button.dataset.sort) {
         case 'input': rows.sort((a, b) => Number(a.dataset.originalIndex) - Number(b.dataset.originalIndex)); break;
@@ -343,6 +416,8 @@
       }
       list.replaceChildren(...rows);
       dirty = true;
+      editRevision += 1;
+      refreshMoveButtons();
       saveOrder();
     });
   });
@@ -354,11 +429,20 @@
     saveOrder();
   });
 
+  document.getElementById('retryPlanButton')?.addEventListener('click', () => {
+    loadPlan().finally(() => schedulePoll());
+  });
+  window.addEventListener('beforeunload', event => {
+    if (!dirty || current?.locked) return;
+    event.preventDefault();
+    event.returnValue = '';
+  });
+
   function schedulePoll(delay = document.hidden ? 10000 : 3000) {
     clearTimeout(pollTimer);
     pollTimer = setTimeout(async () => {
       await loadPlan();
-      if (current && !['completed', 'failed', 'cancelled', 'interrupted'].includes(current.status)) {
+      if (!terminal() && !unavailable && pin && authPanel.hidden) {
         schedulePoll();
       }
     }, delay);

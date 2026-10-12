@@ -1967,6 +1967,14 @@ order in the web planner while they download.
   easier to navigate.
 - Compatible embedded subtitles and font attachments are preserved with
   corrected timeline offsets.
+- SRT tracks with matching languages and roles continue across episodes in one
+  selectable track, including gaps where an episode has no subtitles. ASS tracks
+  with matching script settings are also joined; each episode keeps its styles,
+  colors, fonts, positioning, and named style resets.
+- Mixed subtitle formats, bitmap subtitles, and incompatible ASS script settings
+  remain separate selectable tracks. The planner and upload message explain when
+  some tracks cover individual parts. Subtitles are never burned in or silently
+  converted to another format.
 - Recognized external subtitle sidecars such as `.srt`, `.ass`, or `.vtt` are
   associated with their video and merged with the same chapter offset. Missing,
   ambiguous, or incomplete sidecar pairs stop the task with a clear error.

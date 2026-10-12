@@ -1,5 +1,7 @@
 """Reproducible tiny media fixtures for the real MKVToolNix copy backend."""
 
+import asyncio
+import hashlib
 import json
 import shutil
 import struct
@@ -21,6 +23,7 @@ from bot.helper.ext_utils.merge_media import (
     merge_encode,
     validate_merge_encode_profile,
 )
+from bot.helper.ext_utils.merge_subtitles import join_documents, read_document
 
 
 def _run(*args):
@@ -140,7 +143,7 @@ def _font_bytes(family="Example", postscript="Example-Regular"):
 
 
 @pytest.mark.asyncio
-async def test_ass_ass_srt_remain_original_tracks_with_chapters(media):
+async def test_ass_styles_join_continuously_and_srt_keeps_its_format(media):
     root, files = media
     probes = [_probe(path, "-show_streams", "-show_format") for path in files]
     output, error = await merge_copy(
@@ -149,7 +152,7 @@ async def test_ass_ass_srt_remain_original_tracks_with_chapters(media):
     assert not error
     info = _probe(output, "-show_streams", "-show_chapters", "-show_packets", "-show_data_hash", "sha256")
     assert [stream["codec_name"] for stream in info["streams"] if stream["codec_type"] == "subtitle"] == [
-        "ass", "ass", "subrip"
+        "ass", "subrip"
     ]
     assert len(info["chapters"]) == 3
     assert [chapter["tags"]["title"] for chapter in info["chapters"]] == ["1", "2", "3"]
@@ -157,11 +160,34 @@ async def test_ass_ass_srt_remain_original_tracks_with_chapters(media):
         [0.2, 1.7, 3.2], abs=0.08
     )
     assert probes[0]["streams"][2]["codec_name"] == "ass"
+    extracted = root / "joined.ass"
+    _run("ffmpeg", "-v", "error", "-y", "-i", output, "-map", "0:s:0", "-c:s", "copy", str(extracted))
+    text = extracted.read_text(encoding="utf-8-sig")
+    assert "Part1_Default,Arial,22,&H00FFFFFF" in text
+    assert "Part2_Default,Arial,32,&H0000FFFF" in text
+    assert "Part1_Default,,0,0,0,,First" in text
+    assert "Part2_Default,,0,0,0,,Second" in text
+    ass_packets = [packet for packet in info["packets"] if packet["stream_index"] == 2]
+    assert len(ass_packets) == 2
 
 
 def test_font_name_parser_detects_internal_identity():
     assert ("family-style", "example", "regular") in _font_names(_font_bytes())
     assert ("postscript", "example-regular") in _font_names(_font_bytes())
+
+
+def test_font_collection_checks_identity_of_every_face():
+    first = bytearray(_font_bytes("First", "First-Regular"))
+    second = bytearray(_font_bytes("Second", "Second-Regular"))
+    first_offset, second_offset = 20, 20 + len(first)
+    for face, offset in ((first, first_offset), (second, second_offset)):
+        struct.pack_into(">I", face, 20, struct.unpack_from(">I", face, 20)[0] + offset)
+    data = struct.pack(">4sIIII", b"ttcf", 0x00010000, 2, first_offset, second_offset) + first + second
+    names = _font_names(data)
+    assert ("postscript", "first-regular") in names
+    assert ("postscript", "second-regular") in names
+    with pytest.raises(ValueError, match="face directory"):
+        _font_names(struct.pack(">4sII", b"ttcf", 0x00010000, 0))
 
 
 def test_continuous_profile_rejects_settings_it_cannot_honor():
@@ -362,5 +388,228 @@ async def test_mixed_resolution_and_codec_use_one_continuous_encode(media):
     info = _probe(output, "-show_streams", "-show_chapters")
     assert [stream["codec_name"] for stream in info["streams"] if stream["codec_type"] == "video"] == ["h264"]
     assert next(stream for stream in info["streams"] if stream["codec_type"] == "video")["profile"] == "High"
-    assert [stream["codec_name"] for stream in info["streams"] if stream["codec_type"] == "subtitle"] == ["ass", "ass", "subrip"]
+    assert [stream["codec_name"] for stream in info["streams"] if stream["codec_type"] == "subtitle"] == ["ass", "subrip"]
     assert len(info["chapters"]) == 3
+
+
+def test_ass_named_style_resets_follow_namespaced_styles():
+    first = _ass("First", 22, "&H00FFFFFF").replace("First\n", r"{\rDefault}First" + "\n")
+    second = _ass("Second", 32, "&H0000FFFF")
+    text = join_documents([read_document(first, "ass"), read_document(second, "ass")])
+    assert r"{\rPart1_Default}First" in text
+    assert "Part2_Default,Arial,32" in text
+    with pytest.raises(ValueError, match="rendering settings"):
+        join_documents([read_document(first, "ass"), read_document(second.replace("PlayResX: 640", "PlayResX: 1280"), "ass")])
+
+
+@pytest.mark.parametrize("value", ["NaN", "Infinity", "-Infinity"])
+def test_non_finite_duration_is_rejected(value):
+    with pytest.raises(ValueError, match="non-finite"):
+        _video_span({"streams": [{"codec_type": "video", "duration": value}]})
+
+
+@pytest.mark.asyncio
+async def test_srt_sidecars_join_across_missing_interval_and_keep_languages(media):
+    root, files = media
+    selected = []
+    for index, source in enumerate(files):
+        target = root / f"srt-episode-{index}.mkv"
+        _run("ffmpeg", "-v", "error", "-y", "-i", str(source), "-map", "0:v", "-map", "0:a", "-c", "copy", str(target))
+        selected.append(str(target))
+    sidecars = []
+    for index in (0, 2):
+        for language in ("en", "ja"):
+            sidecar = root / f"srt-episode-{index}.{language}.srt"
+            sidecar.write_text(f"1\n00:00:00,200 --> 00:00:00,800\n{language} part {index}\n", encoding="utf-8")
+            sidecars.append(str(sidecar))
+    listener = _listener()
+    output, error = await merge_copy(listener, selected, str(root / "continuous-srt.mkv"),
+                                     [_probe(path, "-show_streams", "-show_format") for path in selected],
+                                     sidecars=associate_sidecars(selected, sidecars))
+    assert not error
+    info = _probe(output, "-show_streams", "-show_packets")
+    tracks = [stream for stream in info["streams"] if stream["codec_type"] == "subtitle"]
+    assert len(tracks) == 2
+    assert {stream["tags"]["language"] for stream in tracks} == {"eng", "jpn"}
+    for stream in tracks:
+        events = [packet for packet in info["packets"] if packet["stream_index"] == stream["index"]]
+        assert [float(packet["pts_time"]) for packet in events] == pytest.approx([0.2, 3.2], abs=0.08)
+    assert listener.merge_subtitle_count == 2
+
+
+@pytest.mark.asyncio
+async def test_ass_rendering_settings_remain_separate(media):
+    root, files = media
+    alternate = root / "alternate-resolution.ass"
+    alternate.write_text(_ass("Alternate", 32, "&H0000FFFF").replace("PlayResX: 640", "PlayResX: 1280"), encoding="utf-8")
+    second = root / "alternate-header.mkv"
+    _run("ffmpeg", "-v", "error", "-y", "-i", str(files[1]), "-i", str(alternate),
+         "-map", "0:v", "-map", "0:a", "-map", "1:s", "-c", "copy", str(second))
+    selected = [str(files[0]), str(second)]
+    output, error = await merge_copy(_listener(), selected, str(root / "separate-resolution.mkv"),
+                                     [_probe(path, "-show_streams", "-show_format") for path in selected])
+    assert not error
+    assert [s["codec_name"] for s in _probe(output, "-show_streams")["streams"] if s["codec_type"] == "subtitle"] == ["ass", "ass"]
+
+
+@pytest.mark.asyncio
+async def test_video_only_continuous_encode(media):
+    root, files = media
+    selected = []
+    for index, source in enumerate(files[:2]):
+        target = root / f"silent-{index}.mkv"
+        _run("ffmpeg", "-v", "error", "-y", "-i", str(source), "-map", "0:v", "-c", "copy", str(target))
+        selected.append(str(target))
+    output, error = await merge_encode(_listener(), selected, str(root / "silent-encoded.mkv"),
+        [_probe(path, "-show_streams", "-show_format") for path in selected],
+        {"video_codec": "libx264", "audio_codec": "aac", "video_params": {"preset": "ultrafast"}})
+    assert not error
+    assert [s["codec_type"] for s in _probe(output, "-show_streams")["streams"]] == ["video"]
+
+
+def test_srt_incomplete_block_is_a_validation_error():
+    with pytest.raises(ValueError, match="SRT"):
+        read_document("1", "subrip")
+
+
+def test_ass_equal_start_events_keep_original_paint_order():
+    text = _ass("Behind", 22, "&H00FFFFFF")
+    text += "Dialogue: 0,0:00:00.20,0:00:00.40,Default,,0,0,0,,In front\n"
+    result = read_document(join_documents([read_document(text, "ass")]), "ass")
+    assert [event["Text"] for event in result["events"]] == ["Behind", "In front"]
+
+
+@pytest.mark.asyncio
+async def test_joined_ass_renders_identically_to_source_styles(media):
+    root, files = media
+    output, error = await merge_copy(_listener(), list(map(str, files[:2])), str(root / "render-proof.mkv"),
+        [_probe(path, "-show_streams", "-show_format") for path in files[:2]])
+    assert not error
+    chapters = _probe(output, "-show_chapters")["chapters"]
+
+    def rendered_frame(name, time):
+        result = subprocess.run(["ffmpeg", "-v", "error", "-ss", str(time), "-i", name,
+            "-vf", f"subtitles={name}:si=0", "-frames:v", "1", "-an", "-f", "framemd5", "pipe:1"],
+            cwd=root, check=True, capture_output=True)
+        return [line.rsplit(b",", 1)[-1].strip() for line in result.stdout.splitlines()
+                if line and not line.startswith(b"#")]
+
+    for index, source in enumerate(files[:2]):
+        assert rendered_frame(source.name, 0.4) == rendered_frame("render-proof.mkv", float(chapters[index]["start_time"]) + 0.4)
+
+
+def test_video_span_excludes_nonzero_start_from_absolute_end_tags():
+    probe = {"streams": [{"codec_type": "video", "start_time": "10", "tags": {"DURATION": "00:00:12.000"}}]}
+    assert _video_span(probe) == 2
+
+
+@pytest.mark.asyncio
+async def test_real_merge_failure_removes_temporary_files_and_preserves_sources(media, monkeypatch):
+    from bot.helper.ext_utils import merge_media as backend
+    root, files = media
+    original = backend._run
+    hashes = [hashlib.sha256(path.read_bytes()).digest() for path in files[:2]]
+
+    async def fail_append(arguments, listener, **kwargs):
+        if "--generate-chapters" in arguments:
+            return 2, "Injected append failure"
+        return await original(arguments, listener, **kwargs)
+
+    monkeypatch.setattr(backend, "_run", fail_append)
+    target = root / "failed-mux.mkv"
+    output, error = await merge_copy(_listener(), list(map(str, files[:2])), str(target),
+        [_probe(path, "-show_streams", "-show_format") for path in files[:2]])
+    assert output is False
+    assert "Injected append failure" in error
+    assert not target.exists()
+    assert not list(root.glob("merge-*/"))
+    assert hashes == [hashlib.sha256(path.read_bytes()).digest() for path in files[:2]]
+
+
+@pytest.mark.asyncio
+async def test_twenty_part_merge_decodes_all_frames_and_subtitles(media):
+    root, files = media
+    source = str(files[0])
+    probe = _probe(source, "-show_streams", "-show_format")
+    output, error = await merge_copy(_listener(), [source] * 20, str(root / "twenty-parts.mkv"), [probe] * 20)
+    assert not error
+    info = _probe(output, "-show_streams", "-show_chapters", "-show_packets")
+    assert len(info["chapters"]) == 20
+    subtitles = [s for s in info["streams"] if s["codec_type"] == "subtitle"]
+    assert len(subtitles) == 1
+    assert len([p for p in info["packets"] if p["stream_index"] == subtitles[0]["index"]]) == 20
+    frames = _probe(output, "-count_frames", "-select_streams", "v:0", "-show_streams")
+    assert int(frames["streams"][0]["nb_read_frames"]) == 36 * 20
+    _run("ffmpeg", "-v", "error", "-xerror", "-i", output, "-map", "0:v", "-map", "0:a", "-f", "null", "-")
+
+
+@pytest.mark.asyncio
+async def test_encode_preserves_delayed_audio_and_subtitle_origin(media):
+    root, files = media
+    delayed = root / "delayed-audio.mkv"
+    _run("ffmpeg", "-v", "error", "-y", "-i", str(files[0]), "-itsoffset", "0.4", "-i", str(files[0]),
+         "-map", "0:v", "-map", "1:a", "-map", "0:s", "-c", "copy", str(delayed))
+    selected = [str(delayed), str(delayed)]
+    output, error = await merge_encode(_listener(), selected, str(root / "delayed-encoded.mkv"),
+        [_probe(path, "-show_streams", "-show_format") for path in selected],
+        {"video_codec": "libx264", "audio_codec": "aac", "video_params": {"preset": "ultrafast"}})
+    assert not error
+    samples = subprocess.check_output(["ffmpeg", "-v", "error", "-i", output,
+        "-t", "0.2", "-map", "0:a:0", "-f", "f32le", "pipe:1"])
+    values = struct.unpack(f"<{len(samples) // 4}f", samples)
+    assert max(map(abs, values)) < 0.002
+    events = _probe(output, "-show_streams", "-show_packets")
+    subtitle = next(s["index"] for s in events["streams"] if s["codec_type"] == "subtitle")
+    assert [float(p["pts_time"]) for p in events["packets"] if p["stream_index"] == subtitle] == pytest.approx([0.2, 1.7], abs=0.04)
+
+
+@pytest.mark.asyncio
+async def test_encode_retains_dual_audio_languages_titles_and_defaults(media):
+    root, files = media
+    selected = []
+    for index, source in enumerate(files[:2]):
+        target = root / f"dual-{index}.mkv"
+        _run("ffmpeg", "-v", "error", "-y", "-i", str(source), "-map", "0:v", "-map", "0:a", "-map", "0:a", "-map", "0:s", "-c", "copy",
+             "-metadata:s:a:0", "language=eng", "-metadata:s:a:0", "title=English",
+             "-metadata:s:a:1", "language=jpn", "-metadata:s:a:1", "title=Japanese",
+             "-disposition:a:0", "default", "-disposition:a:1", "0", str(target))
+        selected.append(str(target))
+    output, error = await merge_encode(_listener(), selected, str(root / "dual-encoded.mkv"),
+        [_probe(path, "-show_streams", "-show_format") for path in selected],
+        {"video_codec": "libx264", "audio_codec": "aac", "video_params": {"preset": "ultrafast"}})
+    assert not error
+    audio = [s for s in _probe(output, "-show_streams")["streams"] if s["codec_type"] == "audio"]
+    assert [(s["tags"]["language"], s["tags"]["title"], s["disposition"]["default"]) for s in audio] == [
+        ("eng", "English", 1), ("jpn", "Japanese", 0)]
+
+
+@pytest.mark.asyncio
+async def test_task_cancellation_terminates_child_and_returns_clear_error(media, monkeypatch):
+    from bot.helper.ext_utils import merge_media as backend
+    root, files = media
+    running = asyncio.Event()
+    original = backend._run
+
+    async def slow_run(arguments, listener, **kwargs):
+        if "-J" in arguments:
+            running.set()
+            return await original([sys.executable, "-c", "import time; time.sleep(30)"], listener)
+        return await original(arguments, listener, **kwargs)
+
+    monkeypatch.setattr(backend, "_run", slow_run)
+    listener = _listener()
+    target = root / "task-cancelled.mkv"
+    task = asyncio.create_task(merge_copy(listener, list(map(str, files[:2])), str(target),
+        [_probe(path, "-show_streams", "-show_format") for path in files[:2]]))
+    await running.wait()
+    while listener.subproc is None:
+        await asyncio.sleep(0.01)
+    child = listener.subproc
+    task.cancel()
+    output, error = await task
+    assert output is False
+    assert "cancelled" in error.lower()
+    assert listener.is_cancelled
+    assert child.returncode is not None
+    assert listener.subproc is None
+    assert not target.exists()

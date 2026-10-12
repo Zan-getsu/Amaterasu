@@ -2030,7 +2030,7 @@ class TaskConfig:
                     for probe in probes
                 ),
                 subtitle_summary=(
-                    f"{subtitle_count} original subtitle tracks; some cover individual episodes"
+                    f"{subtitle_count} source subtitle tracks. Compatible tracks will be joined across episodes."
                     if subtitle_count else "No subtitle tracks found"
                 ),
             )
@@ -2068,6 +2068,11 @@ class TaskConfig:
             return False
 
         await self.update_merge_plan_status("validating", locked=True)
+        if self.merge_plan_id:
+            await sync_to_async(
+                set_merge_plan_details, self.merge_plan_id,
+                subtitle_summary=getattr(self, "merge_subtitle_summary", ""),
+            )
         return result
 
     async def generate_sample_video(self, dl_path, gid):

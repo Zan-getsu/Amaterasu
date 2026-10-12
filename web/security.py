@@ -113,7 +113,7 @@ def verify_short_token(
     *,
     length: int = 12,
 ) -> bool:
-    if not token or not secret:
+    if not isinstance(token, str) or len(token) != length or not token.isascii() or not secret:
         return False
     expected = make_short_token(secret, purpose, subject, length=length)
     return compare_digest(token, expected)

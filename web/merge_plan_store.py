@@ -179,7 +179,8 @@ def register_source(plan_id, source_id, position, label):
             if len(sources) >= int(data.get("expected_sources", 1)):
                 data["enumeration_complete"] = True
                 data["status"] = "downloading"
-            _write_unlocked(plan_id, data, order_change=changed_order)
+            if not _write_unlocked(plan_id, data, order_change=changed_order):
+                return None
             return data
     except (OSError, TimeoutError):
         return None
@@ -263,11 +264,12 @@ def replace_source_files(plan_id, source_id, files, position=1, ready=False):
             updated[source_slot:source_slot] = remaining
             old_order = [item.get("id") for item in items]
             data["items"] = updated
-            _write_unlocked(
+            if not _write_unlocked(
                 plan_id,
                 data,
                 order_change=old_order != [item["id"] for item in updated],
-            )
+            ):
+                return None
             return data
     except (OSError, TimeoutError):
         return None
@@ -384,7 +386,8 @@ def sync_final_files(plan_id, files):
             data["locked"] = True
             data["frozen_order"] = [item["id"] for item in ordered]
             data.pop("inventory_error", None)
-            _write_unlocked(plan_id, data, order_change=True)
+            if not _write_unlocked(plan_id, data, order_change=True):
+                return None
             return data
     except (OSError, TimeoutError):
         return None
@@ -413,7 +416,8 @@ def update_order(plan_id, order, revision=None):
                 return data, "Include every current item exactly once."
             data["items"] = [by_id[item_id] for item_id in order]
             data["order_saved"] = True
-            _write_unlocked(plan_id, data, order_change=True)
+            if not _write_unlocked(plan_id, data, order_change=True):
+                return None, "Could not save the merge order."
             return data, ""
     except (OSError, TimeoutError, TypeError, ValueError):
         return None, "Could not save the merge order."

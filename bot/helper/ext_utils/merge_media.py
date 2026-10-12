@@ -1,8 +1,4 @@
-"""Matroska merge backend that keeps subtitle tracks independent of A/V append.
-
-The copy route intentionally supports only A/V layouts vetted by the caller.
-Each source subtitle remains an original-format track at its timeline offset.
-"""
+"""Validated Matroska A/V append with continuous, original-format subtitles."""
 
 import asyncio
 import hashlib
@@ -13,9 +9,12 @@ import shutil
 import struct
 import tempfile
 from collections import Counter
+from contextlib import suppress
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from secrets import token_hex
+
+from .merge_subtitles import join_documents, read_document
 
 
 def _mkvmerge_binary():
@@ -34,14 +33,22 @@ def _mkvextract_binary(mkvmerge):
     return str(sibling) if sibling.is_file() else shutil.which("mkvextract")
 
 
-def _font_names(data):
+def _font_names(data, *, offset=0):
     """Read only the SFNT name table needed to detect conflicting font identity."""
-    if data[:4] == b"ttcf":
-        if len(data) < 16:
+    if data[:4] == b"ttcf" and offset == 0:
+        if len(data) < 12:
             raise ValueError("A font attachment has an invalid TTC header.")
-        offset = struct.unpack_from(">I", data, 12)[0]
-    else:
-        offset = 0
+        count = struct.unpack_from(">I", data, 8)[0]
+        directory_end = 12 + count * 4
+        if not 1 <= count <= 256 or directory_end > len(data):
+            raise ValueError("A font attachment has an invalid TTC face directory.")
+        names = set()
+        for index in range(count):
+            face = struct.unpack_from(">I", data, 12 + index * 4)[0]
+            if face < directory_end:
+                raise ValueError("A font attachment has an invalid TTC face offset.")
+            names.update(_font_names(data, offset=face))
+        return names
     if offset + 12 > len(data):
         raise ValueError("A font attachment has an invalid SFNT header.")
     table_count = struct.unpack_from(">H", data, offset + 4)[0]
@@ -121,14 +128,19 @@ async def _run(arguments, listener, *, timeout=12 * 60 * 60):
         # Tools may also emit harmless warnings on stderr while succeeding;
         # returning that warning or truncating a large payload would corrupt
         # otherwise valid JSON or framemd5 output. Bound only error diagnostics.
-        if process.returncode == 0:
+        # MKVToolNix exits 1 on warnings (e.g. regenerated duplicate track UIDs).
+        # The finished artifact still has to pass every preservation check.
+        warning = process.returncode == 1 and Path(str(arguments[0])).stem.casefold() in {"mkvmerge", "mkvextract"}
+        if process.returncode == 0 or warning:
             return 0, stdout.decode(errors="replace").strip()
         diagnostic = (stderr or stdout).decode(errors="replace")[-16000:].strip()
         return process.returncode, diagnostic
     finally:
         if process.returncode is None:
-            process.kill()
-            await process.wait()
+            with suppress(ProcessLookupError):
+                process.kill()
+        if not communication.done():
+            await communication
         if listener.subproc is process:
             listener.subproc = None
 
@@ -160,7 +172,10 @@ def _av_identity(layout):
 
 def _chapter_timestamp(value):
     try:
-        return Decimal(str(value))
+        result = Decimal(str(value))
+        if not result.is_finite():
+            raise ValueError("The A/V timeline has a non-finite timestamp.")
+        return result
     except (InvalidOperation, TypeError) as error:
         raise ValueError("The A/V timeline has an invalid chapter timestamp.") from error
 
@@ -187,16 +202,26 @@ def _video_span(probe):
     if video is None:
         raise ValueError("A selected item has no playable video stream.")
     value = video.get("duration")
+    absolute_end = value is None
     if value is None and (video.get("tags") or {}).get("DURATION"):
         clock = str(video["tags"]["DURATION"]).split(":")
         if len(clock) == 3:
-            value = sum(Decimal(part) * scale for part, scale in zip(clock, (3600, 60, 1), strict=True))
+            value = sum(_chapter_timestamp(part) * scale for part, scale in zip(clock, (3600, 60, 1), strict=True))
     if value is None:
         value = (probe.get("format") or {}).get("duration")
     duration = _chapter_timestamp(value)
+    if absolute_end:
+        duration -= _video_origin(probe)
     if duration <= 0:
         raise ValueError("A selected item has no finite video duration.")
     return duration
+
+
+def _video_origin(probe):
+    video = next((stream for stream in probe.get("streams") or []
+                  if stream.get("codec_type") == "video"
+                  and not (stream.get("disposition") or {}).get("attached_pic")), {})
+    return _chapter_timestamp(video.get("start_time") or 0)
 
 
 def _check_selected_streams(probes):
@@ -245,7 +270,8 @@ def _sidecar_tags(video, sidecar):
     suffix = Path(sidecar).stem[len(Path(video).stem) + 1:].casefold()
     language = re.match(r"([a-z]{2,3}(?:-[a-z]{2,4})?)(?:[._-]|$)", suffix)
     roles = set(re.split(r"[._-]", suffix))
-    return language.group(1) if language else None, "forced" in roles, bool(roles & {"sdh", "cc", "hi"})
+    return (language.group(1) if language and language.group(1) not in {"sdh", "cc", "hi"}
+            else None), "forced" in roles, bool(roles & {"sdh", "cc", "hi"})
 
 
 def validate_merge_encode_profile(profile):
@@ -455,6 +481,11 @@ async def _validate_subtitles(inputs, candidate, listener):
             result_pts = _chapter_timestamp(result_packet.get("pts_time"))
             if abs(result_pts - source_pts - offset) > Decimal("0.003"):
                 raise ValueError(f"Subtitle event timing changed for item {item_number}.")
+            if source_packet.get("duration_time") is not None:
+                before_duration = _chapter_timestamp(source_packet["duration_time"])
+                after_duration = _chapter_timestamp(result_packet.get("duration_time"))
+                if abs(before_duration - after_duration) > Decimal("0.003"):
+                    raise ValueError(f"Subtitle event duration changed for item {item_number}.")
 
 
 async def _validate_playback(candidate, duration, has_audio, listener):
@@ -475,6 +506,126 @@ async def _validate_playback(candidate, duration, has_audio, listener):
             raise ValueError(
                 f"The merged output could not decode video/audio near {point:.2f}s."
             )
+
+
+async def _join_subtitle_tracks(executable, candidate, working, listener):
+    """Combine compatible text lanes; preserve bitmap and incompatible lanes."""
+    identity = await _json_command([executable, "-J", candidate], listener)
+    evidence = await _subtitle_evidence(candidate, listener)
+    tracks = _tracks(identity, "subtitles")
+    groups = []
+    packets = _packets_by_stream(evidence)
+    extraction = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin", "-y", "-copyts", "-i", candidate]
+    text_paths = {}
+    for index, stream in enumerate(evidence.get("streams") or []):
+        codec = stream.get("codec_name")
+        if codec in {"ass", "subrip"} and packets.get(stream["index"]):
+            text_paths[index] = os.path.join(working, f"text-{index}.{'ass' if codec == 'ass' else 'srt'}")
+            extraction += ["-map", f"0:{stream['index']}", "-c:s", "copy", text_paths[index]]
+    if text_paths:
+        code, diagnostic = await _run(extraction, listener)
+        if code:
+            raise ValueError(f"Subtitle extraction failed: {diagnostic or code}")
+    for index, (track, stream) in enumerate(zip(tracks, evidence.get("streams") or [], strict=True)):
+        properties = track.get("properties") or {}
+        title = re.sub(r"^Episode \d+ - ", "", properties.get("track_name") or "")
+        item_number = re.match(r"Episode (\d+)", properties.get("track_name") or "")
+        item_number = int(item_number[1]) if item_number else index
+        codec = stream.get("codec_name")
+        document = None
+        if index in text_paths:
+            try:
+                document = read_document(Path(text_paths[index]).read_text(encoding="utf-8-sig"), codec)
+                if codec == "ass":
+                    join_documents([document])
+            except ValueError:
+                # Preserve unusual ASS sections/layouts as their original track.
+                document = None
+            if document is not None and len(document["events"]) != len(packets.get(stream["index"], [])):
+                raise ValueError("Subtitle extraction changed the number of events.")
+        role = tuple(properties.get(key) for key in (
+            "language", "language_ietf", "forced_track", "hearing_impaired",
+            "visual_impaired", "text_descriptions", "original", "commentary",
+        ))
+        key = (codec, role, title, document["key"] if document else index)
+        group = next((group for group in groups if group["key"] == key
+                      and item_number not in group["items"]), None) if document else None
+        if group is None:
+            group = {"key": key, "tracks": [], "documents": [], "items": set(),
+                     "properties": properties, "title": title, "codec": codec}
+            groups.append(group)
+        group["tracks"].append((track, stream))
+        group["items"].add(item_number)
+        if document:
+            group["documents"].append(document)
+    if not any(len(group["tracks"]) > 1 for group in groups):
+        return candidate, len(tracks), len(tracks)
+
+    if shutil.disk_usage(working).free < os.path.getsize(candidate) + 64 * 1024**2:
+        raise ValueError("Not enough free disk space to assemble continuous subtitle tracks.")
+
+    result = os.path.join(working, "continuous-subtitles.mkv")
+    command = [executable, "--quiet", "-o", result, "--no-subtitles", candidate]
+    validation_inputs = []
+    independent = 0
+    for index, group in enumerate(groups):
+        target = os.path.join(working, f"lane-{index}.mkv")
+        if len(group["tracks"]) > 1:
+            text = join_documents(group["documents"])
+            text_path = os.path.join(working, f"lane-{index}.{'ass' if group['codec'] == 'ass' else 'srt'}")
+            Path(text_path).write_text(text, encoding="utf-8")
+            code, diagnostic = await _run(
+                ["ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin", "-y",
+                 "-i", text_path, "-map", "0:s", "-c:s", "copy", target], listener,
+            )
+            if code:
+                raise ValueError(f"Continuous subtitle mux failed: {diagnostic or code}")
+            checked = os.path.join(working, f"checked-{index}.{Path(text_path).suffix.lstrip('.')}")
+            code, diagnostic = await _run(
+                ["ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin", "-y", "-copyts",
+                 "-i", target, "-map", "0:s", "-c:s", "copy", checked], listener,
+            )
+            if code or read_document(Path(checked).read_text(encoding="utf-8-sig"), group["codec"]) != read_document(text, group["codec"]):
+                raise ValueError("Continuous subtitle mux changed events, timing or ASS styles.")
+        else:
+            independent += 1
+            track, stream = group["tracks"][0]
+            code, diagnostic = await _run(
+                [executable, "--quiet", "-o", target, "--no-video", "--no-audio",
+                 "--no-attachments", "--no-chapters", "--no-global-tags",
+                 "--subtitle-tracks", str(track["id"]), candidate], listener,
+            )
+            if code:
+                raise ValueError(f"Independent subtitle mux failed: {diagnostic or code}")
+            before = dict(evidence, streams=[stream], packets=packets.get(stream["index"], []))
+            after = await _subtitle_evidence(target, listener)
+            original = before["packets"]
+            remuxed = after.get("packets") or []
+            if [(p.get("data_hash"), p.get("pts_time"), p.get("duration_time")) for p in original] != [
+                (p.get("data_hash"), p.get("pts_time"), p.get("duration_time")) for p in remuxed
+            ] or stream.get("extradata_hash") != after["streams"][0].get("extradata_hash"):
+                raise ValueError("An independent subtitle track changed during muxing.")
+        prepared = await _json_command([executable, "-J", target], listener)
+        track_id = _tracks(prepared, "subtitles")[0]["id"]
+        command += ["--no-video", "--no-audio", "--no-attachments", "--no-chapters", "--no-global-tags"]
+        properties = group["properties"]
+        command += ["--language", f"{track_id}:{properties.get('language_ietf') or properties.get('language') or 'und'}",
+                    "--track-name", f"{track_id}:{group['title']}" if len(group["tracks"]) > 1 else f"{track_id}:{properties.get('track_name') or group['title']}",
+                    "--default-track-flag", f"{track_id}:{'yes' if index == 0 else 'no'}"]
+        for property_, option in (("forced_track", "--forced-display-flag"),
+                                  ("hearing_impaired", "--hearing-impaired-flag"),
+                                  ("visual_impaired", "--visual-impaired-flag"),
+                                  ("text_descriptions", "--text-descriptions-flag"),
+                                  ("original", "--original-flag"), ("commentary", "--commentary-flag")):
+            if properties.get(property_) is not None:
+                command += [option, f"{track_id}:{'yes' if properties[property_] else 'no'}"]
+        command.append(target)
+        validation_inputs.append((target, Decimal(0), index + 1))
+    code, diagnostic = await _run(command, listener)
+    if code:
+        raise ValueError(f"Continuous subtitle assembly failed: {diagnostic or code}")
+    await _validate_subtitles(validation_inputs, result, listener)
+    return result, len(groups), independent
 
 
 async def merge_copy(
@@ -565,12 +716,13 @@ async def merge_copy(
                         command.append("--no-attachments")
                     if subtitles:
                         command += ["--subtitle-tracks", ",".join(str(track["id"]) for track in subtitles)]
-                        subtitle_inputs.append((file_, starts[index] - _origin(probe), index + 1))
+                        origin = _video_origin(probe) if av_override else _origin(probe)
+                        subtitle_inputs.append((file_, starts[index] - origin, index + 1))
                     else:
                         command.append("--no-subtitles")
                     for track in subtitles:
                         track_id = track["id"]
-                        offset_ms = int(((starts[index] - _origin(probe)) * 1000).to_integral_value())
+                        offset_ms = int(((starts[index] - origin) * 1000).to_integral_value())
                         command += ["--sync", f"{track_id}:{offset_ms}"]
                         original_title = (track.get("properties") or {}).get("track_name")
                         label = f"Episode {index + 1:02d} - {original_title or track.get('codec', 'subtitle')}"
@@ -597,7 +749,9 @@ async def merge_copy(
                             command += ["--forced-display-flag", f"{track_id}:yes"]
                         if hearing_impaired:
                             command += ["--hearing-impaired-flag", f"{track_id}:yes"]
-                        command += ["--track-name", f"{track_id}:Episode {index + 1:02d} - {Path(sidecar).name}"]
+                        signs = 'signs' in re.split(r"[._-]", Path(sidecar).stem[len(Path(file_).stem):].casefold())
+                        label = f"{track.get('codec', 'subtitles')}{' signs' if signs else ''}"
+                        command += ["--track-name", f"{track_id}:Episode {index + 1:02d} - {label}"]
                         command += ["--default-track-flag", f"{track_id}:{'yes' if subtitle_count == 0 else 'no'}"]
                         subtitle_count += 1
                     command.append(prepared)
@@ -605,6 +759,12 @@ async def merge_copy(
             code, diagnostic = await _run(command, listener)
             if code:
                 raise ValueError(f"Final Matroska assembly failed: {diagnostic or f'exit {code}'}")
+            await _validate_subtitles(subtitle_inputs, candidate, listener)
+            if not av_override:
+                os.remove(av_file)
+            candidate, subtitle_count, independent_count = await _join_subtitle_tracks(
+                executable, candidate, working, listener
+            )
             final_probe = await _json_command(
                 ["ffprobe", "-v", "error", "-show_streams", "-show_chapters", "-show_format", "-show_data_hash", "sha256", "-of", "json", candidate],
                 listener,
@@ -635,7 +795,6 @@ async def merge_copy(
                 for field in ("codec_name", "width", "height", "sample_rate", "channels", "extradata_hash"):
                     if original.get(field) is not None and original.get(field) != merged.get(field):
                         raise ValueError(f"The merged A/V track changed {field}.")
-            await _validate_subtitles(subtitle_inputs, candidate, listener)
             await _validate_attachments(
                 executable, candidate, expected_attachments, working, listener
             )
@@ -648,8 +807,16 @@ async def merge_copy(
             # hard link atomically refuses to replace an unrelated output.
             os.link(candidate, output_file)
             listener.merge_subtitle_count = subtitle_count
+            listener.merge_subtitle_summary = (
+                f"{subtitle_count} selectable subtitle tracks. Compatible tracks continue across episodes. "
+                f"{independent_count} tracks cover individual parts or use separate formats/settings."
+                if subtitle_count else "No subtitle tracks found."
+            )
             return output_file, ""
-    except (OSError, ValueError, asyncio.CancelledError) as error:
+    except asyncio.CancelledError:
+        listener.is_cancelled = True
+        return False, "Merge was cancelled."
+    except (OSError, ValueError, InvalidOperation) as error:
         return False, str(error)
 
 
@@ -672,8 +839,8 @@ async def merge_encode(listener, files, output_file, probes, profile, *, sidecar
             videos = [stream for stream in probe.get("streams") or []
                       if stream.get("codec_type") == "video" and not (stream.get("disposition") or {}).get("attached_pic")]
             audios = [stream for stream in probe.get("streams") or [] if stream.get("codec_type") == "audio"]
-            if len(videos) != 1 or not audios:
-                raise ValueError("Continuous merge encoding requires one video stream and at least one audio stream per item.")
+            if len(videos) != 1:
+                raise ValueError("Continuous merge encoding requires one video stream per item.")
             video_tracks.append(videos[0])
             audio_tracks.append(audios)
         audio_count = len(audio_tracks[0])
@@ -700,16 +867,16 @@ async def merge_encode(listener, files, output_file, probes, profile, *, sidecar
         if not (16 <= width <= 7680 and 16 <= height <= 4320 and width % 2 == height % 2 == 0):
             raise ValueError("The merge encode profile has invalid output dimensions.")
         channels = audio_params.get("channels")
-        if channels is None:
+        if channels is None and audio_count:
             channel_counts = {int(track.get("channels") or 0) for tracks in audio_tracks for track in tracks}
             if len(channel_counts) != 1:
                 raise ValueError("Audio channel layouts differ; select an explicit encoded channel count.")
             channels = channel_counts.pop()
-        channels = int(channels)
+        channels = int(channels or 2)
         layout = {1: "mono", 2: "stereo", 6: "5.1"}.get(channels)
         if layout is None:
             raise ValueError("The selected encoded channel layout is unsupported for a continuous merge.")
-        sample_rate = int(audio_params.get("sample_rate") or audio_tracks[0][0].get("sample_rate") or 0)
+        sample_rate = int(audio_params.get("sample_rate") or (audio_tracks[0][0].get("sample_rate") if audio_count else 48000) or 0)
         if not 8000 <= sample_rate <= 192000:
             raise ValueError("The selected encoded audio sample rate is invalid.")
         spans = [_video_span(probe) for probe in probes]
@@ -722,6 +889,7 @@ async def merge_encode(listener, files, output_file, probes, profile, *, sidecar
             joined = []
             for index, (span, tracks) in enumerate(zip(spans, audio_tracks, strict=True)):
                 duration = format(span, "f")
+                origin = format(_video_origin(probes[index]), "f")
                 video_chain = (
                     f"[{index}:{video_tracks[index]['index']}]trim=duration={duration},setpts=PTS-STARTPTS,"
                     f"scale={width}:{height}:force_original_aspect_ratio=decrease,"
@@ -731,15 +899,15 @@ async def merge_encode(listener, files, output_file, probes, profile, *, sidecar
                 joined.append(f"[v{index}]")
                 for audio_index, _ in enumerate(tracks):
                     filters.append(
-                        f"[{index}:a:{audio_index}]atrim=duration={duration},"
-                        f"asetpts=PTS-STARTPTS,aresample={sample_rate},"
+                        f"[{index}:a:{audio_index}]asetpts=PTS-({origin})/TB,"
+                        f"aresample={sample_rate}:async=1:first_pts=0,"
                         f"aformat=channel_layouts={layout},apad=pad_dur={duration},"
                         f"atrim=duration={duration}[a{index}_{audio_index}]"
                     )
                     joined.append(f"[a{index}_{audio_index}]")
             outputs = "[v]" + "".join(f"[a{index}]" for index in range(audio_count))
             filters.append("".join(joined) + f"concat=n={len(files)}:v=1:a={audio_count}{outputs}")
-            command = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin", "-y"]
+            command = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin", "-y", "-copyts"]
             for file_ in files:
                 command += ["-i", file_]
             command += ["-filter_complex", ";".join(filters), "-map", "[v]"]
@@ -748,6 +916,13 @@ async def merge_encode(listener, files, output_file, probes, profile, *, sidecar
             command += ["-map_metadata", "-1", "-map_chapters", "-1",
                         "-c:v", video_codec, "-pix_fmt", pixel_format,
                         "-c:a", audio_codec]
+            for index, stream in enumerate(audio_tracks[0]):
+                for key in ("language", "title"):
+                    value = (stream.get("tags") or {}).get(key)
+                    if value:
+                        command += [f"-metadata:s:a:{index}", f"{key}={value}"]
+                flags = "+".join(key for key, value in (stream.get("disposition") or {}).items() if value)
+                command += [f"-disposition:a:{index}", flags or "0"]
             if video_codec == "mpeg4":
                 command += ["-q:v", str(max(1, min(31, round(float(video_params.get("crf", 24)) / 6))))]
             else:
@@ -774,5 +949,8 @@ async def merge_encode(listener, files, output_file, probes, profile, *, sidecar
                 av_override=av_file, starts_override=starts,
             )
             return result, error
-    except (OSError, ValueError, InvalidOperation, asyncio.CancelledError) as error:
+    except asyncio.CancelledError:
+        listener.is_cancelled = True
+        return False, "Merge was cancelled."
+    except (OSError, ValueError, InvalidOperation) as error:
         return False, str(error)

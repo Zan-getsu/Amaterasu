@@ -1051,7 +1051,7 @@ class TaskListener(TaskConfig):
                 if getattr(self, "merge_subtitle_count", 0):
                     msg += _premium_row(
                         "Subtitles",
-                        "Original tracks preserved; switch tracks at episode chapters if needed.",
+                        getattr(self, "merge_subtitle_summary", "Subtitle tracks preserved."),
                         code=False,
                     )
             else:
