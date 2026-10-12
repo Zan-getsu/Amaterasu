@@ -1,6 +1,7 @@
 import ast
 import asyncio
 import gc
+import os
 import warnings
 from contextlib import asynccontextmanager
 from importlib import import_module
@@ -34,6 +35,7 @@ from bot.core.tg_client import (
     _configure_wzgram_media_pool,
     _configure_wzgram_upload_module,
     _WzgramAsyncioProxy,
+    _WzgramUploadPacer,
     _WzgramUploadQueue,
     is_wzgram_media_session_failure,
 )
@@ -415,6 +417,7 @@ async def test_native_simultaneous_uploads_recover_without_losing_parts(monkeypa
     clock = [100.0]
     accepted = []
     flooded = []
+    pool_sizes = []
 
     async def pause(delay):
         clock[0] += delay
@@ -434,6 +437,8 @@ async def test_native_simultaneous_uploads_recover_without_losing_parts(monkeypa
         return True
 
     monkeypatch.setenv("WZGRAM_UPLOAD_RATE_BOT", "1000")
+    monkeypatch.delenv("WZGRAM_UPLOAD_POOL_BOT", raising=False)
+    _configure_wzgram_upload_module(save_file)
     monkeypatch.setattr(tg_client, "monotonic", lambda: clock[0])
     monkeypatch.setattr(tg_client, "sleep", pause)
     monkeypatch.setattr(save_file, "asyncio", AsyncioProxy())
@@ -451,6 +456,7 @@ async def test_native_simultaneous_uploads_recover_without_losing_parts(monkeypa
 
     @asynccontextmanager
     async def media_pool(_dc_id, _pool_size):
+        pool_sizes.append(_pool_size)
         async def ready():
             return _configure_wzgram_media_pool(sessions)
 
@@ -472,6 +478,7 @@ async def test_native_simultaneous_uploads_recover_without_losing_parts(monkeypa
         (file_id, part) for file_id in [123, 456] for part in range(24)
     }
     assert all(when >= 102 for when, _, _ in accepted)
+    assert pool_sizes == [4, 4]
 
 
 async def test_upload_cooldown_is_separate_for_other_accounts():
@@ -483,6 +490,60 @@ async def test_upload_cooldown_is_separate_for_other_accounts():
 
     assert await sessions[1].invoke(part) is True
     assert sessions[0]._amaterasu_upload_pacer is not sessions[1]._amaterasu_upload_pacer
+
+
+@pytest.mark.parametrize("is_bot", [True, False])
+def test_nonpremium_upload_rate_does_not_grow_beyond_configured_rate(monkeypatch, is_bot):
+    monkeypatch.setenv("WZGRAM_UPLOAD_RATE_BOT", "32")
+    monkeypatch.setenv("WZGRAM_UPLOAD_RATE_USER", "32")
+    pacer = _WzgramUploadPacer(SimpleNamespace(me=SimpleNamespace(is_bot=is_bot, is_premium=False)))
+
+    for _ in range(100):
+        pacer.bucket._last_up = 0
+        pacer.bucket.on_success()
+
+    assert pacer.bucket.rate == 32
+
+
+async def test_bot_upload_requests_have_bounded_concurrency(monkeypatch):
+    monkeypatch.setenv("WZGRAM_UPLOAD_RATE_BOT", "1000")
+    monkeypatch.delenv("WZGRAM_UPLOAD_POOL_BOT", raising=False)
+    pacer = _WzgramUploadPacer(SimpleNamespace(me=SimpleNamespace(is_bot=True)))
+    pacer.bucket.acquire = AsyncMock()
+    release = asyncio.Event()
+    active = 0
+    peak = 0
+
+    async def send_part(_query):
+        nonlocal active, peak
+        active += 1
+        peak = max(peak, active)
+        try:
+            await release.wait()
+            return True
+        finally:
+            active -= 1
+
+    part = pyrogram.raw.functions.upload.SaveFilePart(file_id=123, file_part=0, bytes=b"part")
+    tasks = [asyncio.create_task(pacer.invoke(send_part, part)) for _ in range(8)]
+    try:
+        await asyncio.sleep(0)
+        assert active == 4
+    finally:
+        release.set()
+        await asyncio.gather(*tasks)
+    assert peak == 4
+
+
+@pytest.mark.parametrize("pool_setting,expected", [(None, "4"), ("2", "2"), ("8", "8")])
+def test_native_bot_upload_pool_default_preserves_explicit_settings(monkeypatch, pool_setting, expected):
+    if pool_setting is None:
+        monkeypatch.delenv("WZGRAM_UPLOAD_POOL_BOT", raising=False)
+    else:
+        monkeypatch.setenv("WZGRAM_UPLOAD_POOL_BOT", pool_setting)
+    _configure_wzgram_upload_module(save_file)
+
+    assert os.environ["WZGRAM_UPLOAD_POOL_BOT"] == expected
 
 
 async def test_wzgram_upload_queue_unblocks_when_every_consumer_has_failed():

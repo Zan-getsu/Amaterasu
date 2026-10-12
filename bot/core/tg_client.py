@@ -1,11 +1,11 @@
 import asyncio as _asyncio
 from ast import literal_eval
-from asyncio import CancelledError, Lock, gather, get_running_loop, sleep, wait_for
+from asyncio import CancelledError, Lock, Semaphore, gather, get_running_loop, sleep, wait_for
 from functools import partial
 from hashlib import sha256
 from importlib import import_module
 from inspect import signature
-from os import getenv
+from os import environ, getenv
 from time import monotonic
 
 from pyrogram import Client, enums
@@ -122,11 +122,17 @@ class _WzgramUploadPacer:
         me = getattr(client, "me", None)
         if getattr(me, "is_bot", False):
             rate = int(getenv("WZGRAM_UPLOAD_RATE_BOT", "32"))
+            in_flight = int(getenv("WZGRAM_UPLOAD_POOL_BOT", "4"))
         elif getattr(me, "is_premium", False):
             rate = int(getenv("WZGRAM_UPLOAD_RATE_PREMIUM", "300"))
+            in_flight = 2 * int(getenv("WZGRAM_UPLOAD_POOL_PREMIUM", "14"))
         else:
             rate = int(getenv("WZGRAM_UPLOAD_RATE_USER", "32"))
-        self.bucket = AdaptiveBucket(rate=rate, ceiling=max(rate, 300), burst=1, step=1.0)
+            in_flight = 2 * int(getenv("WZGRAM_UPLOAD_POOL_USER", "12"))
+        premium = not getattr(me, "is_bot", False) and getattr(me, "is_premium", False)
+        ceiling = max(rate, 300) if premium else rate
+        self.bucket = AdaptiveBucket(rate=rate, ceiling=ceiling, burst=1, step=1.0)
+        self.in_flight = Semaphore(max(1, in_flight))
         self.lock = Lock()
         self.flood_until = 0.0
 
@@ -134,27 +140,28 @@ class _WzgramUploadPacer:
         if _query_name(query).split(".")[-1] not in {"SaveFilePart", "SaveBigFilePart"}:
             return await operation(query, *args, **kwargs)
 
-        async with self.lock:
-            while True:
-                delay = self.flood_until - monotonic()
-                if delay > 0:
-                    await sleep(delay)
-                    continue
-                await self.bucket.acquire()
-                # Another in-flight RPC can extend the cooldown while admission waits.
-                if self.flood_until <= monotonic():
-                    break
-        try:
-            result = await operation(query, *args, **kwargs)
-        except (FloodWait, FloodPremiumWait) as error:
-            self.flood_until = max(
-                self.flood_until, monotonic() + max(float(error.value), 1.0) + 1.0
-            )
-            self.bucket.on_flood()
-            raise
-        if result:
-            self.bucket.on_success()
-        return result
+        async with self.in_flight:
+            async with self.lock:
+                while True:
+                    delay = self.flood_until - monotonic()
+                    if delay > 0:
+                        await sleep(delay)
+                        continue
+                    await self.bucket.acquire()
+                    # Another in-flight RPC can extend the cooldown while admission waits.
+                    if self.flood_until <= monotonic():
+                        break
+            try:
+                result = await operation(query, *args, **kwargs)
+            except (FloodWait, FloodPremiumWait) as error:
+                self.flood_until = max(
+                    self.flood_until, monotonic() + max(float(error.value), 1.0) + 1.0
+                )
+                self.bucket.on_flood()
+                raise
+            if result:
+                self.bucket.on_success()
+            return result
 
 
 def _configure_wzgram_media_pool(pool):
@@ -511,6 +518,8 @@ async def _get_stable_media_session_pool(client, dc_id, requested_size):
 
 def _configure_wzgram_upload_module(save_file_module):
     """Bound retries and install cleanup compatibility only when needed."""
+    # Use WZGram's upload-only setting so download pools retain their native sizing.
+    environ.setdefault("WZGRAM_UPLOAD_POOL_BOT", "4")
     save_file_module.MAX_RETRIES = min(
         int(getattr(save_file_module, "MAX_RETRIES", WZGRAM_UPLOAD_PART_ATTEMPTS)),
         WZGRAM_UPLOAD_PART_ATTEMPTS,
