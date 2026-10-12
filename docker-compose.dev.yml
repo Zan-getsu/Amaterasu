@@ -4,7 +4,7 @@ services:
       context: .
       dockerfile: Dockerfile
       args:
-        BASE_IMAGE: nbots/amaterasu:v1
+        BASE_IMAGE: docker.io/nbots/amaterasu:v1
     image: amaterasu:local
     pull_policy: never
     container_name: amaterasu-bot

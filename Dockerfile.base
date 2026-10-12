@@ -21,7 +21,7 @@
 #  Or native (faster, no QEMU):
 #    docker build -f Dockerfile.base -t amaterasu-base:latest .
 # =============================================================================
-FROM --platform=$TARGETPLATFORM python:3.11-slim-bookworm AS base
+FROM --platform=$TARGETPLATFORM docker.io/library/python:3.11-slim-bookworm AS base
 
 ARG TARGETPLATFORM
 ARG TARGETARCH

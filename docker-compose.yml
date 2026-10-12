@@ -1,6 +1,6 @@
 services:
   amaterasu:
-    image: nbots/amaterasu:latest
+    image: docker.io/nbots/amaterasu:latest
     pull_policy: always
     container_name: amaterasu-bot
     restart: always
