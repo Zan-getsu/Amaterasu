@@ -438,7 +438,7 @@ async def test_srt_sidecars_join_across_missing_interval_and_keep_languages(medi
 
 
 @pytest.mark.asyncio
-async def test_ass_rendering_settings_remain_separate(media):
+async def test_incompatible_ass_settings_stop_instead_of_separate_episode_tracks(media):
     root, files = media
     alternate = root / "alternate-resolution.ass"
     alternate.write_text(_ass("Alternate", 32, "&H0000FFFF").replace("PlayResX: 640", "PlayResX: 1280"), encoding="utf-8")
@@ -448,8 +448,10 @@ async def test_ass_rendering_settings_remain_separate(media):
     selected = [str(files[0]), str(second)]
     output, error = await merge_copy(_listener(), selected, str(root / "separate-resolution.mkv"),
                                      [_probe(path, "-show_streams", "-show_format") for path in selected])
-    assert not error
-    assert [s["codec_name"] for s in _probe(output, "-show_streams")["streams"] if s["codec_type"] == "subtitle"] == ["ass", "ass"]
+    assert output is False
+    assert "one continuous" in error
+    assert "playresx" in error
+    assert not (root / "separate-resolution.mkv").exists()
 
 
 @pytest.mark.asyncio
@@ -488,14 +490,95 @@ async def test_joined_ass_renders_identically_to_source_styles(media):
     chapters = _probe(output, "-show_chapters")["chapters"]
 
     def rendered_frame(name, time):
-        result = subprocess.run(["ffmpeg", "-v", "error", "-ss", str(time), "-i", name,
-            "-vf", f"subtitles={name}:si=0", "-frames:v", "1", "-an", "-f", "framemd5", "pipe:1"],
+        result = subprocess.run(["ffmpeg", "-v", "error", "-i", name,
+            "-vf", f"subtitles={name}:si=0", "-ss", str(time), "-frames:v", "1", "-an", "-f", "framemd5", "pipe:1"],
             cwd=root, check=True, capture_output=True)
         return [line.rsplit(b",", 1)[-1].strip() for line in result.stdout.splitlines()
                 if line and not line.startswith(b"#")]
 
     for index, source in enumerate(files[:2]):
         assert rendered_frame(source.name, 0.4) == rendered_frame("render-proof.mkv", float(chapters[index]["start_time"]) + 0.4)
+    bare = subprocess.check_output(["ffmpeg", "-v", "error", "-i", str(files[0]), "-ss", "0.4",
+                                   "-frames:v", "1", "-an", "-f", "framemd5", "pipe:1"])
+    bare_hash = [line.rsplit(b",", 1)[-1].strip() for line in bare.splitlines() if line and not line.startswith(b"#")]
+    assert rendered_frame(files[0].name, 0.4) != bare_hash
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("episode_titles", [False, True])
+async def test_three_english_ass_episodes_with_editor_metadata_join_into_one_track(media, episode_titles):
+    root, files = media
+    selected = []
+    for index, source in enumerate((files[0], files[1], files[0]), 1):
+        ass = root / f"episode-header-{index}.ass"
+        text = _ass(f"Episode {index}", 18 + index * 3, "&H00FFFFFF")
+        text = text.replace("ScriptType:", f"Episode: {index}\nScriptType:")
+        if index != 1:
+            text = text.replace("[V4+ Styles]", "WrapStyle: 0\nKerning: no\nCollisions: Normal\n[Aegisub Project Garbage]\nLast Style Storage: Episode " + str(index) + "\n[V4+ Styles]")
+        ass.write_text(text, encoding="utf-8")
+        target = root / f"english-episode-{index}.mkv"
+        _run("ffmpeg", "-v", "error", "-y", "-i", str(source), "-i", str(ass),
+             "-map", "0:v", "-map", "0:a", "-map", "1:s", "-c", "copy",
+             "-metadata:s:s:0", "language=eng", "-metadata:s:s:0",
+             f"title={'English - Episode ' + str(index) if episode_titles else 'English'}", str(target))
+        selected.append(str(target))
+    output, error = await merge_copy(_listener(), selected, str(root / f"three-english-episodes-{episode_titles}.mkv"),
+        [_probe(path, "-show_streams", "-show_format") for path in selected])
+    assert not error
+    info = _probe(output, "-show_streams", "-show_packets", "-show_chapters")
+    tracks = [s for s in info["streams"] if s["codec_type"] == "subtitle"]
+    assert len(tracks) == 1
+    assert tracks[0]["codec_name"] == "ass"
+    assert tracks[0]["tags"]["language"] == "eng"
+    assert len(info["chapters"]) == 3
+    events = [p for p in info["packets"] if p["stream_index"] == tracks[0]["index"]]
+    assert [float(p["pts_time"]) for p in events] == pytest.approx([0.2, 1.7, 3.2], abs=0.08)
+
+
+def test_ass_case_insensitive_style_references_join_correctly():
+    text = _ass("Dialogue", 22, "&H00FFFFFF").replace(".80,Default", ".80,default")
+    text = text.replace(",,Dialogue", r",,{\rDEFAULT}Dialogue")
+    joined = join_documents([read_document(text, "ass")])
+    assert "Part1_Default" in joined
+    assert r"{\rPart1_Default}Dialogue" in joined
+    assert "PlayResX: 640" in joined
+    assert "PlayResY: 360" in joined
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("forced_signs", [False, True])
+async def test_default_dialogue_track_is_continuous_when_signs_order_changes(media, forced_signs):
+    root, files = media
+    selected = []
+    for index, source in enumerate(files[:2]):
+        target = root / f"signs-dialogue-{forced_signs}-{index}.mkv"
+        signs = root / f"signs-{index}.ass"
+        signs.write_text(_ass(f"Signs {index}", 22, "&H00FFFFFF"), encoding="utf-8")
+        dialogue_index = 1 - index
+        signs_index = index
+        subtitle_maps = ("1:s", "0:s") if index == 0 else ("0:s", "1:s")
+        _run("ffmpeg", "-v", "error", "-y", "-i", str(source), "-i", str(signs),
+             "-map", "0:v", "-map", "0:a", "-map", subtitle_maps[0], "-map", subtitle_maps[1], "-c", "copy",
+             "-metadata:s:s:0", "language=eng", "-metadata:s:s:1", "language=eng",
+             f"-metadata:s:s:{signs_index}", "title=Signs",
+             f"-metadata:s:s:{dialogue_index}", "title=English Dialogue",
+             f"-disposition:s:{signs_index}", "forced" if forced_signs else "0",
+             f"-disposition:s:{dialogue_index}", "default", str(target))
+        selected.append(str(target))
+    output, error = await merge_copy(_listener(), selected, str(root / f"default-dialogue-{forced_signs}.mkv"),
+        [_probe(path, "-show_streams", "-show_format") for path in selected])
+    assert not error
+    info = _probe(output, "-show_streams", "-show_packets")
+    tracks = [s for s in info["streams"] if s["codec_type"] == "subtitle"]
+    assert len(tracks) == 2
+    default = [s for s in tracks if s["disposition"]["default"]]
+    assert len(default) == 1
+    assert not default[0]["disposition"]["forced"]
+    assert default[0]["tags"]["title"] == "English Dialogue"
+    assert len([p for p in info["packets"] if p["stream_index"] == default[0]["index"]]) == 2
+    text = subprocess.check_output(["ffmpeg", "-v", "error", "-i", output,
+                                   "-map", f"0:{default[0]['index']}", "-c:s", "copy", "-f", "ass", "pipe:1"])
+    assert [event["Text"] for event in read_document(text.decode("utf-8"), "ass")["events"]] == ["First", "Second"]
 
 
 def test_video_span_excludes_nonzero_start_from_absolute_end_tags():

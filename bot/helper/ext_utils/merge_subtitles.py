@@ -3,6 +3,14 @@
 import re
 from decimal import Decimal
 
+_ASS_HEADERS = {
+    "scripttype": "ScriptType", "playresx": "PlayResX", "playresy": "PlayResY",
+    "layoutresx": "LayoutResX", "layoutresy": "LayoutResY", "timer": "Timer",
+    "wrapstyle": "WrapStyle", "scaledborderandshadow": "ScaledBorderAndShadow",
+    "kerning": "Kerning", "ycbcr matrix": "YCbCr Matrix", "language": "Language",
+    "collisions": "Collisions",
+}
+
 
 def _seconds(clock):
     hours, minutes, seconds = clock.strip().replace(",", ".").split(":")
@@ -44,7 +52,8 @@ def read_document(text, codec):
             sections.setdefault(section, [])
         elif section and line.strip() and not line.lstrip().startswith(";"):
             sections[section].append(line)
-    if set(sections) - {"[script info]", "[v4+ styles]", "[events]"}:
+    if set(sections) - {"[script info]", "[v4+ styles]", "[events]",
+                       "[aegisub project garbage]", "[aegisub extradata]"}:
         raise ValueError("This ASS script has additional sections that require independent tracks.")
     settings = {}
     for line in sections.get("[script info]", []):
@@ -81,11 +90,13 @@ def read_document(text, codec):
             events.append(event)
     if "Name" not in style_format or not event_format or event_format[-1] != "Text":
         raise ValueError("An ASS subtitle has an unsupported style or event format.")
-    # Informational credits do not affect rendering; every other setting does.
-    credits = {"title", "original script", "original translation", "original editing",
-               "original timing", "synch point", "script updated by", "update details"}
-    identity = tuple(sorted((key, value) for key, value in settings.items() if key not in credits))
-    return {"codec": codec, "key": (identity, tuple(style_format), tuple(event_format)),
+    # Editor metadata and credits are not rendering settings.
+    rendering = {key: value for key, value in settings.items() if key in _ASS_HEADERS}
+    rendering.setdefault("wrapstyle", "0")
+    rendering.setdefault("kerning", "no")
+    rendering.setdefault("collisions", "Normal")
+    identity = tuple(sorted(rendering.items()))
+    return {"codec": codec, "key": (identity, tuple(sorted(style_format)), tuple(sorted(event_format))),
             "settings": settings, "style_format": style_format, "styles": styles,
             "event_format": event_format, "events": events}
 
@@ -104,15 +115,16 @@ def join_documents(documents):
     styles = []
     events = []
     for index, doc in enumerate(documents, 1):
-        names = {style["Name"]: f"Part{index}_{style['Name']}" for style in doc["styles"]}
+        names = {style["Name"].casefold(): f"Part{index}_{style['Name']}" for style in doc["styles"]}
         if len(names) != len(doc["styles"]):
             raise ValueError("An ASS subtitle contains duplicate style names.")
-        styles.extend(dict(style, Name=names[style["Name"]]) for style in doc["styles"])
+        styles.extend(dict(style, Name=names[style["Name"].casefold()]) for style in doc["styles"])
         for original in doc["events"]:
             event = original.copy()
-            if event["Style"] not in names:
+            source_style = event["Style"].removeprefix("*").casefold()
+            if source_style not in names:
                 raise ValueError("An ASS dialogue refers to a missing style.")
-            event["Style"] = names[event["Style"]]
+            event["Style"] = names[source_style]
             # Named resets inside override blocks must follow the renamed style.
             event["Text"] = re.sub(
                 r"\{[^}]*\}",
@@ -122,7 +134,7 @@ def join_documents(documents):
             events.append(event)
     base = documents[0]
     lines = ["[Script Info]"]
-    lines.extend(f"{key}: {value}" for key, value in base["settings"].items())
+    lines.extend(f"{_ASS_HEADERS.get(key, key)}: {value}" for key, value in base["settings"].items())
     lines += ["[V4+ Styles]", "Format: " + ", ".join(base["style_format"])]
     lines.extend("Style: " + ",".join(style[key] for key in base["style_format"]) for style in styles)
     lines += ["[Events]", "Format: " + ", ".join(base["event_format"])]
@@ -136,7 +148,8 @@ def join_documents(documents):
 
 def _rename_resets(block, names):
     def rename(match):
-        if match[1] not in names:
+        name = match[1].casefold()
+        if name not in names:
             raise ValueError("An ASS override refers to a missing style.")
-        return "\\r" + names[match[1]]
+        return "\\r" + names[name]
     return re.sub(r"\\r([^\\}]+)", rename, block)

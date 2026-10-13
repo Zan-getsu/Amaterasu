@@ -7,6 +7,7 @@ from contextlib import suppress
 from os import path as ospath, walk
 from re import search as re_search
 from secrets import token_urlsafe
+from tempfile import mkdtemp
 from pyrogram.enums import ButtonStyle
 
 from aiofiles.os import listdir, makedirs, remove, replace, path as aiopath
@@ -577,7 +578,16 @@ class TaskListener(TaskConfig):
             merge_result = await self.proceed_merge(up_path, gid)
             if not merge_result or self.is_cancelled:
                 return
-            up_path = merge_result
+            # Telegram walks its upload directory, including any source files.
+            try:
+                up_dir = self.up_dir = await sync_to_async(
+                    mkdtemp, prefix="merge-output-", dir=self.dir
+                )
+                up_path = ospath.join(up_dir, ospath.basename(merge_result))
+                await move(merge_result, up_path)
+            except OSError as error:
+                await self.on_upload_error(f"Could not prepare the merged video for upload: {error}")
+                return
             self.is_file = True
             self.name = ospath.basename(up_path)
             self.size = await get_path_size(up_path)

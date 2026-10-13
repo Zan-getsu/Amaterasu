@@ -509,24 +509,28 @@ async def _validate_playback(candidate, duration, has_audio, listener):
 
 
 async def _join_subtitle_tracks(executable, candidate, working, listener):
-    """Combine compatible text lanes; preserve bitmap and incompatible lanes."""
+    """Combine text lanes; reject incompatible text and preserve bitmap tracks."""
     identity = await _json_command([executable, "-J", candidate], listener)
     evidence = await _subtitle_evidence(candidate, listener)
     tracks = _tracks(identity, "subtitles")
     groups = []
+    lane_positions = Counter()
     packets = _packets_by_stream(evidence)
     extraction = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin", "-y", "-copyts", "-i", candidate]
     text_paths = {}
     for index, stream in enumerate(evidence.get("streams") or []):
         codec = stream.get("codec_name")
-        if codec in {"ass", "subrip"} and packets.get(stream["index"]):
+        if codec in {"ass", "subrip"}:
             text_paths[index] = os.path.join(working, f"text-{index}.{'ass' if codec == 'ass' else 'srt'}")
             extraction += ["-map", f"0:{stream['index']}", "-c:s", "copy", text_paths[index]]
     if text_paths:
         code, diagnostic = await _run(extraction, listener)
         if code:
             raise ValueError(f"Subtitle extraction failed: {diagnostic or code}")
-    for index, (track, stream) in enumerate(zip(tracks, evidence.get("streams") or [], strict=True)):
+    indexed_tracks = list(enumerate(zip(tracks, evidence.get("streams") or [], strict=True)))
+    # Match each episode's default dialogue before alternate same-language tracks.
+    indexed_tracks.sort(key=lambda item: not (item[1][0].get("properties") or {}).get("default_track"))
+    for index, (track, stream) in indexed_tracks:
         properties = track.get("properties") or {}
         title = re.sub(r"^Episode \d+ - ", "", properties.get("track_name") or "")
         item_number = re.match(r"Episode (\d+)", properties.get("track_name") or "")
@@ -543,13 +547,17 @@ async def _join_subtitle_tracks(executable, candidate, working, listener):
                 document = None
             if document is not None and len(document["events"]) != len(packets.get(stream["index"], [])):
                 raise ValueError("Subtitle extraction changed the number of events.")
-        role = tuple(properties.get(key) for key in (
-            "language", "language_ietf", "forced_track", "hearing_impaired",
-            "visual_impaired", "text_descriptions", "original", "commentary",
+        role = (properties.get("language") or "und",) + tuple(bool(properties.get(key)) for key in (
+            "forced_track", "hearing_impaired", "visual_impaired", "text_descriptions", "commentary",
         ))
-        key = (codec, role, title, document["key"] if document else index)
-        group = next((group for group in groups if group["key"] == key
-                      and item_number not in group["items"]), None) if document else None
+        position_key = (item_number, codec, role)
+        lane = (codec, role, lane_positions[position_key])
+        lane_positions[position_key] += 1
+        key = (*lane, document["key"] if document else index)
+        matches = [group for group in groups if group["key"] == key
+                   and item_number not in group["items"]] if document else []
+        group = next((group for group in matches if group["title"] == title), None)
+        group = group or next(iter(matches), None)
         if group is None:
             group = {"key": key, "tracks": [], "documents": [], "items": set(),
                      "properties": properties, "title": title, "codec": codec}
@@ -558,6 +566,19 @@ async def _join_subtitle_tracks(executable, candidate, working, listener):
         group["items"].add(item_number)
         if document:
             group["documents"].append(document)
+    lanes = Counter(group["key"][:3] for group in groups if group["codec"] in {"ass", "subrip"})
+    for lane, count in lanes.items():
+        if count <= 1:
+            continue
+        related = [group for group in groups if group["key"][:3] == lane]
+        settings = [dict(group["documents"][0]["key"][0]) for group in related if group["documents"] and group["codec"] == "ass"]
+        differences = sorted(key for key in set().union(*(set(item) for item in settings))
+                             if len({item.get(key) for item in settings}) > 1) if settings else []
+        reason = ", ".join(differences) or "unsupported subtitle header, styles, or event format"
+        raise ValueError(
+            f"Cannot create one continuous {lane[1][0]} dialogue subtitle track: {reason}. "
+            "The merge stopped instead of publishing separate episode subtitle tracks."
+        )
     if not any(len(group["tracks"]) > 1 for group in groups):
         return candidate, len(tracks), len(tracks)
 
@@ -568,6 +589,9 @@ async def _join_subtitle_tracks(executable, candidate, working, listener):
     command = [executable, "--quiet", "-o", result, "--no-subtitles", candidate]
     validation_inputs = []
     independent = 0
+    default_index = next((i for i, group in enumerate(groups)
+                          if group["properties"].get("default_track") and not group["properties"].get("forced_track")),
+                         next((i for i, group in enumerate(groups) if not group["properties"].get("forced_track")), 0))
     for index, group in enumerate(groups):
         target = os.path.join(working, f"lane-{index}.mkv")
         if len(group["tracks"]) > 1:
@@ -611,7 +635,7 @@ async def _join_subtitle_tracks(executable, candidate, working, listener):
         properties = group["properties"]
         command += ["--language", f"{track_id}:{properties.get('language_ietf') or properties.get('language') or 'und'}",
                     "--track-name", f"{track_id}:{group['title']}" if len(group["tracks"]) > 1 else f"{track_id}:{properties.get('track_name') or group['title']}",
-                    "--default-track-flag", f"{track_id}:{'yes' if index == 0 else 'no'}"]
+                    "--default-track-flag", f"{track_id}:{'yes' if index == default_index else 'no'}"]
         for property_, option in (("forced_track", "--forced-display-flag"),
                                   ("hearing_impaired", "--hearing-impaired-flag"),
                                   ("visual_impaired", "--visual-impaired-flag"),
@@ -727,7 +751,9 @@ async def merge_copy(
                         original_title = (track.get("properties") or {}).get("track_name")
                         label = f"Episode {index + 1:02d} - {original_title or track.get('codec', 'subtitle')}"
                         command += ["--track-name", f"{track_id}:{label}"]
-                        command += ["--default-track-flag", f"{track_id}:{'yes' if subtitle_count == 0 else 'no'}"]
+                        has_default = any((item.get("properties") or {}).get("default_track") for item in subtitles)
+                        source_default = (track.get("properties") or {}).get("default_track") or (not has_default and subtitle_count == 0)
+                        command += ["--default-track-flag", f"{track_id}:{'yes' if source_default else 'no'}"]
                         subtitle_count += 1
                     command.append(file_)
                 for sidecar in sidecars.get(file_, []):

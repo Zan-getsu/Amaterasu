@@ -1971,10 +1971,15 @@ order in the web planner while they download.
   selectable track, including gaps where an episode has no subtitles. ASS tracks
   with matching script settings are also joined; each episode keeps its styles,
   colors, fonts, positioning, and named style resets.
-- Mixed subtitle formats, bitmap subtitles, and incompatible ASS script settings
-  remain separate selectable tracks. The planner and upload message explain when
-  some tracks cover individual parts. Subtitles are never burned in or silently
+- Episode titles and editor metadata do not create separate subtitle tracks.
+  A dialogue track continues across the merged timeline, so you select it once.
+  If matching text tracks have genuinely incompatible ASS rendering settings or
+  unreadable events, the merge stops with a reason instead of publishing separate
+  episode tracks. Distinct languages, forced signs, mixed formats and bitmap
+  subtitles remain separate choices. Subtitles are never burned in or silently
   converted to another format.
+- Only the combined video, or its required Telegram split parts, is uploaded.
+  Downloaded episode sources are kept out of the upload directory.
 - Recognized external subtitle sidecars such as `.srt`, `.ass`, or `.vtt` are
   associated with their video and merged with the same chapter offset. Missing,
   ambiguous, or incomplete sidecar pairs stop the task with a clear error.
