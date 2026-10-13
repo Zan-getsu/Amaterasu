@@ -9,7 +9,7 @@ aioaria2
 aioqbt
 imdbio
 cloudscraper
-curl_cffi>=0.16.1
+curl_cffi>=0.16.2
 dnspython
 feedparser
 fonttools==4.66.1
