@@ -15,6 +15,36 @@ env:
   AMATERASU_DB_PARTITION_SALT: "wzmlx_v3_db_partition_salt"
 
 jobs:
+  merge-media:
+    name: Linux Merge Regression Checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+      - name: Install merge test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg mkvtoolnix
+          python -m pip install pytest pytest-asyncio "$(grep '^fonttools==' requirements.txt)"
+      - name: Exercise real media and merged-only delivery
+        run: |
+          python - <<'PY'
+          import sys
+          from pathlib import Path
+          from types import ModuleType
+          import pytest
+
+          # Load the real helpers without starting unrelated bot services.
+          for name in ("bot", "bot.helper", "bot.helper.ext_utils"):
+              package = ModuleType(name)
+              package.__path__ = [str(Path(*name.split(".")).resolve())]
+              sys.modules[name] = package
+          raise SystemExit(pytest.main(["-q", "tests/test_merge_media.py", "tests/test_merge_upload_scope.py"]))
+          PY
+
   smoke:
     name: Smoke Checks
     runs-on: ubuntu-latest

@@ -223,6 +223,25 @@ def test_ass_font_references_update_styles_and_overrides_only():
     assert document["events"][0]["Text"] == r"{\fnEpisode2_Arial}AAAA{\fn@Episode2_Arial}A{\fn}Arial"
 
 
+@pytest.mark.parametrize("kind", ["ttf", "otf"])
+def test_namespace_keeps_long_postscript_names_valid_and_distinct(kind):
+    from fontTools.ttLib import TTFont
+
+    source = _renderable_font(kind=kind, family="A" * 55)
+    names = []
+    for prefix in ("Episode1_", "Episode2_"):
+        renamed, aliases = namespace_font(source, prefix)
+        font = TTFont(BytesIO(renamed))
+        postscript = font["name"].getDebugName(6)
+        assert len(postscript) <= 63
+        assert aliases[("A" * 55 + "-Regular").casefold()] == postscript
+        if "CFF " in font:
+            assert font["CFF "].cff.fontNames == [postscript]
+        names.append(postscript)
+        font.close()
+    assert names[0] != names[1]
+
+
 @pytest.mark.asyncio
 async def test_ass_styles_join_continuously_and_srt_keeps_its_format(media):
     root, files = media
@@ -392,7 +411,8 @@ async def test_identical_font_attachment_is_deduplicated(media):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("kind", ["ttf", "otf", "ttc"])
-async def test_conflicting_fonts_merge_and_render_each_episode_correctly(media, kind):
+@pytest.mark.parametrize("encoded", [False, True])
+async def test_conflicting_fonts_merge_and_render_each_episode_correctly(media, kind, encoded):
     root, files = media
     selected = []
     for index, source in enumerate(files[:2]):
@@ -408,8 +428,15 @@ async def test_conflicting_fonts_merge_and_render_each_episode_correctly(media, 
              "font/otf" if kind == "otf" else "font/ttf", "--attach-file", str(font), str(intermediate))
         selected.append(str(target))
     source_hashes = [hashlib.sha256(Path(path).read_bytes()).digest() for path in selected]
-    output, error = await merge_copy(_listener(), selected, str(root / f"font-conflicts-{kind}.mkv"),
-                                    [_probe(path, "-show_streams", "-show_format") for path in selected])
+    arguments = (_listener(), selected, str(root / f"font-conflicts-{kind}-{encoded}.mkv"),
+                 [_probe(path, "-show_streams", "-show_format") for path in selected])
+    if encoded:
+        output, error = await merge_encode(*arguments, {
+            "video_codec": "libx264", "audio_codec": "aac",
+            "video_params": {"preset": "ultrafast", "crf": 0},
+        })
+    else:
+        output, error = await merge_copy(*arguments)
     assert not error
     identity = json.loads(subprocess.check_output([_mkvmerge_binary(), "-J", output]))
     assert len(identity["attachments"]) == 2
@@ -426,6 +453,47 @@ async def test_conflicting_fonts_merge_and_render_each_episode_correctly(media, 
     for index, original in enumerate(originals):
         assert original == rendered_frame(output, float(chapters[index]["start_time"]) + 0.4)
     assert source_hashes == [hashlib.sha256(Path(path).read_bytes()).digest() for path in selected]
+
+
+@pytest.mark.asyncio
+async def test_three_av1_aac_episodes_join_english_ass_with_conflicting_fonts(media):
+    if b"libsvtav1" not in subprocess.check_output(["ffmpeg", "-v", "error", "-encoders"]):
+        pytest.skip("SVT-AV1 is required for this production-format fixture")
+    root, files = media
+    selected = []
+    for index, source in enumerate((files[0], files[1], files[0]), 1):
+        font = root / "av1-collision.ttf"
+        font.write_bytes(_renderable_font(index % 2))
+        subtitle = root / f"av1-{index}.ass"
+        subtitle.write_text(_ass("AAAA", 48, "&H00FFFFFF").replace(",Arial,", ",MergeCollision,"), encoding="utf-8")
+        video = root / f"av1-{index}-base.mkv"
+        target = root / f"av1-{index}.mkv"
+        _run("ffmpeg", "-v", "error", "-y", "-i", str(source), "-i", str(subtitle),
+             "-map", "0:v", "-map", "0:a", "-map", "1:s", "-c:v", "libsvtav1",
+             "-preset", "12", "-crf", "40", "-svtav1-params", "lp=2", "-c:a", "copy", "-c:s", "copy",
+             "-metadata:s:a:0", "language=jpn", "-metadata:s:s:0", "language=eng",
+             "-metadata:s:s:0", f"title=Episode {index:02d} - English", str(video))
+        _run(_mkvmerge_binary(), "--quiet", "-o", str(target), "--attach-file", str(font), str(video))
+        selected.append(str(target))
+    output, error = await merge_copy(_listener(), selected, str(root / "av1-three-episodes.mkv"),
+                                    [_probe(path, "-show_streams", "-show_format") for path in selected])
+    assert not error
+    info = _probe(output, "-show_streams", "-show_chapters", "-show_packets")
+    video = [stream for stream in info["streams"] if stream["codec_type"] == "video"]
+    audio = [stream for stream in info["streams"] if stream["codec_type"] == "audio"]
+    subtitles = [stream for stream in info["streams"] if stream["codec_type"] == "subtitle"]
+    assert len(video) == len(audio) == len(subtitles) == 1
+    assert (video[0]["codec_name"], audio[0]["codec_name"], subtitles[0]["codec_name"]) == ("av1", "aac", "ass")
+    assert audio[0]["tags"]["language"] == "jpn"
+    assert subtitles[0]["tags"]["language"] == "eng"
+    assert subtitles[0]["disposition"]["default"]
+    assert len(info["chapters"]) == 3
+    events = [packet for packet in info["packets"] if packet["stream_index"] == subtitles[0]["index"]]
+    assert [float(packet["pts_time"]) for packet in events] == pytest.approx(
+        [float(chapter["start_time"]) + 0.2 for chapter in info["chapters"]], abs=0.03)
+    frames = _probe(output, "-count_frames", "-select_streams", "v:0", "-show_streams")
+    assert int(frames["streams"][0]["nb_read_frames"]) == 108
+    _run("ffmpeg", "-v", "error", "-xerror", "-i", output, "-map", "0:v", "-map", "0:a", "-f", "null", "-")
 
 
 @pytest.mark.asyncio

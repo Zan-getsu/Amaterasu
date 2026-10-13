@@ -16,7 +16,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("outcome", ["file", "split", "failed", "cancelled"])
+@pytest.mark.parametrize("outcome", ["file", "split", "failed", "cancelled", "move_failed"])
 async def test_merge_upload_excludes_episode_sources(tmp_path, outcome):
     task_dir = tmp_path / "task"
     episodes = task_dir / "Episodes"
@@ -59,6 +59,11 @@ async def test_merge_upload_excludes_episode_sources(tmp_path, outcome):
             uploaded.extend(path.name for path in self.path.rglob("*") if path.is_file())
             assert all(path.read_bytes() == b"original episode" for path in sources)
 
+    def move(source, target):
+        if outcome == "move_failed":
+            raise OSError("Injected staging failure")
+        return shutil.move(source, target)
+
     task = SimpleNamespace(
         dir=str(task_dir), up_dir="", mid=1, folder_name="", same_dir={}, name="Episodes",
         is_cancelled=False, is_merge=True, is_torrent=False, is_qbit=False, seed=False,
@@ -78,7 +83,7 @@ async def test_merge_upload_excludes_episode_sources(tmp_path, outcome):
         "get_path_size": size, "remove_excluded_files": AsyncMock(),
         "Config": SimpleNamespace(QUEUE_ALL=True), "ospath": os.path,
         "guess_type": guess_type, "sync_to_async": sync_to_async, "mkdtemp": mkdtemp,
-        "move": AsyncMock(side_effect=shutil.move), "check_running_tasks": AsyncMock(return_value=(False, None)),
+        "move": AsyncMock(side_effect=move), "check_running_tasks": AsyncMock(return_value=(False, None)),
         "start_from_queued": AsyncMock(), "update_status_message": AsyncMock(),
         "TelegramUploader": Uploader, "TelegramStatus": lambda *_args: object(),
     }
@@ -87,7 +92,13 @@ async def test_merge_upload_excludes_episode_sources(tmp_path, outcome):
     method = next(node for node in cls.body if isinstance(node, ast.AsyncFunctionDef) and node.name == "on_download_complete")
     exec(compile(ast.Module([method], type_ignores=[]), str(ROOT / "bot/helper/listeners/task_listener.py"), "exec"), namespace)
     await namespace["on_download_complete"](task)
-    if outcome in {"failed", "cancelled"}:
+    if outcome == "move_failed":
+        assert uploaded == []
+        task.on_upload_error.assert_awaited_once()
+        assert "Injected staging failure" in task.on_upload_error.await_args.args[0]
+        assert result.read_bytes() == b"validated merged video"
+        assert all(path.read_bytes() == b"original episode" for path in sources)
+    elif outcome in {"failed", "cancelled"}:
         assert uploaded == []
         assert not list(task_dir.glob("merge-output-*"))
     else:
