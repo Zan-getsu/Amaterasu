@@ -514,13 +514,13 @@ async def _validate_subtitles(inputs, candidate, listener):
                     raise ValueError(f"Subtitle event duration changed for item {item_number}.")
 
 
-async def _validate_playback(candidate, duration, has_audio, listener):
+async def _validate_playback(candidate, end, has_audio, listener, *, start):
     """Decode bounded start/middle/end samples before publishing the artifact."""
-    points = {Decimal(0), duration / 2, max(Decimal(0), duration - Decimal("0.6"))}
+    points = {start, (start + end) / 2, max(start, end - Decimal("0.6"))}
     for point in sorted(points):
         command = [
             "ffmpeg", "-hide_banner", "-loglevel", "error", "-xerror", "-nostdin",
-            "-ss", format(point, "f"), "-i", candidate, "-t", "0.4", "-map", "0:v:0",
+            "-seek_timestamp", "1", "-ss", format(point, "f"), "-i", candidate, "-t", "0.4", "-map", "0:v:0",
         ]
         if has_audio:
             command += ["-map", "0:a:0"]
@@ -749,12 +749,26 @@ async def merge_copy(
             if av_override:
                 if starts_override is None or len(starts_override) != len(files):
                     raise ValueError("The encoded timeline has no complete source boundaries.")
-                starts = list(starts_override)
+                starts = [_chapter_timestamp(value) for value in starts_override]
             else:
                 chapters = av_probe.get("chapters") or []
                 if len(chapters) != len(files):
                     raise ValueError("The A/V intermediate did not retain one boundary per selected video.")
                 starts = [_chapter_timestamp(chapter["start_time"]) for chapter in chapters]
+            expected_duration = _chapter_timestamp((av_probe.get("format") or {}).get("duration"))
+            timeline_end = expected_duration + max(Decimal(0), _origin(av_probe))
+            # A valid source can begin after zero; only invalid order/bounds fail.
+            if starts[0] < 0:
+                raise ValueError(f"The first episode boundary is negative ({starts[0]:.3f}s).")
+            for number, (left, right) in enumerate(zip(starts, starts[1:], strict=False), 2):
+                if right <= left:
+                    raise ValueError(
+                        f"Episode {number} boundary ({right:.3f}s) must follow the previous boundary ({left:.3f}s)."
+                    )
+            if starts[-1] >= timeline_end:
+                raise ValueError(
+                    f"Episode {len(starts)} boundary ({starts[-1]:.3f}s) is outside the A/V timeline ending at {timeline_end:.3f}s."
+                )
             kinds = [stream["codec_type"] for stream in av_probe.get("streams") or []
                      if stream.get("codec_type") in {"video", "audio"}]
             _write_chapters(chapters_file, starts, files)
@@ -835,16 +849,9 @@ async def merge_copy(
                 raise ValueError("The merged output did not retain every chapter.")
             if [stream.get("codec_type") for stream in final_probe.get("streams") or [] if stream.get("codec_type") in {"video", "audio"}] != kinds:
                 raise ValueError("The merged output changed the selected A/V track layout.")
-            expected_duration = _chapter_timestamp((av_probe.get("format") or {}).get("duration"))
             actual_duration = _chapter_timestamp((final_probe.get("format") or {}).get("duration"))
             if abs(actual_duration - expected_duration) > Decimal("0.05"):
                 raise ValueError("Final mux duration differs from the validated A/V timeline.")
-            # MP4/AAC priming can make MKVToolNix place the first boundary a
-            # few milliseconds after zero even though no episode is missing.
-            if not 0 <= starts[0] <= Decimal("0.05") or any(
-                right <= left for left, right in zip(starts, starts[1:], strict=False)
-            ):
-                raise ValueError("The A/V timeline has missing or non-monotonic chapter boundaries.")
             actual_av = [
                 stream for stream in final_probe.get("streams") or []
                 if stream.get("codec_type") in {"video", "audio"}
@@ -860,9 +867,12 @@ async def merge_copy(
             await _validate_attachments(
                 executable, candidate, expected_attachments, working, listener
             )
-            await _validate_playback(
-                candidate, actual_duration, "audio" in kinds, listener
-            )
+            sample_streams = [next(stream for stream in actual_av if stream["codec_type"] == "video")]
+            if "audio" in kinds:
+                sample_streams.append(next(stream for stream in actual_av if stream["codec_type"] == "audio"))
+            playback_start = max(Decimal(0), *(_chapter_timestamp(stream.get("start_time") or 0) for stream in sample_streams))
+            playback_end = actual_duration + max(Decimal(0), _origin(final_probe))
+            await _validate_playback(candidate, playback_end, "audio" in kinds, listener, start=playback_start)
             if listener.is_cancelled:
                 raise ValueError("Merge was cancelled before publication.")
             # The candidate and published artifact are on one filesystem. A

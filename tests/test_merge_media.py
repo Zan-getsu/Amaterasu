@@ -806,6 +806,66 @@ def test_video_span_excludes_nonzero_start_from_absolute_end_tags():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("offset", ["0.12", "0.25", "0.8", "5"])
+async def test_copy_merge_accepts_valid_initial_timestamp_offset(media, offset):
+    root, files = media
+    shifted = root / f"initial-offset-{offset}.mkv"
+    _run("ffmpeg", "-v", "error", "-y", "-copyts", "-itsoffset", offset, "-i", str(files[0]),
+         "-map", "0", "-c", "copy", str(shifted))
+    selected = [str(shifted), str(files[1])]
+    hashes = [hashlib.sha256(Path(path).read_bytes()).digest() for path in selected]
+    output, error = await merge_copy(_listener(), selected, str(root / f"offset-merged-{offset}.mkv"),
+                                    [_probe(path, "-show_streams", "-show_format") for path in selected])
+    assert not error
+    info = _probe(output, "-show_streams", "-show_chapters", "-show_packets")
+    assert float(info["chapters"][0]["start_time"]) > 0.05
+    assert len(info["chapters"]) == 2
+    subtitle = [stream for stream in info["streams"] if stream["codec_type"] == "subtitle"]
+    assert len(subtitle) == 1
+    events = [packet for packet in info["packets"] if packet["stream_index"] == subtitle[0]["index"]]
+    assert [float(packet["pts_time"]) for packet in events] == pytest.approx(
+        _expected_embedded_times(selected, info["chapters"]), abs=0.006)
+    frames = _probe(output, "-count_frames", "-select_streams", "v:0", "-show_streams")
+    assert int(frames["streams"][0]["nb_read_frames"]) == 72
+    _run("ffmpeg", "-v", "error", "-xerror", "-i", output, "-map", "0:v", "-map", "0:a", "-f", "null", "-")
+    assert hashes == [hashlib.sha256(Path(path).read_bytes()).digest() for path in selected]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("invalid", ["negative", "duplicate", "reversed", "outside"])
+async def test_invalid_episode_boundaries_fail_early_with_actual_times(media, monkeypatch, invalid):
+    from bot.helper.ext_utils import merge_media as backend
+    root, files = media
+    original = backend._json_command
+    hashes = [hashlib.sha256(path.read_bytes()).digest() for path in files[:2]]
+
+    async def inspect(arguments, listener):
+        info = await original(arguments, listener)
+        if Path(str(arguments[-1])).name == "timeline.mkv":
+            chapters = info["chapters"]
+            if invalid == "negative":
+                chapters[0]["start_time"] = "-0.125"
+            elif invalid == "duplicate":
+                chapters[1]["start_time"] = chapters[0]["start_time"]
+            elif invalid == "reversed":
+                chapters[0]["start_time"] = "0.250"
+                chapters[1]["start_time"] = "0.125"
+            else:
+                chapters[1]["start_time"] = str(float(info["format"]["duration"]) + 1)
+        return info
+
+    monkeypatch.setattr(backend, "_json_command", inspect)
+    target = root / f"invalid-boundaries-{invalid}.mkv"
+    output, error = await merge_copy(_listener(), list(map(str, files[:2])), str(target),
+                                    [_probe(path, "-show_streams", "-show_format") for path in files[:2]])
+    assert output is False
+    assert {"negative": "-0.125s", "duplicate": "previous boundary", "reversed": "0.250s", "outside": "timeline ending"}[invalid] in error
+    assert not target.exists()
+    assert not list(root.glob("merge-*/"))
+    assert hashes == [hashlib.sha256(path.read_bytes()).digest() for path in files[:2]]
+
+
+@pytest.mark.asyncio
 async def test_real_merge_failure_removes_temporary_files_and_preserves_sources(media, monkeypatch):
     from bot.helper.ext_utils import merge_media as backend
     root, files = media
