@@ -1963,6 +1963,11 @@ order in the web planner while they download.
   parts until the final file passes media validation.
 - The final duration and track layout are checked, and bounded video/audio
   playback samples are decoded near the start, middle, and end.
+- Compatible H.264 and HEVC episodes may have different video headers. The copy
+  merge preserves each episode's headers and verifies every decoded video frame
+  against the sources before publishing. These jobs take extra verification
+  time; they do not re-encode the output. Audio configuration, resolution, codec,
+  frame rate, and color settings must still match.
 - Each source becomes a chapter in the MKV, making episodes or playlist items
   easier to navigate.
 - Compatible embedded subtitles and font attachments are preserved with

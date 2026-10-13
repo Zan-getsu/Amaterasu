@@ -912,7 +912,7 @@ _MERGE_STREAM_FIELDS = (
 
 
 def _merge_stream_signature(probe, *, av_only=False):
-    """Fields that must match for a safe concat-demuxer stream copy."""
+    """Fields that must match for stream copy or the validated Matroska append."""
     signatures = []
     for stream in probe.get("streams") or []:
         stream_type = stream.get("codec_type")
@@ -937,8 +937,13 @@ def _merge_stream_signature(probe, *, av_only=False):
                 # different derived rationals (for example 24000/1001 and
                 # 2997/125). Compare milliframes, not the raw strings.
                 frame_rate = round(parsed_rate, 3)
+        # Matroska appends preserve x26x headers and verify every decoded frame.
         signatures.append(
-            tuple(stream.get(key) for key in _MERGE_STREAM_FIELDS)
+            tuple(
+                None if av_only and stream_type == "video" and key == "extradata_hash"
+                and stream.get("codec_name") in {"h264", "hevc"} else stream.get(key)
+                for key in _MERGE_STREAM_FIELDS
+            )
             + (
                 frame_rate,
                 tuple(

@@ -160,13 +160,16 @@ def _tracks(identity, kind):
     return [track for track in identity.get("tracks", []) if track.get("type") == kind]
 
 
-def _av_identity(layout):
+def _av_identity(layout, *, allow_video_headers=False):
     fields = (
         "codec_id", "codec_private_data", "pixel_dimensions",
         "display_dimensions", "audio_sampling_frequency", "audio_channels",
     )
     return [
-        (track.get("type"), tuple((track.get("properties") or {}).get(field) for field in fields))
+        (track.get("type"), tuple(
+            None if allow_video_headers and track.get("type") == "video" and field == "codec_private_data"
+            and (track.get("properties") or {}).get("codec_id") in {"V_MPEG4/ISO/AVC", "V_MPEGH/ISO/HEVC"}
+            else (track.get("properties") or {}).get(field) for field in fields))
         for track in layout
     ]
 
@@ -534,6 +537,24 @@ async def _validate_playback(candidate, end, has_audio, listener, *, start):
             )
 
 
+async def _video_frames(path, indexes, listener):
+    command = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-xerror", "-nostdin", "-i", path]
+    for index in indexes:
+        command += ["-map", f"0:{index}"]
+    command += ["-an", "-c:v", "rawvideo", "-fps_mode", "passthrough", "-f", "framemd5", "pipe:1"]
+    code, diagnostic = await _run(command, listener)
+    if code:
+        raise ValueError(f"Video header compatibility verification failed: {diagnostic or code}")
+    frames = {}
+    for line in diagnostic.splitlines():
+        fields = [value.strip() for value in line.split(",")]
+        if len(fields) == 6 and fields[0].isdigit():
+            frames.setdefault(int(fields[0]), []).append((fields[-2], fields[-1]))
+    if not frames:
+        raise ValueError("Video header compatibility verification decoded no frames.")
+    return frames
+
+
 async def _join_subtitle_tracks(executable, candidate, working, listener, font_maps=None):
     """Combine text lanes; reject incompatible text and preserve bitmap tracks."""
     identity = await _json_command([executable, "-J", candidate], listener)
@@ -714,7 +735,7 @@ async def merge_copy(
         kinds = [track["type"] for track in av_layout[0]]
         if not av_override and ("video" not in kinds or any(
             [track["type"] for track in layout] != kinds
-            or _av_identity(layout) != _av_identity(av_layout[0])
+            or _av_identity(layout, allow_video_headers=True) != _av_identity(av_layout[0], allow_video_headers=True)
             for layout in av_layout[1:]
         )):
             raise ValueError("The selected A/V track layouts cannot be appended without loss.")
@@ -726,22 +747,58 @@ async def merge_copy(
                 executable, files, identities, working, listener
             )
             if not av_override:
+                append_files = files
+                append_layouts = av_layout
+                probe_headers = [tuple(stream.get("extradata_hash") for stream in probe.get("streams") or []
+                                       if stream.get("codec_type") == "video" and not (stream.get("disposition") or {}).get("attached_pic"))
+                                 for probe in probes]
+                changed_headers = (any(_av_identity(layout) != _av_identity(av_layout[0]) for layout in av_layout[1:])
+                                   or any(headers != probe_headers[0] for headers in probe_headers[1:]))
+                if changed_headers:
+                    append_files = []
+                    append_layouts = []
+                    for index, (file_, probe) in enumerate(zip(files, probes, strict=True)):
+                        prepared = os.path.join(working, f"headers-{index}.mkv")
+                        command = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin", "-y", "-copyts", "-i", file_]
+                        streams = [stream for stream in probe.get("streams") or []
+                                   if stream.get("codec_type") in {"video", "audio"}
+                                   and not (stream.get("disposition") or {}).get("attached_pic")]
+                        for stream in streams:
+                            command += ["-map", f"0:{stream['index']}"]
+                        command += ["-c", "copy", "-map_chapters", "-1", "-avoid_negative_ts", "disabled"]
+                        for position, stream in enumerate(streams):
+                            flags = "+".join(key for key, value in (stream.get("disposition") or {}).items() if value)
+                            command += [f"-disposition:{position}", flags or "0"]
+                        for position, stream in enumerate(stream for stream in streams if stream["codec_type"] == "video"):
+                            filter_ = {"h264": "h264_mp4toannexb", "hevc": "hevc_mp4toannexb"}.get(stream.get("codec_name"))
+                            if filter_:
+                                command += [f"-bsf:v:{position}", filter_]
+                        command.append(prepared)
+                        code, diagnostic = await _run(command, listener)
+                        if code:
+                            raise ValueError(f"Could not preserve item {index + 1} video headers: {diagnostic or code}")
+                        prepared_info = await _json_command([executable, "-J", prepared], listener)
+                        append_files.append(prepared)
+                        append_layouts.append([track for track in prepared_info["tracks"] if track["type"] in {"video", "audio"}])
                 mapping = [
-                    f"{index}:{track['id']}:{index - 1}:{av_layout[index - 1][track_position]['id']}"
-                    for index, layout in enumerate(av_layout) if index
+                    f"{index}:{track['id']}:{index - 1}:{append_layouts[index - 1][track_position]['id']}"
+                    for index, layout in enumerate(append_layouts) if index
                     for track_position, track in enumerate(layout)
                 ]
                 command = [executable, "--quiet", "--generate-chapters", "when-appending"]
                 if mapping:
                     command += ["--append-to", ",".join(mapping)]
                 command += ["-o", av_file]
-                for index, file_ in enumerate(files):
+                for index, file_ in enumerate(append_files):
                     if index:
                         command.append("+")
                     command += ["--no-subtitles", "--no-attachments", "--no-chapters", "--no-global-tags", file_]
                 code, diagnostic = await _run(command, listener)
                 if code:
                     raise ValueError(f"A/V append failed: {diagnostic or f'exit {code}'}")
+                if changed_headers:
+                    for prepared in append_files:
+                        os.remove(prepared)
             av_probe = await _json_command(
                 ["ffprobe", "-v", "error", "-show_streams", "-show_chapters", "-show_format", "-show_data_hash", "sha256", "-of", "json", av_file],
                 listener,
@@ -873,6 +930,17 @@ async def merge_copy(
             playback_start = max(Decimal(0), *(_chapter_timestamp(stream.get("start_time") or 0) for stream in sample_streams))
             playback_end = actual_duration + max(Decimal(0), _origin(final_probe))
             await _validate_playback(candidate, playback_end, "audio" in kinds, listener, start=playback_start)
+            if not av_override and changed_headers:
+                # Differing codec headers are accepted only with identical decoded pictures.
+                expected_frames = {}
+                for file_, probe in zip(files, probes, strict=True):
+                    indexes = [stream["index"] for stream in probe["streams"] if stream["codec_type"] == "video"
+                               and not (stream.get("disposition") or {}).get("attached_pic")]
+                    for position, frames in (await _video_frames(file_, indexes, listener)).items():
+                        expected_frames.setdefault(position, []).extend(frames)
+                indexes = [stream["index"] for stream in actual_av if stream["codec_type"] == "video"]
+                if await _video_frames(candidate, indexes, listener) != expected_frames:
+                    raise ValueError("The appended video did not preserve every source frame across codec-header changes. Use an explicit merge encode profile.")
             if listener.is_cancelled:
                 raise ValueError("Merge was cancelled before publication.")
             # The candidate and published artifact are on one filesystem. A

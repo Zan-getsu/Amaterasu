@@ -212,6 +212,34 @@ def test_merge_stream_signature_ignores_cover_art_and_detects_video_changes():
     )
 
 
+def test_matroska_header_tolerance_keeps_other_video_and_audio_checks():
+    signature, mismatch_reason = _load_media_helpers(
+        "_merge_stream_signature", "_merge_mismatch_reason"
+    )
+    for codec in ("h264", "hevc", "av1"):
+        video = {"codec_type": "video", "codec_name": codec, "width": 1920,
+                 "height": 1080, "profile": "Main", "color_transfer": "bt709",
+                 "extradata_hash": "SHA256:first"}
+        audio = {"codec_type": "audio", "codec_name": "aac", "channels": 2,
+                 "extradata_hash": "SHA256:audio"}
+        probe = {"streams": [video, audio]}
+        strict = signature(probe)
+        reference = signature(probe, av_only=True)
+        video["extradata_hash"] = "SHA256:third"
+        assert signature(probe) != strict
+        assert (signature(probe, av_only=True) == reference) is (codec in {"h264", "hevc"})
+        video["extradata_hash"] = "SHA256:first"
+        for stream, field, value in ((video, "height", 720), (video, "profile", "High"),
+                                     (video, "color_transfer", "smpte2084"),
+                                     (audio, "extradata_hash", "SHA256:different"), (audio, "channels", 6)):
+            original = stream[field]
+            stream[field] = value
+            changed = signature(probe, av_only=True)
+            assert changed != reference
+            assert f"different {field}" in mismatch_reason(reference, changed, 3)
+            stream[field] = original
+
+
 async def test_merge_compatibility_reports_the_specific_incompatible_field():
     _, _, _, check_compatibility = _load_media_helpers(
         "_probe_duration",

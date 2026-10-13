@@ -946,6 +946,103 @@ async def test_encode_retains_dual_audio_languages_titles_and_defaults(media):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("codec", ["hevc", "h264"])
+@pytest.mark.parametrize("corrupt_verification", [False, True])
+async def test_video_header_changes_preserve_dual_audio_and_multiple_subtitles(media, monkeypatch, codec, corrupt_verification):
+    from bot.helper.ext_utils import merge_media as backend
+    from tests.test_encoding_playback_safety import _load_media_helpers
+
+    root, _ = media
+    selected = []
+    for index in range(3):
+        subtitles = []
+        for lane, label in enumerate(("English", "French", "Signs")):
+            subtitle = root / f"{codec}-{index}-{lane}.ass"
+            subtitle.write_text(_ass(f"{label} {index}", 22 + index, "&H00FFFFFF"), encoding="utf-8")
+            subtitles.append(subtitle)
+        target = root / f"{codec}-multitrack-{index}.mkv"
+        video_options = ["-c:v", "libx265", "-pix_fmt", "yuv420p10le", "-preset", "ultrafast",
+                         "-x265-params", f"pools=1:frame-threads=1:log-level=error:repeat-headers=0:strong-intra-smoothing={int(index != 2)}"]
+        if codec == "h264":
+            video_options = ["-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "veryfast",
+                             "-x264-params", f"repeat-headers=0:ref={1 if index != 2 else 2}:bframes=0:keyint=24"]
+        _run("ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc2=s=640x360:r=24:d=1.5",
+             "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000:duration=1.5",
+             "-f", "lavfi", "-i", "sine=frequency=880:sample_rate=48000:duration=1.5",
+             "-i", str(subtitles[0]), "-i", str(subtitles[1]), "-i", str(subtitles[2]),
+             "-map", "0:v", "-map", "3:s", "-map", "1:a", "-map", "4:s", "-map", "2:a", "-map", "5:s",
+             *video_options,
+             "-c:a", "aac", "-c:s", "copy", "-metadata:s:a:0", "language=jpn",
+             "-metadata:s:a:0", "title=Japanese", "-metadata:s:a:1", "language=eng", "-metadata:s:a:1", "title=English",
+             "-disposition:a:0", "default" if codec == "hevc" else "0", "-disposition:a:1", "0",
+             "-metadata:s:s:0", "language=eng", "-metadata:s:s:0", "title=English",
+             "-metadata:s:s:1", "language=fra", "-metadata:s:s:1", "title=French",
+             "-metadata:s:s:2", "language=eng", "-metadata:s:s:2", "title=Signs",
+             "-disposition:s:0", "default", "-disposition:s:1", "0", "-disposition:s:2", "forced",
+             "-output_ts_offset", ("0.12", "0.25", "0.8")[index], str(target))
+        selected.append(str(target))
+    probes = [_probe(path, "-show_streams", "-show_format", "-show_data_hash", "sha256") for path in selected]
+    videos = [next(stream for stream in probe["streams"] if stream["codec_type"] == "video") for probe in probes]
+    assert videos[0]["extradata_hash"] == videos[1]["extradata_hash"]
+    assert videos[2]["extradata_hash"] != videos[0]["extradata_hash"]
+    _, _, _, check = _load_media_helpers("_probe_duration", "_merge_stream_signature", "_merge_mismatch_reason", "check_merge_compatibility")
+
+    async def probe(path):
+        return probes[selected.index(path)], ""
+
+    check.__globals__["_probe_media_file"] = probe
+    compatible, error = await check(selected, av_only=True)
+    assert compatible is not None, error
+    hashes = [hashlib.sha256(Path(path).read_bytes()).digest() for path in selected]
+    frame_reader = backend._video_frames
+    verified_paths = []
+
+    async def verify_frames(path, indexes, listener):
+        verified_paths.append(path)
+        frames = await frame_reader(path, indexes, listener)
+        if corrupt_verification and path not in selected:
+            frames[0][0] = (frames[0][0][0], "injected frame mismatch")
+        return frames
+
+    monkeypatch.setattr(backend, "_video_frames", verify_frames)
+    target = root / f"{codec}-multitrack-merged-{corrupt_verification}.mkv"
+    output, error = await merge_copy(_listener(), selected, str(target), probes)
+    assert verified_paths[:3] == selected
+    assert len(verified_paths) == 4
+    if corrupt_verification:
+        assert output is False
+        assert "every source frame" in error
+        assert not target.exists()
+        assert not list(root.glob("merge-*/"))
+        assert hashes == [hashlib.sha256(Path(path).read_bytes()).digest() for path in selected]
+        return
+    assert not error
+    info = _probe(output, "-show_streams", "-show_packets", "-show_chapters", "-show_data_hash", "sha256")
+    audio = [stream for stream in info["streams"] if stream["codec_type"] == "audio"]
+    subtitles = [stream for stream in info["streams"] if stream["codec_type"] == "subtitle"]
+    assert len(audio) == 2 and len(subtitles) == 3
+    assert [(stream["tags"]["language"], stream["tags"]["title"], stream["disposition"]["default"]) for stream in audio] == [
+        ("jpn", "Japanese", int(codec == "hevc")), ("eng", "English", 0)]
+    assert sum(stream["disposition"]["default"] for stream in subtitles) == 1
+    assert sum(stream["disposition"]["forced"] for stream in subtitles) == 1
+    assert len(info["chapters"]) == 3
+    subtitle_indexes = {stream["index"] for stream in subtitles}
+    assert sorted(float(packet["pts_time"]) for packet in info["packets"]
+                  if packet["stream_index"] in subtitle_indexes) == pytest.approx(
+        _expected_embedded_times(selected, info["chapters"]), abs=0.006)
+    for stream in subtitles:
+        assert len([packet for packet in info["packets"] if packet["stream_index"] == stream["index"]]) == 3
+    for position, stream in enumerate(audio):
+        expected = []
+        for source in selected:
+            original = _probe(source, "-select_streams", f"a:{position}", "-show_packets", "-show_data_hash", "sha256")
+            expected.extend(packet["data_hash"] for packet in original["packets"])
+        assert [packet["data_hash"] for packet in info["packets"] if packet["stream_index"] == stream["index"]] == expected
+    assert hashes == [hashlib.sha256(Path(path).read_bytes()).digest() for path in selected]
+    _run("ffmpeg", "-v", "error", "-xerror", "-i", output, "-map", "0:v", "-map", "0:a", "-f", "null", "-")
+
+
+@pytest.mark.asyncio
 async def test_task_cancellation_terminates_child_and_returns_clear_error(media, monkeypatch):
     from bot.helper.ext_utils import merge_media as backend
     root, files = media
