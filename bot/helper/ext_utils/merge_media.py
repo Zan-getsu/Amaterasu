@@ -917,9 +917,14 @@ async def merge_encode(listener, files, output_file, probes, profile, *, sidecar
             if any(item != identity[0] for item in identity[1:]):
                 raise ValueError(f"Audio track {position + 1} changes language or role between items.")
         color_fields = ("color_range", "color_space", "color_transfer", "color_primaries")
-        if any(tuple(track.get(field) for field in color_fields) !=
-               tuple(video_tracks[0].get(field) for field in color_fields)
-               for track in video_tracks[1:]):
+        color_values = []
+        for track in video_tracks:
+            values = [track.get(field) for field in color_fields]
+            if values[0] in {None, "unknown", "unspecified"}:
+                # FFmpeg defaults YUV to limited range; JPEG YUV and RGB are full.
+                values[0] = "pc" if str(track.get("pix_fmt") or "").startswith(("yuvj", "rgb", "bgr", "gbr")) else "tv"
+            color_values.append(values)
+        if any(values != color_values[0] for values in color_values[1:]):
             raise ValueError("Input color or HDR properties differ; this profile does not define a safe conversion.")
         pixel_format = str(video_params.get("pix_fmt") or "yuv420p")
         if video_tracks[0].get("color_transfer") in {"smpte2084", "arib-std-b67"} and "10" not in pixel_format:

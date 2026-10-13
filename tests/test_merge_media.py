@@ -39,6 +39,16 @@ def _probe(path, *fields):
     ]))
 
 
+def _expected_embedded_times(sources, chapters):
+    times = []
+    for source, chapter in zip(sources, chapters, strict=True):
+        info = _probe(source, "-show_streams", "-show_packets")
+        tracks = {stream["index"] for stream in info["streams"] if stream["codec_type"] == "subtitle"}
+        offset = float(chapter["start_time"]) - float(_origin(info))
+        times.extend(float(packet["pts_time"]) + offset for packet in info["packets"] if packet["stream_index"] in tracks)
+    return sorted(times)
+
+
 def _ass(title, size, colour):
     return f"""[Script Info]
 Title: {title}
@@ -257,7 +267,7 @@ async def test_ass_styles_join_continuously_and_srt_keeps_its_format(media):
     assert len(info["chapters"]) == 3
     assert [chapter["tags"]["title"] for chapter in info["chapters"]] == ["1", "2", "3"]
     assert [float(packet["pts_time"]) for packet in info["packets"] if packet["stream_index"] in {2, 3, 4}] == pytest.approx(
-        [0.2, 1.7, 3.2], abs=0.08
+        _expected_embedded_times(files, info["chapters"]), abs=0.006
     )
     assert probes[0]["streams"][2]["codec_name"] == "ass"
     extracted = root / "joined.ass"
@@ -382,11 +392,11 @@ async def test_missing_subtitle_interval_keeps_sparse_original_tracks(media):
         [_probe(path, "-show_streams", "-show_format") for path in selected],
     )
     assert not error
-    info = _probe(output, "-show_streams", "-show_packets")
+    info = _probe(output, "-show_streams", "-show_packets", "-show_chapters")
     subtitles = [stream for stream in info["streams"] if stream["codec_type"] == "subtitle"]
     assert [stream["codec_name"] for stream in subtitles] == ["ass", "subrip"]
     starts = [float(packet["pts_time"]) for packet in info["packets"] if packet["stream_index"] in {stream["index"] for stream in subtitles}]
-    assert starts == pytest.approx([0.2, 3.2], abs=0.08)
+    assert starts == pytest.approx(_expected_embedded_times(selected, info["chapters"]), abs=0.006)
 
 
 @pytest.mark.asyncio
@@ -589,6 +599,26 @@ def test_ass_named_style_resets_follow_namespaced_styles():
         join_documents([read_document(first, "ass"), read_document(second.replace("PlayResX: 640", "PlayResX: 1280"), "ass")])
 
 
+@pytest.mark.asyncio
+async def test_encode_accepts_equivalent_implicit_range_and_rejects_explicit_color_changes(media):
+    root, files = media
+    selected = list(map(str, files[:2]))
+    profile = {"video_codec": "libx264", "audio_codec": "aac", "video_params": {"preset": "ultrafast"}}
+    probes = [_probe(path, "-show_streams", "-show_format") for path in selected]
+    videos = [next(stream for stream in probe["streams"] if stream["codec_type"] == "video") for probe in probes]
+    videos[0].pop("color_range", None)
+    videos[1]["color_range"] = "tv"
+    output, error = await merge_encode(_listener(), selected, str(root / "implicit-limited-range.mkv"), probes, profile)
+    assert output and not error
+    for field, value in (("color_range", "pc"), ("color_transfer", "smpte2084")):
+        original = videos[1].get(field)
+        videos[1][field] = value
+        output, error = await merge_encode(_listener(), selected, str(root / f"unsafe-{field}.mkv"), probes, profile)
+        assert output is False
+        assert "color or HDR" in error
+        videos[1][field] = original
+
+
 @pytest.mark.parametrize("value", ["NaN", "Infinity", "-Infinity"])
 def test_non_finite_duration_is_rejected(value):
     with pytest.raises(ValueError, match="non-finite"):
@@ -614,13 +644,14 @@ async def test_srt_sidecars_join_across_missing_interval_and_keep_languages(medi
                                      [_probe(path, "-show_streams", "-show_format") for path in selected],
                                      sidecars=associate_sidecars(selected, sidecars))
     assert not error
-    info = _probe(output, "-show_streams", "-show_packets")
+    info = _probe(output, "-show_streams", "-show_packets", "-show_chapters")
     tracks = [stream for stream in info["streams"] if stream["codec_type"] == "subtitle"]
     assert len(tracks) == 2
     assert {stream["tags"]["language"] for stream in tracks} == {"eng", "jpn"}
     for stream in tracks:
         events = [packet for packet in info["packets"] if packet["stream_index"] == stream["index"]]
-        assert [float(packet["pts_time"]) for packet in events] == pytest.approx([0.2, 3.2], abs=0.08)
+        assert [float(packet["pts_time"]) for packet in events] == pytest.approx(
+            [float(info["chapters"][index]["start_time"]) + 0.2 for index in (0, 2)], abs=0.003)
     assert listener.merge_subtitle_count == 2
 
 
@@ -719,7 +750,8 @@ async def test_three_english_ass_episodes_with_editor_metadata_join_into_one_tra
     assert tracks[0]["tags"]["language"] == "eng"
     assert len(info["chapters"]) == 3
     events = [p for p in info["packets"] if p["stream_index"] == tracks[0]["index"]]
-    assert [float(p["pts_time"]) for p in events] == pytest.approx([0.2, 1.7, 3.2], abs=0.08)
+    assert [float(p["pts_time"]) for p in events] == pytest.approx(
+        _expected_embedded_times(selected, info["chapters"]), abs=0.006)
 
 
 def test_ass_case_insensitive_style_references_join_correctly():
