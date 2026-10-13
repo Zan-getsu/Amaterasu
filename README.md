@@ -1971,6 +1971,9 @@ order in the web planner while they download.
   selectable track, including gaps where an episode has no subtitles. ASS tracks
   with matching script settings are also joined; each episode keeps its styles,
   colors, fonts, positioning, and named style resets.
+- Different episode font packs may use the same internal font names. The merger
+  gives conflicting packs unique names and updates ASS styles and inline font
+  references, preserving each episode's glyphs and keeping all required fonts.
 - Episode titles and editor metadata do not create separate subtitle tracks.
   A dialogue track continues across the merged timeline, so you select it once.
   If matching text tracks have genuinely incompatible ASS rendering settings or

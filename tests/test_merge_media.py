@@ -7,10 +7,13 @@ import shutil
 import struct
 import subprocess
 import sys
+from io import BytesIO
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
+from bot.helper.ext_utils.merge_fonts import namespace_font
 from bot.helper.ext_utils.merge_media import (
     _check_selected_streams,
     _font_names,
@@ -23,7 +26,7 @@ from bot.helper.ext_utils.merge_media import (
     merge_encode,
     validate_merge_encode_profile,
 )
-from bot.helper.ext_utils.merge_subtitles import join_documents, read_document
+from bot.helper.ext_utils.merge_subtitles import join_documents, read_document, rename_fonts
 
 
 def _run(*args):
@@ -140,6 +143,84 @@ def _font_bytes(family="Example", postscript="Example-Regular"):
         strings += encoded
     name_table = struct.pack(">HHH", 0, len(records), 6 + len(records) * 12) + b"".join(records) + strings
     return struct.pack(">IHHHH", 0x00010000, 1, 0, 0, 0) + struct.pack(">4sIII", b"name", 0, 28, len(name_table)) + name_table
+
+
+def _renderable_font(variant=0, kind="ttf", family="MergeCollision"):
+    from fontTools.fontBuilder import FontBuilder
+    from fontTools.pens.t2CharStringPen import T2CharStringPen
+    from fontTools.pens.ttGlyphPen import TTGlyphPen
+    from fontTools.ttLib import TTCollection, TTFont
+
+    if kind == "ttc":
+        collection = TTCollection()
+        collection.fonts = [TTFont(BytesIO(_renderable_font(variant, family=family))),
+                            TTFont(BytesIO(_renderable_font(variant, family=family + "Alternate")))]
+        output = BytesIO()
+        collection.save(output)
+        collection.close()
+        return output.getvalue()
+    builder = FontBuilder(1000, isTTF=kind == "ttf")
+    builder.setupGlyphOrder([".notdef", "A"])
+    builder.setupCharacterMap({65: "A"})
+    glyphs = {}
+    for name in (".notdef", "A"):
+        pen = TTGlyphPen(None) if kind == "ttf" else T2CharStringPen(600, None)
+        if name == "A":
+            pen.moveTo((50, 0))
+            pen.lineTo((50, 700))
+            pen.lineTo((250 + variant * 200, 700))
+            pen.lineTo((250 + variant * 200, 0))
+            pen.closePath()
+        glyphs[name] = pen.glyph() if kind == "ttf" else pen.getCharString()
+    if kind == "ttf":
+        builder.setupGlyf(glyphs)
+    else:
+        builder.setupCFF(family + "-Regular", {"FamilyName": family, "FullName": family + " Regular"}, glyphs, {})
+    builder.setupHorizontalMetrics({name: (600, 0) for name in glyphs})
+    builder.setupHorizontalHeader(ascent=800, descent=-200)
+    builder.setupNameTable({"familyName": family, "styleName": "Regular",
+                           "fullName": family + " Regular", "psName": family + "-Regular",
+                           "uniqueFontIdentifier": family + str(variant)})
+    builder.setupOS2(sTypoAscender=800, sTypoDescender=-200, usWinAscent=800, usWinDescent=200)
+    builder.setupPost()
+    output = BytesIO()
+    builder.save(output)
+    return output.getvalue()
+
+
+@pytest.mark.parametrize("kind", ["ttf", "otf", "ttc"])
+def test_conflicting_font_namespace_keeps_glyphs_and_metrics(kind):
+    from fontTools.ttLib import TTCollection, TTFont
+
+    original = _renderable_font(kind=kind)
+    renamed, aliases = namespace_font(original, "Episode2_")
+    assert aliases["mergecollision"] == "Episode2_MergeCollision"
+    assert not (_font_names(original) & _font_names(renamed))
+    before = TTCollection(BytesIO(original)) if kind == "ttc" else TTFont(BytesIO(original))
+    after = TTCollection(BytesIO(renamed)) if kind == "ttc" else TTFont(BytesIO(renamed))
+    before_fonts = before.fonts if kind == "ttc" else [before]
+    after_fonts = after.fonts if kind == "ttc" else [after]
+    for source, result in zip(before_fonts, after_fonts, strict=True):
+        for table in ("cmap", "hmtx", "OS/2", "glyf", "loca"):
+            if table in source:
+                assert source.getTableData(table) == result.getTableData(table)
+        if "CFF " in source:
+            assert result["CFF "].cff.fontNames == ["Episode2_" + name for name in source["CFF "].cff.fontNames]
+            for glyph in source.getGlyphOrder():
+                left = source["CFF "].cff.topDictIndex[0].CharStrings[glyph]
+                right = result["CFF "].cff.topDictIndex[0].CharStrings[glyph]
+                left.decompile()
+                right.decompile()
+                assert left.program == right.program
+    before.close()
+    after.close()
+
+
+def test_ass_font_references_update_styles_and_overrides_only():
+    document = read_document(_ass(r"{\fnArial}AAAA{\fn@ARIAL}A{\fn}Arial", 22, "&H00FFFFFF"), "ass")
+    assert rename_fonts(document, {"arial": "Episode2_Arial"})
+    assert document["styles"][0]["Fontname"] == "Episode2_Arial"
+    assert document["events"][0]["Text"] == r"{\fnEpisode2_Arial}AAAA{\fn@Episode2_Arial}A{\fn}Arial"
 
 
 @pytest.mark.asyncio
@@ -307,6 +388,44 @@ async def test_identical_font_attachment_is_deduplicated(media):
     assert not error
     identity = json.loads(subprocess.check_output([_mkvmerge_binary(), "-J", output]))
     assert len(identity["attachments"]) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["ttf", "otf", "ttc"])
+async def test_conflicting_fonts_merge_and_render_each_episode_correctly(media, kind):
+    root, files = media
+    selected = []
+    for index, source in enumerate(files[:2]):
+        font = root / f"collision.{kind}"
+        font.write_bytes(_renderable_font(index, kind))
+        subtitle = root / f"collision-{kind}-{index}.ass"
+        subtitle.write_text(_ass(r"AA{\fnMergeCollision}AA", 48, "&H00FFFFFF").replace(",Arial,", ",MergeCollision,"), encoding="utf-8")
+        intermediate = root / f"collision-{kind}-{index}-base.mkv"
+        target = root / f"collision-{kind}-{index}.mkv"
+        _run("ffmpeg", "-v", "error", "-y", "-i", str(source), "-i", str(subtitle),
+             "-map", "0:v", "-map", "0:a", "-map", "1:s", "-c", "copy", str(intermediate))
+        _run(_mkvmerge_binary(), "--quiet", "-o", str(target), "--attachment-mime-type",
+             "font/otf" if kind == "otf" else "font/ttf", "--attach-file", str(font), str(intermediate))
+        selected.append(str(target))
+    source_hashes = [hashlib.sha256(Path(path).read_bytes()).digest() for path in selected]
+    output, error = await merge_copy(_listener(), selected, str(root / f"font-conflicts-{kind}.mkv"),
+                                    [_probe(path, "-show_streams", "-show_format") for path in selected])
+    assert not error
+    identity = json.loads(subprocess.check_output([_mkvmerge_binary(), "-J", output]))
+    assert len(identity["attachments"]) == 2
+    assert len([track for track in identity["tracks"] if track["type"] == "subtitles"]) == 1
+    chapters = _probe(output, "-show_chapters")["chapters"]
+
+    def rendered_frame(path, time):
+        result = subprocess.check_output(["ffmpeg", "-v", "error", "-i", Path(path).name,
+            "-vf", f"subtitles={Path(path).name}:si=0", "-ss", str(time), "-frames:v", "1", "-an", "-f", "framemd5", "pipe:1"], cwd=root)
+        return [line.rsplit(b",", 1)[-1].strip() for line in result.splitlines() if line and not line.startswith(b"#")]
+
+    originals = [rendered_frame(path, 0.4) for path in selected]
+    assert originals[0] != originals[1]
+    for index, original in enumerate(originals):
+        assert original == rendered_frame(output, float(chapters[index]["start_time"]) + 0.4)
+    assert source_hashes == [hashlib.sha256(Path(path).read_bytes()).digest() for path in selected]
 
 
 @pytest.mark.asyncio

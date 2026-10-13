@@ -14,7 +14,8 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from secrets import token_hex
 
-from .merge_subtitles import join_documents, read_document
+from .merge_fonts import namespace_font
+from .merge_subtitles import join_documents, read_document, rename_fonts
 
 
 def _mkvmerge_binary():
@@ -313,7 +314,7 @@ def _write_chapters(path, starts, files):
     Path(path).write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
-async def _attachment_records(extractor, file_, attachments, working, listener):
+async def _attachment_records(extractor, file_, attachments, working, listener, *, retain=False):
     records = []
     for index, attachment in enumerate(attachments):
         if int(attachment.get("size") or 0) > 64 * 1024 * 1024:
@@ -332,12 +333,13 @@ async def _attachment_records(extractor, file_, attachments, working, listener):
         name = str(attachment.get("file_name") or "")
         mime = str(attachment.get("content_type") or "")
         digest = hashlib.sha256(content).hexdigest()
-        font = name.casefold().endswith((".ttf", ".otf", ".ttc")) or mime.casefold().startswith("font/")
+        font = name.casefold().endswith((".ttf", ".otf", ".ttc", ".otc")) or mime.casefold().startswith("font/")
         records.append({
             "id": attachment["id"], "name": name, "mime": mime,
-            "hash": digest, "font_names": _font_names(content) if font else set(),
+            "hash": digest, "font_names": _font_names(content) if font else set(), "path": target,
         })
-        os.remove(target)
+        if not retain:
+            os.remove(target)
     return records
 
 
@@ -355,7 +357,7 @@ async def _select_attachments(executable, files, identities, working, listener):
         for info in identities
     ]
     if not any(kept_attachments):
-        return [[] for _ in files], []
+        return [[] for _ in files], [], [], {}
     extractor = _mkvextract_binary(executable)
     if not extractor:
         raise ValueError("MKVToolNix (mkvextract) is required to verify subtitle font attachments.")
@@ -364,27 +366,51 @@ async def _select_attachments(executable, files, identities, working, listener):
     seen_hashes = set()
     names = {}
     font_names = {}
+    records_by_file = []
     for file_, attachments in zip(files, kept_attachments, strict=True):
-        records = await _attachment_records(
-            extractor, file_, attachments, working, listener
-        )
+        records_by_file.append(await _attachment_records(
+            extractor, file_, attachments, working, listener, retain=True,
+        ))
+    conflicts = False
+    for records in records_by_file:
+        for record in records:
+            for font_name in record["font_names"]:
+                if font_name in font_names and font_names[font_name] != record["hash"]:
+                    conflicts = True
+                font_names[font_name] = record["hash"]
+            folded_name = record["name"].casefold()
+            if record["font_names"] and folded_name in names and names[folded_name] != record["hash"]:
+                conflicts = True
+            names[folded_name] = record["hash"]
+    names = {}
+    extra = []
+    font_maps = {}
+    for index, records in enumerate(records_by_file, 1):
+        prefix = f"Merge{index}_{token_hex(4)}_"
         ids = []
         for record in records:
+            renamed = conflicts and bool(record["font_names"])
+            if renamed:
+                data, aliases = namespace_font(Path(record["path"]).read_bytes(), prefix)
+                Path(record["path"]).write_bytes(data)
+                font_maps.setdefault(index, {}).update(aliases)
+                record = dict(record, name=f"{prefix}{record['hash'][:8]}-{record['name']}",
+                              hash=hashlib.sha256(data).hexdigest(), font_names=_font_names(data),
+                              mime="font/otf" if data[:4] == b"OTTO" else "font/ttf")
             if record["hash"] in seen_hashes:
                 continue
             folded_name = record["name"].casefold()
             if folded_name in names and names[folded_name] != record["hash"]:
                 raise ValueError(f"Different attachments share the filename {record['name']!r}.")
-            for font_name in record["font_names"]:
-                if font_name in font_names and font_names[font_name] != record["hash"]:
-                    raise ValueError("Different embedded fonts have the same internal family/style or PostScript name.")
-                font_names[font_name] = record["hash"]
             names[folded_name] = record["hash"]
             seen_hashes.add(record["hash"])
             expected.append(record)
-            ids.append(record["id"])
+            if renamed:
+                extra.append(record)
+            else:
+                ids.append(record["id"])
         selected.append(ids)
-    return selected, expected
+    return selected, expected, extra, font_maps
 
 
 async def _validate_attachments(executable, candidate, expected, working, listener):
@@ -508,12 +534,13 @@ async def _validate_playback(candidate, duration, has_audio, listener):
             )
 
 
-async def _join_subtitle_tracks(executable, candidate, working, listener):
+async def _join_subtitle_tracks(executable, candidate, working, listener, font_maps=None):
     """Combine text lanes; reject incompatible text and preserve bitmap tracks."""
     identity = await _json_command([executable, "-J", candidate], listener)
     evidence = await _subtitle_evidence(candidate, listener)
     tracks = _tracks(identity, "subtitles")
     groups = []
+    font_maps = font_maps or {}
     lane_positions = Counter()
     packets = _packets_by_stream(evidence)
     extraction = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin", "-y", "-copyts", "-i", candidate]
@@ -537,6 +564,7 @@ async def _join_subtitle_tracks(executable, candidate, working, listener):
         item_number = int(item_number[1]) if item_number else index
         codec = stream.get("codec_name")
         document = None
+        fonts_changed = False
         if index in text_paths:
             try:
                 document = read_document(Path(text_paths[index]).read_text(encoding="utf-8-sig"), codec)
@@ -547,6 +575,10 @@ async def _join_subtitle_tracks(executable, candidate, working, listener):
                 document = None
             if document is not None and len(document["events"]) != len(packets.get(stream["index"], [])):
                 raise ValueError("Subtitle extraction changed the number of events.")
+            if codec == "ass" and font_maps.get(item_number):
+                if document is None:
+                    raise ValueError("Cannot update font references in an unreadable ASS subtitle.")
+                fonts_changed = rename_fonts(document, font_maps[item_number])
         role = (properties.get("language") or "und",) + tuple(bool(properties.get(key)) for key in (
             "forced_track", "hearing_impaired", "visual_impaired", "text_descriptions", "commentary",
         ))
@@ -560,10 +592,11 @@ async def _join_subtitle_tracks(executable, candidate, working, listener):
         group = group or next(iter(matches), None)
         if group is None:
             group = {"key": key, "tracks": [], "documents": [], "items": set(),
-                     "properties": properties, "title": title, "codec": codec}
+                     "properties": properties, "title": title, "codec": codec, "fonts_changed": False}
             groups.append(group)
         group["tracks"].append((track, stream))
         group["items"].add(item_number)
+        group["fonts_changed"] |= fonts_changed
         if document:
             group["documents"].append(document)
     lanes = Counter(group["key"][:3] for group in groups if group["codec"] in {"ass", "subrip"})
@@ -579,7 +612,7 @@ async def _join_subtitle_tracks(executable, candidate, working, listener):
             f"Cannot create one continuous {lane[1][0]} dialogue subtitle track: {reason}. "
             "The merge stopped instead of publishing separate episode subtitle tracks."
         )
-    if not any(len(group["tracks"]) > 1 for group in groups):
+    if not any(len(group["tracks"]) > 1 or group["fonts_changed"] for group in groups):
         return candidate, len(tracks), len(tracks)
 
     if shutil.disk_usage(working).free < os.path.getsize(candidate) + 64 * 1024**2:
@@ -594,7 +627,7 @@ async def _join_subtitle_tracks(executable, candidate, working, listener):
                          next((i for i, group in enumerate(groups) if not group["properties"].get("forced_track")), 0))
     for index, group in enumerate(groups):
         target = os.path.join(working, f"lane-{index}.mkv")
-        if len(group["tracks"]) > 1:
+        if len(group["tracks"]) > 1 or group["fonts_changed"]:
             text = join_documents(group["documents"])
             text_path = os.path.join(working, f"lane-{index}.{'ass' if group['codec'] == 'ass' else 'srt'}")
             Path(text_path).write_text(text, encoding="utf-8")
@@ -689,7 +722,7 @@ async def merge_copy(
             av_file = av_override or os.path.join(working, "timeline.mkv")
             chapters_file = os.path.join(working, "chapters.txt")
             candidate = os.path.join(working, f"candidate-{token_hex(6)}.mkv")
-            attachment_ids, expected_attachments = await _select_attachments(
+            attachment_ids, expected_attachments, extra_attachments, font_maps = await _select_attachments(
                 executable, files, identities, working, listener
             )
             if not av_override:
@@ -782,6 +815,9 @@ async def merge_copy(
                         subtitle_count += 1
                     command.append(prepared)
                     subtitle_inputs.append((prepared, starts[index], index + 1))
+            for attachment in extra_attachments:
+                command += ["--attachment-name", attachment["name"],
+                            "--attachment-mime-type", attachment["mime"], "--attach-file", attachment["path"]]
             code, diagnostic = await _run(command, listener)
             if code:
                 raise ValueError(f"Final Matroska assembly failed: {diagnostic or f'exit {code}'}")
@@ -789,7 +825,7 @@ async def merge_copy(
             if not av_override:
                 os.remove(av_file)
             candidate, subtitle_count, independent_count = await _join_subtitle_tracks(
-                executable, candidate, working, listener
+                executable, candidate, working, listener, font_maps
             )
             final_probe = await _json_command(
                 ["ffprobe", "-v", "error", "-show_streams", "-show_chapters", "-show_format", "-show_data_hash", "sha256", "-of", "json", candidate],

@@ -153,3 +153,26 @@ def _rename_resets(block, names):
             raise ValueError("An ASS override refers to a missing style.")
         return "\\r" + names[name]
     return re.sub(r"\\r([^\\}]+)", rename, block)
+
+
+def rename_fonts(document, names):
+    """Update ASS styles and inline font overrides to their episode font pack."""
+    changed = False
+
+    def rename(name):
+        nonlocal changed
+        vertical = name.startswith("@")
+        replacement = names.get(name.removeprefix("@").strip().casefold())
+        if replacement:
+            changed = True
+            return ("@" if vertical else "") + replacement
+        return name
+
+    for style in document["styles"]:
+        if "Fontname" in style:
+            style["Fontname"] = rename(style["Fontname"])
+    for event in document["events"]:
+        event["Text"] = re.sub(r"\{[^}]*\}", lambda block: re.sub(
+            r"\\fn([^\\}]+)", lambda match: "\\fn" + rename(match[1]), block[0],
+        ), event["Text"])
+    return changed
