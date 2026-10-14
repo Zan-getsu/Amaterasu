@@ -286,6 +286,89 @@ def test_font_name_parser_detects_internal_identity():
     assert ("postscript", "example-regular") in _font_names(_font_bytes())
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("sidecar", [False, True])
+@pytest.mark.parametrize("continuous", [False, True])
+async def test_mixed_ass_and_multiline_srt_preserve_text_bytes_and_timing(media, sidecar, continuous):
+    root, files = media
+    prefix = f"multiline-{sidecar}-{continuous}"
+    selected, sidecars, texts, event_times = [], {}, [], []
+    for index, source in enumerate((files[0], files[1], files[0])):
+        target = root / f"{prefix}-{index}.mkv"
+        subtitle = root / f"{prefix}-{index}.en.srt"
+        present = continuous or index == 2
+        text = f"\t<i>日本語, part {index}</i>  \n  Second line, with comma"
+        if present:
+            subtitle.write_text(f"1\n00:00:00,200 --> 00:00:00,800\n{text}\n", encoding="utf-8")
+            texts.append(text)
+        command = ["ffmpeg", "-v", "error", "-y", "-i", str(source)]
+        if present and not sidecar:
+            command += ["-i", str(subtitle)]
+        command += ["-map", "0"]
+        if present and not sidecar:
+            command += ["-map", "1:s"]
+        _run(*command, "-c", "copy", str(target))
+        selected.append(str(target))
+        if present and sidecar:
+            sidecars[str(target)] = [str(subtitle)]
+    probes = [_probe(path, "-show_streams", "-show_format") for path in selected]
+    hashes = [hashlib.sha256(Path(path).read_bytes()).digest() for path in selected]
+    output, error = await merge_copy(_listener(), selected, str(root / f"{prefix}-merged.mkv"), probes, sidecars=sidecars)
+    assert not error
+    info = _probe(output, "-show_streams", "-show_packets", "-show_chapters", "-show_data_hash", "sha256")
+    subtitles = [stream for stream in info["streams"] if stream["codec_type"] == "subtitle"]
+    assert sorted(stream["codec_name"] for stream in subtitles) == ["ass", "subrip"]
+    srt_index = next(stream["index"] for stream in subtitles if stream["codec_name"] == "subrip")
+    packets = [packet for packet in info["packets"] if packet["stream_index"] == srt_index]
+    expected_hashes = []
+    for index, chapter in enumerate(info["chapters"]):
+        if not continuous and index != 2:
+            continue
+        if sidecar:
+            source = _probe(sidecars[selected[index]][0], "-select_streams", "s", "-show_packets", "-show_data_hash", "sha256")
+            offset = float(chapter["start_time"])
+        else:
+            source = _probe(selected[index], "-select_streams", "s:1", "-show_packets", "-show_data_hash", "sha256")
+            offset = float(chapter["start_time"]) - float(_origin(probes[index]))
+        event_times.extend(float(packet["pts_time"]) + offset for packet in source["packets"])
+        expected_hashes.extend(packet["data_hash"] for packet in source["packets"])
+    assert [float(packet["pts_time"]) for packet in packets] == pytest.approx(event_times, abs=0.003)
+    assert [packet["data_hash"] for packet in packets] == expected_hashes
+    extracted = root / f"{prefix}-checked.srt"
+    _run("ffmpeg", "-v", "error", "-y", "-i", output, "-map", f"0:{srt_index}", "-c:s", "copy", str(extracted))
+    document = read_document(extracted.read_text(encoding="utf-8-sig"), "subrip")
+    assert [event[-1] for event in document["events"]] == texts
+    assert hashes == [hashlib.sha256(Path(path).read_bytes()).digest() for path in selected]
+
+
+@pytest.mark.asyncio
+async def test_subtitle_dialogue_mutation_fails_before_publication(media, monkeypatch):
+    from bot.helper.ext_utils import merge_media as backend
+
+    root, files = media
+    original_run = backend._run
+    hashes = [hashlib.sha256(path.read_bytes()).digest() for path in files[:2]]
+
+    async def corrupt_dialogue(arguments, listener, **kwargs):
+        result = await original_run(arguments, listener, **kwargs)
+        if Path(str(arguments[0])).stem.casefold() == "mkvmerge" and "--chapters" in arguments:
+            candidate = Path(arguments[arguments.index("-o") + 1])
+            data = candidate.read_bytes()
+            assert data.count(b",,First") == 1
+            candidate.write_bytes(data.replace(b",,First", b",,Wrong"))
+        return result
+
+    monkeypatch.setattr(backend, "_run", corrupt_dialogue)
+    target = root / "corrupted-subtitle.mkv"
+    output, error = await merge_copy(_listener(), list(map(str, files[:2])), str(target),
+                                    [_probe(path, "-show_streams", "-show_format") for path in files[:2]])
+    assert output is False
+    assert error == "Subtitle event content changed for item 1."
+    assert not target.exists()
+    assert not list(root.glob("merge-*/"))
+    assert hashes == [hashlib.sha256(path.read_bytes()).digest() for path in files[:2]]
+
+
 def test_font_collection_checks_identity_of_every_face():
     first = bytearray(_font_bytes("First", "First-Regular"))
     second = bytearray(_font_bytes("Second", "Second-Regular"))

@@ -640,7 +640,8 @@ async def _join_subtitle_tracks(executable, candidate, working, listener, font_m
         raise ValueError("Not enough free disk space to assemble continuous subtitle tracks.")
 
     result = os.path.join(working, "continuous-subtitles.mkv")
-    command = [executable, "--quiet", "-o", result, "--no-subtitles", candidate]
+    command = [executable, "--quiet", "--engage", "force_passthrough_packetizer",
+               "-o", result, "--no-subtitles", candidate]
     validation_inputs = []
     independent = 0
     default_index = next((i for i, group in enumerate(groups)
@@ -669,7 +670,8 @@ async def _join_subtitle_tracks(executable, candidate, working, listener, font_m
             independent += 1
             track, stream = group["tracks"][0]
             code, diagnostic = await _run(
-                [executable, "--quiet", "-o", target, "--no-video", "--no-audio",
+                [executable, "--quiet", "--engage", "force_passthrough_packetizer",
+                 "-o", target, "--no-video", "--no-audio",
                  "--no-attachments", "--no-chapters", "--no-global-tags",
                  "--subtitle-tracks", str(track["id"]), candidate], listener,
             )
@@ -830,7 +832,9 @@ async def merge_copy(
                      if stream.get("codec_type") in {"video", "audio"}]
             _write_chapters(chapters_file, starts, files)
 
-            command = [executable, "--quiet", "-o", candidate, "--chapters", chapters_file,
+            # Text packetizers rewrite line endings/whitespace; preserve payloads exactly.
+            command = [executable, "--quiet", "--engage", "force_passthrough_packetizer",
+                       "-o", candidate, "--chapters", chapters_file,
                        "--no-subtitles", "--no-attachments", "--no-chapters", "--no-global-tags", av_file]
             subtitle_count = 0
             subtitle_inputs = []
