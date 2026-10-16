@@ -517,24 +517,42 @@ async def _validate_subtitles(inputs, candidate, listener):
                     raise ValueError(f"Subtitle event duration changed for item {item_number}.")
 
 
-async def _validate_playback(candidate, end, has_audio, listener, *, start):
-    """Decode bounded start/middle/end samples before publishing the artifact."""
-    points = {start, (start + end) / 2, max(start, end - Decimal("0.6"))}
-    for point in sorted(points):
-        command = [
-            "ffmpeg", "-hide_banner", "-loglevel", "error", "-xerror", "-nostdin",
-            "-seek_timestamp", "1", "-ss", format(point, "f"), "-i", candidate, "-t", "0.4", "-map", "0:v:0",
-        ]
-        if has_audio:
-            command += ["-map", "0:a:0"]
-        command += ["-f", "framemd5", "pipe:1"]
-        code, output = await _run(command, listener, timeout=90)
-        frames = [line.split(",", 1)[0].strip() for line in output.splitlines()
-                  if line and not line.startswith("#") and "," in line]
-        if code or "0" not in frames or (has_audio and "1" not in frames):
-            raise ValueError(
-                f"The merged output could not decode video/audio near {point:.2f}s."
-            )
+async def _validate_playback(candidate, probe, listener):
+    """Decode bounded samples within each A/V track's own playable timeline."""
+    fallback_end = _chapter_timestamp((probe.get("format") or {}).get("duration")) + max(Decimal(0), _origin(probe))
+    for stream in probe.get("streams") or []:
+        kind = stream.get("codec_type")
+        if kind not in {"video", "audio"} or (stream.get("disposition") or {}).get("attached_pic"):
+            continue
+        origin = _chapter_timestamp(stream.get("start_time") or 0)
+        start, end = max(Decimal(0), origin), fallback_end
+        tags = stream.get("tags") or {}
+        if stream.get("duration") is not None:
+            end = origin + _chapter_timestamp(stream["duration"])
+        elif tags.get("_STATISTICS_WRITING_APP") and tags.get("DURATION"):
+            # MKVToolNix statistics give a span, not an absolute end timestamp.
+            end = origin + sum(_chapter_timestamp(part) * scale for part, scale in zip(
+                tags["DURATION"].split(":"), (3600, 60, 1), strict=True))
+        if end <= start:
+            raise ValueError(f"The merged {kind} track {stream['index'] + 1} has no playable duration.")
+        points = {start, (start + end) / 2, max(start, end - Decimal("0.6"))}
+        for point in sorted(points):
+            command = [
+                "ffmpeg", "-hide_banner", "-loglevel", "error", "-xerror", "-nostdin",
+                "-seek_timestamp", "1", "-ss", format(point, "f"), "-i", candidate,
+                "-map", f"0:{stream['index']}",
+                "-vf" if kind == "video" else "-af", "setpts=PTS-STARTPTS" if kind == "video" else "asetpts=PTS-STARTPTS",
+                "-t", "0.4", "-f", "framemd5", "pipe:1",
+            ]
+            # Start the sample at the next actual frame when a track has a gap.
+            code, output = await _run(command, listener, timeout=90)
+            frames = [line.split(",", 1)[0].strip() for line in output.splitlines()
+                      if line and not line.startswith("#") and "," in line]
+            if code or "0" not in frames:
+                detail = output[-1200:] if code else "No frames were decoded."
+                raise ValueError(
+                    f"The merged output could not decode {kind} track {stream['index'] + 1} near {point:.2f}s. {detail}"
+                )
 
 
 async def _video_frames(path, indexes, listener):
@@ -928,12 +946,7 @@ async def merge_copy(
             await _validate_attachments(
                 executable, candidate, expected_attachments, working, listener
             )
-            sample_streams = [next(stream for stream in actual_av if stream["codec_type"] == "video")]
-            if "audio" in kinds:
-                sample_streams.append(next(stream for stream in actual_av if stream["codec_type"] == "audio"))
-            playback_start = max(Decimal(0), *(_chapter_timestamp(stream.get("start_time") or 0) for stream in sample_streams))
-            playback_end = actual_duration + max(Decimal(0), _origin(final_probe))
-            await _validate_playback(candidate, playback_end, "audio" in kinds, listener, start=playback_start)
+            await _validate_playback(candidate, final_probe, listener)
             if not av_override and changed_headers:
                 # Differing codec headers are accepted only with identical decoded pictures.
                 expected_frames = {}

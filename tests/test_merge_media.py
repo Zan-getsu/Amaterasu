@@ -915,6 +915,93 @@ async def test_copy_merge_accepts_valid_initial_timestamp_offset(media, offset):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("case,offset", [
+    ("short-audio", "0"), ("short-video", "0"), ("dual-audio", "0"),
+    ("sparse-audio", "0"), ("dual-audio", "4300"),
+])
+async def test_playback_checks_handle_uneven_track_ends_and_gaps(media, case, offset):
+    root, _ = media
+    selected = []
+    for index in range(3):
+        duration = 4 if index == 2 else 2
+        video_duration = 2 if case == "short-video" and index == 2 else duration
+        audio_duration = 2 if case in {"short-audio", "dual-audio"} and index == 2 else duration
+        if case == "sparse-audio":
+            video_duration, audio_duration = 6 if index == 1 else 4, 1
+        target = root / f"uneven-{case}-{offset}-{index}.mkv"
+        subtitle = root / f"uneven-{case}-{offset}-{index}.ass"
+        subtitle.write_text(_ass(f"Episode {index}", 22, "&H00FFFFFF"), encoding="utf-8")
+        command = ["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i",
+                   f"testsrc2=s=160x90:r=24:d={video_duration}", "-f", "lavfi", "-i",
+                   f"sine=frequency=440:sample_rate=48000:duration={audio_duration}"]
+        if case == "dual-audio":
+            command += ["-f", "lavfi", "-i", f"sine=frequency=880:sample_rate=48000:duration={duration}"]
+        command += ["-i", str(subtitle), "-map", "0:v", "-map", "1:a"]
+        if case == "dual-audio":
+            command += ["-map", "2:a"]
+        command += ["-map", "3:s" if case == "dual-audio" else "2:s", "-c:v", "libx264",
+                    "-preset", "ultrafast", "-pix_fmt", "yuv420p", "-c:a", "aac", "-c:s", "copy"]
+        if index == 0:
+            command += ["-output_ts_offset", offset]
+        _run(*command, str(target))
+        selected.append(str(target))
+    probes = [_probe(path, "-show_streams", "-show_format") for path in selected]
+    hashes = [hashlib.sha256(Path(path).read_bytes()).digest() for path in selected]
+    output, error = await merge_copy(_listener(), selected, str(root / f"uneven-{case}-{offset}-merged.mkv"), probes)
+    assert not error
+    info = _probe(output, "-show_streams", "-show_chapters", "-show_packets", "-show_data_hash", "sha256")
+    audio = [stream for stream in info["streams"] if stream["codec_type"] == "audio"]
+    subtitles = [stream for stream in info["streams"] if stream["codec_type"] == "subtitle"]
+    assert len(audio) == (2 if case == "dual-audio" else 1)
+    assert len(subtitles) == 1
+    assert len(info["chapters"]) == 3
+    assert [float(packet["pts_time"]) for packet in info["packets"] if packet["stream_index"] == subtitles[0]["index"]] == pytest.approx(
+        _expected_embedded_times(selected, info["chapters"]), abs=0.006)
+    for position, stream in enumerate(audio):
+        expected = []
+        for source in selected:
+            original = _probe(source, "-select_streams", f"a:{position}", "-show_packets", "-show_data_hash", "sha256")
+            expected.extend(packet["data_hash"] for packet in original["packets"])
+        assert [packet["data_hash"] for packet in info["packets"] if packet["stream_index"] == stream["index"]] == expected
+    frames = _probe(output, "-count_frames", "-select_streams", "v:0", "-show_streams")
+    assert int(frames["streams"][0]["nb_read_frames"]) == (144 if case == "short-video" else 336 if case == "sparse-audio" else 192)
+    _run("ffmpeg", "-v", "error", "-xerror", "-i", output, "-map", "0:v", "-map", "0:a", "-f", "null", "-")
+    assert hashes == [hashlib.sha256(Path(path).read_bytes()).digest() for path in selected]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", ["decoder-error", "empty"])
+async def test_secondary_audio_playback_failure_blocks_publication(media, monkeypatch, failure):
+    from bot.helper.ext_utils import merge_media as backend
+
+    root, files = media
+    selected = []
+    for index, source in enumerate(files[:2]):
+        target = root / f"secondary-failure-{failure}-{index}.mkv"
+        _run("ffmpeg", "-v", "error", "-y", "-i", str(source), "-map", "0:v", "-map", "0:a",
+             "-map", "0:a", "-map", "0:s", "-c", "copy", str(target))
+        selected.append(str(target))
+    hashes = [hashlib.sha256(Path(path).read_bytes()).digest() for path in selected]
+    original_run = backend._run
+
+    async def fail_secondary_audio(arguments, listener, **kwargs):
+        if "-ss" in arguments and "0:2" in arguments and "framemd5" in arguments:
+            return (1, "Injected secondary audio decoder error") if failure == "decoder-error" else (0, "")
+        return await original_run(arguments, listener, **kwargs)
+
+    monkeypatch.setattr(backend, "_run", fail_secondary_audio)
+    target = root / f"secondary-failure-{failure}-merged.mkv"
+    output, error = await merge_copy(_listener(), selected, str(target),
+                                    [_probe(path, "-show_streams", "-show_format") for path in selected])
+    assert output is False
+    assert "could not decode audio track 3 near" in error
+    assert ("Injected secondary audio decoder error" if failure == "decoder-error" else "No frames were decoded") in error
+    assert not target.exists()
+    assert not list(root.glob("merge-*/"))
+    assert hashes == [hashlib.sha256(Path(path).read_bytes()).digest() for path in selected]
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("invalid", ["negative", "duplicate", "reversed", "outside"])
 async def test_invalid_episode_boundaries_fail_early_with_actual_times(media, monkeypatch, invalid):
     from bot.helper.ext_utils import merge_media as backend
