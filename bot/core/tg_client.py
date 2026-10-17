@@ -516,6 +516,28 @@ async def _get_stable_media_session_pool(client, dc_id, requested_size):
         return list(pool)
 
 
+def _configure_wzgram_socket_reader():
+    """Reconnect failed sockets instead of retrying their stored timeout forever."""
+    tcp = import_module("pyrogram.connection.transport.tcp").TCP
+    receive = tcp._recv_from_socket
+    if getattr(receive, "_amaterasu_socket_guard", False):
+        return
+
+    async def guarded_receive(self, length):
+        # A polling deadline leaves reader.exception() empty. A stored timeout
+        # is permanent; rereading it grows its traceback on every native retry.
+        if (
+            length > 0
+            and self.reader is not None
+            and isinstance(self.reader.exception(), TimeoutError)
+        ):
+            raise ConnectionError("Telegram socket has a persistent read timeout")
+        return await receive(self, length)
+
+    guarded_receive._amaterasu_socket_guard = True
+    tcp._recv_from_socket = guarded_receive
+
+
 def _configure_wzgram_upload_module(save_file_module):
     """Bound retries and install cleanup compatibility only when needed."""
     # Use WZGram's upload-only setting so download pools retain their native sizing.
@@ -552,6 +574,7 @@ def _report_wzgram_upload_pool():
     )
 
 
+_configure_wzgram_socket_reader()
 _report_wzgram_upload_pool()
 
 # DB partition salt loaded from per-deployment secrets module.

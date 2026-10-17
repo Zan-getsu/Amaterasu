@@ -9,12 +9,13 @@ from importlib.metadata import version as package_version
 from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pyrogram
 import pytest
 import warpcrypto
 from pyrogram import Client
+from pyrogram.connection.transport.tcp import TCP, TCPAbridged
 from pyrogram.crypto import aes
 from pyrogram.dispatcher import Dispatcher
 from pyrogram.errors import FloodPremiumWait, FloodWait
@@ -25,6 +26,7 @@ from pyrogram.handlers import (
     StopHandler,
 )
 from pyrogram.methods.advanced import save_file
+from pyrogram.session import Session
 
 from bot.core import tg_client
 from bot.core.tg_client import (
@@ -43,6 +45,96 @@ from bot.core.tg_client import (
 ROOT = Path(__file__).resolve().parents[1]
 EXPECTED_WZGRAM_VERSION = "3.1.5"
 EXPECTED_WARPCRYPTO_VERSION = "2.0.8"
+
+
+def test_socket_reader_guard_is_idempotent():
+    receive = TCP._recv_from_socket
+    tg_client._configure_wzgram_socket_reader()
+    assert TCP._recv_from_socket is receive
+
+
+async def test_failed_socket_timeout_does_not_retain_retry_tracebacks():
+    transport = TCP()
+    transport.reader = asyncio.StreamReader()
+    socket_error = TimeoutError(110, "Connection timed out")
+    transport.reader.set_exception(socket_error)
+
+    for _ in range(100):
+        with pytest.raises(ConnectionError, match="persistent read timeout"):
+            await transport._recv_from_socket(1)
+
+    assert socket_error.__traceback__ is None
+
+
+async def test_failed_socket_timeout_reconnects_instead_of_spinning():
+    transport = TCPAbridged()
+    transport.reader = asyncio.StreamReader()
+    transport.reader.set_exception(TimeoutError(110, "Connection timed out"))
+    receive_attempts = 0
+
+    async def receive():
+        nonlocal receive_attempts
+        receive_attempts += 1
+        if receive_attempts > 1:
+            raise RuntimeError("Retried a permanently failed socket")
+        return await transport.recv()
+
+    session = object.__new__(Session)
+    session.connection = SimpleNamespace(recv=receive)
+    session.is_started = asyncio.Event()
+    session.is_started.set()
+    session._teardown_started = False
+    session._stopping = False
+    session._fail_pending = Mock()
+    session._safe_restart = AsyncMock()
+
+    await session.recv_worker()
+
+    assert receive_attempts == 1
+    session._safe_restart.assert_awaited_once()
+    session._fail_pending.assert_called_once()
+    assert isinstance(session._fail_pending.call_args.args[0], ConnectionResetError)
+
+
+async def test_idle_socket_timeout_can_receive_data_later(monkeypatch):
+    transport = TCP()
+    transport.reader = asyncio.StreamReader()
+    monkeypatch.setattr(TCP, "TIMEOUT", 0.01)
+
+    with pytest.raises(TimeoutError, match="Socket read timed out"):
+        await transport._recv_from_socket(1)
+
+    assert transport.reader.exception() is None
+    transport.reader.feed_data(b"ok")
+    assert await transport._recv_from_socket(2) == b"ok"
+
+
+async def test_socket_failure_during_read_stops_on_next_attempt():
+    transport = TCP()
+    transport.reader = asyncio.StreamReader()
+    socket_error = TimeoutError(110, "Connection timed out")
+    asyncio.get_running_loop().call_soon(transport.reader.set_exception, socket_error)
+
+    with pytest.raises(TimeoutError, match="Socket read timed out"):
+        await transport._recv_from_socket(1)
+
+    retained_traceback = socket_error.__traceback__
+    for _ in range(100):
+        with pytest.raises(ConnectionError, match="persistent read timeout"):
+            await transport._recv_from_socket(1)
+    assert socket_error.__traceback__ is retained_traceback
+
+
+async def test_socket_read_cancellation_is_preserved():
+    transport = TCP()
+    transport.reader = asyncio.StreamReader()
+    task = asyncio.create_task(transport._recv_from_socket(1))
+    await asyncio.sleep(0)
+    task.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert transport.reader.exception() is None
 
 
 def test_all_amaterasu_pyrogram_imports_resolve_with_wzgram():
