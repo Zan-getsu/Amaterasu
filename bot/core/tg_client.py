@@ -5,7 +5,7 @@ from functools import partial
 from hashlib import sha256
 from importlib import import_module
 from inspect import signature
-from os import environ, getenv
+from os import getenv
 from time import monotonic
 
 from pyrogram import Client, enums
@@ -122,16 +122,15 @@ class _WzgramUploadPacer:
         me = getattr(client, "me", None)
         if getattr(me, "is_bot", False):
             rate = int(getenv("WZGRAM_UPLOAD_RATE_BOT", "32"))
-            in_flight = int(getenv("WZGRAM_UPLOAD_POOL_BOT", "4"))
+            in_flight = 2 * int(getenv("WZGRAM_UPLOAD_POOL_BOT", "8"))
         elif getattr(me, "is_premium", False):
             rate = int(getenv("WZGRAM_UPLOAD_RATE_PREMIUM", "300"))
             in_flight = 2 * int(getenv("WZGRAM_UPLOAD_POOL_PREMIUM", "14"))
         else:
             rate = int(getenv("WZGRAM_UPLOAD_RATE_USER", "32"))
             in_flight = 2 * int(getenv("WZGRAM_UPLOAD_POOL_USER", "12"))
-        premium = not getattr(me, "is_bot", False) and getattr(me, "is_premium", False)
-        ceiling = max(rate, 300) if premium else rate
-        self.bucket = AdaptiveBucket(rate=rate, ceiling=ceiling, burst=1, step=1.0)
+        # Match native upload workers and rate growth while sharing flood cooldowns.
+        self.bucket = AdaptiveBucket(rate=rate, ceiling=max(rate, 300), burst=16, step=1.0)
         self.in_flight = Semaphore(max(1, in_flight))
         self.lock = Lock()
         self.flood_until = 0.0
@@ -540,14 +539,23 @@ def _configure_wzgram_socket_reader():
 
 def _configure_wzgram_upload_module(save_file_module):
     """Bound retries and install cleanup compatibility only when needed."""
-    # Use WZGram's upload-only setting so download pools retain their native sizing.
-    environ.setdefault("WZGRAM_UPLOAD_POOL_BOT", "4")
     save_file_module.MAX_RETRIES = min(
         int(getattr(save_file_module, "MAX_RETRIES", WZGRAM_UPLOAD_PART_ATTEMPTS)),
         WZGRAM_UPLOAD_PART_ATTEMPTS,
     )
 
-    if callable(getattr(save_file_module, "_stop_workers", None)):
+    stop_workers = getattr(save_file_module, "_stop_workers", None)
+    if callable(stop_workers):
+        if not getattr(stop_workers, "_amaterasu_cancel_guard", False):
+            async def stop_upload_workers(queue, workers):
+                # Cancelled uploads must not wait for pending part acknowledgements.
+                if _asyncio.current_task().cancelling():
+                    for worker in workers:
+                        worker.cancel()
+                return await stop_workers(queue, workers)
+
+            stop_upload_workers._amaterasu_cancel_guard = True
+            save_file_module._stop_workers = stop_upload_workers
         return "native"
 
     if not getattr(save_file_module.asyncio, "_amaterasu_queue_guard", False):
