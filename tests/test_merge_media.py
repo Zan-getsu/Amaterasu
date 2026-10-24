@@ -287,6 +287,36 @@ def test_font_name_parser_detects_internal_identity():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("hex_data,expected", [
+    ("4c69 6e65 310a 4c69 6e65 32", b"Line1\nLine2"),
+    ("4c69 6e65 310d 0a4c 696e 6532", b"Line1\nLine2"),
+    ("4c69 6e65 310d 4c69 6e65 32", b"Line1\nLine2"),
+    ("4c69 6e65 3120 0a4c 696e 6532", b"Line1 \nLine2"),
+])
+async def test_text_packet_hashes_normalize_only_line_endings(monkeypatch, hex_data, expected):
+    from bot.helper.ext_utils import merge_media as backend
+
+    async def inspect(arguments, listener):
+        return {"packets": [{"data": f"\n00000000: {hex_data:<39}  text\n"}]}
+
+    monkeypatch.setattr(backend, "_json_command", inspect)
+    assert await backend._text_packet_hashes("unused.mkv", 0, _listener()) == [hashlib.sha256(expected).digest()]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("packet", [{}, {"data": "invalid hex dump"}])
+async def test_text_packet_hashes_reject_missing_or_unreadable_data(monkeypatch, packet):
+    from bot.helper.ext_utils import merge_media as backend
+
+    async def inspect(arguments, listener):
+        return {"packets": [packet]}
+
+    monkeypatch.setattr(backend, "_json_command", inspect)
+    with pytest.raises(ValueError, match="Subtitle text packet data"):
+        await backend._text_packet_hashes("unused.mkv", 0, _listener())
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("sidecar", [False, True])
 @pytest.mark.parametrize("continuous", [False, True])
 async def test_mixed_ass_and_multiline_srt_preserve_text_bytes_and_timing(media, sidecar, continuous):
@@ -320,7 +350,6 @@ async def test_mixed_ass_and_multiline_srt_preserve_text_bytes_and_timing(media,
     assert sorted(stream["codec_name"] for stream in subtitles) == ["ass", "subrip"]
     srt_index = next(stream["index"] for stream in subtitles if stream["codec_name"] == "subrip")
     packets = [packet for packet in info["packets"] if packet["stream_index"] == srt_index]
-    expected_hashes = []
     for index, chapter in enumerate(info["chapters"]):
         if not continuous and index != 2:
             continue
@@ -331,9 +360,7 @@ async def test_mixed_ass_and_multiline_srt_preserve_text_bytes_and_timing(media,
             source = _probe(selected[index], "-select_streams", "s:1", "-show_packets", "-show_data_hash", "sha256")
             offset = float(chapter["start_time"]) - float(_origin(probes[index]))
         event_times.extend(float(packet["pts_time"]) + offset for packet in source["packets"])
-        expected_hashes.extend(packet["data_hash"] for packet in source["packets"])
     assert [float(packet["pts_time"]) for packet in packets] == pytest.approx(event_times, abs=0.003)
-    assert [packet["data_hash"] for packet in packets] == expected_hashes
     extracted = root / f"{prefix}-checked.srt"
     _run("ffmpeg", "-v", "error", "-y", "-i", output, "-map", f"0:{srt_index}", "-c:s", "copy", str(extracted))
     document = read_document(extracted.read_text(encoding="utf-8-sig"), "subrip")
@@ -342,31 +369,43 @@ async def test_mixed_ass_and_multiline_srt_preserve_text_bytes_and_timing(media,
 
 
 @pytest.mark.asyncio
-async def test_subtitle_dialogue_mutation_fails_before_publication(media, monkeypatch):
+@pytest.mark.parametrize("codec", ["ass", "subrip"])
+async def test_subtitle_dialogue_mutation_fails_before_publication(media, monkeypatch, codec):
     from bot.helper.ext_utils import merge_media as backend
 
     root, files = media
+    selected = files[:2]
+    if codec == "subrip":
+        selected = []
+        for index, source in enumerate(files[:2]):
+            subtitle = root / f"corruptible-{index}.srt"
+            subtitle.write_text(f"1\n00:00:00,200 --> 00:00:00,800\n{'First' if index == 0 else 'Later'}\nSecond line\n", encoding="utf-8")
+            target = root / f"corruptible-{index}.mkv"
+            _run("ffmpeg", "-v", "error", "-y", "-i", str(source), "-i", str(subtitle),
+                 "-map", "0:v", "-map", "0:a", "-map", "1:s", "-c", "copy", str(target))
+            selected.append(target)
     original_run = backend._run
-    hashes = [hashlib.sha256(path.read_bytes()).digest() for path in files[:2]]
+    hashes = [hashlib.sha256(path.read_bytes()).digest() for path in selected]
 
     async def corrupt_dialogue(arguments, listener, **kwargs):
         result = await original_run(arguments, listener, **kwargs)
         if Path(str(arguments[0])).stem.casefold() == "mkvmerge" and "--chapters" in arguments:
             candidate = Path(arguments[arguments.index("-o") + 1])
             data = candidate.read_bytes()
-            assert data.count(b",,First") == 1
-            candidate.write_bytes(data.replace(b",,First", b",,Wrong"))
+            before, after = (b",,First", b",,Wrong") if codec == "ass" else (b"First", b"Wrong")
+            assert data.count(before) == 1
+            candidate.write_bytes(data.replace(before, after))
         return result
 
     monkeypatch.setattr(backend, "_run", corrupt_dialogue)
-    target = root / "corrupted-subtitle.mkv"
-    output, error = await merge_copy(_listener(), list(map(str, files[:2])), str(target),
-                                    [_probe(path, "-show_streams", "-show_format") for path in files[:2]])
+    target = root / f"corrupted-subtitle-{codec}.mkv"
+    output, error = await merge_copy(_listener(), list(map(str, selected)), str(target),
+                                    [_probe(path, "-show_streams", "-show_format") for path in selected])
     assert output is False
     assert error == "Subtitle event content changed for item 1."
     assert not target.exists()
     assert not list(root.glob("merge-*/"))
-    assert hashes == [hashlib.sha256(path.read_bytes()).digest() for path in files[:2]]
+    assert hashes == [hashlib.sha256(path.read_bytes()).digest() for path in selected]
 
 
 def test_font_collection_checks_identity_of_every_face():
@@ -587,6 +626,68 @@ async def test_three_av1_aac_episodes_join_english_ass_with_conflicting_fonts(me
     frames = _probe(output, "-count_frames", "-select_streams", "v:0", "-show_streams")
     assert int(frames["streams"][0]["nb_read_frames"]) == 108
     _run("ffmpeg", "-v", "error", "-xerror", "-i", output, "-map", "0:v", "-map", "0:a", "-f", "null", "-")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("frames_ms", [(20, 20), (10, 60), (2.5, 40)])
+async def test_av1_dual_opus_merge_preserves_audio_timestamps_and_multiline_subtitles(media, frames_ms):
+    from bot.helper.ext_utils import merge_media as backend
+
+    root, _ = media
+    label = f"opus-{frames_ms[0]}-{frames_ms[1]}"
+    selected = []
+    for index in range(3):
+        ass = root / f"{label}-{index}.ass"
+        srt = root / f"{label}-{index}.srt"
+        ass.write_text(_ass(f"Episode {index}", 22, "&H00FFFFFF"), encoding="utf-8")
+        srt.write_text(f"1\n00:00:00,200 --> 00:00:00,800\n<i>Français {index}</i>\n  Deuxième ligne\n", encoding="utf-8")
+        target = root / f"{label}-{index}.mkv"
+        _run("ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc2=s=160x90:r=24:d=1.5",
+             "-f", "lavfi", "-i", f"sine=frequency={440 + index * 20}:sample_rate=48000:duration=1.5",
+             "-f", "lavfi", "-i", f"sine=frequency={880 + index * 20}:sample_rate=48000:duration=1.5",
+             "-i", str(ass), "-i", str(srt), "-map", "0:v", "-map", "1:a", "-map", "2:a", "-map", "3:s", "-map", "4:s",
+             "-c:v", "libsvtav1", "-preset", "12", "-crf", "40", "-pix_fmt", "yuv420p10le", "-svtav1-params", "lp=2",
+             "-c:a", "libopus", "-ac:a", "2", "-frame_duration:a:0", str(frames_ms[0]),
+             "-frame_duration:a:1", str(frames_ms[1]), "-c:s", "copy",
+             "-metadata:s:a:0", "language=jpn", "-metadata:s:a:0", "title=Japanese", "-disposition:a:0", "default",
+             "-metadata:s:a:1", "language=eng", "-metadata:s:a:1", "title=English", "-disposition:a:1", "0",
+             "-metadata:s:s:0", "language=eng", "-disposition:s:0", "default",
+             "-metadata:s:s:1", "language=fra", "-disposition:s:1", "0", str(target))
+        selected.append(str(target))
+    probes = [_probe(path, "-show_streams", "-show_format", "-show_data_hash", "sha256") for path in selected]
+    source_hashes = [hashlib.sha256(Path(path).read_bytes()).digest() for path in selected]
+    output, error = await merge_copy(_listener(), selected, str(root / f"{label}-merged.mkv"), probes)
+    assert not error
+    info = _probe(output, "-show_streams", "-show_packets", "-show_chapters", "-show_data_hash", "sha256")
+    audio = [stream for stream in info["streams"] if stream["codec_type"] == "audio"]
+    subtitles = [stream for stream in info["streams"] if stream["codec_type"] == "subtitle"]
+    assert [(stream["codec_name"], stream["tags"]["language"], stream["tags"]["title"], stream["disposition"]["default"]) for stream in audio] == [
+        ("opus", "jpn", "Japanese", 1), ("opus", "eng", "English", 0)]
+    assert sorted(stream["codec_name"] for stream in subtitles) == ["ass", "subrip"]
+    assert len(info["chapters"]) == 3
+    for position, stream in enumerate(audio):
+        actual = [packet for packet in info["packets"] if packet["stream_index"] == stream["index"]]
+        times = [float(packet["pts_time"]) for packet in actual]
+        assert all(right > left for left, right in zip(times, times[1:]))
+        cursor, expected_span = 0, 0
+        for path in selected:
+            original = _probe(path, "-select_streams", f"a:{position}", "-show_packets", "-show_data_hash", "sha256")["packets"]
+            part = actual[cursor:cursor + len(original)]
+            assert [packet["data_hash"] for packet in part] == [packet["data_hash"] for packet in original]
+            expected_span += float(original[-1]["pts_time"]) + float(original[-1]["duration_time"]) - float(original[0]["pts_time"])
+            cursor += len(original)
+        assert cursor == len(actual)
+        assert times[-1] + float(actual[-1]["duration_time"]) - times[0] == pytest.approx(expected_span, abs=0.02)
+    subtitle_indexes = {stream["index"] for stream in subtitles}
+    assert sorted(float(packet["pts_time"]) for packet in info["packets"] if packet["stream_index"] in subtitle_indexes) == pytest.approx(
+        _expected_embedded_times(selected, info["chapters"]), abs=0.006)
+    expected_frames = []
+    for path in selected:
+        expected_frames.extend((await backend._video_frames(path, [0], _listener()))[0])
+    assert len(expected_frames) == 108
+    assert await backend._video_frames(output, [0], _listener()) == {0: expected_frames}
+    _run("ffmpeg", "-v", "error", "-xerror", "-i", output, "-map", "0:v", "-map", "0:a", "-f", "null", "-")
+    assert source_hashes == [hashlib.sha256(Path(path).read_bytes()).digest() for path in selected]
 
 
 @pytest.mark.asyncio

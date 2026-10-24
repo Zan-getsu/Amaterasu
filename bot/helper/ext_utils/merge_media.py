@@ -480,6 +480,24 @@ def _packets_by_stream(evidence):
     return packets
 
 
+async def _text_packet_hashes(path, index, listener):
+    evidence = await _json_command(
+        ["ffprobe", "-v", "error", "-select_streams", str(index), "-show_packets", "-show_data",
+         "-show_entries", "packet=data", "-of", "json", path], listener,
+    )
+    hashes = []
+    for packet in evidence.get("packets") or []:
+        if "data" not in packet:
+            raise ValueError("Subtitle text packet data is unavailable for validation.")
+        rows = [row for row in packet["data"].splitlines() if row]
+        if any(not re.match(r"^[0-9a-fA-F]{8}: ", row) for row in rows):
+            raise ValueError("Subtitle text packet data is unreadable.")
+        data = bytes.fromhex("".join(row.split(": ", 1)[1].split("  ", 1)[0] for row in rows))
+        # Text muxers use platform line endings; retain every other byte.
+        hashes.append(hashlib.sha256(data.replace(b"\r\n", b"\n").replace(b"\r", b"\n")).digest())
+    return hashes
+
+
 async def _validate_subtitles(inputs, candidate, listener):
     # inputs are (subtitle-bearing path, timeline offset, original item number)
     sources = [await _subtitle_evidence(path, listener) for path, _, _ in inputs]
@@ -503,9 +521,14 @@ async def _validate_subtitles(inputs, candidate, listener):
         after = output_packets.get(merged.get("index"), [])
         if len(before) != len(after):
             raise ValueError(f"Subtitle event count changed for item {item_number}.")
-        for source_packet, result_packet in zip(before, after, strict=True):
-            if source_packet.get("data_hash") != result_packet.get("data_hash"):
+        if [packet.get("data_hash") for packet in before] != [packet.get("data_hash") for packet in after]:
+            if original.get("codec_name") not in {"subrip", "webvtt", "text"}:
                 raise ValueError(f"Subtitle event content changed for item {item_number}.")
+            before_text = await _text_packet_hashes(inputs[source_index][0], original["index"], listener)
+            after_text = await _text_packet_hashes(candidate, merged["index"], listener)
+            if len(before_text) != len(before) or before_text != after_text:
+                raise ValueError(f"Subtitle event content changed for item {item_number}.")
+        for source_packet, result_packet in zip(before, after, strict=True):
             source_pts = _chapter_timestamp(source_packet.get("pts_time"))
             result_pts = _chapter_timestamp(result_packet.get("pts_time"))
             if abs(result_pts - source_pts - offset) > Decimal("0.003"):
@@ -658,7 +681,7 @@ async def _join_subtitle_tracks(executable, candidate, working, listener, font_m
         raise ValueError("Not enough free disk space to assemble continuous subtitle tracks.")
 
     result = os.path.join(working, "continuous-subtitles.mkv")
-    command = [executable, "--quiet", "--engage", "force_passthrough_packetizer",
+    command = [executable, "--quiet", "--engage", "keep_whitespaces_in_text_subtitles",
                "-o", result, "--no-subtitles", candidate]
     validation_inputs = []
     independent = 0
@@ -688,7 +711,7 @@ async def _join_subtitle_tracks(executable, candidate, working, listener, font_m
             independent += 1
             track, stream = group["tracks"][0]
             code, diagnostic = await _run(
-                [executable, "--quiet", "--engage", "force_passthrough_packetizer",
+                [executable, "--quiet", "--engage", "keep_whitespaces_in_text_subtitles",
                  "-o", target, "--no-video", "--no-audio",
                  "--no-attachments", "--no-chapters", "--no-global-tags",
                  "--subtitle-tracks", str(track["id"]), candidate], listener,
@@ -850,8 +873,8 @@ async def merge_copy(
                      if stream.get("codec_type") in {"video", "audio"}]
             _write_chapters(chapters_file, starts, files)
 
-            # Text packetizers rewrite line endings/whitespace; preserve payloads exactly.
-            command = [executable, "--quiet", "--engage", "force_passthrough_packetizer",
+            # Preserve text whitespace without bypassing audio/video packetizers.
+            command = [executable, "--quiet", "--engage", "keep_whitespaces_in_text_subtitles",
                        "-o", candidate, "--chapters", chapters_file,
                        "--no-subtitles", "--no-attachments", "--no-chapters", "--no-global-tags", av_file]
             subtitle_count = 0
