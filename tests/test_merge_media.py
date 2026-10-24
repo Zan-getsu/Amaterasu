@@ -669,15 +669,16 @@ async def test_av1_dual_opus_merge_preserves_audio_timestamps_and_multiline_subt
         actual = [packet for packet in info["packets"] if packet["stream_index"] == stream["index"]]
         times = [float(packet["pts_time"]) for packet in actual]
         assert all(right > left for left, right in zip(times, times[1:]))
-        cursor, expected_span = 0, 0
+        cursor = 0
         for path in selected:
             original = _probe(path, "-select_streams", f"a:{position}", "-show_packets", "-show_data_hash", "sha256")["packets"]
             part = actual[cursor:cursor + len(original)]
             assert [packet["data_hash"] for packet in part] == [packet["data_hash"] for packet in original]
-            expected_span += float(original[-1]["pts_time"]) + float(original[-1]["duration_time"]) - float(original[0]["pts_time"])
             cursor += len(original)
         assert cursor == len(actual)
-        assert times[-1] + float(actual[-1]["duration_time"]) - times[0] == pytest.approx(expected_span, abs=0.02)
+        # Earlier episodes' encoder padding does not extend the final timeline.
+        expected_tail = float(info["chapters"][-1]["start_time"]) + float(original[-1]["pts_time"]) + float(original[-1]["duration_time"])
+        assert times[-1] + float(actual[-1]["duration_time"]) == pytest.approx(expected_tail, abs=0.003)
     subtitle_indexes = {stream["index"] for stream in subtitles}
     assert sorted(float(packet["pts_time"]) for packet in info["packets"] if packet["stream_index"] in subtitle_indexes) == pytest.approx(
         _expected_embedded_times(selected, info["chapters"]), abs=0.006)
