@@ -5,7 +5,12 @@ from aiohttp.client_exceptions import ClientError
 
 from ... import LOGGER
 from ...core.config_manager import Config
-from ...core.torrent_manager import TorrentManager, aria2_name
+from ...core.torrent_manager import TorrentManager
+from ..ext_utils.bot_utils import (
+    get_aria2_retry_options,
+    get_download_user_agent,
+    parse_download_headers,
+)
 
 
 class DirectListener:
@@ -54,48 +59,75 @@ class DirectListener:
         options = self._a2c_opt.copy()
         options["dir"] = f"{self._path}/{content['path']}" if content["path"] else self._path
         options["out"] = filename
-        gid = ""
-        download = None
+        headers = {
+            **parse_download_headers(options.get("header")),
+            **parse_download_headers(getattr(self.listener, "download_headers", "")),
+        }
+        if headers:
+            options["header"] = [f"{key}: {value}" for key, value in headers.items()]
+        if "user-agent" in options:
+            headers.setdefault("user-agent", options["user-agent"])
+        elif "user-agent" not in headers:
+            options["user-agent"] = get_download_user_agent(content["url"])
 
-        try:
-            gid = await TorrentManager.aria2.addUri(
-                uris=[content["url"]], options=options, position=0
-            )
-            download = await TorrentManager.aria2.tellStatus(gid)
-            self.download_tasks[gid] = download
-
-            while not self.listener.is_cancelled:
+        for attempt in range(2):
+            if self.listener.is_cancelled:
+                return
+            gid = ""
+            download = None
+            try:
+                gid = await TorrentManager.aria2.addUri(
+                    uris=[content["url"]], options=options.copy(), position=0
+                )
                 download = await TorrentManager.aria2.tellStatus(gid)
                 self.download_tasks[gid] = download
-                if error_message := download.get("errorMessage"):
-                    self._failed += 1
-                    failed_name = aria2_name(download) or filename
-                    LOGGER.error(f"Unable to download {failed_name} due to: {error_message}")
-                    await self._remove_download(download)
-                    return
-                if download.get("status", "") == "complete":
-                    # Move completed bytes from the live aggregate into the
-                    # durable counter without briefly counting them twice.
-                    self.download_tasks.pop(gid, None)
-                    self._proc_bytes += int(download.get("totalLength", "0") or 0)
-                    await self._remove_download(download)
-                    return
-                await sleep(1)
 
-            if download:
-                await self._remove_download(download)
-        except (TimeoutError, ClientError, Exception) as e:
-            self._failed += 1
-            LOGGER.error(f"Unable to download {filename} due to: {e}")
-            if download:
-                await self._remove_download(download)
-            elif gid:
-                # addUri succeeded but the first status request failed. Remove
-                # the unseen job so it cannot keep downloading as an orphan.
-                await self._remove_download({"gid": gid, "status": "active"})
-        finally:
-            if gid:
-                self.download_tasks.pop(gid, None)
+                while not self.listener.is_cancelled:
+                    download = await TorrentManager.aria2.tellStatus(gid)
+                    self.download_tasks[gid] = download
+                    if download.get("status") in ("error", "removed") or download.get("errorMessage"):
+                        error_message = (
+                            download.get("errorMessage") or "Download stopped unexpectedly."
+                        )
+                        retry_options = {}
+                        if attempt == 0:
+                            retry_options = get_aria2_retry_options(
+                                content["url"], error_message,
+                                int(download.get("completedLength", "0") or 0), headers,
+                            )
+                        await self._remove_download(download)
+                        if retry_options:
+                            options.update(retry_options)
+                            LOGGER.info(f"Retrying direct file with conservative HTTP settings: {filename}")
+                            await sleep(2)
+                            break
+                        self._failed += 1
+                        LOGGER.error(f"Unable to download {filename} due to: {error_message}")
+                        return
+                    if download.get("status", "") == "complete":
+                        # Transfer bytes to the durable counter without double counting.
+                        self.download_tasks.pop(gid, None)
+                        self._proc_bytes += int(download.get("totalLength", "0") or 0)
+                        await self._remove_download(download)
+                        return
+                    await sleep(1)
+
+                if self.listener.is_cancelled:
+                    if download:
+                        await self._remove_download(download)
+                    return
+            except (TimeoutError, ClientError, Exception) as e:
+                self._failed += 1
+                LOGGER.error(f"Unable to download {filename} due to: {e}")
+                if download:
+                    await self._remove_download(download)
+                elif gid:
+                    # Do not leave a job running when its initial status request fails.
+                    await self._remove_download({"gid": gid, "status": "active"})
+                return
+            finally:
+                if gid:
+                    self.download_tasks.pop(gid, None)
 
     async def download(self, contents):
         self.is_downloading = True

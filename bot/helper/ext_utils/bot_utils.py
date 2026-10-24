@@ -19,7 +19,7 @@ from urllib.parse import unquote, urlparse
 from aiofiles import open as aiopen
 from aiofiles.os import mkdir
 from aiofiles.os import path as aiopath
-from httpx import AsyncClient
+from httpx import AsyncClient, RequestError
 from pyrogram.enums import ButtonStyle
 from pyrogram.handlers import MessageHandler
 
@@ -43,6 +43,51 @@ DEFAULT_BROWSER_USER_AGENT = (
     "AppleWebKit/537.36 (KHTML, like Gecko) "
     "Chrome/131.0.0.0 Safari/537.36"
 )
+
+
+def get_download_user_agent(url):
+    # The ColorOS firmware CDN rejects browser User-Agents with HTTP 403.
+    if urlparse(url).hostname == "downgradefs.coloros.com":
+        return "aria2"
+    return DEFAULT_BROWSER_USER_AGENT
+
+
+def parse_download_headers(headers):
+    if isinstance(headers, dict):
+        return {key.strip().lower(): value for key, value in headers.items()}
+    result = {}
+    lines = (
+        headers if isinstance(headers, (list, tuple))
+        else (headers or "").replace("\\n", "\n").splitlines()
+    )
+    for line in lines:
+        key, sep, value = line.partition(":")
+        if sep and key.strip():
+            result[key.strip().lower()] = value.strip()
+    return result
+
+
+def get_aria2_retry_options(url, error, completed=0, headers=None):
+    if completed or urlparse(url).scheme not in ("http", "https"):
+        return {}
+    message = str(error).lower()
+    if not re_compile(
+        r"\b(?:403|406|416|429|500|502|503|504)\b|\brange\b|timeout|timed out|"
+        r"connection (?:closed|reset)|network problem|name resolution|could not resolve"
+    ).search(message):
+        return {}
+    options = {
+        "split": "1", "max-connection-per-server": "1",
+        "max-tries": "3", "retry-wait": "2",
+    }
+    if re_compile(r"\b(?:403|406)\b").search(message) and (
+        "user-agent" not in parse_download_headers(headers)
+    ):
+        options["user-agent"] = "aria2"
+    if "name resolution" in message or "could not resolve" in message:
+        options["async-dns"] = "false"
+    return options
+
 
 # Salts are now loaded from env vars or .amaterasu_secrets file (per-deployment).
 # See bot/helper/ext_utils/secrets.py for migration / rotation instructions.
@@ -522,8 +567,9 @@ def get_filename_from_headers(headers, url=""):
     return filename or ""
 
 
-async def get_content_info(url):
-    headers = {"User-Agent": DEFAULT_BROWSER_USER_AGENT}
+async def get_content_info(url, headers=None):
+    request_headers = {"user-agent": get_download_user_agent(url)}
+    request_headers.update(parse_download_headers(headers))
     try:
         # TLS verification is ON by default. If you genuinely need to bypass
         # for an internal host with a self-signed cert, add the host to
@@ -537,15 +583,22 @@ async def get_content_info(url):
         async with AsyncClient(
             verify=verify, follow_redirects=True, timeout=30.0
         ) as client:
-            response = await client.head(url, headers=headers)
-            if response.status_code in (405, 501) or not response.headers.get(
-                "Content-Type"
+            try:
+                response = await client.head(url, headers=request_headers, timeout=10.0)
+            except RequestError:
+                response = None
+            if response is None or response.status_code in (400, 403, 404, 405, 406, 501) or (
+                response.is_success and not response.headers.get("Content-Type")
             ):
-                async with client.stream("GET", url, headers=headers) as response:
+                async with client.stream("GET", url, headers=request_headers) as response:
+                    if not response.is_success:
+                        return None, ""
                     return (
                         response.headers.get("Content-Type"),
                         get_filename_from_headers(response.headers, str(response.url)),
                     )
+            if not response.is_success:
+                return None, ""
             return (
                 response.headers.get("Content-Type"),
                 get_filename_from_headers(response.headers, str(response.url)),

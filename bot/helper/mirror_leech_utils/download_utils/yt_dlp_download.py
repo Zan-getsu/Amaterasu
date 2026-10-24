@@ -342,7 +342,8 @@ class YoutubeDLHelper:
         if not self._valid_filename(repaired_name):
             with suppress(Exception):
                 _, content_filename = async_to_sync(
-                    get_content_info, self._listener.link
+                    get_content_info, self._listener.link,
+                    getattr(self._listener, "download_headers", ""),
                 )
                 if self._valid_filename(content_filename):
                     repaired_name = content_filename

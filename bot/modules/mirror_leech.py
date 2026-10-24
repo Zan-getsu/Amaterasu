@@ -12,7 +12,9 @@ from .. import DOWNLOAD_DIR, LOGGER, bot_loop, task_dict_lock
 from ..helper.ext_utils.bot_utils import (
     COMMAND_USAGE,
     arg_parser,
+    get_aria2_retry_options,
     get_content_info,
+    parse_download_headers,
     sync_to_async,
 )
 from ..helper.ext_utils.exceptions import DirectDownloadLinkException
@@ -162,9 +164,15 @@ class Mirror(TaskListener):
         notify_generic_error=True,
         notify_extract_error=True,
     ):
+        if self.is_cancelled:
+            return False
         opt = self.user_dict.get("YT_DLP_OPTIONS") or Config.YT_DLP_OPTIONS or {}
         if not isinstance(opt, dict):
             opt = {}
+        opt = opt.copy()
+        headers = parse_download_headers(getattr(self, "download_headers", ""))
+        if headers:
+            opt["http_headers"] = {**parse_download_headers(opt.get("http_headers")), **headers}
 
         cookie_to_use = (
             usr_cookie
@@ -193,6 +201,8 @@ class Mirror(TaskListener):
             self.ytdlp_fallback_error = msg
             return False
 
+        if self.is_cancelled:
+            return False
         extractor = get_ytdlp_extractor(result) or "unknown"
         if is_generic_ytdlp_result(result) and not force_generic:
             msg = (
@@ -207,6 +217,7 @@ class Mirror(TaskListener):
             LOGGER.info(
                 f"Skipping automatic yt-dlp fallback for generic extractor: {self.link}"
             )
+            self.ytdlp_fallback_error = msg
             if notify_generic_error:
                 await self.on_download_error(msg)
                 return None
@@ -239,6 +250,8 @@ class Mirror(TaskListener):
         self.aria2_fallback_seed_time = seed_time
         self.aria2_fallback_error = ""
         self.aria2_fallback_completed = 0
+        self.aria2_fallback_options = {}
+        self.download_headers = headers
         aria2_started = await add_aria2_download(
             self,
             path,
@@ -254,11 +267,25 @@ class Mirror(TaskListener):
             await self._retry_aria2_or_ytdlp(path)
 
     async def _retry_aria2_or_ytdlp(self, path):
+        if self.is_cancelled:
+            return
         if not getattr(self, "aria2_fallback_retried", False):
             self.aria2_fallback_retried = True
+            self.aria2_fallback_options = get_aria2_retry_options(
+                self.link,
+                getattr(self, "aria2_fallback_error", ""),
+                getattr(self, "aria2_fallback_completed", 0),
+                getattr(self, "aria2_fallback_headers", ""),
+            )
             await sleep(5)
+            if self.is_cancelled:
+                return
 
-            content_type, content_filename = await get_content_info(self.link)
+            content_type, content_filename = await get_content_info(
+                self.link, getattr(self, "aria2_fallback_headers", "")
+            )
+            if self.is_cancelled:
+                return
             is_text_response = bool(
                 content_type and re_match(r"text/html|text/plain", content_type)
             )
@@ -291,11 +318,18 @@ class Mirror(TaskListener):
 
         LOGGER.info(f"Aria2 retry failed. Falling back to yt-dlp for: {self.link}")
         self.allow_ytdlp_fallback = False
-        await self._add_ytdlp_fallback(
+        result = await self._add_ytdlp_fallback(
             path,
             force_generic=force_generic,
             fallback_error=getattr(self, "aria2_fallback_error", None),
+            notify_generic_error=False,
+            notify_extract_error=False,
         )
+        if result is False and not self.is_cancelled:
+            await self.on_download_error(
+                f"{getattr(self, 'aria2_fallback_error', '') or 'Aria2 download failed.'}"
+                f"\n\nyt-dlp fallback: {self.ytdlp_fallback_error}"
+            )
 
     async def new_event(self):
         if self.is_leech:
@@ -494,7 +528,12 @@ class Mirror(TaskListener):
                 self.metadata_dict, meta
             )
 
-        headers = args["-h"]
+        headers = parse_download_headers(args["-h"])
+        ussr = args["-au"]
+        pssw = args["-ap"]
+        if ussr or pssw:
+            auth = f"{ussr}:{pssw}"
+            headers["authorization"] = f"Basic {b64encode(auth.encode()).decode('ascii')}"
         is_bulk = args["-b"]
 
         bulk_start = 0
@@ -742,7 +781,7 @@ class Mirror(TaskListener):
             and not is_terabox_link(self.link)
             and not self.is_terabox_account
         ):
-            content_type, content_filename = await get_content_info(self.link)
+            content_type, content_filename = await get_content_info(self.link, headers)
             is_text_response = bool(
                 content_type and re_match(r"text/html|text/plain", content_type)
             )
@@ -758,7 +797,8 @@ class Mirror(TaskListener):
                 try:
                     self.link = await sync_to_async(direct_link_generator, self.link)
                     if isinstance(self.link, tuple):
-                        self.link, headers = self.link
+                        self.link, generated_headers = self.link
+                        headers = {**parse_download_headers(generated_headers), **headers}
                     elif isinstance(self.link, str):
                         LOGGER.info(f"Generated link: {self.link}")
                 except DirectDownloadLinkException as e:
@@ -797,13 +837,10 @@ class Mirror(TaskListener):
         await delete_links(self.message, preserve_reply=preserve_reply)
         self.ytdlp_fallback_name = ytdlp_fallback_name
 
-        ussr = args["-au"]
-        pssw = args["-ap"]
+        headers = parse_download_headers(headers)
         if ussr or pssw:
-            auth = f"{ussr}:{pssw}"
-            headers += (
-                f" authorization: Basic {b64encode(auth.encode()).decode('ascii')}"
-            )
+            headers["authorization"] = f"Basic {b64encode(auth.encode()).decode('ascii')}"
+        self.download_headers = headers
 
         if file_ is not None:
             try:

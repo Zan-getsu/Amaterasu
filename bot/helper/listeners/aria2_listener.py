@@ -241,8 +241,9 @@ async def _on_download_error(api, data):
         ):
             listener.aria2_fallback_error = error
             with suppress(Exception):
-                listener.aria2_fallback_completed = int(
-                    download.get("completedLength", "0") or 0
+                listener.aria2_fallback_completed = max(
+                    getattr(listener, "aria2_fallback_completed", 0),
+                    int(download.get("completedLength", "0") or 0),
                 )
             listener.allow_ytdlp_fallback = False
             LOGGER.info(

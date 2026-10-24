@@ -1,6 +1,7 @@
 from aiofiles.os import remove, path as aiopath
 from aiofiles import open as aiopen
 from base64 import b64encode
+from contextlib import suppress
 from aiohttp.client_exceptions import ClientError
 from asyncio import TimeoutError
 from urllib.parse import unquote, urlparse
@@ -8,7 +9,11 @@ from urllib.parse import unquote, urlparse
 from .... import task_dict_lock, task_dict, LOGGER
 from ....core.config_manager import Config
 from ....core.torrent_manager import TorrentManager, is_metadata, aria2_name
-from ...ext_utils.bot_utils import DEFAULT_BROWSER_USER_AGENT, bt_selection_buttons
+from ...ext_utils.bot_utils import (
+    bt_selection_buttons,
+    get_download_user_agent,
+    parse_download_headers,
+)
 from ...ext_utils.task_manager import check_running_tasks
 from ...mirror_leech_utils.status_utils.aria2_status import Aria2Status
 from ...telegram_helper.message_utils import send_status_message, send_message
@@ -37,6 +42,8 @@ def _sourceforge_filename(link):
 async def add_aria2_download(
     listener, dpath, header, ratio, seed_time, notify_error=True
 ):
+    if getattr(listener, "is_cancelled", False):
+        return False
     if Config.DISABLE_TORRENTS and (
         listener.link.startswith("magnet:") or listener.link.endswith(".torrent")
     ):
@@ -48,12 +55,14 @@ async def add_aria2_download(
         a2c_opt["out"] = listener.name
     elif filename := _sourceforge_filename(listener.link):
         a2c_opt["out"] = filename
-    if header:
-        a2c_opt["header"] = header
+    request_headers = parse_download_headers(header)
+    if request_headers:
+        a2c_opt["header"] = [f"{key}: {value}" for key, value in request_headers.items()]
     if listener.link.startswith(("http://", "https://", "ftp://")) and (
-        "user-agent" not in str(header).lower()
+        "user-agent" not in request_headers
     ):
-        a2c_opt["user-agent"] = DEFAULT_BROWSER_USER_AGENT
+        a2c_opt["user-agent"] = get_download_user_agent(listener.link)
+    a2c_opt.update(getattr(listener, "aria2_fallback_options", {}))
     if ratio:
         a2c_opt["seed-ratio"] = ratio
     if seed_time:
@@ -72,6 +81,8 @@ async def add_aria2_download(
         LOGGER.info(f"Sequential streaming enabled for aria2 torrent: {listener.link[:80]}")
 
     add_to_queue, event = await check_running_tasks(listener)
+    if getattr(listener, "is_cancelled", False):
+        return False
     if add_to_queue:
         if listener.link.startswith("magnet:"):
             a2c_opt["pause-metadata"] = "true"
@@ -104,9 +115,12 @@ async def add_aria2_download(
     except (TimeoutError, ClientError, Exception) as e:
         LOGGER.info(f"Aria2c Download Error: {e}")
         listener.aria2_fallback_error = str(e)
-        listener.aria2_fallback_completed = 0
         if notify_error:
             await listener.on_download_error(f"{e}")
+        return False
+    if getattr(listener, "is_cancelled", False):
+        with suppress(Exception):
+            await TorrentManager.aria2_remove({"gid": gid, "status": "active"})
         return False
     try:
         download = await TorrentManager.aria2.tellStatus(gid)
@@ -119,7 +133,6 @@ async def add_aria2_download(
                 "Aria2 removed the failed download before its error details "
                 "could be read."
             )
-        listener.aria2_fallback_completed = 0
         if notify_error:
             await listener.on_download_error(listener.aria2_fallback_error)
         return False
@@ -127,8 +140,9 @@ async def add_aria2_download(
         error = str(download["errorMessage"]).replace("<", " ").replace(">", " ")
         LOGGER.info(f"Aria2c Download Error: {error}")
         listener.aria2_fallback_error = error
-        listener.aria2_fallback_completed = int(
-            download.get("completedLength", "0") or 0
+        listener.aria2_fallback_completed = max(
+            getattr(listener, "aria2_fallback_completed", 0),
+            int(download.get("completedLength", "0") or 0),
         )
         await TorrentManager.aria2_remove(download)
         if notify_error:
