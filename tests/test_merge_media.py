@@ -1,4 +1,4 @@
-"""Reproducible tiny media fixtures for the real MKVToolNix copy backend."""
+"""Reproducible tiny media fixtures for the FFmpeg/MKVToolNix copy backends."""
 
 import asyncio
 import hashlib
@@ -35,7 +35,7 @@ def _run(*args):
 
 def _probe(path, *fields):
     return json.loads(subprocess.check_output([
-        "ffprobe", "-v", "error", *fields, "-of", "json", str(path)
+        "ffprobe", "-v", "error", "-show_data_hash", "sha256", *fields, "-of", "json", str(path)
     ]))
 
 
@@ -125,6 +125,156 @@ def cover_media(tmp_path_factory):
 
 def _listener():
     return SimpleNamespace(is_cancelled=False, subproc=None)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("difference", [
+    "header", "missing-header", "index", "audio-rate", "language", "disposition",
+    "origin", "opus", "duration", "subtitle-tail", "missing-duration", "newline",
+])
+async def test_concat_keeps_unproven_inputs_on_mkv_path(tmp_path, monkeypatch, difference):
+    from copy import deepcopy
+
+    from bot.helper.ext_utils import merge_media as backend
+
+    probe = {"format": {"start_time": "0", "duration": "1.5"}, "streams": [
+        {"index": 0, "codec_type": "video", "codec_name": "h264", "extradata_hash": "video",
+         "start_time": "0", "duration": "1.5"},
+        {"index": 1, "codec_type": "audio", "codec_name": "aac", "extradata_hash": "audio",
+         "start_time": "0", "duration": "1.5", "sample_rate": "48000"},
+    ]}
+    changed = deepcopy(probe)
+    video, audio = changed["streams"]
+    files = [str(tmp_path / "first.mkv"), str(tmp_path / "second.mkv")]
+    if difference == "header":
+        video["extradata_hash"] = "different"
+    elif difference == "missing-header":
+        video.pop("extradata_hash")
+    elif difference == "index":
+        audio["index"] = 2
+    elif difference == "audio-rate":
+        audio["sample_rate"] = "44100"
+    elif difference == "language":
+        audio["tags"] = {"language": "eng"}
+    elif difference == "disposition":
+        audio["disposition"] = {"default": 1}
+    elif difference == "origin":
+        video["start_time"] = audio["start_time"] = "0.12"
+    elif difference == "opus":
+        audio["codec_name"] = "opus"
+    elif difference in {"duration", "subtitle-tail"}:
+        changed["format"]["duration"] = "12"
+        if difference == "subtitle-tail":
+            changed["streams"].append({"index": 2, "codec_type": "subtitle", "duration": "12"})
+    elif difference == "missing-duration":
+        video.pop("duration")
+    else:
+        files[1] += "\nfile malicious"
+
+    async def unexpected_run(*args, **kwargs):
+        pytest.fail("Unsafe inputs must not enter FFmpeg concat")
+
+    monkeypatch.setattr(backend, "_run", unexpected_run)
+    assert not await backend._concat_av(files, [probe, changed], str(tmp_path / "out.mkv"), str(tmp_path), _listener())
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("case", ["plain", "subtitles", "video-only", "mp4", "hevc", "fallback", "shifted", "cancel"])
+async def test_ffmpeg_concat_retains_all_tracks_and_mkv_safeguards(media, monkeypatch, case):
+    from bot.helper.ext_utils import merge_media as backend
+
+    root, sources = media
+    folder = root / f"concat {case} l'été"
+    folder.mkdir()
+    selected = []
+    for index in range(3):
+        target = folder / f"part '{index}.{'mp4' if case == 'mp4' else 'mkv'}"
+        command = ["ffmpeg", "-v", "error", "-y", "-i", str(sources[index % 2]), "-map", "0:v"]
+        if case != "video-only":
+            command += ["-map", "0:a", "-map", "0:a", "-metadata:s:a:0", "language=jpn",
+                        "-metadata:s:a:0", "title=Japanese", "-metadata:s:a:1", "language=eng",
+                        "-metadata:s:a:1", "title=English", "-disposition:a:0", "0", "-disposition:a:1", "0"]
+        if case == "subtitles":
+            command += ["-map", "0:s", "-metadata:s:s:0", "language=eng", "-disposition:s:0", "default"]
+        command += ["-c", "copy"]
+        if case == "hevc":
+            command += ["-c:v", "libx265", "-preset", "ultrafast", "-x265-params", "pools=1:frame-threads=1:log-level=error:bframes=0"]
+        if case != "mp4":
+            command += ["-avoid_negative_ts", "make_zero"]
+        _run(*command, "-metadata", "title=Series", str(target))
+        selected.append(str(target))
+    probes = [_probe(path, "-show_streams", "-show_format") for path in selected]
+    hashes = [hashlib.sha256(Path(path).read_bytes()).digest() for path in selected]
+    original_run = backend._run
+    original_json = backend._json_command
+    concat_commands = []
+    append_commands = []
+
+    async def run(arguments, listener, **kwargs):
+        if "concat" in arguments:
+            concat_commands.append(arguments)
+            if case in {"fallback", "cancel"}:
+                Path(arguments[-1]).write_bytes(b"partial concat output")
+                listener.is_cancelled = case == "cancel"
+                return 1, "Injected concat failure"
+        if "--generate-chapters" in arguments:
+            append_commands.append(arguments)
+        return await original_run(arguments, listener, **kwargs)
+
+    async def inspect(arguments, listener):
+        result = await original_json(arguments, listener)
+        if case == "shifted" and Path(arguments[-1]).name == "timeline.mkv" and not append_commands:
+            result["streams"][0]["start_time"] = "0.5"
+        return result
+
+    monkeypatch.setattr(backend, "_run", run)
+    monkeypatch.setattr(backend, "_json_command", inspect)
+    listener = _listener()
+    target = folder / "merged.mkv"
+    output, error = await merge_copy(listener, selected, str(target), probes)
+    assert len(concat_commands) <= 1 if case == "mp4" else len(concat_commands) == 1
+    if case != "mp4":
+        assert bool(append_commands) == (case in {"fallback", "shifted"})
+    assert hashes == [hashlib.sha256(Path(path).read_bytes()).digest() for path in selected]
+    assert not list(folder.glob("merge-*/"))
+    if case == "cancel":
+        assert output is False and "cancelled" in error.lower()
+        assert not target.exists()
+        return
+    assert not error
+    info = _probe(output, "-show_streams", "-show_chapters", "-show_packets", "-show_format")
+    assert len(info["chapters"]) == 3
+    assert info["format"]["tags"]["title"] == "Series"
+    audio = [stream for stream in info["streams"] if stream["codec_type"] == "audio"]
+    source_defaults = [stream["disposition"]["default"] for stream in probes[0]["streams"] if stream["codec_type"] == "audio"]
+    assert [(stream["tags"]["language"], stream["tags"]["title"], stream["disposition"]["default"]) for stream in audio] == (
+        [] if case == "video-only" else [("jpn", "Japanese", source_defaults[0]), ("eng", "English", source_defaults[1])]
+    )
+    for position, stream in enumerate(audio):
+        expected = []
+        times = []
+        for source, probe, chapter in zip(selected, probes, info["chapters"], strict=True):
+            packets = _probe(source, "-select_streams", f"a:{position}", "-show_packets")["packets"]
+            expected += [packet["data_hash"] for packet in packets]
+            times += [float(packet["pts_time"]) + float(chapter["start_time"]) - float(_origin(probe)) for packet in packets]
+        actual = [packet for packet in info["packets"] if packet["stream_index"] == stream["index"]]
+        assert [packet["data_hash"] for packet in actual] == expected
+        if case != "mp4":
+            assert [float(packet["pts_time"]) for packet in actual] == pytest.approx(times, abs=0.003)
+    frames = []
+    for source in selected:
+        frames.extend((await backend._video_frames(source, [0], listener))[0])
+    assert await backend._video_frames(output, [0], listener) == {0: frames}
+    subtitles = [stream for stream in info["streams"] if stream["codec_type"] == "subtitle"]
+    assert len(subtitles) == int(case == "subtitles")
+    if subtitles:
+        assert [float(packet["pts_time"]) for packet in info["packets"] if packet["stream_index"] == subtitles[0]["index"]] == pytest.approx(
+            _expected_embedded_times(selected, info["chapters"]), abs=0.006)
+        document = read_document(subprocess.check_output([
+            "ffmpeg", "-v", "error", "-i", output, "-map", "0:s", "-c:s", "copy", "-f", "ass", "pipe:1"
+        ]).decode("utf-8-sig"), "ass")
+        assert {style["Fontsize"] for style in document["styles"]} == {"22", "32"}
+    _run("ffmpeg", "-v", "error", "-xerror", "-i", output, "-map", "0:v", "-map", "0:a?", "-f", "null", "-")
 
 
 @pytest.mark.asyncio
@@ -630,9 +780,16 @@ async def test_three_av1_aac_episodes_join_english_ass_with_conflicting_fonts(me
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("frames_ms", [(20, 20), (10, 60), (2.5, 40)])
-async def test_av1_dual_opus_merge_preserves_audio_timestamps_and_multiline_subtitles(media, frames_ms):
+async def test_av1_dual_opus_merge_preserves_audio_timestamps_and_multiline_subtitles(media, frames_ms, monkeypatch):
     from bot.helper.ext_utils import merge_media as backend
 
+    original_run = backend._run
+
+    async def run(arguments, listener, **kwargs):
+        assert "concat" not in arguments, "Opus pre-skip requires the MKVToolNix append path"
+        return await original_run(arguments, listener, **kwargs)
+
+    monkeypatch.setattr(backend, "_run", run)
     root, _ = media
     label = f"opus-{frames_ms[0]}-{frames_ms[1]}"
     selected = []
@@ -1145,7 +1302,7 @@ async def test_real_merge_failure_removes_temporary_files_and_preserves_sources(
     hashes = [hashlib.sha256(path.read_bytes()).digest() for path in files[:2]]
 
     async def fail_append(arguments, listener, **kwargs):
-        if "--generate-chapters" in arguments:
+        if "--generate-chapters" in arguments or "concat" in arguments:
             return 2, "Injected append failure"
         return await original(arguments, listener, **kwargs)
 

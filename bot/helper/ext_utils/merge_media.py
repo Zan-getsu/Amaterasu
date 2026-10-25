@@ -1,4 +1,4 @@
-"""Validated Matroska A/V append with continuous, original-format subtitles."""
+"""Validated stream-copy timelines with continuous, original-format subtitles."""
 
 import asyncio
 import hashlib
@@ -315,6 +315,110 @@ def _write_chapters(path, starts, files):
         lines.append(f"CHAPTER{index:02d}={hours:02d}:{minutes:02d}:{seconds:02d}.{millis:03d}")
         lines.append(f"CHAPTER{index:02d}NAME={_chapter_name(file_)}")
     Path(path).write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+async def _concat_av(files, probes, target, working, listener):
+    """Try native FFmpeg concat only for matching, zero-origin A/V layouts."""
+    layouts = []
+    durations = []
+    fields = ("index", "codec_type", "codec_name", "profile", "level", "width", "height",
+              "pix_fmt", "sample_fmt", "sample_rate", "channels", "channel_layout",
+              "time_base", "r_frame_rate", "extradata_hash")
+    for file_, probe in zip(files, probes, strict=True):
+        format_ = probe.get("format") or {}
+        streams = [stream for stream in probe.get("streams") or []
+                   if stream.get("codec_type") in {"video", "audio"}]
+        # Unproven headers and shifted origins keep the existing MKVToolNix path.
+        if (any(char in str(file_) for char in "\r\n") or not streams
+            or format_.get("start_time") is None or format_.get("duration") is None
+            # Opus pre-skip can hide negative packet times behind a zero stream start.
+            or any(stream.get("codec_name") == "opus" or not stream.get("extradata_hash")
+                   or (stream.get("disposition") or {}).get("attached_pic")
+                   for stream in streams)
+            or _origin(probe) != 0 or _chapter_timestamp(format_.get("start_time")) != 0):
+            return False
+        duration = _chapter_timestamp(format_.get("duration"))
+        if duration <= 0:
+            return False
+        ends = []
+        for stream in streams:
+            origin = _chapter_timestamp(stream.get("start_time") or 0)
+            tags = stream.get("tags") or {}
+            if stream.get("duration") is not None:
+                end = origin + _chapter_timestamp(stream["duration"])
+            elif tags.get("DURATION"):
+                parts = tags["DURATION"].split(":")
+                if len(parts) != 3:
+                    return False
+                end = sum(_chapter_timestamp(part) * scale for part, scale in zip(parts, (3600, 60, 1), strict=True))
+                if tags.get("_STATISTICS_WRITING_APP"):
+                    end += origin
+            else:
+                return False
+            ends.append(end)
+        # A subtitle tail or inaccurate container duration must not insert A/V gaps.
+        if abs(max(ends) - duration) > Decimal("0.002"):
+            return False
+        durations.append(duration)
+        layouts.append([
+            (tuple(stream.get(field) for field in fields),
+             tuple((stream.get("tags") or {}).get(key) for key in ("language", "title")),
+             stream.get("disposition"), stream.get("side_data_list"))
+            for stream in streams
+        ])
+    if any(layout != layouts[0] for layout in layouts[1:]):
+        return False
+
+    manifest = Path(working) / "timeline.ffconcat"
+    manifest.write_text("ffconcat version 1.0\n" + "".join(
+        "file 'file:" + Path(file_).resolve().as_posix().replace("'", "'\\''") + f"'\nduration {duration:f}\n"
+        for file_, duration in zip(files, durations, strict=True)
+    ), encoding="utf-8")
+    metadata = Path(working) / "timeline.ffmetadata"
+    chapters = [";FFMETADATA1"]
+    start = Decimal(0)
+    for duration in durations:
+        end = start + duration
+        chapters.append(f"[CHAPTER]\nTIMEBASE=1/1000000\nSTART={int(start * 1000000)}\nEND={int(end * 1000000)}")
+        start = end
+    metadata.write_text("\n".join(chapters) + "\n", encoding="utf-8")
+    command = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-xerror", "-nostdin", "-y", "-copyts",
+               "-f", "concat", "-safe", "0", "-protocol_whitelist", "file", "-auto_convert", "0",
+               "-i", str(manifest), "-i", files[0], "-f", "ffmetadata", "-i", str(metadata)]
+    for stream in probes[0]["streams"]:
+        if stream.get("codec_type") in {"video", "audio"}:
+            command += ["-map", f"0:{stream['index']}"]
+    # The concat demuxer does not forward source-level metadata.
+    command += ["-c", "copy", "-map_metadata", "1", "-map_chapters", "2", "-default_mode", "passthrough",
+                "-avoid_negative_ts", "disabled"]
+    for position, stream in enumerate(stream for stream in probes[0]["streams"]
+                                      if stream.get("codec_type") in {"video", "audio"}):
+        flags = "+".join(key for key, value in (stream.get("disposition") or {}).items() if value)
+        command += [f"-disposition:{position}", flags or "0"]
+    command.append(target)
+    code, _ = await _run(command, listener)
+    if listener.is_cancelled:
+        raise ValueError("Merge was cancelled.")
+    if code:
+        return False
+    try:
+        result = await _json_command(
+            ["ffprobe", "-v", "error", "-show_streams", "-show_chapters", "-show_format", "-show_data_hash", "sha256", "-of", "json", target], listener,
+        )
+        duration = _chapter_timestamp((result.get("format") or {}).get("duration"))
+    except (OSError, ValueError):
+        return False
+    actual = result.get("streams") or []
+    original = [stream for stream in probes[0]["streams"] if stream.get("codec_type") in {"video", "audio"}]
+    preserved = ("codec_type", "codec_name", "width", "height", "sample_rate", "channels", "extradata_hash", "disposition")
+    return (len(actual) == len(original)
+            and abs(duration - sum(durations)) <= Decimal("0.003")
+            and all(all(before.get(field) == after.get(field) for field in preserved)
+                    and all((before.get("tags") or {}).get(key) == (after.get("tags") or {}).get(key)
+                            for key in ("language", "title"))
+                    and abs(_chapter_timestamp(before.get("start_time") or 0)
+                            - _chapter_timestamp(after.get("start_time") or 0)) <= Decimal("0.003")
+                    for before, after in zip(original, actual, strict=True)))
 
 
 async def _attachment_records(extractor, file_, attachments, working, listener, *, retain=False):
@@ -835,10 +939,19 @@ async def merge_copy(
                 for index, file_ in enumerate(append_files):
                     if index:
                         command.append("+")
-                    command += ["--no-subtitles", "--no-attachments", "--no-chapters", "--no-global-tags", file_]
-                code, diagnostic = await _run(command, listener)
-                if code:
-                    raise ValueError(f"A/V append failed: {diagnostic or f'exit {code}'}")
+                    command += ["--no-subtitles", "--no-attachments", "--no-chapters", "--no-global-tags"]
+                    streams = [stream for stream in probes[index].get("streams") or []
+                               if stream.get("codec_type") in {"video", "audio"}
+                               and not (stream.get("disposition") or {}).get("attached_pic")]
+                    for track, stream in zip(append_layouts[index], streams, strict=True):
+                        if "default" in (stream.get("disposition") or {}):
+                            command += ["--default-track-flag", f"{track['id']}:{'yes' if stream['disposition']['default'] else 'no'}"]
+                    command.append(file_)
+                concatenated = not changed_headers and await _concat_av(files, probes, av_file, working, listener)
+                if not concatenated:
+                    code, diagnostic = await _run(command, listener)
+                    if code:
+                        raise ValueError(f"A/V append failed: {diagnostic or f'exit {code}'}")
                 if changed_headers:
                     for prepared in append_files:
                         os.remove(prepared)
@@ -963,7 +1076,7 @@ async def merge_copy(
                 if stream.get("codec_type") in {"video", "audio"}
             ]
             for original, merged in zip(original_av, actual_av, strict=True):
-                for field in ("codec_name", "width", "height", "sample_rate", "channels", "extradata_hash"):
+                for field in ("codec_name", "width", "height", "sample_rate", "channels", "extradata_hash", "disposition"):
                     if original.get(field) is not None and original.get(field) != merged.get(field):
                         raise ValueError(f"The merged A/V track changed {field}.")
             await _validate_attachments(
