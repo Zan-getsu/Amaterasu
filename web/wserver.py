@@ -31,6 +31,7 @@ from aiohttp import ClientSession, ClientTimeout
 from aiohttp.client_exceptions import ClientError
 from aioqbt.client import create_client
 from aioqbt.exc import AQError
+from anyio import CancelScope
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import (
     HTMLResponse,
@@ -2378,6 +2379,16 @@ def _filetolink_cache_usage() -> tuple[int, int]:
     return file_count, total_size
 
 
+class _FileToLinkStreamingResponse(StreamingResponse):
+    async def __call__(self, scope, receive, send):
+        try:
+            await super().__call__(scope, receive, send)
+        finally:
+            # A disconnect during send() leaves the body suspended at yield.
+            with CancelScope(shield=True):
+                await self.body_iterator.aclose()
+
+
 def _begin_filetolink_transfer(
     filename: str,
     mode: str,
@@ -3764,7 +3775,7 @@ async def embedded_subtitle(token: str, track_index: int):
                 await process.wait()
             _release_stream_load(client_id)
 
-    return StreamingResponse(
+    return _FileToLinkStreamingResponse(
         subtitle_generator(),
         media_type="text/vtt; charset=utf-8",
         headers={"Cache-Control": "private, max-age=86400", **CORS_HEADERS},
@@ -3955,7 +3966,6 @@ async def stream_media(chat_id: str, message_id: int, request: Request, filename
     except ValueError:
         pass
     from bot.core.tg_client import TgClient
-    from fastapi.responses import StreamingResponse
 
     client_id, client, message = await get_message_with_stream_client(chat_id, message_id)
 
@@ -4057,7 +4067,7 @@ async def stream_media(chat_id: str, message_id: int, request: Request, filename
                 finally:
                     _finish_filetolink_transfer(transfer_id)
 
-            response = StreamingResponse(
+            response = _FileToLinkStreamingResponse(
                 cached_stream_generator(),
                 status_code=206 if ranged_response else 200,
                 media_type=mime_type,
@@ -4279,7 +4289,7 @@ async def stream_media(chat_id: str, message_id: int, request: Request, filename
                     _finish_filetolink_transfer(transfer_id)
                 _release_reserved_stream_clients(reserved_clients)
                 
-        return StreamingResponse(
+        return _FileToLinkStreamingResponse(
             stream_generator(),
             status_code=206 if ranged_response else 200,
             headers=headers

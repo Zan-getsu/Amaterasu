@@ -109,6 +109,32 @@ async def test_idle_socket_timeout_can_receive_data_later(monkeypatch):
     assert await transport._recv_from_socket(2) == b"ok"
 
 
+async def test_partial_packet_timeout_reconnects_instead_of_reusing_socket(monkeypatch):
+    transport = TCPAbridged()
+    transport.reader = asyncio.StreamReader()
+    # A two-word frame with only one word available reproduces the production timeout.
+    transport.reader.feed_data(b"\x02abcd")
+    monkeypatch.setattr(TCP, "TIMEOUT", 0.01)
+    receive = AsyncMock(side_effect=transport.recv)
+    session = object.__new__(Session)
+    session.connection = SimpleNamespace(recv=receive)
+    session.is_started = asyncio.Event()
+    session.is_started.set()
+    session._teardown_started = False
+    session._stopping = False
+    session._fail_pending = Mock()
+    session._safe_restart = AsyncMock()
+
+    await session.recv_worker()
+
+    receive.assert_awaited_once()
+    session._safe_restart.assert_awaited_once()
+    session._fail_pending.assert_called_once()
+    error = session._fail_pending.call_args.args[0]
+    assert isinstance(error, ConnectionResetError)
+    assert "desynchronised mid-message" in str(error)
+
+
 async def test_socket_failure_during_read_stops_on_next_attempt():
     transport = TCP()
     transport.reader = asyncio.StreamReader()

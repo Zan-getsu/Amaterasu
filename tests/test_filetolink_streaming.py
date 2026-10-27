@@ -368,6 +368,80 @@ def test_stale_runtime_transfers_are_cancelled_and_removed():
     assert released == [3]
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("spec_version", ["2.0", "2.4"])
+@pytest.mark.parametrize("ending", ["complete", "disconnect", "cancel"])
+async def test_stream_response_closes_body_before_releasing_request(
+    spec_version, ending,
+):
+    from anyio import CancelScope
+    from starlette.requests import ClientDisconnect
+    from starlette.responses import StreamingResponse
+
+    namespace = {"StreamingResponse": StreamingResponse, "CancelScope": CancelScope}
+    tree = ast.parse(SOURCE_PATH.read_text(encoding="utf-8"))
+    response_class = next(
+        node for node in tree.body
+        if isinstance(node, ast.ClassDef) and node.name == "_FileToLinkStreamingResponse"
+    )
+    exec(
+        compile(ast.Module([response_class], type_ignores=[]), str(SOURCE_PATH), "exec"),
+        namespace,
+    )
+    namespace.update({
+        "_filetolink_active_streams": {},
+        "token_urlsafe": lambda _size: "transfer",
+        "monotonic": lambda: 100.0,
+        "wall_time": lambda: 100.0,
+        "current_task": asyncio.current_task,
+    })
+    load_functions({"_begin_filetolink_transfer", "_finish_filetolink_transfer"}, namespace)
+    released = []
+    chunk_sent = asyncio.Event()
+
+    async def body():
+        transfer_id = namespace["_begin_filetolink_transfer"](
+            "movie.mkv", "Download", "Telegram", 2, 3,
+        )
+        try:
+            yield b"a"
+            yield b"b"
+        finally:
+            # Cache closure also needs an await while the disconnect scope is cancelled.
+            await asyncio.sleep(0)
+            namespace["_finish_filetolink_transfer"](transfer_id)
+            released.append(3)
+
+    async def receive():
+        await chunk_sent.wait()
+        return {"type": "http.disconnect"}
+
+    async def send(message):
+        if message["type"] != "http.response.body" or not message.get("body"):
+            return
+        if ending == "cancel":
+            raise asyncio.CancelledError
+        if ending == "disconnect":
+            if spec_version == "2.4":
+                raise OSError("Client connection closed")
+            chunk_sent.set()
+            await asyncio.Event().wait()
+
+    response = namespace["_FileToLinkStreamingResponse"](body())
+    scope = {"type": "http", "asgi": {"spec_version": spec_version}}
+    try:
+        await response(scope, receive, send)
+    except ClientDisconnect:
+        assert ending == "disconnect" and spec_version == "2.4"
+    except asyncio.CancelledError:
+        assert ending == "cancel"
+
+    assert released == [3]
+    assert namespace["_filetolink_active_streams"] == {}
+    await response.body_iterator.aclose()
+    assert released == [3]
+
+
 def test_streaming_paths_publish_live_filetolink_metrics():
     source = SOURCE_PATH.read_text(encoding="utf-8")
 
@@ -377,6 +451,8 @@ def test_streaming_paths_publish_live_filetolink_metrics():
     assert '"Cache"' in source
     assert source.count("_update_filetolink_transfer(transfer_id, bytes_sent)") == 2
     assert source.count("_finish_filetolink_transfer(transfer_id)") == 2
+    assert source.count("return _FileToLinkStreamingResponse(") == 2
+    assert "response = _FileToLinkStreamingResponse(" in source
 
 
 def test_wzmlx_media_features_are_wired_into_filetolink():
