@@ -2081,6 +2081,9 @@ _LOGIN_PAGE_HTML = """<!DOCTYPE html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Amaterasu — Login</title>
+<link rel="icon" href="/static/images/brand/favicon.ico" sizes="16x16 32x32 48x48">
+<link rel="icon" href="/static/images/brand/favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/static/images/brand/apple-touch-icon.png">
 <style>
 body { font-family: -apple-system, system-ui, sans-serif; background: #f5f6f7;
        display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; }
@@ -2098,6 +2101,7 @@ button:hover { background: #155a7e; }
 </head>
 <body>
 <div class="card">
+<img src="/static/images/brand/blackflare-ink.svg" width="56" height="56" alt="Amaterasu" style="display:block;margin-bottom:1rem">
 <h1>Amaterasu Login</h1>
 <form method="POST" action="/login">
 <label for="password">Password</label>

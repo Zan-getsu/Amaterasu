@@ -45,15 +45,18 @@
   display: flex;
   justify-content: center;
   margin-bottom: var(--bs-space-6);
+}
+.hero-logo-container img {
   animation: float 6s ease-in-out infinite;
 }
 .hero-wordmark {
-  font-family: var(--bs-font-mono);
-  font-size: clamp(28px, 5vw, 48px);
-  font-weight: 800;
-  letter-spacing: 0.15em;
-  color: var(--bs-gold);
   margin-bottom: var(--bs-space-4);
+}
+.hero-wordmark img {
+  display: block;
+  width: min(420px, calc(100% - 48px));
+  height: auto;
+  margin: 0 auto;
 }
 .hero-version {
   display: inline-flex;
@@ -295,18 +298,9 @@
 <!-- Hero -->
 <section class="hero-section">
   <div class="hero-logo-container fade-in fade-in-1">
-    <svg width="80" height="80" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
-      <circle cx="16" cy="16" r="12" fill="#0B0F14" stroke="#D4AF37" stroke-width="2"/>
-      <path d="M32 16C32 24.8366 24.8366 32 16 32C7.16344 32 0 24.8366 0 16C0 7.16344 7.16344 0 16 0C24.8366 0 32 7.16344 32 16ZM28 16C28 9.37258 22.6274 4 16 4C9.37258 4 4 9.37258 4 16C4 22.6274 9.37258 28 16 28C22.6274 28 28 22.6274 28 16Z" fill="url(#paint0_radial)"/>
-      <defs>
-        <radialGradient id="paint0_radial" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(16 16) rotate(90) scale(16)">
-          <stop stop-color="#D4AF37" stop-opacity="0.25"/>
-          <stop offset="1" stop-color="#D4AF37" stop-opacity="0"/>
-        </radialGradient>
-      </defs>
-    </svg>
+    <img src="/static/images/brand/blackflare.svg" width="96" height="96" alt="" />
   </div>
-  <h1 class="hero-wordmark fade-in fade-in-2">AMATERASU</h1>
+  <h1 class="hero-wordmark fade-in fade-in-2"><img src="/static/images/brand/wordmark-white.svg" width="420" height="66" alt="Amaterasu" /></h1>
   <div class="hero-version fade-in fade-in-2">
     <i data-lucide="shield" style="width:12px;height:12px;"></i>
     {% if version %}{{ version }}{% else %}v1.6.7{% endif %}
@@ -457,10 +451,7 @@
 <footer class="footer">
   <div class="footer-inner">
     <div style="display: flex; align-items: center; gap: var(--bs-space-3);">
-      <svg width="18" height="18" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <circle cx="16" cy="16" r="12" fill="#0B0F14" stroke="#D4AF37" stroke-width="2"/>
-        <path d="M32 16C32 24.8366 24.8366 32 16 32C7.16344 32 0 24.8366 0 16C0 7.16344 7.16344 0 16 0C24.8366 0 32 7.16344 32 16ZM28 16C28 9.37258 22.6274 4 16 4C9.37258 4 4 9.37258 4 16C4 22.6274 9.37258 28 16 28C22.6274 28 28 22.6274 28 16Z" fill="url(#paint0_radial)"/>
-      </svg>
+      <img src="/static/images/brand/favicon.svg" width="18" height="18" alt="" />
       <span class="footer-text">© 2026 Amaterasu — Black Sun Infrastructure</span>
     </div>
     <div class="footer-links">

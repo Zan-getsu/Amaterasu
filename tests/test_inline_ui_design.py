@@ -8,6 +8,7 @@ from types import ModuleType, SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 ROOT = Path(__file__).resolve().parents[1]
 INLINE_UI_PATH = ROOT / "bot" / "helper" / "telegram_helper" / "inline_ui.py"
@@ -36,13 +37,63 @@ AMATERASU_ASCII_ROWS = (
 )
 
 
-def test_runtime_and_readme_banners_spell_amaterasu():
+def test_runtime_and_readme_banners_identify_amaterasu():
     runtime_source = MAIN_PATH.read_text(encoding="utf-8")
     readme = README_PATH.read_text(encoding="utf-8")
 
     for row in AMATERASU_ASCII_ROWS:
         assert row in runtime_source
-        assert row in readme
+    banner = "docs/assets/blackflare-github-banner.png"
+    assert banner in readme
+    assert (ROOT / banner).is_file()
+
+
+def _web_branding_context():
+    return {
+        "version": "test", "user_id": 42, "page_token": "page-proof",
+        "auth_token": "auth-proof", "plan_id": "plan-proof", "step": "details",
+        "session_history": [], "token_status": None, "callback_url": "/callback",
+        "default_scope": "drive", "file_name": "Example.mp4", "file_size": "1 MB",
+        "file_type": "video", "file_extension": "mp4", "mime_type": "video/mp4",
+        "file_url": "/stream/proof", "absolute_file_url": "http://localhost/stream/proof",
+        "download_url": "/dl/proof", "absolute_download_url": "http://localhost/dl/proof",
+        "doc_preview_url": "", "subtitles": [], "poster_url": "/poster/proof",
+        "tracks_url": "/api/tracks/proof", "playlist": None, "asset_version": "test",
+        "playlist_name": "Example playlist", "playlist_token": "playlist-proof",
+        "items": [{"name": "Example.mp4", "watch_url": "/watch/proof",
+                   "download_url": "/dl/proof", "poster_url": "/poster/proof"}],
+    }
+
+
+@pytest.mark.parametrize(
+    "template_name",
+    sorted(path.name for path in (ROOT / "web/templates").glob("*.html")
+           if path.name not in {"base.html", "brand_icons.html"}),
+)
+def test_every_web_page_has_resolvable_blackflare_branding(template_name):
+    environment = Environment(
+        loader=FileSystemLoader(ROOT / "web/templates"), autoescape=select_autoescape(),
+    )
+    rendered = environment.get_template(template_name).render(**_web_branding_context())
+    assert '/static/images/brand/favicon.svg' in rendered
+    assert '/static/images/brand/favicon.ico' in rendered
+    assert '/static/images/brand/blackflare.svg' in rendered
+    assert "paint0_radial" not in rendered
+    for resource in findall(r'(?:src|href)="(/static/images/brand/[^\"]+)"', rendered):
+        assert (ROOT / "web" / resource.lstrip("/")).is_file(), resource
+
+
+def test_light_login_uses_ink_blackflare_and_shared_browser_icons():
+    tree = ast.parse((ROOT / "web/wserver.py").read_text(encoding="utf-8"))
+    login = next(ast.literal_eval(node.value) for node in tree.body
+                 if isinstance(node, ast.Assign)
+                 and any(isinstance(target, ast.Name) and target.id == "_LOGIN_PAGE_HTML"
+                         for target in node.targets))
+    assert '/static/images/brand/blackflare-ink.svg' in login
+    assert '/static/images/brand/favicon.svg' in login
+    assert '/static/images/brand/favicon.ico' in login
+    for resource in findall(r'(?:src|href)="(/static/images/brand/[^\"]+)"', login):
+        assert (ROOT / "web" / resource.lstrip("/")).is_file(), resource
 
 
 def _load_inline_ui():

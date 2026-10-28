@@ -4,6 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Amaterasu | Torrent File Selector</title>
+  {% include "brand_icons.html" %}
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
@@ -166,18 +167,9 @@
     <!-- PIN Entry UI -->
     <div id="pinEntry" class="bs-card bs-card--glass pin-entry-card">
       <div class="bs-mb-6" style="display: flex; justify-content: center;">
-        <svg class="bs-navbar__logo" viewBox="0 0 32 32" fill="none" style="width: 56px; height: 56px;" xmlns="http://www.w3.org/2000/svg">
-          <circle cx="16" cy="16" r="12" fill="#0B0F14" stroke="#D4AF37" stroke-width="2"/>
-          <path d="M32 16C32 24.8366 24.8366 32 16 32C7.16344 32 0 24.8366 0 16C0 7.16344 7.16344 0 16 0C24.8366 0 32 7.16344 32 16ZM28 16C28 9.37258 22.6274 4 16 4C9.37258 4 4 9.37258 4 16C4 22.6274 9.37258 28 16 28C22.6274 28 28 22.6274 28 16Z" fill="url(#paint0_radial)"/>
-          <defs>
-            <radialGradient id="paint0_radial" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(16 16) rotate(90) scale(16)">
-              <stop stop-color="#D4AF37" stop-opacity="0.25"/>
-              <stop offset="1" stop-color="#D4AF37" stop-opacity="0"/>
-            </radialGradient>
-          </defs>
-        </svg>
+        <img src="/static/images/brand/blackflare.svg" width="64" height="64" alt="" />
       </div>
-      <h2 class="bs-h2 bs-mb-2">AMATERASU</h2>
+      <h2 class="bs-h2 bs-mb-2"><img src="/static/images/brand/wordmark-white.svg" width="240" height="38" style="max-width: 100%; height: auto;" alt="Amaterasu" /></h2>
       <p class="bs-body-sm bs-text-muted bs-mb-6 uppercase" style="letter-spacing: 0.1em;">Access Control</p>
       
       <div class="bs-input-group bs-mb-6">
@@ -191,7 +183,7 @@
     <div id="fileManager" class="selector-shell" style="display: none;">
       <div class="selector-hero">
         <div>
-          <div class="selector-kicker"><i class="fa-solid fa-layer-group"></i> Torrent Selector</div>
+          <div class="selector-kicker"><img src="/static/images/brand/blackflare.svg" width="20" height="20" alt="Amaterasu" /><span class="selector-label">Torrent Selector</span></div>
           <h1 class="selector-title">Choose Files</h1>
           <p class="selector-subtitle">Browse the torrent directory, select what you need, and submit the final file list.</p>
         </div>
@@ -286,8 +278,7 @@
         ? 'Torrent'
         : selectorEndpoint.charAt(0).toUpperCase() + selectorEndpoint.slice(1);
     document.title = `Amaterasu | ${selectorLabel} File Selector`;
-    document.querySelector('.selector-kicker').innerHTML =
-        `<i class="fa-solid fa-layer-group"></i> ${selectorLabel} Selector`;
+    document.querySelector('.selector-label').textContent = `${selectorLabel} Selector`;
     document.querySelector('.selector-subtitle').textContent =
         `Browse the ${selectorLabel} directory, select what you need, and submit the final file list.`;
 

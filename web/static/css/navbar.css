@@ -16,7 +16,8 @@
   display: flex; align-items: center; gap: var(--bs-space-3);
   text-decoration: none; color: var(--bs-text-primary);
 }
-.bs-navbar__logo { width: 28px; height: 28px; }
+.bs-navbar__logo { width: 32px; height: 32px; display: block; flex-shrink: 0; }
+.bs-navbar__wordmark { width: 128px; height: 20px; display: block; }
 .bs-navbar__title {
   font-size: 13px; font-weight: 800; letter-spacing: 0.12em;
   color: var(--bs-gold); font-family: var(--bs-font-mono);
