@@ -10,7 +10,7 @@ from time import monotonic
 
 from pyrogram import Client, enums
 from pyrogram import __version__ as WZGRAM_VERSION
-from pyrogram.errors import FloodWait
+from pyrogram.errors import ChannelInvalid, FloodWait, PeerIdInvalid
 from pyrogram.methods.rate_limiter import AdaptiveBucket
 from pyrogram.types import ChatPrivileges
 
@@ -865,7 +865,10 @@ class TgClient:
             if cls.IS_PREMIUM_USER:
                 cls.MAX_SPLIT_SIZE = 4194304000
             uname = cls.user.me.username or cls.user.me.first_name
-            LOGGER.info(f"WZ User : [{uname}] Started!")
+            LOGGER.info(
+                "WZ User : [%s] Started! premium=%s upload_limit=%s",
+                uname, cls.IS_PREMIUM_USER, cls.MAX_SPLIT_SIZE,
+            )
         except FloodWait as e:
             LOGGER.warning(f"User client FloodWait: Retrying in {e.value}s...")
             bot_loop.create_task(cls._retry_user(e.value))
@@ -890,7 +893,10 @@ class TgClient:
                 if cls.IS_PREMIUM_USER:
                     cls.MAX_SPLIT_SIZE = 4194304000
                 uname = cls.user.me.username or cls.user.me.first_name
-                LOGGER.info(f"Amaterasu User : [{uname}] Started!")
+                LOGGER.info(
+                    "Amaterasu User : [%s] Started! premium=%s upload_limit=%s",
+                    uname, cls.IS_PREMIUM_USER, cls.MAX_SPLIT_SIZE,
+                )
             except FloodWait as e:
                 LOGGER.warning(
                     f"User client FloodWait: Retrying in {e.value}s (non-blocking)..."
@@ -900,6 +906,22 @@ class TgClient:
                 LOGGER.error(f"Failed to start client from USER_SESSION_STRING. {e}")
                 cls.IS_PREMIUM_USER = False
                 cls.user = None
+
+    @classmethod
+    async def get_user_chat(cls, chat_id):
+        try:
+            return await cls.user.get_chat(chat_id)
+        except (PeerIdInvalid, ChannelInvalid):
+            if not isinstance(chat_id, int):
+                raise
+            # Session strings do not include the private channel's cached access hash.
+            LOGGER.info("Refreshing user-session peers for Telegram chat %s", chat_id)
+            async with _asyncio.timeout(30):
+                async for dialog in cls.user.get_dialogs():
+                    if dialog.chat.id == chat_id:
+                        LOGGER.info("User session resolved Telegram chat %s from dialogs", chat_id)
+                        return dialog.chat
+            raise
 
     @classmethod
     async def start_stream_clients(cls):
@@ -1076,7 +1098,7 @@ class TgClient:
 
         for chat_id in chat_ids:
             try:
-                chat = await cls.user.get_chat(chat_id)
+                chat = await cls.get_user_chat(chat_id)
             except Exception as e:
                 raise RuntimeError(
                     f"Cannot inspect provisioning chat {chat_id}: {e}"

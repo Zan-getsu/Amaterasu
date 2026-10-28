@@ -943,6 +943,7 @@ class TaskConfig:
             if self.hybrid_leech:
                 self.transmission_mode = "both"
 
+            requested_transmission_mode = self.transmission_mode
             self.up_dest = Config.LEECH_DUMP_CHAT
             if self.up_dest:
                 if not isinstance(self.up_dest, int):
@@ -958,11 +959,20 @@ class TaskConfig:
 
                 if self.transmission_mode in ("user", "both"):
                     if not TgClient.user:
+                        LOGGER.warning(
+                            "Leech mode %s changed to bot: user session is unavailable",
+                            self.transmission_mode,
+                        )
                         self.transmission_mode = "bot"
                     else:
                         try:
-                            chat = await TgClient.user.get_chat(self.up_dest)
-                        except Exception:
+                            chat = await TgClient.get_user_chat(self.up_dest)
+                        except Exception as err:
+                            LOGGER.warning(
+                                "User session cannot resolve leech dump %s: %s: %s. "
+                                "Falling back to bot uploads and the 2 GB limit.",
+                                self.up_dest, type(err).__name__, err,
+                            )
                             chat = None
                         if chat is None:
                             self.transmission_mode = "bot"
@@ -974,6 +984,11 @@ class TaskConfig:
                                 ChatType.GROUP,
                                 ChatType.FORUM,
                             ]:
+                                LOGGER.warning(
+                                    "Leech dump %s has unsupported user-session chat type %s; "
+                                    "falling back to bot uploads",
+                                    self.up_dest, chat.type,
+                                )
                                 self.transmission_mode = "bot"
                             elif chat.type == ChatType.CHANNEL:
                                 member = await chat.get_member(uploader_id)
@@ -981,6 +996,11 @@ class TaskConfig:
                                     not member.privileges
                                     or not member.privileges.can_post_messages
                                 ):
+                                    LOGGER.warning(
+                                        "User session lacks permission to post in leech dump %s; "
+                                        "falling back to bot uploads",
+                                        self.up_dest,
+                                    )
                                     self.transmission_mode = "bot"
 
                 try:
@@ -1024,6 +1044,11 @@ class TaskConfig:
                         else:
                             self.transmission_mode = "user"
             elif self.transmission_mode in ("user", "both") and not self.is_super_chat:
+                LOGGER.warning(
+                    "Leech mode %s changed to bot: no LEECH_DUMP_CHAT is configured "
+                    "and the command chat cannot use the user session",
+                    self.transmission_mode,
+                )
                 self.transmission_mode = "bot"
             if self.split_size:
                 if self.split_size.isdigit():
@@ -1043,6 +1068,13 @@ class TaskConfig:
                 TgClient.MAX_SPLIT_SIZE if self.transmission_mode in ("user", "both") else 2097152000
             )
             self.split_size = min(self.split_size, self.max_split_size)
+            LOGGER.info(
+                "Telegram leech preflight: requested=%s effective=%s "
+                "user_available=%s user_premium=%s split_size=%s max_split_size=%s dump=%s",
+                requested_transmission_mode, self.transmission_mode,
+                TgClient.user is not None, TgClient.IS_PREMIUM_USER,
+                self.split_size, self.max_split_size, self.up_dest,
+            )
 
             if not self.as_doc:
                 self.as_doc = (
