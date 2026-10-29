@@ -2596,6 +2596,141 @@ def test_download_routes_hyperdl_first_and_wzgram_for_overflow():
     assert "Telegram download route: WZGram overflow lane" in source
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("outcome", ["success", "unavailable", "exception", "fallback-failure", "callback-failure", "cancel"])
+async def test_hyperdl_lane_is_free_before_fallback_and_upload_handoff(outcome):
+    from pyrogram.errors import FloodPremiumWait, FloodWait
+
+    entered = asyncio.Event()
+    namespace = {
+        "_hyper_download_active": 0, "LOGGER": logging.getLogger(__name__),
+        "FloodWait": FloodWait, "FloodPremiumWait": FloodPremiumWait,
+    }
+    load_top_level_functions(DOWNLOAD_SOURCE, {"_claim_hyper_download", "_release_hyper_download"}, namespace)
+    assert namespace["_claim_hyper_download"](1)
+
+    async def download_media(*_args, **_kwargs):
+        if outcome == "cancel":
+            entered.set()
+            await asyncio.Event().wait()
+        if outcome == "exception":
+            raise ConnectionError("helper unavailable")
+        return "complete.mkv" if outcome in {"success", "callback-failure"} else None
+
+    namespace.update(
+        HypertgDownload=lambda _obj: SimpleNamespace(download_media=download_media, message=None),
+        Config=SimpleNamespace(LEECH_DUMP_CHAT=-1001),
+    )
+    download = load_method(DOWNLOAD_SOURCE, "TelegramDownloadHelper", "_download", namespace)
+    helper = SimpleNamespace(
+        _hyper_dl=True, _hyper_download_claimed=True, _standard_session="bot",
+        _listener=SimpleNamespace(is_cancelled=False), _has_downloadable_media=lambda _msg: False,
+    )
+
+    async def next_stage(*_args, **_kwargs):
+        assert namespace["_hyper_download_active"] == 0
+        assert helper._hyper_download_claimed is False
+        # Another task must be admitted while this task enters its upload callback.
+        assert namespace["_claim_hyper_download"](1)
+        namespace["_release_hyper_download"]()
+        if outcome == "callback-failure":
+            raise RuntimeError("upload callback failed")
+        return None if outcome == "fallback-failure" else "complete.mkv"
+
+    helper._standard_download = next_stage
+    helper._on_download_complete = next_stage
+    helper._on_download_error = next_stage
+    task = asyncio.create_task(download(helper, object(), "downloads/"))
+    if outcome == "cancel":
+        await asyncio.wait_for(entered.wait(), 1)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    elif outcome == "callback-failure":
+        with pytest.raises(RuntimeError, match="upload callback failed"):
+            await task
+    else:
+        await task
+    assert namespace["_hyper_download_active"] == 0
+    assert helper._hyper_download_claimed is False
+
+
+@pytest.mark.asyncio
+async def test_hyperdl_flood_backoff_survives_short_success_bursts_then_recovers(monkeypatch):
+    from pyrogram.errors import FloodWait
+
+    from bot.helper.ext_utils import hyperdl_utils
+
+    downloader = _pipeline_downloader()
+    downloader.pipeline_depth = 8
+    downloader._MAX_PIPELINE_MULT = 4
+    downloader._pool = SimpleNamespace(sessions_per_client=4)
+    now = [100.0]
+    monkeypatch.setattr(hyperdl_utils, "monotonic", lambda: now[0])
+    monkeypatch.setattr(hyperdl_utils, "sleep", AsyncMock())
+    active = {"quiet": 0, "recovered": 0}
+    peaks = dict(active)
+    flooded = False
+
+    async def request(_session, _client, _loc, offset, size, _attempt):
+        nonlocal flooded
+        if offset == 0 and not flooded:
+            flooded = True
+            raise FloodWait(1)
+        phase = "quiet" if 8 * size <= offset < 24 * size else "recovered" if offset >= 24 * size else None
+        if offset >= 24 * size:
+            now[0] = 111.0
+        if phase:
+            active[phase] += 1
+            peaks[phase] = max(peaks[phase], active[phase])
+        try:
+            await asyncio.sleep(0)
+            return b"x" * size
+        finally:
+            if phase:
+                active[phase] -= 1
+
+    downloader._do_req = request
+    assert await downloader._pipeline_fetch(1, "location", 0, 128 * 1024, SimpleNamespace(dc_id=5), 1024, 1) == set()
+    assert peaks["quiet"] == 4
+    assert peaks["recovered"] > 4
+    assert downloader._obj._processed_bytes == 128 * 1024
+    assert downloader._pwrite.await_count == 128
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("valid", [True, False])
+async def test_hyperdl_completed_progress_excludes_rewritten_retry_bytes(tmp_path, valid):
+    from bot.helper.ext_utils.hyperdl_utils import HypertgDownload
+
+    payload = b"verified payload"
+    final = str(tmp_path / "download.bin")
+    downloader = object.__new__(HypertgDownload)
+    downloader.file_size, downloader.chunk_size = len(payload), 1024 * 1024
+    downloader.pipeline_depth = 4
+    downloader._pool = SimpleNamespace(sessions_per_client=3)
+    downloader._tasks = []
+    downloader._obj = SimpleNamespace(_processed_bytes=0)
+    downloader.clients = {1: SimpleNamespace(me=SimpleNamespace(username="helper"))}
+    downloader._resolve_file_refs = AsyncMock(return_value={1: SimpleNamespace(dc_id=5)})
+    downloader._warmup = AsyncMock()
+
+    async def part(_start, _end, path, *_args):
+        Path(path).write_bytes(payload if valid else payload[:-1])
+        downloader._obj._processed_bytes = len(payload) * 2  # Retry rewrote a completed chunk.
+        return set()
+
+    downloader._part = part
+    result = await downloader._run_download_with_clients([1], final)
+    if valid:
+        assert result == final
+        assert Path(result).read_bytes() == payload
+        assert downloader._obj._processed_bytes == len(payload)
+    else:
+        assert result is None
+        assert not Path(final).exists()
+
+
 def test_failed_download_performance_does_not_report_expected_size_as_transferred():
     records = []
     log_performance = load_method(

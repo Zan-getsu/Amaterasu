@@ -17,6 +17,7 @@ from mimetypes import guess_extension
 from pathlib import Path
 from re import sub
 from sys import argv
+from time import monotonic
 
 from aiofiles.os import makedirs
 from aiofiles.os import path as aiopath
@@ -373,7 +374,7 @@ class HypertgDownload(HypertgTransfer):
         cur = first_off
         seq = 0
         ok_count = 0
-        flood_count = 0
+        last_flood = float("-inf")
         timeout_count = 0
         pipe_timeouts = 0
         bot_down = False
@@ -395,7 +396,7 @@ class HypertgDownload(HypertgTransfer):
             self._obj._processed_bytes += len(chunk)
 
         async def _req(off, s):
-            nonlocal window, ok_count, flood_count, timeout_count, current_dc, loc, pipe_timeouts, bot_down
+            nonlocal window, ok_count, last_flood, timeout_count, current_dc, loc, pipe_timeouts, bot_down
             if bot_down:
                 return s, off, b""
             my_sess = None
@@ -452,16 +453,17 @@ class HypertgDownload(HypertgTransfer):
                         pipe_timeouts = 0
                     return s, off, result
                 except (FloodWait, FloodPremiumWait) as e:
-                    flood_count += 1
                     val = e.value if hasattr(e, "value") else 5
-                    if val > 10 or flood_count >= 3:
-                        window = max(min_win, window - max(1, window // 4))
-                        ok_count = 0
-                        flood_count = 0
+                    now = monotonic()
+                    # One flooded batch must not halve the window per pending RPC.
+                    if now - last_flood >= 1:
+                        window = max(min_win, window // 2)
                         LOGGER.warning(
                             f"HypertgDL flood window={window} "
-                            f"val={val}s client={cname} off={off}"
+                            f"val={val}s type={type(e).__name__} client={cname} off={off}"
                         )
+                    last_flood = now
+                    ok_count = 0
                     await sleep(val + 1)
                 except CancelledError:
                     raise
@@ -549,7 +551,9 @@ class HypertgDownload(HypertgTransfer):
                         continue
                     ok_count += 1
                     if ok_count >= window:
-                        window = min(window + 2, max_win)
+                        # A few completed requests must not immediately undo flood backoff.
+                        if monotonic() - last_flood >= 10:
+                            window = min(window + 2, max_win)
                         ok_count = 0
                     await _schedule_write(roff, chunk)
         except CancelledError:
@@ -1086,6 +1090,7 @@ class HypertgDownload(HypertgTransfer):
                     pass
                 return None
 
+            self._obj._processed_bytes = self.file_size
             return final
         except FloodWait:
             raise

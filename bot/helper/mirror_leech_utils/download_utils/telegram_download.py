@@ -396,6 +396,11 @@ class TelegramDownloadHelper:
                         f"{hyper_err}); falling back to standard WZGram download"
                     )
                     download = None
+                finally:
+                    # The completion callback can run an entire upload pipeline.
+                    if getattr(self, "_hyper_download_claimed", False):
+                        _release_hyper_download()
+                        self._hyper_download_claimed = False
                 # If HypertgDL returned None, the fast path was unavailable
                 # for this message or it detected an incomplete file. Fall
                 # back to standard Pyrogram download instead of uploading a
