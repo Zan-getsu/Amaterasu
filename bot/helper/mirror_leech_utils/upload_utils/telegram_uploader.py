@@ -125,8 +125,14 @@ class TelegramUploader:
         self._hu: HypertgUpload | None = None
         self._error = ""
         self._upload_tasks = []
+        self._hu = HypertgUpload(self) if Config.USE_HYPER and Config.LEECH_DUMP_CHAT else None
+        mode = self._listener.transmission_mode
+        helper_count = sum(
+            1 for key in self._hu.clients
+            if mode == "both" or (key < 0 if mode == "user" else key > 0)
+        ) if self._hu else 0
         self._file_upload_parallelism = min(
-            max(int(getattr(Config, "UPLOAD_PARALLELISM", 3)), 1),
+            max(int(getattr(Config, "UPLOAD_PARALLELISM", 0)) or max(3, helper_count), 1),
             16,
         )
         self._file_upload_semaphore = Semaphore(self._file_upload_parallelism)
@@ -134,7 +140,6 @@ class TelegramUploader:
         self._split_quality_cache = {}
         self._split_upload_tails = {}
         self._additional_copy_destinations = None
-        self._hu = HypertgUpload(self) if Config.USE_HYPER and Config.LEECH_DUMP_CHAT else None
         self._upload_seq = []
         self._msg_to_seq = {}
 

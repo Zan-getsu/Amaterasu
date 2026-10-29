@@ -1,4 +1,5 @@
-from asyncio import sleep
+from asyncio import Semaphore, sleep
+from time import monotonic
 
 from PIL import Image
 from pyrogram import StopTransmission
@@ -212,12 +213,20 @@ class HypertgUpload(HypertgTransfer):
                     pass
 
     async def _send_with_retry(self, send_func, **kwargs):
+        client = send_func.__self__
         while True:
+            delay = getattr(client, "_amaterasu_send_flood_until", 0) - monotonic()
+            if delay > 0:
+                await sleep(delay)
+                continue
             try:
                 return await send_func(**kwargs)
             except (FloodWait, FloodPremiumWait) as f:
+                client._amaterasu_send_flood_until = max(
+                    getattr(client, "_amaterasu_send_flood_until", 0),
+                    monotonic() + max(float(f.value), 1) + 1,
+                )
                 LOGGER.warning(f"HypertgUL flood {f.value}s on {self._up_file}")
-                await sleep(f.value + 1)
 
     async def _try_send(self, key, client, kwargs):
         async def send():
@@ -320,7 +329,12 @@ class HypertgUpload(HypertgTransfer):
             else:
                 kwargs["document"] = file_path
 
-            sent = await self._try_send(key, client, kwargs)
+            gate = getattr(client, "_amaterasu_hyper_upload_gate", None)
+            if gate is None:
+                premium = getattr(getattr(client, "me", None), "is_premium", False)
+                gate = client._amaterasu_hyper_upload_gate = Semaphore(1 if premium else 2)
+            async with gate:
+                sent = await self._try_send(key, client, kwargs)
             return sent
         finally:
             self.work_loads[idx] = max(0, self.work_loads.get(idx, 0) - 1)

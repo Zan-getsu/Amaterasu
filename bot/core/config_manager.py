@@ -229,8 +229,8 @@ class Config:
 
     # Concurrent file pipelines within each Telegram leech task. This bounds
     # MIME/ffprobe/thumbnail work and active transfers so large folders cannot
-    # exhaust the process file-descriptor limit.
-    UPLOAD_PARALLELISM = 3
+    # exhaust file descriptors. Zero scales to helper count (3-16 files).
+    UPLOAD_PARALLELISM = 0
 
     # Phase 3.7 — yt-dlp playlist parallelism. Number of playlist items
     # to download concurrently. Default 3, max 6 (higher risks source
@@ -390,7 +390,7 @@ class Config:
             elif key == "DIRECT_PARALLELISM":
                 value = min(max(int(value), 1), 16)
             elif key == "UPLOAD_PARALLELISM":
-                value = min(max(int(value), 1), 16)
+                value = min(max(int(value), 0), 16)
             elif key == "FILETOLINK_PREFETCH_CHUNKS":
                 value = min(
                     max(int(value), 1),
@@ -504,7 +504,7 @@ class Config:
 
     @classmethod
     def _normalize_upload_parallelism(cls):
-        cls.UPLOAD_PARALLELISM = min(max(int(cls.UPLOAD_PARALLELISM), 1), 16)
+        cls.UPLOAD_PARALLELISM = min(max(int(cls.UPLOAD_PARALLELISM), 0), 16)
 
     @classmethod
     def _validate_required(cls):

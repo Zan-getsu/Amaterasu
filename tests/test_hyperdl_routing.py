@@ -7,6 +7,7 @@ import re
 import runpy
 from contextlib import suppress
 from pathlib import Path
+from time import monotonic
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -1366,7 +1367,7 @@ def test_telegram_upload_parallelism_config_is_clamped(monkeypatch):
 
     monkeypatch.setattr(Config, "UPLOAD_PARALLELISM", 3)
     Config.set("UPLOAD_PARALLELISM", 0)
-    assert Config.UPLOAD_PARALLELISM == 1
+    assert Config.UPLOAD_PARALLELISM == 0
 
     Config.set("UPLOAD_PARALLELISM", 99)
     assert Config.UPLOAD_PARALLELISM == 16
@@ -1909,11 +1910,14 @@ async def test_helper_upload_selection_preserves_account_type_and_loads(user_onl
 
 
 def _helper_upload_sender():
-    namespace = {"LOGGER": logging.getLogger(__name__), "ospath": os.path}
+    namespace = {
+        "LOGGER": logging.getLogger(__name__), "ospath": os.path,
+        "monotonic": monotonic, "Semaphore": asyncio.Semaphore,
+    }
     send = load_method(HYPERUL_SOURCE, "HypertgUpload", "_hyper_send", namespace)
     pick = load_method(ROOT / "bot/helper/telegram_helper/tg_transfer.py", "HypertgTransfer", "_pick_client", namespace)
     uploader = type("HelperUpload", (), {"_hyper_send": send, "_pick_client": pick})()
-    uploader.clients = {2: object(), 3: object(), -1: object()}
+    uploader.clients = {2: SimpleNamespace(), 3: SimpleNamespace(), -1: SimpleNamespace()}
     uploader.work_loads = {2: 2, 3: 3, -1: 0}
     uploader._try_send = AsyncMock(return_value="sent")
     uploader._progress = AsyncMock()
@@ -2304,10 +2308,10 @@ async def test_hyperdl_only_retries_transient_rpc_errors(error_name, retryable):
     session = SimpleNamespace(invoke=AsyncMock(side_effect=error))
     downloader = object.__new__(HypertgDownload)
     if retryable:
-        assert await downloader._do_req(session, object(), "location", 0, 1024) == (None, -2)
+        assert await downloader._do_req(session, SimpleNamespace(), "location", 0, 1024) == (None, -2)
     else:
         with pytest.raises(type(error)):
-            await downloader._do_req(session, object(), "location", 0, 1024)
+            await downloader._do_req(session, SimpleNamespace(), "location", 0, 1024)
     session.invoke.assert_awaited_once()
 
 
@@ -2329,7 +2333,7 @@ async def test_hyperdl_end_to_end_request_deadline_cancels_pending_work(monkeypa
 
     monkeypatch.setattr(hyperdl_utils, "wait_for", accelerated_deadline)
     downloader = object.__new__(hyperdl_utils.HypertgDownload)
-    assert await downloader._do_req(SimpleNamespace(invoke=pending), object(), "location", 0, 1024) == (None, -2)
+    assert await downloader._do_req(SimpleNamespace(invoke=pending), SimpleNamespace(), "location", 0, 1024) == (None, -2)
     assert finished.is_set()
 
 

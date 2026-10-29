@@ -1,9 +1,14 @@
 import socket
-from asyncio import Event, Lock, gather, wait_for
+from asyncio import Event, Lock, Semaphore, gather, sleep, wait_for
+from contextlib import asynccontextmanager
+from time import monotonic
 
 from pyrogram import raw, utils
 from pyrogram.connection.transport.tcp.tcp import TCP
+from pyrogram.errors import FloodPremiumWait, FloodWait
 from pyrogram.file_id import FileType, ThumbnailSource
+from pyrogram.methods.rate_limiter import AdaptiveBucket
+from pyrogram.session import Session
 
 from ... import LOGGER
 from ...core.tg_client import WZGRAM_MEDIA_RESTART_ATTEMPTS, TgClient
@@ -55,6 +60,46 @@ if not getattr(_current_tcp_connect, "_amaterasu_tuned", False):
 MB = 1024 * 1024
 
 _global_work_loads = None
+
+
+class _DownloadPacer:
+    """Share admission and Telegram cooldowns across one account's downloads."""
+
+    def __init__(self):
+        self.in_flight = Semaphore(4 * max(1, Session.MAX_INFLIGHT_MEDIA))
+        self.bucket = AdaptiveBucket(rate=32, ceiling=300, burst=16, step=1.0)
+        self.lock = Lock()
+        self.flood_until = 0.0
+
+    @asynccontextmanager
+    async def slot(self):
+        async with self.in_flight:
+            async with self.lock:
+                while True:
+                    delay = self.flood_until - monotonic()
+                    if delay > 0:
+                        await sleep(delay)
+                        continue
+                    await self.bucket.acquire()
+                    if self.flood_until <= monotonic():
+                        break
+            try:
+                yield
+            except (FloodWait, FloodPremiumWait) as error:
+                self.flood_until = max(
+                    self.flood_until, monotonic() + max(float(error.value), 1) + 1,
+                )
+                self.bucket.on_flood()
+                raise
+            else:
+                self.bucket.on_success()
+
+
+def _download_pacer(client):
+    pacer = getattr(client, "_amaterasu_download_pacer", None)
+    if pacer is None:
+        pacer = client._amaterasu_download_pacer = _DownloadPacer()
+    return pacer
 
 
 class MtprotoPool:
@@ -197,9 +242,17 @@ class HypertgTransfer:
         ]
         if not candidates:
             raise RuntimeError("No active HyperTG helper clients")
+        now = monotonic()
         return min(
             candidates,
-            key=lambda client_id: self.work_loads.get(client_id, 0),
+            key=lambda client_id: (
+                max(
+                    0,
+                    getattr(self.clients[client_id], "_amaterasu_send_flood_until", 0) - now,
+                    getattr(getattr(self.clients[client_id], "_amaterasu_upload_pacer", None), "flood_until", 0) - now,
+                ),
+                self.work_loads.get(client_id, 0),
+            ),
         )
 
     async def _get_session(self, idx, dc_id, force=False):

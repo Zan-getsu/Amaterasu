@@ -648,7 +648,7 @@ All variables go inside `config.py`. Copy `config_sample.py` as your starting te
 | `FILETOLINK_ADAPTIVE_STREAMING` | `bool` | `True` | Use the WZML-X adaptive MTProto range engine; automatically falls back to WZGram's native streamer before response bytes start |
 | `FILETOLINK_GETFILE_CONCURRENCY` | `int` | `8` | Maximum concurrent Telegram `GetFile` requests per FileToLink stream bot. Valid range: 1–32 |
 | `FILETOLINK_PREFETCH_CHUNKS` | `int` | `4` | Maximum ordered look-ahead chunks per transfer; capped by concurrency and reduced automatically under load |
-| `HELPER_STRINGS` | `str` | `""` | Space-separated helper user session strings. These clients can start with the bot, but HyperDL/HyperUP currently uses helper bot tokens as its active worker pool |
+| `HELPER_STRINGS` | `str` | `""` | Space-separated helper user session strings used by HyperDL/HyperUP when the selected transmission mode permits user accounts |
 | `HELPER_BOT_PROXIES` | `str` | `""` | Optional newline-separated proxy dictionaries for `HELPER_TOKENS`, one proxy per helper bot |
 | `HELPER_USER_PROXIES` | `str` | `""` | Optional newline-separated proxy dictionaries for `HELPER_STRINGS`, one proxy per helper user |
 | `DEFAULT_LANG` | `str` | `""` | Default language code for the bot |
@@ -682,7 +682,7 @@ All variables go inside `config.py`. Copy `config_sample.py` as your starting te
 | `MEDIA_GROUP` | `bool` | `False` | Send split files as a media group (album) |
 | `TRANSMISSION_MODE` | `str` | `both` | Telegram upload mode: `bot`, `user`, or `both` |
 | `USE_HYPER` | `bool` | `True` | Enable HyperDL/HyperUP acceleration when helper bots and `LEECH_DUMP_CHAT` are configured |
-| `HYPER_THREADS` | `int` | `0` | Number of helper workers used for HyperDL. `0` lets Amaterasu choose automatically |
+| `HYPER_THREADS` | `int` | `0` | Number of helper workers used for HyperDL. `0` uses all eligible helpers, bounded by file size |
 | `HYPER_PIPELINE` | `int` | `4` | Initial Telegram `GetFile` request depth per HyperDL worker; grows within its media-session capacity |
 | `HYPER_CHUNK` | `int` | `1048576` | HyperDL working chunk size. Telegram requests are normalized to 1 MiB |
 | `LEECH_PREFIX` | `str` | `""` | Text prepended to every uploaded filename |
@@ -722,6 +722,9 @@ How it is used:
 | Normal transfer | Missing helper bots, missing dump chat, or `USE_HYPER=False` | Amaterasu uses the regular Telegram download/upload path |
 
 HyperUP assigns each file to one helper account and uploads its parts in parallel. Concurrent files spread across the available helpers.
+Automatic upload preparation scales to the eligible helper count (3-16 files). Set `UPLOAD_PARALLELISM=0` to enable this on an existing installation; positive values retain your chosen limit. Helpers with active upload cooldowns are deprioritized, and simultaneous sends share the same account cooldown. Telegram can still impose FloodWaits; no helper count guarantees their absence.
+
+Open `/bsetting` → **Helper Bots**, or **HELPER_TOKENS → Manage Helpers**, to see configured/connected counts, busy helpers, cooldowns, and per-bot job assignments. Use **Refresh** for a current snapshot. **Remove** asks for confirmation and saves the token/proxy-list change to the connected database; restart to apply it without interrupting active transfers. Environment-defined helper values must also be updated in the deployment. Removing a helper does not remove the same token from separately configured `MULTI_TOKEN` workers.
 
 Recommended helper count:
 
@@ -734,9 +737,10 @@ Recommended helper count:
 Optional tuning:
 
 ```python
-HYPER_THREADS = 0        # 0 = auto. Set 2, 4, 6... to cap parallel download parts.
+HYPER_THREADS = 0        # 0 = all eligible helpers. Set 2, 4, 6... to cap download parts.
 HYPER_PIPELINE = 4       # Initial depth; grows within the helper's media-session capacity.
 HYPER_CHUNK = 1024 * 1024 # Telegram GetFile requests are normalized to 1 MiB.
+UPLOAD_PARALLELISM = 0   # Auto-scale file preparation to helpers; 1-16 sets a limit.
 ```
 
 Optional per-helper proxy config uses one Python dictionary per line. Blank lines mean "no proxy" for that helper index.
@@ -756,7 +760,7 @@ Troubleshooting:
 | Hyper never starts | Confirm `USE_HYPER=True`, `HELPER_TOKENS` is not empty, and `LEECH_DUMP_CHAT` is set |
 | `Cannot copy to dump chat` | Main bot cannot copy the source message into `LEECH_DUMP_CHAT`; check chat ID and bot permissions |
 | Helper bot failed at startup | Token may be wrong, bot may be banned/limited, or proxy syntax may be invalid |
-| Many FloodWait logs | Reduce helper count, lower `HYPER_THREADS`, or lower `HYPER_PIPELINE` |
+| Many FloodWait logs | HyperDL shares adaptive request pacing and server cooldowns across each account's downloads. Lower `HYPER_THREADS` or `HYPER_PIPELINE` if the host or Telegram DC stays saturated |
 | Upload works but not faster | Add more helper bots, use a nearby VPS region, and ensure `LEECH_DUMP_CHAT` is a supergroup/channel where all helper bots can send |
 
 ### 5. Google Drive
@@ -830,7 +834,7 @@ All limits are in **GB**. Set `0` to disable the limit.
 | `QUEUE_ALL` | `int` | `0` | Max total tasks in queue (0 = unlimited) |
 | `QUEUE_DOWNLOAD` | `int` | `0` | Max concurrent downloads |
 | `QUEUE_UPLOAD` | `int` | `0` | Max concurrent uploads |
-| `UPLOAD_PARALLELISM` | `int` | `3` | Concurrent file preparation within each Telegram leech task (`1`-`16`). Upload admission is shared per client: one Premium file or two bot/non-Premium files; file parts still upload in parallel |
+| `UPLOAD_PARALLELISM` | `int` | `0` | Concurrent file preparation per Telegram leech task. `0` scales to the eligible helper count with a minimum of 3 and maximum of 16; `1`-`16` sets an explicit limit. Upload admission is shared per client: one Premium file or two bot/non-Premium files; file parts still upload in parallel |
 
 ### 9. JDownloader & Usenet
 

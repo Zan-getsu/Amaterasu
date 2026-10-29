@@ -1,4 +1,5 @@
 from asyncio import (
+    Lock,
     create_subprocess_exec,
     gather,
     sleep,
@@ -6,10 +7,12 @@ from asyncio import (
 from ast import literal_eval
 from copy import deepcopy
 from functools import partial
+from hashlib import sha256
 from html import escape
 from io import BytesIO
+from math import ceil
 from os import environ, getcwd
-from time import time
+from time import monotonic, time
 
 from aiofiles import open as aiopen
 from aiofiles.os import path as aiopath
@@ -49,7 +52,8 @@ from ..helper.ext_utils.bot_utils import (
 )
 from ..core.auto_restart import schedule_auto_restart
 from ..core.config_manager import Config, DEFAULT_CONFIG
-from ..core.tg_client import db_partition_id
+from ..core.tg_client import TelegramClient, TgClient, db_partition_id
+from ..helper.telegram_helper import tg_transfer
 from ..core.torrent_manager import TorrentManager
 from ..core.startup import (
     start_web_server,
@@ -77,6 +81,86 @@ from .search import initiate_search_tools
 start = 0
 state = "view"
 handler_dict = {}
+_helper_tokens_lock = Lock()
+
+
+def _helper_bot_rows():
+    """Read live helper assignments without returning credentials."""
+    tokens = Config.helper_bot_tokens()
+    clients = [(token, TgClient.helper_bot_clients.get(token)) for token in tokens]
+    configured_clients = {id(client) for _, client in clients if client is not None}
+    clients.extend(
+        (None, client) for client in TgClient.helper_bots.values()
+        if id(client) not in configured_clients
+    )
+    loads = tg_transfer._global_work_loads or {}
+    now = monotonic()
+    rows = []
+    for index, (token, client) in enumerate(clients, 1):
+        me = getattr(client, "me", None)
+        username = getattr(me, "username", None)
+        bot_id = getattr(me, "id", None)
+        if not bot_id and token and token.split(":", 1)[0].isdigit():
+            bot_id = token.split(":", 1)[0]
+        name = f"@{username}" if username else f"Bot {bot_id or '#' + str(index)}"
+        connected = TelegramClient.is_connected(client)
+        helper_id = next((key for key, value in TgClient.helper_bots.items() if value is client), None)
+        hyper_jobs = loads.get(helper_id, TgClient.helper_loads.get(helper_id, 0))
+        stream_jobs = sum(
+            TgClient.stream_loads.get(key, 0)
+            for key, value in TgClient.stream_clients.items() if value is client
+        ) if client is not None else 0
+        jobs = hyper_jobs + stream_jobs
+        deadline = max(
+            getattr(client, "_amaterasu_send_flood_until", 0),
+            getattr(getattr(client, "_amaterasu_upload_pacer", None), "flood_until", 0),
+            getattr(getattr(client, "_amaterasu_download_pacer", None), "flood_until", 0),
+        )
+        cooldown = max(0, ceil(deadline - now))
+        status = "Not connected"
+        if connected:
+            status = f"Cooldown {cooldown}s" if cooldown else ("Busy" if jobs else "Connected · idle")
+        if jobs:
+            status += f" · {hyper_jobs} Hyper / {stream_jobs} stream jobs"
+        if token is None:
+            status += " · pending removal/restart"
+        rows.append({
+            "ref": sha256(token.encode()).hexdigest()[:16] if token else None,
+            "name": name, "connected": connected, "jobs": jobs, "cooldown": cooldown,
+            "status": status, "configured": token is not None,
+        })
+    return rows
+
+
+def _helper_bot_summary(rows):
+    return (
+        f"<b>Configured:</b> {sum(row['configured'] for row in rows)} · "
+        f"<b>Connected:</b> {sum(row['connected'] for row in rows)}\n"
+        f"<b>Busy:</b> {sum(row['jobs'] > 0 for row in rows)} · "
+        f"<b>Cooldown:</b> {sum(row['connected'] and row['cooldown'] > 0 for row in rows)}\n"
+    )
+
+
+async def _remove_helper_bot(reference):
+    async with _helper_tokens_lock:
+        tokens = Config.helper_bot_tokens()
+        index = next((i for i, token in enumerate(tokens)
+                      if sha256(token.encode()).hexdigest()[:16] == reference), None)
+        if index is None:
+            return False
+        if database.db is None or getattr(database, "_return", False):
+            raise ValueError("Database unavailable. Edit HELPER_TOKENS in your deployment config to save a removal.")
+        tokens.pop(index)
+        changes = {"HELPER_TOKENS": " ".join(tokens)}
+        if Config.HELPER_BOT_PROXIES:
+            proxies = Config.HELPER_BOT_PROXIES.split("\n")
+            if index < len(proxies):
+                proxies.pop(index)
+                changes["HELPER_BOT_PROXIES"] = "\n".join(proxies)
+        await database.update_config(changes)
+        for key, value in changes.items():
+            Config.set(key, value)
+        return True
 
 
 def _config_update_payload(key, value):
@@ -110,7 +194,7 @@ DEFAULT_VALUES = {
     "UPSTREAM_BRANCH": "main",
     "AUTO_UPDATE": False,
     "DIRECT_PARALLELISM": 4,
-    "UPLOAD_PARALLELISM": 3,
+    "UPLOAD_PARALLELISM": 0,
     "DEFAULT_UPLOAD": "rc",
     "BOT_MAX_TASKS": 0,
     "QUEUE_ALL": 0,
@@ -244,7 +328,7 @@ DEFAULT_DESP = {
     "HYPER_THREADS": "Number of parallel download parts (clients). 0 = auto.",
     "HYPER_PIPELINE": "Concurrent GetFile requests per HyperDL part. Default: 4.",
     "HYPER_CHUNK": "HyperDL working chunk size in bytes. Telegram transfers are normalized to 1 MiB.",
-    "UPLOAD_PARALLELISM": "Concurrent files per Telegram leech task, including metadata probing and upload. Valid range: 1-16. Default: 3.",
+    "UPLOAD_PARALLELISM": "Concurrent files per Telegram leech task, including metadata probing and upload. 0 = auto (3-16 based on eligible helpers); 1-16 = explicit limit. Default: 0.",
     "CPU_LIMIT": "CPU limit percentage for background services (SABnzbd, JDownloader). Default: 20.",
     "THROTTLE_SERVICES": "Pause services during heavy ops (FFmpeg). auto=low-end only, always, never.",
     "HYDRA_IP": "Hydra API IP address for search.",
@@ -342,7 +426,8 @@ PROTECTED_VARS = {
 RESTART_VARS = {
     "CMD_SUFFIX", "OWNER_ID", "USER_SESSION_STRING", "TELEGRAM_HASH", "TELEGRAM_API", "BOT_TOKEN",
     "TG_PROXY", "AUTHORIZED_CHATS", "DATABASE_URL", "AUTO_PROVISION_STREAM_BOTS",
-    "AUTO_UPDATE", "DISABLE_TORRENTS"
+    "AUTO_UPDATE", "DISABLE_TORRENTS", "HELPER_TOKENS", "HELPER_STRINGS",
+    "HELPER_BOT_PROXIES", "HELPER_USER_PROXIES"
 }
 
 HIDDEN_VARS = {"PORT"}
@@ -703,6 +788,7 @@ async def get_buttons(key=None, edit_type=None, edit_mode=False):
     buttons = ButtonMaker()
     if key is None:
         buttons.data_button("✦ CONFIG VARIABLES", "botset var")
+        buttons.data_button("✦ HELPER BOTS", "botset helpers 0")
         buttons.data_button("✦ MODULE SETTINGS", "botset setonoff")
         buttons.data_button("✦ PRIVATE FILES", "botset private open")
         if not Config.DISABLE_TORRENTS:
@@ -794,6 +880,9 @@ async def get_buttons(key=None, edit_type=None, edit_mode=False):
                 f"<b>Current value</b> : "
                 f"<code>{escape(str(value))}</code>\n\n"
             )
+            if key == "HELPER_TOKENS":
+                msg += _helper_bot_summary(_helper_bot_rows()) + "\n"
+                buttons.data_button("Manage Helpers", "botset helpers 0", style=ButtonStyle.PRIMARY)
             buttons.data_button(
                 "View Value", f"botset showvar {key}", position="header"
             )
@@ -821,6 +910,43 @@ async def get_buttons(key=None, edit_type=None, edit_mode=False):
                 msg += "\n<b>Note:</b> Restart required for changes to take effect!\n\n"
             if edit_mode and not is_bool:
                 msg += "<i>Send a valid value for the above Var.</i>\n┖ <b>Time Left :</b> <code>60 sec</code>"
+        elif edit_type == "helper_remove":
+            row = next((row for row in _helper_bot_rows() if row["ref"] == key), None)
+            if row is None:
+                return await get_buttons("helpers_0")
+            msg = (
+                "<b>✦ REMOVE HELPER BOT</b>\n\n"
+                f"Remove <b>{escape(row['name'])}</b> from HELPER_TOKENS?\n\n"
+                "The saved helper list changes now. Restart to stop this helper; "
+                "running transfers continue until then.\n"
+                "A token also configured under MULTI_TOKEN remains a FileToLink worker."
+            )
+            if "HELPER_TOKENS" in environ or "HELPER_BOT_PROXIES" in environ:
+                msg += "\n\n<b>Deployment environment override:</b> update HELPER_TOKENS and its proxy list there too before restarting."
+            buttons.data_button("Confirm Remove", f"botset helper_confirm {key}", style=ButtonStyle.DANGER)
+            buttons.data_button("Cancel", "botset helpers 0")
+    elif key.startswith("helpers_"):
+        rows = _helper_bot_rows()
+        page_text = key.removeprefix("helpers_")
+        page = int(page_text) if page_text.isdecimal() else 0
+        page = min(page, max(0, (len(rows) - 1) // 6))
+        msg = "<b>✦ HELPER BOTS</b>\n\n" + _helper_bot_summary(rows)
+        msg += "\n<i>Busy includes assigned or queued Hyper and FileToLink jobs. Connection status does not verify channel permissions.</i>\n\n"
+        if not rows:
+            msg += "No helper bots configured. Use Edit Tokens to add them.\n"
+        for index, row in enumerate(rows[page * 6 : (page + 1) * 6], page * 6 + 1):
+            msg += f"<b>{index}. {escape(row['name'])}</b>\n{escape(row['status'])}\n\n"
+            if row["configured"]:
+                buttons.data_button(f"Remove {row['name']}", f"botset helper_remove {row['ref']}", style=ButtonStyle.DANGER)
+        if page:
+            buttons.data_button("Previous", f"botset helpers {page - 1}")
+        if (page + 1) * 6 < len(rows):
+            buttons.data_button("Next", f"botset helpers {page + 1}")
+        buttons.data_button("Refresh", f"botset helpers {page}", style=ButtonStyle.PRIMARY)
+        buttons.data_button("Edit Tokens", "botset editvar HELPER_TOKENS edit")
+        buttons.data_button("Back", "botset editvar HELPER_TOKENS", position="footer")
+        buttons.data_button("Close", "botset close", position="footer", style=ButtonStyle.DANGER)
+        msg += "<i>Removal takes effect after restart. Tokens stay hidden in this list.</i>"
     elif key == "var":
         conf_dict = _visible_config_variables()
         for slug, (label, _, _) in CONFIG_CATEGORIES.items():
@@ -1670,6 +1796,26 @@ async def edit_bot_settings(client, query):
             show_alert=True,
         )
         await sync_jdownloader()
+    elif data[1] == "helpers":
+        await query.answer()
+        page = data[2] if len(data) > 2 and data[2].isdecimal() else "0"
+        await update_buttons(message, f"helpers_{page}")
+    elif data[1] == "helper_remove":
+        await query.answer()
+        await update_buttons(message, data[2] if len(data) > 2 else "", "helper_remove")
+    elif data[1] == "helper_confirm":
+        await query.answer()
+        try:
+            removed = await _remove_helper_bot(data[2] if len(data) > 2 else "")
+        except ValueError:
+            await send_message(message, "Database unavailable. Edit HELPER_TOKENS in your deployment config to save a removal.")
+        except Exception as error:
+            LOGGER.error("Helper removal save failed: %s", type(error).__name__)
+            await send_message(message, "Could not save helper removal. Check the database connection and try again.")
+        else:
+            if not removed:
+                await send_message(message, "This helper is no longer configured. The list has been refreshed.")
+        await update_buttons(message, "helpers_0")
     elif data[1] in ["var", "aria", "qbit", "nzb", "nzbserver", "setonoff"] or data[1].startswith(
         "nzbser"
     ):

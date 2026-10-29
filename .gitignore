@@ -63,6 +63,7 @@ tests/*
 !tests/player_runtime.test.cjs
 !tests/test_adaptive_tg_stream.py
 !tests/test_hyperdl_routing.py
+!tests/test_hypertg_efficiency.py
 !tests/test_bot_settings_categories.py
 !tests/test_wzmlx_august_ports.py
 !tests/test_wzgram_upgrade.py

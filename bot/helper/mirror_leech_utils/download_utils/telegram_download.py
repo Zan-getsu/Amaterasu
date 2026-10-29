@@ -101,7 +101,7 @@ class TelegramDownloadHelper:
         client_count = bot_count + user_count
         if client_count <= 0:
             return 0
-        requested_parts = Config.HYPER_THREADS or min(4, max(2, client_count))
+        requested_parts = Config.HYPER_THREADS or client_count
         workers_per_transfer = min(max(1, requested_parts), client_count)
         return max(1, client_count // workers_per_transfer)
 

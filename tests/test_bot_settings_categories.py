@@ -1,7 +1,12 @@
 import ast
+import asyncio
+import logging
+from hashlib import sha256
 from html import escape
+from math import ceil
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -24,6 +29,9 @@ def load_category_namespace(include_buttons=False):
         "_is_bool_variable",
         "_is_protected_variable",
         "_apply_filetolink_web_tuning",
+        "_helper_bot_rows",
+        "_helper_bot_summary",
+        "_remove_helper_bot",
     }
     if include_buttons:
         names.add("get_buttons")
@@ -168,6 +176,187 @@ class FakeButtonMaker:
 
     def build_menu(self, columns):
         return {"columns": columns, "buttons": self.buttons}
+
+
+@pytest.fixture
+def helper_settings(monkeypatch):
+    from bot.core.config_manager import Config
+    from bot.core.tg_client import TelegramClient
+
+    tokens = ["101:SECRET_A", "202:SECRET_B", "303:SECRET_C"]
+    monkeypatch.setattr(Config, "HELPER_TOKENS", " ".join(tokens))
+    monkeypatch.setattr(Config, "HELPER_BOT_PROXIES", "proxy-a\n\nproxy-c")
+    busy = SimpleNamespace(is_connected=True, me=SimpleNamespace(id=101, username="busy<&>"))
+    cooling = SimpleNamespace(
+        is_connected=lambda: True, me=SimpleNamespace(id=202, username="cooling"),
+        _amaterasu_download_pacer=SimpleNamespace(flood_until=112),
+    )
+    pending = SimpleNamespace(is_connected=True, me=SimpleNamespace(id=404, username="pending"))
+    clients = SimpleNamespace(
+        helper_bot_clients={tokens[0]: busy, tokens[1]: cooling},
+        helper_bots={7: busy, 9: cooling, 11: pending}, helper_loads={},
+        stream_clients={2: busy}, stream_loads={2: 1},
+    )
+    namespace = load_category_namespace(include_buttons=True)
+    namespace.update(
+        Config=Config, TgClient=clients, TelegramClient=TelegramClient,
+        tg_transfer=SimpleNamespace(_global_work_loads={7: 2, 9: 0}),
+        monotonic=lambda: 100, ceil=ceil, sha256=sha256, escape=escape,
+        ButtonMaker=FakeButtonMaker, ButtonStyle=SimpleNamespace(DANGER="danger", PRIMARY="primary"),
+        environ={}, _helper_tokens_lock=asyncio.Lock(),
+        database=SimpleNamespace(db=object(), update_config=AsyncMock()),
+        LOGGER=logging.getLogger(__name__), handler_dict={},
+    )
+    return namespace, tokens, clients
+
+
+def test_helper_snapshot_shows_actual_assignments_and_no_credentials(helper_settings):
+    namespace, tokens, _clients = helper_settings
+    rows = namespace["_helper_bot_rows"]()
+    assert len(rows) == 4
+    assert rows[0]["jobs"] == 3
+    assert "2 Hyper / 1 stream jobs" in rows[0]["status"]
+    assert rows[1]["cooldown"] == 12
+    assert rows[2]["status"] == "Not connected"
+    assert not rows[3]["configured"]
+    assert "pending removal" in rows[3]["status"]
+    assert all(token not in repr(rows) for token in tokens)
+    summary = namespace["_helper_bot_summary"](rows)
+    assert "<b>Configured:</b> 3" in summary
+    assert "<b>Connected:</b> 3" in summary
+    assert "<b>Busy:</b> 1" in summary
+    assert "<b>Cooldown:</b> 1" in summary
+
+
+@pytest.mark.asyncio
+async def test_helper_page_and_variable_details_expose_management_without_tokens(helper_settings):
+    namespace, tokens, _clients = helper_settings
+    _, root_menu = await namespace["get_buttons"]()
+    assert any(data == "botset helpers 0" for _, data, _, _ in root_menu["buttons"])
+    text, menu = await namespace["get_buttons"]("HELPER_TOKENS", "editvar")
+    assert "<b>Configured:</b> 3" in text
+    assert any(data == "botset helpers 0" for _, data, _, _ in menu["buttons"])
+    text, menu = await namespace["get_buttons"]("helpers_0")
+    assert "busy&lt;&amp;&gt;" in text
+    callbacks = [data for _, data, _, _ in menu["buttons"]]
+    assert sum(data.startswith("botset helper_remove ") for data in callbacks) == 3
+    assert all(len(data.encode()) <= 64 for data in callbacks)
+    assert all(token not in text + repr(menu) and token.split(":")[1] not in text + repr(menu) for token in tokens)
+
+    reference = namespace["_helper_bot_rows"]()[0]["ref"]
+    namespace["environ"]["HELPER_TOKENS"] = "external-setting"
+    text, menu = await namespace["get_buttons"](reference, "helper_remove")
+    assert "Restart" in text and "Deployment environment override" in text
+    assert any(data == f"botset helper_confirm {reference}" for _, data, _, _ in menu["buttons"])
+    namespace["database"].update_config.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_helper_page_pagination_and_empty_pool(helper_settings):
+    namespace, _tokens, _clients = helper_settings
+    namespace["Config"].set("HELPER_TOKENS", " ".join(f"{i}:SECRET" for i in range(10)))
+    _, menu = await namespace["get_buttons"]("helpers_0")
+    assert any(data == "botset helpers 1" for _, data, _, _ in menu["buttons"])
+    assert sum(data.startswith("botset helper_remove ") for _, data, _, _ in menu["buttons"]) == 6
+    _, menu = await namespace["get_buttons"]("helpers_999")
+    assert any(data == "botset helpers 1" for _, data, _, _ in menu["buttons"])  # Clamped refresh.
+    namespace["Config"].set("HELPER_TOKENS", "")
+    namespace["TgClient"].helper_bots = {}
+    text, menu = await namespace["get_buttons"]("helpers_0")
+    assert "No helper bots configured" in text
+    assert not any(data.startswith("botset helper_remove ") for _, data, _, _ in menu["buttons"])
+
+
+@pytest.mark.asyncio
+async def test_helper_removal_keeps_proxy_alignment_and_running_clients(helper_settings):
+    namespace, tokens, clients = helper_settings
+    reference = sha256(tokens[1].encode()).hexdigest()[:16]
+    before = dict(clients.helper_bots)
+    assert await namespace["_remove_helper_bot"](reference)
+    assert namespace["Config"].HELPER_TOKENS.split() == [tokens[0], tokens[2]]
+    assert namespace["Config"].HELPER_BOT_PROXIES == "proxy-a\nproxy-c"
+    namespace["database"].update_config.assert_awaited_once_with({
+        "HELPER_TOKENS": f"{tokens[0]} {tokens[2]}", "HELPER_BOT_PROXIES": "proxy-a\nproxy-c",
+    })
+    assert clients.helper_bots == before
+    assert not await namespace["_remove_helper_bot"](reference)
+    namespace["database"].update_config.assert_awaited_once()
+    assert any(not row["configured"] and row["name"] == "@cooling" for row in namespace["_helper_bot_rows"]())
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", ["offline", "save-error"])
+async def test_helper_removal_never_reports_an_unsaved_config_change(helper_settings, failure):
+    namespace, tokens, _clients = helper_settings
+    config = namespace["Config"]
+    previous = config.HELPER_TOKENS, config.HELPER_BOT_PROXIES
+    if failure == "offline":
+        namespace["database"].db = None
+    else:
+        namespace["database"].update_config.side_effect = OSError("database down")
+    with pytest.raises((ValueError, OSError)):
+        await namespace["_remove_helper_bot"](sha256(tokens[0].encode()).hexdigest()[:16])
+    assert (config.HELPER_TOKENS, config.HELPER_BOT_PROXIES) == previous
+
+
+@pytest.mark.asyncio
+async def test_helper_removal_uses_stable_references_across_concurrent_clicks(helper_settings):
+    namespace, tokens, _clients = helper_settings
+    await asyncio.gather(*(
+        namespace["_remove_helper_bot"](sha256(token.encode()).hexdigest()[:16]) for token in tokens[:2]
+    ))
+    assert namespace["Config"].HELPER_TOKENS == tokens[2]
+    assert namespace["Config"].HELPER_BOT_PROXIES == "proxy-c"
+    assert namespace["database"].update_config.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_helper_callbacks_open_confirmation_and_persist_only_after_confirm(helper_settings):
+    namespace, tokens, _clients = helper_settings
+    namespace.update(update_buttons=AsyncMock(), send_message=AsyncMock())
+    handler = load_callback_handler(namespace)
+    message = SimpleNamespace(chat=SimpleNamespace(id=99))
+
+    def query(data):
+        return SimpleNamespace(data=data, message=message, answer=AsyncMock())
+
+    await handler(None, query("botset helpers 1"))
+    namespace["update_buttons"].assert_awaited_with(message, "helpers_1")
+    reference = sha256(tokens[0].encode()).hexdigest()[:16]
+    await handler(None, query(f"botset helper_remove {reference}"))
+    namespace["update_buttons"].assert_awaited_with(message, reference, "helper_remove")
+    namespace["database"].update_config.assert_not_awaited()
+    await handler(None, query(f"botset helper_confirm {reference}"))
+    assert namespace["Config"].HELPER_TOKENS.split() == tokens[1:]
+    namespace["update_buttons"].assert_awaited_with(message, "helpers_0")
+    namespace["send_message"].assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_helper_callback_failure_and_stale_confirmation_keep_config_safe(helper_settings):
+    namespace, tokens, _clients = helper_settings
+    namespace.update(update_buttons=AsyncMock(), send_message=AsyncMock())
+    handler = load_callback_handler(namespace)
+    message = SimpleNamespace(chat=SimpleNamespace(id=99))
+    namespace["database"].update_config.side_effect = OSError(tokens[0])
+    reference = sha256(tokens[0].encode()).hexdigest()[:16]
+    await handler(None, SimpleNamespace(data=f"botset helper_confirm {reference}", message=message, answer=AsyncMock()))
+    assert namespace["Config"].HELPER_TOKENS.split() == tokens
+    assert tokens[0] not in repr(namespace["send_message"].call_args)
+    namespace["database"].update_config.reset_mock()
+    await handler(None, SimpleNamespace(data="botset helper_confirm bogus", message=message, answer=AsyncMock()))
+    namespace["database"].update_config.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_removing_all_helpers_saves_empty_lists_without_stopping_clients(helper_settings):
+    namespace, tokens, clients = helper_settings
+    for token in tokens:
+        assert await namespace["_remove_helper_bot"](sha256(token.encode()).hexdigest()[:16])
+    assert namespace["Config"].HELPER_TOKENS == ""
+    assert namespace["Config"].HELPER_BOT_PROXIES == ""
+    assert len(clients.helper_bots) == 3
+    assert all(not row["configured"] for row in namespace["_helper_bot_rows"]())
 
 
 @pytest.mark.asyncio

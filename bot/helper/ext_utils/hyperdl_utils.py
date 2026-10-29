@@ -14,7 +14,6 @@ from asyncio import (
 from datetime import datetime
 from itertools import cycle
 from mimetypes import guess_extension
-from os import cpu_count
 from pathlib import Path
 from re import sub
 from sys import argv
@@ -42,7 +41,7 @@ from pyrogram.session.internals.data_center import DataCenter
 from ... import LOGGER
 from ...core.config_manager import Config
 from ...core.tg_client import TgClient, resilient_tg_operation
-from ..telegram_helper.tg_transfer import MB, HypertgTransfer
+from ..telegram_helper.tg_transfer import MB, HypertgTransfer, _download_pacer
 
 _load_lock = Lock()
 
@@ -62,11 +61,6 @@ class HypertgDownload(HypertgTransfer):
     _DEFAULT_PIPELINE = 32
     _MIN_PIPELINE = 4
     _MAX_PIPELINE_MULT = 4
-    _LOW_WORKERS = 2
-    # More clients are not automatically faster: every client creates another
-    # media session and competes for the same host/DC bandwidth.  Keep auto
-    # fan-out modest; an explicit HYPER_THREADS value can still override it.
-    _HIGH_WORKERS = min(4, max(2, cpu_count() or 2))
     _MAX_RETRIES = 4
 
     def __init__(self, obj):
@@ -83,9 +77,7 @@ class HypertgDownload(HypertgTransfer):
                 requested_chunk,
             )
         self.chunk_size = self._TELEGRAM_CHUNK
-        self.num_parts = Config.HYPER_THREADS or max(
-            self._LOW_WORKERS, min(self._HIGH_WORKERS, self.num_clients)
-        )
+        self.num_parts = Config.HYPER_THREADS or max(1, self.num_clients)
         # HYPER_PIPELINE is documented as requests *per part*.  Dividing it by
         # the number of parts starved each connection as more helpers joined.
         self.pipeline_depth = min(base_pipe, media_sessions * per_session)
@@ -112,7 +104,8 @@ class HypertgDownload(HypertgTransfer):
         last_err = None
         for attempt in range(self._MAX_RETRIES):
             try:
-                msg = await client.get_messages(self.dump_chat, self.message.id)
+                async with _download_pacer(client).slot():
+                    msg = await client.get_messages(self.dump_chat, self.message.id)
                 if msg is None:
                     raise ValueError(f"msg {self.message.id} not found in {self.dump_chat}")
                 media = self._media_of(msg)
@@ -257,17 +250,16 @@ class HypertgDownload(HypertgTransfer):
 
     async def _do_req(self, sess, client, location, off, csz, attempt=0):
         try:
-            r = await wait_for(
-                sess.invoke(raw.functions.upload.GetFile(
-                    # The transfer pool does not have Telegram's dynamically
-                    # supplied CDN endpoint table. Advertising CDN support can
-                    # redirect media to CDN DCs such as 201, which WZGram's
-                    # static DataCenter table cannot resolve.
-                    precise=True, cdn_supported=False,
-                    location=location, offset=off, limit=csz,
-                ), retries=1, timeout=15, sleep_threshold=0),
-                timeout=20,
-            )
+            # Cooldown/admission waits must not consume the network deadline.
+            async with _download_pacer(client).slot():
+                r = await wait_for(
+                    sess.invoke(raw.functions.upload.GetFile(
+                        # The transfer pool lacks Telegram's CDN endpoint table.
+                        precise=True, cdn_supported=False,
+                        location=location, offset=off, limit=csz,
+                    ), retries=1, timeout=15, sleep_threshold=0),
+                    timeout=20,
+                )
             if isinstance(r, raw.types.upload.File):
                 return r.bytes
             if isinstance(r, raw.types.upload.FileCdnRedirect):
