@@ -683,7 +683,7 @@ All variables go inside `config.py`. Copy `config_sample.py` as your starting te
 | `TRANSMISSION_MODE` | `str` | `both` | Telegram upload mode: `bot`, `user`, or `both` |
 | `USE_HYPER` | `bool` | `True` | Enable HyperDL/HyperUP acceleration when helper bots and `LEECH_DUMP_CHAT` are configured |
 | `HYPER_THREADS` | `int` | `0` | Number of helper workers used for HyperDL. `0` lets Amaterasu choose automatically |
-| `HYPER_PIPELINE` | `int` | `4` | Concurrent Telegram `GetFile` request depth per HyperDL worker group |
+| `HYPER_PIPELINE` | `int` | `4` | Initial Telegram `GetFile` request depth per HyperDL worker; grows within its media-session capacity |
 | `HYPER_CHUNK` | `int` | `1048576` | HyperDL working chunk size. Telegram requests are normalized to 1 MiB |
 | `LEECH_PREFIX` | `str` | `""` | Text prepended to every uploaded filename |
 | `LEECH_SUFFIX` | `str` | `""` | Text appended to every uploaded filename |
@@ -718,8 +718,10 @@ How it is used:
 | Path | Requirement | Behavior |
 |---|---|---|
 | HyperDL | `USE_HYPER=True`, `HELPER_TOKENS`, `LEECH_DUMP_CHAT` | Files at least 10 MiB are copied to `LEECH_DUMP_CHAT`, then helper bots download different byte ranges in parallel; WZGram handles overflow and fallback |
-| HyperUP | `USE_HYPER=True`, `HELPER_TOKENS`, `LEECH_DUMP_CHAT` | Helper bots provide accelerated upload capacity |
+| HyperUP | `USE_HYPER=True`, `HELPER_TOKENS`, `LEECH_DUMP_CHAT` | Bot-sized files above 10 MiB use the least-loaded helper bot first; user-only mode and larger files keep user-account routing. Private chats and unavailable helpers use the normal path |
 | Normal transfer | Missing helper bots, missing dump chat, or `USE_HYPER=False` | Amaterasu uses the regular Telegram download/upload path |
+
+HyperUP assigns each file to one helper account and uploads its parts in parallel. Concurrent files spread across the available helpers.
 
 Recommended helper count:
 
@@ -733,7 +735,7 @@ Optional tuning:
 
 ```python
 HYPER_THREADS = 0        # 0 = auto. Set 2, 4, 6... to cap parallel download parts.
-HYPER_PIPELINE = 4       # Higher can be faster, but may increase FloodWaits.
+HYPER_PIPELINE = 4       # Initial depth; grows within the helper's media-session capacity.
 HYPER_CHUNK = 1024 * 1024 # Telegram GetFile requests are normalized to 1 MiB.
 ```
 

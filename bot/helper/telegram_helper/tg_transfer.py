@@ -1,12 +1,12 @@
 import socket
-from asyncio import Event, Lock, gather
+from asyncio import Event, Lock, gather, wait_for
 
 from pyrogram import raw, utils
 from pyrogram.connection.transport.tcp.tcp import TCP
 from pyrogram.file_id import FileType, ThumbnailSource
 
 from ... import LOGGER
-from ...core.tg_client import TgClient
+from ...core.tg_client import WZGRAM_MEDIA_RESTART_ATTEMPTS, TgClient
 
 _current_tcp_connect = TCP.connect
 _orig_tcp_connect = getattr(
@@ -58,7 +58,7 @@ _global_work_loads = None
 
 
 class MtprotoPool:
-    def __init__(self, clients):
+    def __init__(self, clients, sessions_per_client=1):
         if isinstance(clients, dict):
             self._client_map = dict(clients)
             self._client_order = list(clients.keys())
@@ -67,6 +67,9 @@ class MtprotoPool:
             self._client_order = list(self._client_map.keys())
         self._sessions = {}
         self._locks = {}
+        self.sessions_per_client = max(1, sessions_per_client)
+        self._cursors = {}
+        self._limited = set()
 
     def _resolve_key(self, client_key):
         if client_key in self._client_map:
@@ -77,54 +80,76 @@ class MtprotoPool:
 
     async def get_session(self, client_key, dc_id, is_media=True):
         ck = self._resolve_key(client_key)
-        cache_key = (ck, dc_id)
+        group = (ck, dc_id, is_media)
+        cursor = self._cursors.get(group, 0)
+        self._cursors[group] = cursor + 1
+        fallback = self._fallback_session(group, cursor)
+        if fallback is not None:
+            return fallback
+        cache_key = (*group, cursor % self.sessions_per_client)
         s = self._sessions.get(cache_key)
         if s and s.is_started.is_set():
             return s
-        if cache_key not in self._locks:
-            self._locks[cache_key] = Lock()
-        async with self._locks[cache_key]:
+        if group not in self._locks:
+            self._locks[group] = Lock()
+        async with self._locks[group]:
+            fallback = self._fallback_session(group, cursor)
+            if fallback is not None:
+                return fallback
             s = self._sessions.get(cache_key)
             if s and s.is_started.is_set():
                 return s
             if s:
-                try:
-                    await s.stop()
-                except Exception:
-                    pass
+                await self._stop_session(s)
+                self._sessions.pop(cache_key, None)
             client = self._client_map[ck]
             # Use WZGram's public session path so media-only DC endpoints,
             # cross-DC authorization, proxy settings, and WarpCrypto's
             # executor are configured exactly like standard transfers.
-            s = await client.get_session(
-                dc_id,
-                is_media=is_media,
-                temporary=True,
-            )
+            try:
+                s = await wait_for(
+                    client.get_session(dc_id, is_media=is_media, temporary=True), timeout=15,
+                )
+            except Exception:
+                self._limited.add(group)
+                fallback = self._fallback_session(group, cursor)
+                if fallback is None:
+                    raise
+                LOGGER.warning("HyperTG client %s DC%s could not add a media session; retaining its healthy pool", ck, dc_id)
+                return fallback
+            s.MAX_RETRIES = min(getattr(s, "MAX_RETRIES", WZGRAM_MEDIA_RESTART_ATTEMPTS), WZGRAM_MEDIA_RESTART_ATTEMPTS)
             self._sessions[cache_key] = s
         return s
 
+    def _fallback_session(self, group, cursor):
+        if group not in self._limited:
+            return None
+        healthy = [session for key, session in self._sessions.items() if key[:3] == group and session.is_started.is_set()]
+        return healthy[cursor % len(healthy)] if healthy else None
+
     async def drop_session(self, client_key, dc_id):
         ck = self._resolve_key(client_key)
-        cache_key = (ck, dc_id)
-        s = self._sessions.pop(cache_key, None)
-        if s:
-            try:
-                await s.stop()
-            except Exception:
-                pass
+        sessions = [self._sessions.pop(key) for key in list(self._sessions) if key[:2] == (ck, dc_id)]
+        self._limited = {group for group in self._limited if group[:2] != (ck, dc_id)}
+        await gather(*(self._stop_session(s) for s in sessions))
+
+    @staticmethod
+    async def _stop_session(session):
+        try:
+            await wait_for(session.stop(), timeout=10)
+        except Exception as error:
+            LOGGER.debug("Unable to stop HyperTG media session: %s", error)
 
     async def stop(self):
-        for s in self._sessions.values():
-            try:
-                await s.stop()
-            except Exception:
-                pass
+        sessions = list(self._sessions.values())
         self._sessions.clear()
+        self._cursors.clear()
+        self._limited.clear()
+        await gather(*(self._stop_session(s) for s in sessions))
 
 
 class HypertgTransfer:
-    def __init__(self, obj):
+    def __init__(self, obj, media_sessions=1):
         global _global_work_loads
         self._obj = obj
         self._listener = obj._listener
@@ -157,7 +182,7 @@ class HypertgTransfer:
                 _global_work_loads.pop(key, None)
         self.work_loads = _global_work_loads
         self.num_clients = len(self.clients)
-        self._pool = MtprotoPool(self.clients)
+        self._pool = MtprotoPool(self.clients, sessions_per_client=media_sessions)
         self._cancel = Event()
         self._tasks = []
         LOGGER.info(
@@ -165,11 +190,15 @@ class HypertgTransfer:
             f"loads={dict(self.work_loads)}"
         )
 
-    def _pick_client(self):
-        if not self.clients:
+    def _pick_client(self, user_only=None):
+        candidates = [
+            key for key in self.clients
+            if user_only is None or (key < 0 if user_only else key > 0)
+        ]
+        if not candidates:
             raise RuntimeError("No active HyperTG helper clients")
         return min(
-            self.clients,
+            candidates,
             key=lambda client_id: self.work_loads.get(client_id, 0),
         )
 

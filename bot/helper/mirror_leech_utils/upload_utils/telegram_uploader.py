@@ -173,8 +173,10 @@ class TelegramUploader:
             )
         return default
 
-    async def _run_normal_pyrogram_upload(self, upload_factory):
-        client_name = "user" if self._user_session else "bot"
+    async def _run_normal_pyrogram_upload(self, upload_factory, user_session=None):
+        if user_session is None:
+            user_session = self._user_session
+        client_name = "user" if user_session else "bot"
         async with _NORMAL_WZGRAM_UPLOAD_GATES[client_name]:
             wait_time = max(
                 0.0, _NORMAL_PYROGRAM_FLOOD_UNTIL[client_name] - monotonic()
@@ -1029,7 +1031,10 @@ class TelegramUploader:
         artist="",
         title="",
         reply_markup=None,
+        user_session=None,
     ):
+        if user_session is None:
+            user_session = self._user_session
         if self._listener.is_cancelled:
             raise StopTransmission()
         if key == "videos":
@@ -1040,7 +1045,7 @@ class TelegramUploader:
             mtype = "document"
         else:
             mtype = "photo"
-        target_client = TgClient.user if self._user_session else self._listener.client
+        target_client = TgClient.user if user_session else self._listener.client
         upload_path = f_path or self._up_path
         transfer_started = monotonic()
         try:
@@ -1108,7 +1113,9 @@ class TelegramUploader:
                         progress=self._upload_progress,
                         reply_markup=reply_markup,
                     )
-                sent_msg = await self._run_normal_pyrogram_upload(upload_factory)
+                sent_msg = await self._run_normal_pyrogram_upload(
+                    upload_factory, user_session=user_session
+                )
             else:
                 sent_msg = await self._hu.upload(
                     file_path=upload_path,
@@ -1117,7 +1124,7 @@ class TelegramUploader:
                     reply_to_message_id=self._sent_msg.id,
                     force_document=mtype == "document",
                     user_thumb=thumb if thumb and thumb != "none" else None,
-                    user_session=self._user_session,
+                    user_session=user_session,
                     media_type=key,
                     duration=duration,
                     width=width,
@@ -1299,6 +1306,7 @@ class TelegramUploader:
                     key,
                     f_path=o_path,
                     reply_markup=reply_markup,
+                    user_session=user_session,
                 )
             elif is_video:
                 key = "videos"
@@ -1337,6 +1345,7 @@ class TelegramUploader:
                     width=width,
                     height=height,
                     reply_markup=reply_markup,
+                    user_session=user_session,
                 )
             elif is_audio:
                 key = "audios"
@@ -1355,6 +1364,7 @@ class TelegramUploader:
                     artist=artist,
                     title=title,
                     reply_markup=reply_markup,
+                    user_session=user_session,
                 )
             else:
                 key = "photos"
@@ -1367,6 +1377,7 @@ class TelegramUploader:
                     key,
                     f_path=o_path,
                     reply_markup=reply_markup,
+                    user_session=user_session,
                 )
 
             self._sent_msg = sent_msg

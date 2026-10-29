@@ -11,6 +11,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+
 from web import merge_plan_store
 
 ROOT = Path(__file__).parents[1]
@@ -34,6 +35,7 @@ TELEGRAM_UPLOADER_SOURCE = (
     / "upload_utils"
     / "telegram_uploader.py"
 )
+HYPERUL_SOURCE = ROOT / "bot/helper/ext_utils/hyperul_utils.py"
 MESSAGE_UTILS_SOURCE = (
     ROOT / "bot" / "helper" / "telegram_helper" / "message_utils.py"
 )
@@ -1854,6 +1856,118 @@ def test_rar_numeric_multipart_first_volume_is_detected():
     assert is_archive_split("release.rar.02")
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("size,helper_keys,user_session,enabled,expected", [
+    (1700 * 1024 * 1024, [2, 3, -1], False, True, "bot-helper"),
+    (2097152000, [2, -1], False, True, "bot-helper"),
+    (2097152001, [2, -1], False, True, "premium"),
+    (1700 * 1024 * 1024, [2, -1], True, True, "user-helper"),
+    (1700 * 1024 * 1024, [-1], False, True, "direct"),
+    (1700 * 1024 * 1024, [], False, True, "direct"),
+    (1700 * 1024 * 1024, [2], False, False, "direct"),
+    (1024, [2], False, True, "direct"),
+    (1700 * 1024 * 1024, [2], False, True, "private"),
+])
+async def test_upload_routes_eligible_files_to_matching_helpers_first(size, helper_keys, user_session, enabled, expected):
+    from pyrogram import StopTransmission
+
+    namespace = {
+        "Config": SimpleNamespace(USE_HYPER=enabled),
+        "TgClient": SimpleNamespace(user=object()),
+        "LOGGER": logging.getLogger(__name__),
+        "ospath": SimpleNamespace(basename=lambda _path: "file.zip", getsize=lambda _path: size),
+        "StopTransmission": StopTransmission,
+    }
+    method = load_method(HYPERUL_SOURCE, "HypertgUpload", "upload", namespace)
+    uploader = type("UploadRoute", (), {"upload": method})()
+    uploader._cancel = asyncio.Event()
+    uploader.clients = dict.fromkeys(helper_keys, object())
+    uploader._listener = SimpleNamespace(up_dest=123 if expected == "private" else -100123)
+    uploader._hyper_send = AsyncMock(return_value="sent")
+    uploader._direct_send = AsyncMock(return_value="sent")
+    reply = SimpleNamespace(chat=SimpleNamespace(id=uploader._listener.up_dest))
+    assert await uploader.upload("file.zip", "caption", reply, 42, user_session=user_session, media_type="documents") == "sent"
+    if expected in {"bot-helper", "user-helper"}:
+        uploader._hyper_send.assert_awaited_once()
+        assert uploader._hyper_send.call_args.kwargs["user_only"] == (expected == "user-helper")
+        uploader._direct_send.assert_not_awaited()
+        assert uploader.last_backend == "HyperUP"
+    else:
+        uploader._direct_send.assert_awaited_once()
+        assert uploader._direct_send.call_args.kwargs["user_session"] == (expected == "premium")
+        uploader._hyper_send.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("user_only,expected", [(False, 2), (True, -1)])
+async def test_helper_upload_selection_preserves_account_type_and_loads(user_only, expected):
+    uploader = _helper_upload_sender()
+    before = dict(uploader.work_loads)
+    assert await uploader._hyper_send("file.zip", "documents", None, "caption", -100123, 42, user_only=user_only) == "sent"
+    assert uploader._try_send.call_args.args[1] is uploader.clients[expected]
+    assert uploader.work_loads == before
+
+
+def _helper_upload_sender():
+    namespace = {"LOGGER": logging.getLogger(__name__), "ospath": os.path}
+    send = load_method(HYPERUL_SOURCE, "HypertgUpload", "_hyper_send", namespace)
+    pick = load_method(ROOT / "bot/helper/telegram_helper/tg_transfer.py", "HypertgTransfer", "_pick_client", namespace)
+    uploader = type("HelperUpload", (), {"_hyper_send": send, "_pick_client": pick})()
+    uploader.clients = {2: object(), 3: object(), -1: object()}
+    uploader.work_loads = {2: 2, 3: 3, -1: 0}
+    uploader._try_send = AsyncMock(return_value="sent")
+    uploader._progress = AsyncMock()
+    return uploader
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("user_only", [False, True])
+async def test_upload_helper_does_not_cross_account_types_when_none_match(user_only):
+    uploader = _helper_upload_sender()
+    uploader.clients = {2: object()} if user_only else {-1: object()}
+    before = dict(uploader.work_loads)
+    with pytest.raises(RuntimeError, match="No active"):
+        await uploader._hyper_send("file.zip", "documents", None, "caption", -100123, 42, user_only=user_only)
+    uploader._try_send.assert_not_awaited()
+    assert uploader.work_loads == before
+
+
+@pytest.mark.asyncio
+async def test_concurrent_helper_uploads_balance_bots_and_release_cancelled_loads():
+    uploader = _helper_upload_sender()
+    uploader.work_loads = dict.fromkeys(uploader.clients, 0)
+    selected = []
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    async def send(_key, client, _kwargs):
+        selected.append(client)
+        if len(selected) == 2:
+            entered.set()
+        await release.wait()
+        return "sent"
+
+    uploader._try_send = send
+    tasks = [asyncio.create_task(uploader._hyper_send(
+        f"file-{index}.zip", "documents", None, "caption", -100123, 42,
+    )) for index in range(2)]
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=1)
+        assert selected == [uploader.clients[2], uploader.clients[3]]
+        assert uploader.work_loads == {2: 1, 3: 1, -1: 0}
+        tasks[0].cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await tasks[0]
+        assert uploader.work_loads == {2: 0, 3: 1, -1: 0}
+        release.set()
+        assert await tasks[1] == "sent"
+    finally:
+        release.set()
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+    assert uploader.work_loads == {2: 0, 3: 0, -1: 0}
+
+
 def test_hyperdl_lane_respects_calculated_capacity():
     namespace = {"_hyper_download_active": 0}
     load_top_level_functions(
@@ -1871,6 +1985,179 @@ def test_hyperdl_lane_respects_calculated_capacity():
     namespace["_release_hyper_download"]()
     namespace["_release_hyper_download"]()
     assert namespace["_hyper_download_active"] == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("user_session", [False, True])
+@pytest.mark.parametrize("use_hyper", [False, True])
+async def test_concurrent_files_keep_their_account_choice_through_upload_preparation(user_session, use_hyper):
+    from functools import partial
+    from time import monotonic
+
+    from pyrogram import StopTransmission
+
+    async def getsize(_path):
+        helper._user_session = not user_session
+        await asyncio.sleep(0)
+        return 1700 * 1024 * 1024
+
+    method = load_method(TELEGRAM_UPLOADER_SOURCE, "TelegramUploader", "_hyperul_upload", {
+        "LOGGER": logging.getLogger(__name__),
+        "TgClient": SimpleNamespace(user=object()),
+        "monotonic": monotonic,
+        "aiopath": SimpleNamespace(getsize=getsize),
+        "StopTransmission": StopTransmission,
+        "partial": partial,
+    })
+    helper = type("PerFileUpload", (), {"_hyperul_upload": method})()
+    helper._user_session = user_session
+    helper._last_uploaded = 0
+    helper._listener = SimpleNamespace(is_cancelled=False, client=SimpleNamespace(send_document=AsyncMock(return_value="sent")))
+    method.__globals__["TgClient"].user = SimpleNamespace(send_document=AsyncMock(return_value="sent"))
+    helper._hu = SimpleNamespace(upload=AsyncMock(return_value="sent"), last_backend="HyperUP") if use_hyper else None
+    helper._sent_msg = SimpleNamespace(id=42, chat=SimpleNamespace(id=-1001))
+    helper._upload_progress = AsyncMock()
+
+    async def gate(factory, *, user_session=None):
+        assert user_session is expected_user_session
+        return await factory()
+
+    expected_user_session = user_session
+    helper._run_normal_pyrogram_upload = gate
+    assert await helper._hyperul_upload("caption", "file.zip", None, "documents", f_path="file.zip", user_session=user_session) == "sent"
+    if use_hyper:
+        assert helper._hu.upload.call_args.kwargs["user_session"] is user_session
+    else:
+        client = method.__globals__["TgClient"].user if user_session else helper._listener.client
+        client.send_document.assert_awaited_once()
+
+    tree = ast.parse(TELEGRAM_UPLOADER_SOURCE.read_text(encoding="utf-8"))
+    upload_file = next(node for node in ast.walk(tree) if isinstance(node, ast.AsyncFunctionDef) and node.name == "_upload_file")
+    calls = [node for node in ast.walk(upload_file) if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "_hyperul_upload"]
+    assert len(calls) == 4
+    assert all(any(keyword.arg == "user_session" and isinstance(keyword.value, ast.Name) and keyword.value.id == "user_session" for keyword in call.keywords) for call in calls)
+
+
+def _pipeline_downloader():
+    from bot.helper.ext_utils.hyperdl_utils import HypertgDownload
+
+    downloader = object.__new__(HypertgDownload)
+    downloader.clients = {1: SimpleNamespace(me=SimpleNamespace(username="helper"))}
+    downloader.pipeline_depth = downloader._MIN_PIPELINE = downloader._MAX_PIPELINE_MULT = 1
+    downloader._cancel = asyncio.Event()
+    downloader._cdn_info = {}
+    downloader._get_session = AsyncMock(return_value=object())
+    downloader._obj = SimpleNamespace(_processed_bytes=0)
+    downloader._pwrite = AsyncMock()
+    return downloader
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("start,end,expected", [(0, 2048, {0}), (100, 2048, {100}), (0, 512, set()), (100, 512, set())])
+async def test_hyperdl_short_reads_cannot_leave_gaps_but_final_tails_are_valid(start, end, expected):
+    downloader = _pipeline_downloader()
+    downloader._do_req = AsyncMock(side_effect=[b"x" * 512, b"y" * 1024])
+
+    failed = await downloader._pipeline_fetch(1, "location", start, end, SimpleNamespace(dc_id=2), 1024, 1)
+
+    assert failed == expected
+    if expected:
+        downloader._pwrite.assert_awaited_once_with(1, b"y" * 1024, 1024)
+        assert downloader._obj._processed_bytes == 1024
+    else:
+        downloader._pwrite.assert_awaited_once_with(1, b"x" * (end - start), start)
+        assert downloader._obj._processed_bytes == end - start
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", [(None, -2), TimeoutError("temporary timeout")])
+async def test_hyperdl_success_resets_transient_helper_failure_budget(monkeypatch, failure):
+    from bot.helper.ext_utils import hyperdl_utils
+
+    downloader = _pipeline_downloader()
+    downloader._do_req = AsyncMock(side_effect=[failure, b"x" * 1024] * 4)
+    monkeypatch.setattr(hyperdl_utils, "sleep", AsyncMock())
+
+    assert await downloader._pipeline_fetch(1, "location", 0, 4096, SimpleNamespace(dc_id=2), 1024, 1) == set()
+    assert downloader._do_req.await_count == 8
+    assert downloader._obj._processed_bytes == 4096
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("phase", ["connect", "read"])
+async def test_hyperdl_cancellation_joins_pending_requests_before_closing_sessions(phase):
+    downloader = _pipeline_downloader()
+    downloader.pipeline_depth = 4
+    entered = asyncio.Event()
+    active = 0
+
+    async def pending(*_args):
+        nonlocal active
+        active += 1
+        if active == 4:
+            entered.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            active -= 1
+
+    if phase == "connect":
+        downloader._get_session = pending
+    else:
+        downloader._do_req = pending
+
+    async def run(_clients, _path):
+        downloader._tasks.append(asyncio.create_task(downloader._pipeline_fetch(
+            1, "location", 0, 16 * 1024, SimpleNamespace(dc_id=2), 1024, 1,
+        )))
+        await asyncio.gather(*downloader._tasks)
+
+    async def close():
+        assert active == 0
+
+    downloader._run_download_with_clients = run
+    downloader._cdn_sessions = {}
+    downloader._close_all = AsyncMock(side_effect=close)
+    previous = asyncio.all_tasks()
+    transfer = asyncio.create_task(downloader._handle_download_with_clients([1], "unused"))
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=1)
+    finally:
+        transfer.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(transfer, timeout=1)
+    downloader._close_all.assert_awaited_once()
+    downloader._pwrite.assert_not_awaited()
+    assert downloader._cancel.is_set()
+    assert not (asyncio.all_tasks() - previous)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("user_session", [False, True])
+async def test_normal_upload_gate_uses_file_account_for_flood_cooldown(user_session):
+    from pyrogram.errors import FloodWait
+
+    gates = {"user": asyncio.Lock(), "bot": asyncio.Lock()}
+    cooldowns = {"user": 0, "bot": 0}
+    method = load_method(TELEGRAM_UPLOADER_SOURCE, "TelegramUploader", "_run_normal_pyrogram_upload", {
+        "_NORMAL_WZGRAM_UPLOAD_GATES": gates,
+        "_NORMAL_PYROGRAM_FLOOD_UNTIL": cooldowns,
+        "monotonic": lambda: 100.0,
+        "FloodWait": FloodWait,
+        "FloodPremiumWait": FloodWait,
+    })
+    name = "user" if user_session else "bot"
+
+    async def send():
+        assert gates[name].locked()
+        assert not gates["bot" if user_session else "user"].locked()
+        raise FloodWait(10)
+
+    with pytest.raises(FloodWait):
+        await method(SimpleNamespace(_user_session=not user_session), send, user_session=user_session)
+    assert cooldowns[name] == 113.0
+    assert cooldowns["bot" if user_session else "user"] == 0
+    assert not any(gate.locked() for gate in gates.values())
 
 
 def test_hyperdl_capacity_uses_available_helpers_and_thread_setting():
@@ -1893,6 +2180,239 @@ def test_hyperdl_capacity_uses_available_helpers_and_thread_setting():
     assert capacity(helper) == 1
     config.HYPER_THREADS = 2
     assert capacity(helper) == 3
+
+
+@pytest.mark.asyncio
+async def test_hyperdl_distributes_queued_reads_beyond_one_native_session(monkeypatch):
+    from pyrogram import raw
+
+    from bot.core.tg_client import Config, TgClient
+    from bot.helper.ext_utils.hyperdl_utils import HypertgDownload
+    from bot.helper.telegram_helper import tg_transfer
+
+    release = asyncio.Event()
+    sessions = []
+    active = peak = 0
+
+    class MediaSession:
+        MAX_RETRIES = 10
+
+        def __init__(self):
+            self.is_started = asyncio.Event()
+            self.is_started.set()
+            self.gate = asyncio.Semaphore(6)
+            self.peak = self.active = 0
+            self.stop = AsyncMock()
+
+        async def invoke(self, query, **_kwargs):
+            nonlocal active, peak
+            async with self.gate:
+                active += 1
+                peak = max(peak, active)
+                self.active += 1
+                self.peak = max(self.peak, self.active)
+                try:
+                    await release.wait()
+                    return raw.types.upload.File(
+                        type=raw.types.storage.FileUnknown(), mtime=0,
+                        bytes=bytes([query.offset // query.limit]) * query.limit,
+                    )
+                finally:
+                    active -= 1
+                    self.active -= 1
+
+    async def get_session(dc_id, **kwargs):
+        assert dc_id == 5
+        assert kwargs == {"is_media": True, "temporary": True}
+        session = MediaSession()
+        sessions.append(session)
+        return session
+
+    client = SimpleNamespace(me=SimpleNamespace(username="helper"), sleep_threshold=60, get_session=get_session)
+    monkeypatch.setattr(TgClient, "helper_bots", {1: client})
+    monkeypatch.setattr(TgClient, "helper_users", {})
+    monkeypatch.setattr(TgClient, "user", None)
+    monkeypatch.setattr(tg_transfer, "_global_work_loads", None)
+    monkeypatch.setattr(Config, "HYPER_PIPELINE", 16)
+    obj = SimpleNamespace(_listener=object(), _processed_bytes=0)
+    downloader = HypertgDownload(obj)
+    written = {}
+
+    async def write(_fd, data, offset):
+        assert offset not in written
+        assert data == bytes([offset // len(data)]) * len(data)
+        written[offset] = len(data)
+
+    downloader._pwrite = write
+    size = 32 * downloader.chunk_size
+    previous = asyncio.all_tasks()
+    transfer = asyncio.create_task(downloader._pipeline_fetch(
+        1, "location", 0, size, SimpleNamespace(dc_id=5), downloader.chunk_size, 1,
+    ))
+    try:
+        for _ in range(50):
+            if peak >= 16:
+                break
+            await asyncio.sleep(0.005)
+        assert peak == 16, "The helper's single six-request session starves the pipeline"
+    finally:
+        release.set()
+        failed = await asyncio.wait_for(transfer, timeout=3)
+        await downloader._close_all()
+    assert failed == set()
+    assert obj._processed_bytes == size
+    assert len(written) == 32
+    assert len(sessions) == 4
+    assert all(session.peak <= 6 for session in sessions)
+    assert all(session.stop.await_count == 1 for session in sessions)
+    assert not (asyncio.all_tasks() - previous)
+
+
+@pytest.mark.asyncio
+async def test_hyperdl_request_does_not_multiply_native_retry_or_flood_budgets(monkeypatch):
+    from pyrogram import raw
+    from pyrogram.errors import FloodWait
+
+    from bot.core import tg_client
+    from bot.helper.ext_utils.hyperdl_utils import HypertgDownload
+
+    downloader = object.__new__(HypertgDownload)
+    client = SimpleNamespace(sleep_threshold=60)
+    session = SimpleNamespace(invoke=AsyncMock(return_value=raw.types.upload.File(
+        type=raw.types.storage.FileUnknown(), mtime=0, bytes=b"part",
+    )))
+    assert await downloader._do_req(session, client, "location", 0, 1024) == b"part"
+    kwargs = session.invoke.call_args.kwargs
+    assert kwargs == {"retries": 1, "timeout": 15, "sleep_threshold": 0}
+    session.invoke = AsyncMock(side_effect=FloodWait(60))
+    pause = AsyncMock()
+    monkeypatch.setattr(tg_client, "sleep", pause)
+    with pytest.raises(FloodWait):
+        await downloader._do_req(session, client, "location", 0, 1024)
+    session.invoke.assert_awaited_once()
+    pause.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("error_name,retryable", [("InternalServerError", True), ("FileIdInvalid", False)])
+async def test_hyperdl_only_retries_transient_rpc_errors(error_name, retryable):
+    from pyrogram import errors
+
+    from bot.helper.ext_utils.hyperdl_utils import HypertgDownload
+
+    error = getattr(errors, error_name)()
+    session = SimpleNamespace(invoke=AsyncMock(side_effect=error))
+    downloader = object.__new__(HypertgDownload)
+    if retryable:
+        assert await downloader._do_req(session, object(), "location", 0, 1024) == (None, -2)
+    else:
+        with pytest.raises(type(error)):
+            await downloader._do_req(session, object(), "location", 0, 1024)
+    session.invoke.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_hyperdl_end_to_end_request_deadline_cancels_pending_work(monkeypatch):
+    from bot.helper.ext_utils import hyperdl_utils
+
+    finished = asyncio.Event()
+
+    async def pending(*_args, **_kwargs):
+        try:
+            await asyncio.Event().wait()
+        finally:
+            finished.set()
+
+    async def accelerated_deadline(operation, *, timeout):
+        assert timeout == 20
+        return await asyncio.wait_for(operation, timeout=0.02)
+
+    monkeypatch.setattr(hyperdl_utils, "wait_for", accelerated_deadline)
+    downloader = object.__new__(hyperdl_utils.HypertgDownload)
+    assert await downloader._do_req(SimpleNamespace(invoke=pending), object(), "location", 0, 1024) == (None, -2)
+    assert finished.is_set()
+
+
+@pytest.mark.parametrize("pipeline", [0, 64])
+def test_hyperdl_window_is_bounded_by_its_owned_native_capacity(monkeypatch, pipeline):
+    from bot.core.tg_client import Config
+    from bot.helper.ext_utils.hyperdl_utils import HypertgDownload
+    from bot.helper.telegram_helper import tg_transfer
+
+    monkeypatch.setattr(Config, "HYPER_PIPELINE", pipeline)
+    monkeypatch.setattr(tg_transfer, "_global_work_loads", None)
+    downloader = HypertgDownload(SimpleNamespace(_listener=object()))
+    assert downloader._pool.sessions_per_client == 4
+    assert downloader.pipeline_depth == 24
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("ending", ["cancel", "reject"])
+async def test_hyperdl_partial_pool_retains_and_closes_only_owned_sessions(ending):
+    from bot.helper.telegram_helper.tg_transfer import MtprotoPool
+
+    ready = asyncio.Event()
+    ready.set()
+    started = SimpleNamespace(is_started=ready, stop=AsyncMock())
+    shared = SimpleNamespace(stop=AsyncMock())
+    entered = asyncio.Event()
+    calls = 0
+
+    async def get_session(_dc_id, **kwargs):
+        nonlocal calls
+        assert kwargs == {"is_media": True, "temporary": True}
+        calls += 1
+        if calls == 1:
+            return started
+        entered.set()
+        if ending == "reject":
+            raise ConnectionError("extra connection unavailable")
+        await asyncio.Event().wait()
+
+    pool = MtprotoPool({1: SimpleNamespace(session=shared, get_session=get_session)}, sessions_per_client=3)
+    assert await pool.get_session(1, 5) is started
+    adding = asyncio.create_task(pool.get_session(1, 5))
+    await entered.wait()
+    if ending == "cancel":
+        adding.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await adding
+    else:
+        assert await adding is started
+        for _ in range(10):
+            assert await pool.get_session(1, 5) is started
+        assert calls == 2
+    await pool.stop()
+    await pool.stop()
+    started.stop.assert_awaited_once()
+    shared.stop.assert_not_awaited()
+    assert pool._sessions == {}
+
+
+@pytest.mark.asyncio
+async def test_hyperdl_migration_uses_new_dc_without_dropping_sibling_sessions(monkeypatch):
+    from bot.helper.ext_utils import hyperdl_utils
+
+    downloader = object.__new__(hyperdl_utils.HypertgDownload)
+    downloader.clients = {1: SimpleNamespace(me=SimpleNamespace(username="helper"))}
+    downloader.pipeline_depth = 1
+    downloader._cancel = asyncio.Event()
+    downloader._cdn_info = {}
+    downloader._obj = SimpleNamespace(_processed_bytes=0)
+    downloader._pwrite = AsyncMock()
+    downloader._get_session = AsyncMock(side_effect=lambda _idx, dc: SimpleNamespace(dc_id=dc))
+    offsets = []
+
+    async def request(session, _client, _location, offset, _size, _attempt):
+        offsets.append((session.dc_id, offset))
+        return (None, 5) if session.dc_id == 2 else b"x" * 1024
+
+    downloader._do_req = request
+    monkeypatch.setattr(hyperdl_utils, "sleep", AsyncMock())
+    assert await downloader._pipeline_fetch(1, "location", 0, 2048, SimpleNamespace(dc_id=2), 1024, 1) == set()
+    assert offsets == [(2, 0), (5, 0), (5, 1024)]
+    assert downloader._obj._processed_bytes == 2048
+    assert all(not call.kwargs for call in downloader._get_session.await_args_list)
 
 
 @pytest.mark.asyncio

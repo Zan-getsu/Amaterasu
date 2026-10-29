@@ -9,6 +9,7 @@ from asyncio import (
     sleep,
     to_thread,
     wait,
+    wait_for,
 )
 from datetime import datetime
 from itertools import cycle
@@ -31,6 +32,7 @@ from pyrogram.errors import (
     FloodPremiumWait,
     FloodWait,
     RequestTokenInvalid,
+    RPCError,
 )
 from pyrogram.file_id import PHOTO_TYPES, FileId, FileType
 from pyrogram.session import Auth, Session
@@ -68,7 +70,11 @@ class HypertgDownload(HypertgTransfer):
     _MAX_RETRIES = 4
 
     def __init__(self, obj):
-        super().__init__(obj)
+        base_pipe = max(Config.HYPER_PIPELINE or self._DEFAULT_PIPELINE, self._MIN_PIPELINE)
+        # Native media sessions admit only six RPCs each; distribute the growing window.
+        per_session = max(1, Session.MAX_INFLIGHT_MEDIA)
+        media_sessions = min(4, (base_pipe * self._MAX_PIPELINE_MULT + per_session - 1) // per_session)
+        super().__init__(obj, media_sessions=media_sessions)
         requested_chunk = Config.HYPER_CHUNK or self._TELEGRAM_CHUNK
         if requested_chunk != self._TELEGRAM_CHUNK:
             LOGGER.info(
@@ -80,12 +86,9 @@ class HypertgDownload(HypertgTransfer):
         self.num_parts = Config.HYPER_THREADS or max(
             self._LOW_WORKERS, min(self._HIGH_WORKERS, self.num_clients)
         )
-        base_pipe = max(
-            Config.HYPER_PIPELINE or self._DEFAULT_PIPELINE, self._MIN_PIPELINE
-        )
         # HYPER_PIPELINE is documented as requests *per part*.  Dividing it by
         # the number of parts starved each connection as more helpers joined.
-        self.pipeline_depth = base_pipe
+        self.pipeline_depth = min(base_pipe, media_sessions * per_session)
         self.message = None
         self.media = None
         self.dump_chat = None
@@ -254,18 +257,16 @@ class HypertgDownload(HypertgTransfer):
 
     async def _do_req(self, sess, client, location, off, csz, attempt=0):
         try:
-            r = await resilient_tg_operation(
-                sess.invoke,
-                raw.functions.upload.GetFile(
+            r = await wait_for(
+                sess.invoke(raw.functions.upload.GetFile(
                     # The transfer pool does not have Telegram's dynamically
                     # supplied CDN endpoint table. Advertising CDN support can
                     # redirect media to CDN DCs such as 201, which WZGram's
                     # static DataCenter table cannot resolve.
                     precise=True, cdn_supported=False,
                     location=location, offset=off, limit=csz,
-                ),
-                operation_name="upload.GetFile",
-                sleep_threshold=client.sleep_threshold,
+                ), retries=1, timeout=15, sleep_threshold=0),
+                timeout=20,
             )
             if isinstance(r, raw.types.upload.File):
                 return r.bytes
@@ -284,6 +285,10 @@ class HypertgDownload(HypertgTransfer):
             raise
         except (ConnectionError, OSError, TimeoutError):
             if attempt < 3:
+                return None, -2
+            raise
+        except RPCError as error:
+            if 500 <= (error.CODE or 0) < 600 and attempt < 3:
                 return None, -2
             raise
 
@@ -362,14 +367,15 @@ class HypertgDownload(HypertgTransfer):
 
     async def _pipeline_fetch(self, idx, location, start, end, fid, csz, fd):
         cname = self.clients[idx].me.username
-        sess = await self._get_session(idx, fid.dc_id)
+        current_dc = fid.dc_id
         loc = location
         first_off = start - (start % csz)
         first_trim = start - first_off
         last_byte = end - 1
         window = self.pipeline_depth
         min_win = self._MIN_PIPELINE
-        max_win = window * self._MAX_PIPELINE_MULT
+        capacity = getattr(getattr(self, "_pool", None), "sessions_per_client", 1) * max(1, Session.MAX_INFLIGHT_MEDIA)
+        max_win = min(window * self._MAX_PIPELINE_MULT, capacity)
         inflight = set()
         _inflight_offsets = {}
         cur = first_off
@@ -381,6 +387,8 @@ class HypertgDownload(HypertgTransfer):
         bot_down = False
 
         async def _write(roff, chunk):
+            if roff + len(chunk) < min(roff + csz, end):
+                raise OSError(f"Short Telegram chunk at offset {roff}")
             if roff == first_off and roff + csz >= end:
                 chunk = chunk[first_trim : last_byte - roff + 1]
                 await self._pwrite(fd, chunk, start)
@@ -395,10 +403,10 @@ class HypertgDownload(HypertgTransfer):
             self._obj._processed_bytes += len(chunk)
 
         async def _req(off, s):
-            nonlocal window, ok_count, flood_count, timeout_count, sess, loc, pipe_timeouts, bot_down
+            nonlocal window, ok_count, flood_count, timeout_count, current_dc, loc, pipe_timeouts, bot_down
             if bot_down:
                 return s, off, b""
-            my_sess = sess
+            my_sess = None
             my_loc = loc
             # A migrate/reference refresh only updates the session/location;
             # the same offset still has to be requested again.  One attempt
@@ -406,6 +414,10 @@ class HypertgDownload(HypertgTransfer):
             max_attempts = 3
             for attempt in range(max_attempts):
                 try:
+                    if bot_down:
+                        return s, off, b""
+                    if my_sess is None:
+                        my_sess = await self._get_session(idx, current_dc)
                     cdn = self._cdn_info.get(idx)
                     if cdn:
                         chunk = await self._cdnpull(idx, cdn, off, csz)
@@ -425,6 +437,7 @@ class HypertgDownload(HypertgTransfer):
                         if dc_or_ref == -1:
                             fid_new = await self._fetch_ref(idx, self.clients[idx], force=True)
                             my_loc = self._location(fid_new)
+                            loc = my_loc
                             await sleep(attempt + 1)
                             continue
                         if dc_or_ref == -2:
@@ -435,13 +448,16 @@ class HypertgDownload(HypertgTransfer):
                             if pipe_timeouts >= 3:
                                 bot_down = True
                                 return s, off, b""
+                            my_sess = None
                             await sleep(min(3, pipe_timeouts))
                             continue
-                        my_sess = await self._get_session(idx, dc_or_ref, force=True)
-                        sess = my_sess
+                        current_dc = dc_or_ref
+                        my_sess = None
                         await sleep(attempt + 1)
                         continue
                     timeout_count = 0
+                    if result and off + len(result) >= min(off + csz, end):
+                        pipe_timeouts = 0
                     return s, off, result
                 except (FloodWait, FloodPremiumWait) as e:
                     flood_count += 1
@@ -463,6 +479,7 @@ class HypertgDownload(HypertgTransfer):
                     if pipe_timeouts >= 3:
                         bot_down = True
                         return s, off, b""
+                    my_sess = None
                     await sleep(min(3, pipe_timeouts))
                     continue
             timeout_count += 1
@@ -871,11 +888,13 @@ class HypertgDownload(HypertgTransfer):
 
         LOGGER.info(
             "HyperDL transfer plan: size=%s workers=%s pipeline=%s "
-            "initial_requests=%s",
+            "initial_requests=%s sessions_per_helper=%s helpers=%s",
             self.file_size,
             len(unique_clients),
             self.pipeline_depth,
             len(unique_clients) * self.pipeline_depth,
+            self._pool.sessions_per_client,
+            unique_clients,
         )
 
         first_fid = fid_map[assigns[0]]

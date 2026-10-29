@@ -27,22 +27,6 @@ from ..ext_utils.media_utils import (
 )
 from ..telegram_helper.tg_transfer import HypertgTransfer
 
-_primary_upload_active = 0
-
-
-def _claim_primary_upload():
-    """Reserve the fast primary WZGram lane; never wait for it."""
-    global _primary_upload_active
-    if _primary_upload_active:
-        return False
-    _primary_upload_active = 1
-    return True
-
-
-def _release_primary_upload():
-    global _primary_upload_active
-    _primary_upload_active = max(0, _primary_upload_active - 1)
-
 
 class HypertgUpload(HypertgTransfer):
     def __init__(self, obj):
@@ -129,9 +113,13 @@ class HypertgUpload(HypertgTransfer):
             await create_telegram_thumbnail(thumb) if thumb is not None else None
         )
 
+        upload_chat_id = (
+            self._listener.up_dest
+            if self._listener.up_dest
+            else (Config.LEECH_DUMP_CHAT or reply_target.chat.id)
+        )
         up_size = ospath.getsize(file_path)
         hyper_user_only = False
-        primary_claimed = False
         if up_size > 2097152000 and (TgClient.user or any(k < 0 for k in self.clients)):
             if TgClient.user:
                 use_hyper = False
@@ -141,28 +129,20 @@ class HypertgUpload(HypertgTransfer):
                 hyper_user_only = True
                 user_session = False
         else:
-            hyper_eligible = (
+            hyper_user_only = bool(user_session)
+            use_hyper = (
                 Config.USE_HYPER
-                and bool(self.clients)
                 and up_size > 10 * 1024 * 1024
+                and not (isinstance(upload_chat_id, int) and upload_chat_id > 0)
+                and any(key < 0 if hyper_user_only else key > 0 for key in self.clients)
             )
-            if hyper_eligible:
-                primary_claimed = _claim_primary_upload()
-                use_hyper = not primary_claimed
-            else:
-                use_hyper = False
         self.last_backend = "HyperUP" if use_hyper else "WZGram"
-        upload_chat_id = (
-            self._listener.up_dest
-            if self._listener.up_dest
-            else (Config.LEECH_DUMP_CHAT or reply_target.chat.id)
-        )
         LOGGER.info(
             "Telegram upload route: %s | size=%s | mode=%s | client=%s",
-            self._up_file,
+            ospath.basename(file_path),
             up_size,
-            "helper-overflow" if use_hyper else "primary-wzgram",
-            "user" if user_session else "bot",
+            "helper-pool" if use_hyper else "primary-wzgram",
+            ("user-helper" if hyper_user_only else "bot-helper") if use_hyper else ("user" if user_session else "bot"),
         )
         try:
             if use_hyper:
@@ -220,8 +200,6 @@ class HypertgUpload(HypertgTransfer):
             LOGGER.error(f"HypertgUL fail {self._up_file}: {type(e).__name__}: {e}")
             raise
         finally:
-            if primary_claimed:
-                _release_primary_upload()
             if legacy_thumb is not None and await aiopath.exists(legacy_thumb):
                 try:
                     await remove(legacy_thumb)
@@ -288,22 +266,15 @@ class HypertgUpload(HypertgTransfer):
         reply_markup=None,
         video_cover=None,
     ):
-        if user_only:
-            candidates = {
-                key: self.work_loads.get(key, 0)
-                for key in self.clients
-                if key < 0
-            }
-            if not candidates:
-                idx = self._pick_client()
-            else:
-                idx = min(candidates, key=candidates.get)
-        else:
-            idx = self._pick_client()
+        idx = self._pick_client(user_only=user_only)
         client = self.clients[idx]
         self.work_loads[idx] = self.work_loads.get(idx, 0) + 1
 
         try:
+            LOGGER.info(
+                "Telegram helper upload selected: %s | client=%s | account=%s",
+                ospath.basename(file_path), idx, "user" if user_only else "bot",
+            )
             kwargs = {
                 "chat_id": chat_id,
                 "disable_notification": True,
