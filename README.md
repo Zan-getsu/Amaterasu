@@ -828,7 +828,7 @@ All limits are in **GB**. Set `0` to disable the limit.
 | `QUEUE_ALL` | `int` | `0` | Max total tasks in queue (0 = unlimited) |
 | `QUEUE_DOWNLOAD` | `int` | `0` | Max concurrent downloads |
 | `QUEUE_UPLOAD` | `int` | `0` | Max concurrent uploads |
-| `UPLOAD_PARALLELISM` | `int` | `3` | Concurrent files within each Telegram leech task (`1`-`16`); also bounds MIME, ffprobe, and thumbnail work |
+| `UPLOAD_PARALLELISM` | `int` | `3` | Concurrent file preparation within each Telegram leech task (`1`-`16`). Upload admission is shared per client: one Premium file or two bot/non-Premium files; file parts still upload in parallel |
 
 ### 9. JDownloader & Usenet
 

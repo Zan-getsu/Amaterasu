@@ -351,8 +351,8 @@ INSECURE_HOSTS = []
 # VAAPI/VideoToolbox at startup. Options: auto, nvenc, qsv, vaapi, none.
 FFMPEG_HW_ACCEL = "auto"
 
-# Concurrent file uploads within each Telegram leech task (1-16).
-# This bounds MIME/ffprobe/thumbnail work as well as active transfers.
+# Concurrent file preparation within each Telegram leech task (1-16).
+# Transfers share a per-client gate: one Premium file or two bot/non-Premium files.
 UPLOAD_PARALLELISM = 3
 
 # yt-dlp playlist parallelism (max 6).

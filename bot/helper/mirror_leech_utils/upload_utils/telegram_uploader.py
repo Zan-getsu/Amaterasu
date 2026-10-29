@@ -198,6 +198,8 @@ class TelegramUploader:
                 raise
 
     async def _reset_failed_wzgram_pool(self, error, user_session):
+        if getattr(error, "_amaterasu_upload_recovery_done", False):
+            return True
         backend = (
             getattr(self._hu, "last_backend", "HyperUP")
             if self._hu is not None

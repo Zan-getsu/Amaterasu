@@ -1,11 +1,13 @@
 import asyncio as _asyncio
 from ast import literal_eval
 from asyncio import CancelledError, Lock, Semaphore, gather, get_running_loop, sleep, wait_for
+from contextvars import ContextVar
 from functools import partial
 from hashlib import sha256
 from importlib import import_module
-from inspect import signature
+from inspect import iscoroutinefunction, signature
 from os import getenv
+from sys import exception
 from time import monotonic
 
 from pyrogram import Client, enums
@@ -22,6 +24,8 @@ WARP_ALIGNED_CHUNK_SIZE = 1024 * 1024
 WZGRAM_MEDIA_RESTART_ATTEMPTS = 3
 WZGRAM_MEDIA_RESET_COOLDOWN = 30
 WZGRAM_UPLOAD_PART_ATTEMPTS = 4
+WZGRAM_UPLOAD_STALL_TIMEOUT = 60
+_UPLOAD_STATE = ContextVar("wzgram_upload_state", default=None)
 _TRANSIENT_RPC_ERRORS = frozenset(
     {
         "InternalServerError",
@@ -124,13 +128,18 @@ class _WzgramUploadPacer:
             rate = int(getenv("WZGRAM_UPLOAD_RATE_BOT", "32"))
             in_flight = 2 * int(getenv("WZGRAM_UPLOAD_POOL_BOT", "8"))
         elif getattr(me, "is_premium", False):
-            rate = int(getenv("WZGRAM_UPLOAD_RATE_PREMIUM", "300"))
-            in_flight = 2 * int(getenv("WZGRAM_UPLOAD_POOL_PREMIUM", "14"))
+            rate = int(getenv("WZGRAM_UPLOAD_RATE_PREMIUM", "32"))
+            in_flight = 2 * int(getenv("WZGRAM_UPLOAD_POOL_PREMIUM", "4"))
+            LOGGER.info(
+                "Premium upload profile: files=1, part_rpcs=%s, part_rate=%s/s, stall_timeout=%ss",
+                max(1, in_flight), rate, WZGRAM_UPLOAD_STALL_TIMEOUT,
+            )
         else:
             rate = int(getenv("WZGRAM_UPLOAD_RATE_USER", "32"))
             in_flight = 2 * int(getenv("WZGRAM_UPLOAD_POOL_USER", "12"))
         # Match native upload workers and rate growth while sharing flood cooldowns.
-        self.bucket = AdaptiveBucket(rate=rate, ceiling=max(rate, 300), burst=16, step=1.0)
+        ceiling = rate if getattr(me, "is_premium", False) else max(rate, 300)
+        self.bucket = AdaptiveBucket(rate=rate, ceiling=ceiling, burst=16, step=1.0)
         self.in_flight = Semaphore(max(1, in_flight))
         self.lock = Lock()
         self.flood_until = 0.0
@@ -151,6 +160,18 @@ class _WzgramUploadPacer:
                     if self.flood_until <= monotonic():
                         break
             try:
+                if _session is not None:
+                    state = _UPLOAD_STATE.get()
+                    if state is not None:
+                        state["sessions"][id(_session)] = _session
+                    _session._amaterasu_upload_active = getattr(
+                        _session, "_amaterasu_upload_active", 0
+                    ) + 1
+                    # Avoid multiplying the uploader's four retries by ten native retries.
+                    if not args:
+                        kwargs.setdefault("retries", 1)
+                    if len(args) < 2:
+                        kwargs["timeout"] = min(kwargs.get("timeout") or 15, 15)
                 result = await operation(query, *args, **kwargs)
             except (FloodWait, FloodPremiumWait) as error:
                 self.flood_until = max(
@@ -162,9 +183,15 @@ class _WzgramUploadPacer:
                 if _session is not None and is_wzgram_media_session_failure(error):
                     _session._amaterasu_media_failed = True
                 raise
+            finally:
+                if _session is not None:
+                    _session._amaterasu_upload_active -= 1
             if result:
                 if _session is not None:
                     _session._amaterasu_media_failed = False
+                    _session._amaterasu_upload_ack_at = monotonic()
+                    if state is not None:
+                        state["last_progress"] = _session._amaterasu_upload_ack_at
                 self.bucket.on_success()
             return result
 
@@ -298,6 +325,78 @@ async def resilient_tg_operation(
 class WzgramClient(Client):
     """WZGram implementation behind Amaterasu's framework-neutral boundary."""
 
+    async def save_file(
+        self, path, file_id=None, file_part=0, progress=None, progress_args=(),
+    ):
+        gate = getattr(self, "_amaterasu_file_upload_gate", None)
+        if gate is None:
+            premium = getattr(getattr(self, "me", None), "is_premium", False)
+            gate = self._amaterasu_file_upload_gate = Semaphore(1 if premium else 2)
+
+        # Queue before starting the deadline or reserving the SDK's shared read buffers.
+        async with gate:
+            state = {"last_progress": monotonic(), "sessions": {}}
+            acknowledged = 0
+
+            async def report(current, total):
+                nonlocal acknowledged
+                if current > acknowledged:
+                    acknowledged = current
+                    state["last_progress"] = monotonic()
+                if progress is not None:
+                    if iscoroutinefunction(progress):
+                        await progress(current, total, *progress_args)
+                    else:
+                        await self.loop.run_in_executor(
+                            self.executor, partial(progress, current, total, *progress_args)
+                        )
+
+            token = _UPLOAD_STATE.set(state)
+            try:
+                transfer = _asyncio.create_task(super().save_file(
+                    path, file_id=file_id, file_part=file_part, progress=report,
+                ))
+            finally:
+                _UPLOAD_STATE.reset(token)
+            try:
+                try:
+                    while True:
+                        pacer = getattr(self, "_amaterasu_upload_pacer", None)
+                        deadline = max(state["last_progress"], getattr(pacer, "flood_until", 0))
+                        remaining = WZGRAM_UPLOAD_STALL_TIMEOUT - (monotonic() - deadline)
+                        done, _ = await _asyncio.wait({transfer}, timeout=max(remaining, 0))
+                        if transfer in done:
+                            return transfer.result()
+                        pacer = getattr(self, "_amaterasu_upload_pacer", None)
+                        deadline = max(state["last_progress"], getattr(pacer, "flood_until", 0))
+                        if monotonic() - deadline >= WZGRAM_UPLOAD_STALL_TIMEOUT:
+                            for session in state["sessions"].values():
+                                if (
+                                    getattr(session, "_amaterasu_upload_active", 0)
+                                    and monotonic() - getattr(session, "_amaterasu_upload_ack_at", 0)
+                                    >= WZGRAM_UPLOAD_STALL_TIMEOUT
+                                ):
+                                    session._amaterasu_media_failed = True
+                            raise TimeoutError(
+                                f"Telegram upload stalled: no acknowledged part for "
+                                f"{WZGRAM_UPLOAD_STALL_TIMEOUT}s"
+                            )
+                finally:
+                    if not transfer.done():
+                        transfer.cancel()
+                    await gather(transfer, return_exceptions=True)
+            except Exception as error:
+                if is_wzgram_media_session_failure(error):
+                    # Rebuild before another queued file can acquire this account's gate.
+                    try:
+                        await wait_for(
+                            self.reset_media_session_pool(reason=type(error).__name__), timeout=15,
+                        )
+                    except Exception as reset_error:
+                        LOGGER.warning("Upload pool recovery failed: %s", reset_error)
+                    error._amaterasu_upload_recovery_done = True
+                raise
+
     async def invoke(self, query, *args, **kwargs):
         query_name = _query_name(query)
         try:
@@ -321,6 +420,11 @@ class WzgramClient(Client):
             raise
 
     async def _get_media_session_pool(self, dc_id, requested_size):
+        if _UPLOAD_STATE.get() is not None and getattr(getattr(self, "me", None), "is_premium", False):
+            # Use separate standard-DC sockets; never put file parts on the command socket.
+            size = min(requested_size, max(1, int(getenv("WZGRAM_UPLOAD_POOL_PREMIUM", "4"))))
+            pool = await _get_stable_media_session_pool(self, dc_id, size, control_endpoint=True)
+            return _configure_wzgram_media_pool(pool)
         # WZGram 3.1.0 has its own adaptive, rate-aware media pool. Prefer it
         # so Amaterasu benefits from upstream worker sizing and retry fixes.
         # Retain the proven sequential constructor only as a recovery path for
@@ -479,11 +583,43 @@ def _stabilize_peer_username_storage(client):
     return client
 
 
-async def _get_stable_media_session_pool(client, dc_id, requested_size):
+async def _get_stable_media_session_pool(client, dc_id, requested_size, control_endpoint=False):
     """Construct a media pool sequentially when WZGram's native path fails."""
     lock = client._media_sessions_locks.setdefault(dc_id, Lock())
     async with lock:
         requested_size = max(1, int(requested_size))
+        if control_endpoint:
+            cached = client.media_session_pools.setdefault(dc_id, [])
+            pool = [
+                session for session in cached
+                if session.is_started.is_set()
+                and getattr(session, "_amaterasu_control_endpoint", False)
+                and not getattr(session, "_amaterasu_media_failed", False)
+            ][:requested_size]
+            initial_size = len(pool)
+            while len(pool) < requested_size:
+                try:
+                    session = await wait_for(
+                        client.get_session(dc_id, is_media=False, temporary=True), timeout=15,
+                    )
+                except Exception:
+                    if not pool:
+                        raise
+                    LOGGER.warning(
+                        "Premium transfer pool for DC%s started %s/%s sessions",
+                        dc_id, len(pool), requested_size,
+                    )
+                    break
+                session._amaterasu_control_endpoint = True
+                pool.append(session)
+                # Keep every socket visible to native shutdown/reaping, including on cancellation.
+                cached.append(session)
+            if len(pool) > initial_size:
+                LOGGER.info(
+                    "Premium transfer pool ready: DC%s standard endpoint, sessions=%s/%s",
+                    dc_id, len(pool), requested_size,
+                )
+            return pool
         pool = [
             session
             for session in client.media_session_pools.get(dc_id, [])
@@ -569,9 +705,10 @@ def _configure_wzgram_upload_module(save_file_module):
                     task.done() and not task.cancelled() and task.exception() is not None
                     for task in workers
                 )
-                if _asyncio.current_task().cancelling() or failed:
+                if _asyncio.current_task().cancelling() or failed or exception() is not None:
                     for worker in workers:
                         worker.cancel()
+                    return await _asyncio.gather(*workers, return_exceptions=True)
                 return await stop_workers(queue, workers)
 
             stop_upload_workers._amaterasu_cancel_guard = True
