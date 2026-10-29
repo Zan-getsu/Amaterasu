@@ -135,7 +135,7 @@ class _WzgramUploadPacer:
         self.lock = Lock()
         self.flood_until = 0.0
 
-    async def invoke(self, operation, query, *args, **kwargs):
+    async def invoke(self, operation, query, *args, _session=None, **kwargs):
         if _query_name(query).split(".")[-1] not in {"SaveFilePart", "SaveBigFilePart"}:
             return await operation(query, *args, **kwargs)
 
@@ -158,7 +158,13 @@ class _WzgramUploadPacer:
                 )
                 self.bucket.on_flood()
                 raise
+            except Exception as error:
+                if _session is not None and is_wzgram_media_session_failure(error):
+                    _session._amaterasu_media_failed = True
+                raise
             if result:
+                if _session is not None:
+                    _session._amaterasu_media_failed = False
                 self.bucket.on_success()
             return result
 
@@ -176,7 +182,7 @@ def _configure_wzgram_media_pool(pool):
             if pacer is None:
                 pacer = client._amaterasu_upload_pacer = _WzgramUploadPacer(client)
             # Native part retries call session.invoke directly, bypassing the file pacer.
-            session.invoke = partial(pacer.invoke, session.invoke)
+            session.invoke = partial(pacer.invoke, session.invoke, _session=session)
             session._amaterasu_upload_pacer = pacer
     return pool
 
@@ -358,12 +364,22 @@ class WzgramClient(Client):
 
             pool_lock = self._media_sessions_locks.setdefault(dc_id, Lock())
             async with pool_lock:
-                sessions = list(self.media_session_pools.pop(dc_id, []))
+                def needs_reset(session):
+                    return getattr(session, "_amaterasu_media_failed", False) or (
+                        not session.is_started.is_set()
+                        and not getattr(session, "is_restarting", False)
+                    )
+
+                # Other uploads can still be using the healthy sessions in this pool.
+                pool = self.media_session_pools.get(dc_id, [])
+                sessions = [session for session in pool if needs_reset(session)]
+                retained = [session for session in pool if not needs_reset(session)]
+                if retained:
+                    self.media_session_pools[dc_id] = retained
+                else:
+                    self.media_session_pools.pop(dc_id, None)
                 base_session = self.media_sessions.get(dc_id)
-                if (
-                    base_session is not None
-                    and not base_session.is_started.is_set()
-                ):
+                if base_session is not None and needs_reset(base_session):
                     self.media_sessions.pop(dc_id, None)
                     sessions.append(base_session)
 
@@ -548,8 +564,12 @@ def _configure_wzgram_upload_module(save_file_module):
     if callable(stop_workers):
         if not getattr(stop_workers, "_amaterasu_cancel_guard", False):
             async def stop_upload_workers(queue, workers):
-                # Cancelled uploads must not wait for pending part acknowledgements.
-                if _asyncio.current_task().cancelling():
+                # A failed upload cannot finish; do not drain its queued parts.
+                failed = any(
+                    task.done() and not task.cancelled() and task.exception() is not None
+                    for task in workers
+                )
+                if _asyncio.current_task().cancelling() or failed:
                     for worker in workers:
                         worker.cancel()
                 return await stop_workers(queue, workers)

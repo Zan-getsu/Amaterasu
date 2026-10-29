@@ -437,6 +437,7 @@ async def test_failed_media_pool_is_stopped_and_removed():
 
             self.is_started = Event()
             self.is_started.set()
+            self._amaterasu_media_failed = True
 
         async def stop(self):
             stopped.append(self)
@@ -466,6 +467,57 @@ async def test_failed_media_pool_is_stopped_and_removed():
     client._amaterasu_media_reset_at[2] -= WZGRAM_MEDIA_RESET_COOLDOWN
     assert await client.reset_media_session_pool(reason="TimeoutError") == 1
     assert replacement in stopped
+
+
+async def test_media_pool_reset_preserves_sessions_used_by_healthy_sibling_uploads():
+    stopped = []
+
+    def session(*, failed=False, started=True, restarting=False):
+        ready = asyncio.Event()
+        if started:
+            ready.set()
+        item = SimpleNamespace(
+            is_started=ready, is_restarting=restarting, _amaterasu_media_failed=failed,
+        )
+        item.stop = AsyncMock(side_effect=lambda: stopped.append(item))
+        return item
+
+    failed, healthy = session(failed=True), session()
+    inactive, reconnecting = session(started=False), session(started=False, restarting=True)
+    base = session()
+    client = object.__new__(WzgramClient)
+    client.storage = SimpleNamespace(dc_id=AsyncMock(return_value=5))
+    client.media_session_pools = {5: [failed, healthy, inactive, reconnecting]}
+    client.media_sessions = {5: base}
+    client._media_sessions_locks = {}
+
+    assert await client.reset_media_session_pool(reason="TimeoutError") == 2
+    assert stopped == [failed, inactive]
+    assert client.media_session_pools == {5: [healthy, reconnecting]}
+    assert client.media_sessions == {5: base}
+    healthy.stop.assert_not_awaited()
+    reconnecting.stop.assert_not_awaited()
+    base.stop.assert_not_awaited()
+
+
+@pytest.mark.parametrize("error", [TimeoutError("Request timed out"), ConnectionResetError()])
+async def test_media_rpc_failure_marks_only_its_session_and_success_clears_it(error):
+    client = SimpleNamespace(me=SimpleNamespace(is_bot=False, is_premium=True))
+    operation = AsyncMock(side_effect=error)
+    failed = SimpleNamespace(client=client, invoke=operation)
+    healthy = SimpleNamespace(client=client, invoke=AsyncMock(return_value=True))
+    _configure_wzgram_media_pool([failed, healthy])
+    part = pyrogram.raw.functions.upload.SaveFilePart(file_id=123, file_part=0, bytes=b"part")
+
+    with pytest.raises(type(error)):
+        await failed.invoke(part)
+    assert failed._amaterasu_media_failed is True
+    assert not getattr(healthy, "_amaterasu_media_failed", False)
+
+    operation.side_effect = None
+    operation.return_value = True
+    assert await failed.invoke(part) is True
+    assert failed._amaterasu_media_failed is False
 
 
 @pytest.mark.parametrize("flood_type", [FloodWait, FloodPremiumWait])
@@ -681,7 +733,7 @@ async def test_upload_cooldown_is_separate_for_other_accounts():
     assert sessions[0]._amaterasu_upload_pacer is not sessions[1]._amaterasu_upload_pacer
 
 
-@pytest.mark.parametrize("ending", ["failure", "cancellation"])
+@pytest.mark.parametrize("ending", ["failure", "cancellation", "mixed_failure"])
 async def test_native_upload_releases_workers_and_budgets_after_abort(monkeypatch, ending):
     monkeypatch.setenv("WZGRAM_UPLOAD_RATE_BOT", "100000")
     monkeypatch.delenv("WZGRAM_UPLOAD_POOL_BOT", raising=False)
@@ -695,8 +747,9 @@ async def test_native_upload_releases_workers_and_budgets_after_abort(monkeypatc
     )
 
     async def send_part(_query, **_kwargs):
+        first = not started.is_set()
         started.set()
-        if ending == "failure":
+        if ending == "failure" or ending == "mixed_failure" and first:
             raise ValueError("Upload rejected")
         await release.wait()
         return True
