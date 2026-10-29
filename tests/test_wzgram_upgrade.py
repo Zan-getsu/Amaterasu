@@ -73,7 +73,7 @@ def upload_context():
         tg_client._UPLOAD_STATE.reset(token)
 
 
-async def test_premium_pool_uses_four_separate_standard_dc_connections(monkeypatch, upload_context):
+async def test_premium_pool_uses_eight_separate_standard_dc_connections(monkeypatch, upload_context):
     monkeypatch.delenv("WZGRAM_UPLOAD_POOL_PREMIUM", raising=False)
     client = upload_client(premium=True)
     main = object()
@@ -98,10 +98,10 @@ async def test_premium_pool_uses_four_separate_standard_dc_connections(monkeypat
     first = await client._get_media_session_pool(5, 16)
     second = await client._get_media_session_pool(5, 16)
     assert first == second == sessions
-    assert len(sessions) == 4
+    assert len(sessions) == 8
     assert all(session is not main for session in sessions)
     assert client.media_session_pools[5] == sessions
-    assert client.get_session.await_count == 4
+    assert client.get_session.await_count == 8
     native.assert_not_awaited()
 
 
@@ -179,7 +179,7 @@ async def test_stalled_native_upload_releases_buffers_and_leaves_commands_respon
         await task
     assert caught.value._amaterasu_upload_recovery_done is True
     assert command_ticks >= 2
-    assert len(stopped) == 4
+    assert len(stopped) == 8
     assert client.media_session_pools == {}
     assert client._media_pool_demand == {}
     assert budget._value == available
@@ -226,7 +226,7 @@ async def test_healthy_native_premium_files_keep_all_parts_and_forward_progress(
     assert all(result.parts == 24 for result in results)
     assert len(accepted) == 72
     assert set(accepted) == {(file_id, part) for file_id in range(100, 103) for part in range(24)}
-    assert 1 < peak <= 8
+    assert 1 < peak <= 16
     assert {(current, total, label) for current, total, label in reports if current == total} == {
         (size, size, str(n)) for n in range(3)
     }
@@ -504,11 +504,47 @@ def test_premium_upload_defaults_bound_part_rate_and_worker_window(monkeypatch):
     monkeypatch.delenv("WZGRAM_UPLOAD_POOL_PREMIUM", raising=False)
     pacer = _WzgramUploadPacer(SimpleNamespace(me=SimpleNamespace(is_bot=False, is_premium=True)))
     assert pacer.bucket.rate == 32
-    assert pacer.in_flight._value == 8
+    assert pacer.in_flight._value == 16
     for _ in range(100):
         pacer.bucket._last_up = 0
         pacer.bucket.on_success()
-    assert pacer.bucket.rate == 32
+    assert pacer.bucket.rate == 64
+    pacer.bucket.on_flood()
+    assert pacer.bucket.rate < 64
+    reduced = pacer.bucket.rate
+    pacer.bucket.on_success()
+    assert pacer.bucket.rate == reduced
+
+
+async def test_premium_transport_timeout_reduces_rate_and_releases_the_window(monkeypatch):
+    monkeypatch.delenv("WZGRAM_UPLOAD_RATE_PREMIUM", raising=False)
+    monkeypatch.delenv("WZGRAM_UPLOAD_POOL_PREMIUM", raising=False)
+    client = upload_client(premium=True)
+    session = SimpleNamespace(client=client, invoke=AsyncMock(side_effect=TimeoutError("Request timed out")))
+    _configure_wzgram_media_pool([session])
+    pacer = client._amaterasu_upload_pacer
+    pacer.bucket.rate = 64
+    part = pyrogram.raw.functions.upload.SaveFilePart(file_id=123, file_part=0, bytes=b"part")
+    with pytest.raises(TimeoutError):
+        await session.invoke(part)
+    assert pacer.bucket.rate < 64
+    assert pacer.in_flight._value == 16
+    assert session._amaterasu_upload_active == 0
+    assert session._amaterasu_media_failed is True
+
+
+async def test_premium_explicit_pool_override_is_kept(monkeypatch, upload_context):
+    monkeypatch.setenv("WZGRAM_UPLOAD_POOL_PREMIUM", "3")
+    client = upload_client(premium=True)
+
+    async def get_session(_dc_id, **_kwargs):
+        ready = asyncio.Event()
+        ready.set()
+        return SimpleNamespace(client=client, is_started=ready, invoke=AsyncMock(return_value=True))
+
+    client.get_session = get_session
+    assert len(await client._get_media_session_pool(5, 16)) == 3
+    assert client._amaterasu_upload_pacer.in_flight._value == 6
 
 
 async def test_upload_rpc_bound_does_not_shorten_an_explicit_shorter_deadline():
@@ -520,6 +556,38 @@ async def test_upload_rpc_bound_does_not_shorten_an_explicit_shorter_deadline():
     assert await session.invoke(query, timeout=5) is True
     operation.assert_awaited_once_with(query, timeout=5, retries=1)
     assert session._amaterasu_upload_active == 0
+
+
+async def test_premium_upload_fills_a_full_latency_window_without_blocking_commands(monkeypatch):
+    monkeypatch.delenv("WZGRAM_UPLOAD_POOL_PREMIUM", raising=False)
+    monkeypatch.setenv("WZGRAM_UPLOAD_RATE_PREMIUM", "100000")
+    client = upload_client(premium=True)
+    release = asyncio.Event()
+    active = peak = 0
+
+    async def invoke(_query, **_kwargs):
+        nonlocal active, peak
+        active += 1
+        peak = max(peak, active)
+        try:
+            await release.wait()
+            return True
+        finally:
+            active -= 1
+
+    session = SimpleNamespace(client=client, invoke=invoke)
+    _configure_wzgram_media_pool([session])
+    part = pyrogram.raw.functions.upload.SaveFilePart(file_id=123, file_part=0, bytes=b"part")
+    tasks = [asyncio.create_task(session.invoke(part)) for _ in range(24)]
+    try:
+        for _ in range(30):
+            await asyncio.sleep(0)
+        assert peak == 16
+        assert active == 16
+    finally:
+        release.set()
+        assert all(await asyncio.gather(*tasks))
+    assert active == 0
 
 
 async def test_recovered_file_error_is_not_reset_again_after_releasing_account_gate():

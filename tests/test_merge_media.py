@@ -10,6 +10,7 @@ import sys
 from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -187,16 +188,22 @@ async def test_ffmpeg_concat_retains_all_tracks_and_mkv_safeguards(media, monkey
     folder = root / f"concat {case} l'été"
     folder.mkdir()
     selected = []
+    has_audio = case not in {"video-only", "fallback", "shifted"}
     for index in range(3):
         target = folder / f"part '{index}.{'mp4' if case == 'mp4' else 'mkv'}"
-        command = ["ffmpeg", "-v", "error", "-y", "-i", str(sources[index % 2]), "-map", "0:v"]
-        if case != "video-only":
-            command += ["-map", "0:a", "-map", "0:a", "-metadata:s:a:0", "language=jpn",
+        # Delay-free audio keeps concat coverage independent of AAC priming conventions.
+        command = ["ffmpeg", "-v", "error", "-y",
+                   "-f", "lavfi", "-i", "color=c=blue:s=640x360:r=24:d=1.5",
+                   "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000:duration=1.5",
+                   "-i", str(sources[index % 2]), "-map", "0:v"]
+        if has_audio:
+            command += ["-map", "1:a", "-map", "1:a", "-metadata:s:a:0", "language=jpn",
                         "-metadata:s:a:0", "title=Japanese", "-metadata:s:a:1", "language=eng",
                         "-metadata:s:a:1", "title=English", "-disposition:a:0", "0", "-disposition:a:1", "0"]
         if case == "subtitles":
-            command += ["-map", "0:s", "-metadata:s:s:0", "language=eng", "-disposition:s:0", "default"]
-        command += ["-c", "copy"]
+            command += ["-map", "2:s", "-metadata:s:s:0", "language=eng", "-disposition:s:0", "default"]
+        command += ["-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p",
+                    "-c:a", "aac" if case == "mp4" else "alac", "-c:s", "copy"]
         if case == "hevc":
             command += ["-c:v", "libx265", "-preset", "ultrafast", "-x265-params", "pools=1:frame-threads=1:log-level=error:bframes=0"]
         if case != "mp4":
@@ -229,12 +236,17 @@ async def test_ffmpeg_concat_retains_all_tracks_and_mkv_safeguards(media, monkey
 
     monkeypatch.setattr(backend, "_run", run)
     monkeypatch.setattr(backend, "_json_command", inspect)
+    if case == "mp4":
+        # Keep a real multi-audio AAC fallback case on every toolchain.
+        monkeypatch.setattr(backend, "_concat_av", AsyncMock(return_value=False))
     listener = _listener()
     target = folder / "merged.mkv"
     output, error = await merge_copy(listener, selected, str(target), probes)
     assert len(concat_commands) <= 1 if case == "mp4" else len(concat_commands) == 1
     if case != "mp4":
         assert bool(append_commands) == (case in {"fallback", "shifted"})
+    else:
+        assert append_commands
     assert hashes == [hashlib.sha256(Path(path).read_bytes()).digest() for path in selected]
     assert not list(folder.glob("merge-*/"))
     if case == "cancel":
@@ -246,10 +258,13 @@ async def test_ffmpeg_concat_retains_all_tracks_and_mkv_safeguards(media, monkey
     assert len(info["chapters"]) == 3
     assert info["format"]["tags"]["title"] == "Series"
     audio = [stream for stream in info["streams"] if stream["codec_type"] == "audio"]
-    source_defaults = [stream["disposition"]["default"] for stream in probes[0]["streams"] if stream["codec_type"] == "audio"]
-    assert [(stream["tags"]["language"], stream["tags"]["title"], stream["disposition"]["default"]) for stream in audio] == (
-        [] if case == "video-only" else [("jpn", "Japanese", source_defaults[0]), ("eng", "English", source_defaults[1])]
-    )
+    source_audio = [stream for stream in probes[0]["streams"] if stream["codec_type"] == "audio"]
+    source_identity = json.loads(subprocess.check_output([backend._mkvmerge_binary(), "-J", selected[0]]))
+    source_titles = [(track.get("properties") or {}).get("track_name") for track in source_identity["tracks"] if track["type"] == "audio"]
+    assert len(audio) == len(source_audio) == (2 if has_audio else 0)
+    assert [(stream.get("tags", {}).get("language"), stream.get("tags", {}).get("title"), stream["disposition"]["default"]) for stream in audio] == [
+        (stream.get("tags", {}).get("language"), title, stream["disposition"]["default"]) for stream, title in zip(source_audio, source_titles, strict=True)
+    ]
     for position, stream in enumerate(audio):
         expected = []
         times = []

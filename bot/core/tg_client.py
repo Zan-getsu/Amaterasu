@@ -129,16 +129,16 @@ class _WzgramUploadPacer:
             in_flight = 2 * int(getenv("WZGRAM_UPLOAD_POOL_BOT", "8"))
         elif getattr(me, "is_premium", False):
             rate = int(getenv("WZGRAM_UPLOAD_RATE_PREMIUM", "32"))
-            in_flight = 2 * int(getenv("WZGRAM_UPLOAD_POOL_PREMIUM", "4"))
+            in_flight = 2 * int(getenv("WZGRAM_UPLOAD_POOL_PREMIUM", "8"))
             LOGGER.info(
-                "Premium upload profile: files=1, part_rpcs=%s, part_rate=%s/s, stall_timeout=%ss",
-                max(1, in_flight), rate, WZGRAM_UPLOAD_STALL_TIMEOUT,
+                "Premium upload profile: files=1, part_rpcs=%s, part_rate=%s..%s/s, stall_timeout=%ss",
+                max(1, in_flight), rate, max(rate, 64), WZGRAM_UPLOAD_STALL_TIMEOUT,
             )
         else:
             rate = int(getenv("WZGRAM_UPLOAD_RATE_USER", "32"))
             in_flight = 2 * int(getenv("WZGRAM_UPLOAD_POOL_USER", "12"))
         # Match native upload workers and rate growth while sharing flood cooldowns.
-        ceiling = rate if getattr(me, "is_premium", False) else max(rate, 300)
+        ceiling = max(rate, 64) if getattr(me, "is_premium", False) else max(rate, 300)
         self.bucket = AdaptiveBucket(rate=rate, ceiling=ceiling, burst=16, step=1.0)
         self.in_flight = Semaphore(max(1, in_flight))
         self.lock = Lock()
@@ -182,6 +182,7 @@ class _WzgramUploadPacer:
             except Exception as error:
                 if _session is not None and is_wzgram_media_session_failure(error):
                     _session._amaterasu_media_failed = True
+                    self.bucket.on_flood()
                 raise
             finally:
                 if _session is not None:
@@ -422,7 +423,7 @@ class WzgramClient(Client):
     async def _get_media_session_pool(self, dc_id, requested_size):
         if _UPLOAD_STATE.get() is not None and getattr(getattr(self, "me", None), "is_premium", False):
             # Use separate standard-DC sockets; never put file parts on the command socket.
-            size = min(requested_size, max(1, int(getenv("WZGRAM_UPLOAD_POOL_PREMIUM", "4"))))
+            size = min(requested_size, max(1, int(getenv("WZGRAM_UPLOAD_POOL_PREMIUM", "8"))))
             pool = await _get_stable_media_session_pool(self, dc_id, size, control_endpoint=True)
             return _configure_wzgram_media_pool(pool)
         # WZGram 3.1.0 has its own adaptive, rate-aware media pool. Prefer it
