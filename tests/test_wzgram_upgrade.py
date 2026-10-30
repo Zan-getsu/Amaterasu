@@ -139,6 +139,31 @@ async def test_file_upload_admission_is_bounded_per_account(monkeypatch, premium
     assert client._amaterasu_file_upload_gate._value == limit
 
 
+async def test_rejected_send_reuses_the_uploaded_file(monkeypatch):
+    uploads = []
+
+    async def native(_client, path, file_id=None, **_kwargs):
+        uploads.append((path, file_id))
+        return f"input:{path}"
+
+    monkeypatch.setattr(Client, "save_file", native)
+    client = upload_client(premium=False)
+
+    token = tg_client.UPLOADED_FILES.set({})
+    try:
+        assert await client.save_file("movie") == "input:movie"
+        assert await client.save_file("movie") == "input:movie"
+        assert await client.save_file("thumb") == "input:thumb"
+        # WZGram's FilePartMissing repair has to send the missing part.
+        await client.save_file("movie", file_id=7, file_part=3)
+    finally:
+        tg_client.UPLOADED_FILES.reset(token)
+    assert uploads == [("movie", None), ("thumb", None), ("movie", 7)]
+
+    await client.save_file("movie")
+    assert uploads[-1] == ("movie", None) and len(uploads) == 4
+
+
 async def test_stalled_native_upload_releases_buffers_and_leaves_commands_responsive(monkeypatch):
     monkeypatch.setattr(tg_client, "WZGRAM_UPLOAD_STALL_TIMEOUT", 0.08)
     monkeypatch.setenv("WZGRAM_UPLOAD_RATE_PREMIUM", "100000")

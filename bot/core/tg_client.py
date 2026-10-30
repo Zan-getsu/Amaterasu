@@ -26,6 +26,8 @@ WZGRAM_MEDIA_RESET_COOLDOWN = 30
 WZGRAM_UPLOAD_PART_ATTEMPTS = 4
 WZGRAM_UPLOAD_STALL_TIMEOUT = 60
 _UPLOAD_STATE = ContextVar("wzgram_upload_state", default=None)
+# Files already on Telegram for the current send, so a rejected send can retry without re-uploading.
+UPLOADED_FILES = ContextVar("wzgram_uploaded_files", default=None)
 _TRANSIENT_RPC_ERRORS = frozenset(
     {
         "InternalServerError",
@@ -345,6 +347,11 @@ class WzgramClient(Client):
     async def save_file(
         self, path, file_id=None, file_part=0, progress=None, progress_args=(),
     ):
+        # A file_id means WZGram is repairing FilePartMissing, which must reach Telegram.
+        uploaded = UPLOADED_FILES.get() if file_id is None and isinstance(path, str) else None
+        if uploaded is not None and path in uploaded:
+            return uploaded[path]
+
         gate = getattr(self, "_amaterasu_file_upload_gate", None)
         if gate is None:
             premium = getattr(getattr(self, "me", None), "is_premium", False)
@@ -383,7 +390,10 @@ class WzgramClient(Client):
                         remaining = WZGRAM_UPLOAD_STALL_TIMEOUT - (monotonic() - deadline)
                         done, _ = await _asyncio.wait({transfer}, timeout=max(remaining, 0))
                         if transfer in done:
-                            return transfer.result()
+                            result = transfer.result()
+                            if uploaded is not None:
+                                uploaded[path] = result
+                            return result
                         pacer = getattr(self, "_amaterasu_upload_pacer", None)
                         deadline = max(state["last_progress"], getattr(pacer, "flood_until", 0))
                         if monotonic() - deadline >= WZGRAM_UPLOAD_STALL_TIMEOUT:

@@ -2328,6 +2328,107 @@ async def test_hyperdl_blocks_preserve_the_learned_window_and_flood_quiet_period
     assert downloader._pipeline_state == {1: (8, 100.0)}
 
 
+async def test_hyperdl_new_file_starts_from_the_accounts_learned_window():
+    first = _pipeline_downloader()
+    first._pool = SimpleNamespace(sessions_per_client=3)
+    first.pipeline_depth, first._MAX_PIPELINE_MULT = 4, 4
+    first._pipeline_state = {1: (8, 100.0)}
+
+    async def request(_session, _client, _loc, _offset, size, _attempt):
+        return b"x" * size
+
+    first._do_req = request
+    assert await first._pipeline_fetch(1, "loc", 0, 1024, SimpleNamespace(dc_id=5), 1024, 1) == set()
+
+    second = _pipeline_downloader()
+    second.clients = first.clients
+    second._pool, second.pipeline_depth, second._MAX_PIPELINE_MULT = first._pool, 4, 4
+    seen = 0
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    async def blocked(_session, _client, _loc, _offset, size, _attempt):
+        nonlocal seen
+        seen += 1
+        if seen == 8:
+            entered.set()
+        await release.wait()
+        return b"x" * size
+
+    second._do_req = blocked
+    task = asyncio.create_task(second._pipeline_fetch(1, "loc", 0, 32 * 1024, SimpleNamespace(dc_id=5), 1024, 1))
+    await asyncio.wait_for(entered.wait(), 1)
+    release.set()
+    assert await asyncio.wait_for(task, 1) == set()
+
+
+@pytest.mark.parametrize(
+    ("other_cooldown", "hands_off"),
+    [(0.0, True), (float("inf"), False)],
+)
+async def test_hyperdl_long_flood_hands_block_to_a_free_helper(monkeypatch, other_cooldown, hands_off):
+    from pyrogram.errors import FloodWait
+
+    from bot.helper.ext_utils import hyperdl_utils
+
+    downloader = _pipeline_downloader()
+    downloader._pool = SimpleNamespace(sessions_per_client=1)
+    downloader.pipeline_depth = 4
+    other = SimpleNamespace(me=SimpleNamespace(username="other"))
+    other._amaterasu_download_pacer = SimpleNamespace(flood_until=other_cooldown)
+    downloader.clients = {**downloader.clients, 2: other}
+    downloader._active_clients, downloader._left_clients = [1, 2], set()
+    slept = []
+
+    async def fake_sleep(delay):
+        slept.append(delay)
+        await asyncio.sleep(0)
+
+    monkeypatch.setattr(hyperdl_utils, "sleep", fake_sleep)
+    queued = asyncio.Event()
+
+    async def request(_session, _client, _loc, offset, size, _attempt):
+        if offset == 0:
+            if not hands_off and 60 + 1 in slept:
+                return b"x" * size
+            raise FloodWait(60)
+        if hands_off:
+            # Stands in for a request parked behind the account's cooldown.
+            queued.set()
+            await asyncio.Event().wait()
+        return b"x" * size
+
+    downloader._do_req = request
+    failed = await asyncio.wait_for(
+        downloader._pipeline_fetch(1, "loc", 0, 8 * 1024, SimpleNamespace(dc_id=5), 1024, 1), 1,
+    )
+    if hands_off:
+        assert failed == set(range(0, 8 * 1024, 1024))
+        assert 60 + 1 not in slept and downloader._left_clients == {1}
+    else:
+        assert failed == set() and 60 + 1 in slept
+
+
+async def test_hyperdl_cooling_helper_does_not_delay_transfer_start():
+    downloader = _pipeline_downloader()
+    cooled =SimpleNamespace(_amaterasu_download_pacer=SimpleNamespace(flood_until=float("inf")))
+    ready = SimpleNamespace(_amaterasu_download_pacer=SimpleNamespace(flood_until=0.0))
+    downloader.clients = {1: cooled, 2: ready}
+    resolved = []
+
+    async def resolve(client_ids):
+        resolved.extend(client_ids)
+        return {}
+
+    downloader._resolve_file_refs = resolve
+    assert await downloader._run_download_with_clients([1, 2], "file") is None
+    assert resolved == [2]
+
+    resolved.clear()
+    downloader.clients[2] = cooled
+    assert await downloader._run_download_with_clients([1, 2], "file") is None
+    assert resolved == [1, 2]
+
+
 @pytest.fixture
 def recovery_download(tmp_path, monkeypatch):
     from bot.helper.ext_utils import hyperdl_utils
@@ -2554,9 +2655,12 @@ def test_hyperdl_capacity_uses_available_helpers_and_thread_setting():
         _listener=SimpleNamespace(transmission_mode="bot"),
     )
 
-    assert capacity(helper) == 1
+    assert capacity(helper) == 3
     config.HYPER_THREADS = 2
     assert capacity(helper) == 3
+    tg_client.helper_bots = {1: object()}
+    config.HYPER_THREADS = 0
+    assert capacity(helper) == 1
 
 
 @pytest.mark.asyncio

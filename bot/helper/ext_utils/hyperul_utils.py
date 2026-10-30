@@ -17,7 +17,7 @@ from aiofiles.os import remove
 
 from ... import LOGGER
 from ...core.config_manager import Config
-from ...core.tg_client import WZGRAM_MEDIA_RESET_COOLDOWN, TgClient, is_wzgram_media_session_failure
+from ...core.tg_client import UPLOADED_FILES, WZGRAM_MEDIA_RESET_COOLDOWN, TgClient, is_wzgram_media_session_failure
 from ..ext_utils.media_utils import (
     create_telegram_thumbnail,
     get_audio_thumbnail,
@@ -240,6 +240,7 @@ class HypertgUpload(HypertgTransfer):
                 return await self._send_with_retry(client.send_photo, **kwargs)
             return await self._send_with_retry(client.send_document, **kwargs)
 
+        uploaded_token = UPLOADED_FILES.set({})
         try:
             return await send()
         except PhotoInvalidDimensions:
@@ -259,6 +260,8 @@ class HypertgUpload(HypertgTransfer):
                 )
                 return await send()
             raise
+        finally:
+            UPLOADED_FILES.reset(uploaded_token)
 
     async def _hyper_send(
         self,

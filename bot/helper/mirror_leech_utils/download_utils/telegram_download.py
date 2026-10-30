@@ -103,7 +103,9 @@ class TelegramDownloadHelper:
             return 0
         requested_parts = Config.HYPER_THREADS or client_count
         workers_per_transfer = min(max(1, requested_parts), client_count)
-        return max(1, client_count // workers_per_transfer)
+        # Accounts pace across transfers, so all-helper downloads can overlap instead of
+        # sending the second file to the single-account WZGram overflow lane.
+        return max(client_count // workers_per_transfer, min(3, client_count))
 
     @property
     def speed(self):

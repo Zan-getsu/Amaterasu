@@ -63,6 +63,7 @@ class HypertgDownload(HypertgTransfer):
     _MIN_PIPELINE = 4
     _MAX_PIPELINE_MULT = 4
     _MAX_RETRIES = 4
+    _FLOOD_HANDOFF_SECONDS = 10
 
     def __init__(self, obj):
         base_pipe = max(Config.HYPER_PIPELINE or self._DEFAULT_PIPELINE, self._MIN_PIPELINE)
@@ -90,6 +91,19 @@ class HypertgDownload(HypertgTransfer):
         self._cdn_info = {}
         self._cdn_sessions = {}
         self._pipeline_state = {}
+        self._active_clients = []
+        self._left_clients = set()
+
+    def _can_hand_off(self, idx):
+        """Return whether a helper still in this transfer can take over right now."""
+        now = monotonic()
+        return any(
+            client_id != idx
+            and client_id not in self._left_clients
+            and _download_pacer(self.clients[client_id]).flood_until <= now
+            for client_id in self._active_clients
+        )
+
     def _ref_get(self, idx):
         return self._ref_cache.get(idx)
 
@@ -369,10 +383,17 @@ class HypertgDownload(HypertgTransfer):
         last_byte = end - 1
         if not hasattr(self, "_pipeline_state"):
             self._pipeline_state = {}
-        window, last_flood = self._pipeline_state.get(idx, (self.pipeline_depth, float("-inf")))
+        pacer = _download_pacer(self.clients[idx])
+        # The learned window belongs to the account, so each new file skips the ramp-up.
+        window, last_flood = (
+            self._pipeline_state.get(idx)
+            or getattr(pacer, "pipeline_state", None)
+            or (self.pipeline_depth, float("-inf"))
+        )
         min_win = self._MIN_PIPELINE
         capacity = getattr(getattr(self, "_pool", None), "sessions_per_client", 1) * max(1, Session.MAX_INFLIGHT_MEDIA)
         max_win = min(self.pipeline_depth * self._MAX_PIPELINE_MULT, capacity)
+        window = min(window, max(max_win, min_win))
         inflight = set()
         _inflight_offsets = {}
         cur = first_off
@@ -465,6 +486,11 @@ class HypertgDownload(HypertgTransfer):
                         )
                     last_flood = now
                     ok_count = 0
+                    # Don't hold this block behind a long cooldown when another helper is free.
+                    if val > self._FLOOD_HANDOFF_SECONDS and (bot_down or self._can_hand_off(idx)):
+                        self._left_clients.add(idx)
+                        bot_down = True
+                        return s, off, b""
                     await sleep(val + 1)
                 except CancelledError:
                     raise
@@ -517,22 +543,22 @@ class HypertgDownload(HypertgTransfer):
         try:
             while cur <= last_byte or inflight:
                 if bot_down:
-                    while inflight:
-                        done_set, _ = await wait(inflight, return_when=FIRST_COMPLETED)
-                        for f in done_set:
-                            inflight.discard(f)
-                            known_offset = _inflight_offsets.pop(f, None)
-                            try:
-                                s, roff, chunk = f.result()
-                                if not chunk:
-                                    failed_offsets.add(_failed_offset(roff))
-                                    continue
-                                await _schedule_write(roff, chunk)
-                            except CancelledError:
-                                raise
-                            except Exception:
-                                if known_offset is not None:
-                                    failed_offsets.add(_failed_offset(known_offset))
+                    # Queued requests would otherwise wait out this account's cooldown.
+                    for f in inflight:
+                        f.cancel()
+                    if inflight:
+                        await wait(inflight)
+                    for f in inflight:
+                        known_offset = _inflight_offsets.pop(f)
+                        if f.cancelled() or f.exception() is not None:
+                            failed_offsets.add(_failed_offset(known_offset))
+                            continue
+                        s, roff, chunk = f.result()
+                        if not chunk:
+                            failed_offsets.add(_failed_offset(roff))
+                            continue
+                        await _schedule_write(roff, chunk)
+                    inflight.clear()
                     c = cur
                     while c <= last_byte:
                         failed_offsets.add(_failed_offset(c))
@@ -572,7 +598,7 @@ class HypertgDownload(HypertgTransfer):
             LOGGER.error(f"HypertgDL pipeline fail client={cname}: {e}")
             raise
         finally:
-            self._pipeline_state[idx] = (window, last_flood)
+            pacer.pipeline_state = self._pipeline_state[idx] = (window, last_flood)
             pending_requests = list(inflight)
             for request in pending_requests:
                 if not request.done():
@@ -854,6 +880,13 @@ class HypertgDownload(HypertgTransfer):
 
     async def _run_download_with_clients(self, cidx, final):
         requested_clients = list(dict.fromkeys(cidx))
+        # Reference lookups wait out cooldowns, so one flooded helper would delay the start.
+        now = monotonic()
+        requested_clients = [
+            client_id
+            for client_id in requested_clients
+            if _download_pacer(self.clients[client_id]).flood_until <= now
+        ] or requested_clients
         fid_map = await self._resolve_file_refs(requested_clients)
         if not fid_map:
             LOGGER.error("HypertgDL could not resolve any healthy helper")
@@ -881,7 +914,8 @@ class HypertgDownload(HypertgTransfer):
             )
             return None
 
-        active_clients = list(fid_map)
+        active_clients = self._active_clients = list(fid_map)
+        self._left_clients = set()
         n_use = len(active_clients)
         # Fast helpers take another block instead of waiting for a slow fixed range.
         block_size = max(self.chunk_size, min(32 * MB, self.file_size // n_use // self.chunk_size * self.chunk_size))
@@ -939,8 +973,10 @@ class HypertgDownload(HypertgTransfer):
                         raise
                     except Exception as error:
                         results[index] = error
+                        self._left_clients.add(client_id)
                         return
                     if results[index]:
+                        self._left_clients.add(client_id)
                         return
 
             self._tasks.extend(create_task(worker(client_id)) for client_id in unique_clients)
