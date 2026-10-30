@@ -249,6 +249,7 @@ class HypertgTransfer:
                 max(
                     0,
                     getattr(self.clients[client_id], "_amaterasu_send_flood_until", 0) - now,
+                    getattr(self.clients[client_id], "_amaterasu_hyper_retry_until", 0) - now,
                     getattr(getattr(self.clients[client_id], "_amaterasu_upload_pacer", None), "flood_until", 0) - now,
                 ),
                 self.work_loads.get(client_id, 0),

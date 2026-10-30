@@ -17,7 +17,7 @@ from aiofiles.os import remove
 
 from ... import LOGGER
 from ...core.config_manager import Config
-from ...core.tg_client import TgClient
+from ...core.tg_client import WZGRAM_MEDIA_RESET_COOLDOWN, TgClient, is_wzgram_media_session_failure
 from ..ext_utils.media_utils import (
     create_telegram_thumbnail,
     get_audio_thumbnail,
@@ -131,11 +131,13 @@ class HypertgUpload(HypertgTransfer):
                 user_session = False
         else:
             hyper_user_only = bool(user_session)
+            if not user_session and getattr(self._listener, "transmission_mode", "bot") == "both":
+                hyper_user_only = None
             use_hyper = (
                 Config.USE_HYPER
                 and up_size > 10 * 1024 * 1024
                 and not (isinstance(upload_chat_id, int) and upload_chat_id > 0)
-                and any(key < 0 if hyper_user_only else key > 0 for key in self.clients)
+                and any(hyper_user_only is None or (key < 0 if hyper_user_only else key > 0) for key in self.clients)
             )
         self.last_backend = "HyperUP" if use_hyper else "WZGram"
         LOGGER.info(
@@ -143,7 +145,7 @@ class HypertgUpload(HypertgTransfer):
             ospath.basename(file_path),
             up_size,
             "helper-pool" if use_hyper else "primary-wzgram",
-            ("user-helper" if hyper_user_only else "bot-helper") if use_hyper else ("user" if user_session else "bot"),
+            ("mixed-helpers" if hyper_user_only is None else "user-helper" if hyper_user_only else "bot-helper") if use_hyper else ("user" if user_session else "bot"),
         )
         try:
             if use_hyper:
@@ -282,7 +284,7 @@ class HypertgUpload(HypertgTransfer):
         try:
             LOGGER.info(
                 "Telegram helper upload selected: %s | client=%s | account=%s",
-                ospath.basename(file_path), idx, "user" if user_only else "bot",
+                ospath.basename(file_path), idx, "user" if idx < 0 else "bot",
             )
             kwargs = {
                 "chat_id": chat_id,
@@ -335,7 +337,13 @@ class HypertgUpload(HypertgTransfer):
                 gate = client._amaterasu_hyper_upload_gate = Semaphore(1 if premium else 2)
             async with gate:
                 sent = await self._try_send(key, client, kwargs)
+            if sent is not None:
+                client._amaterasu_hyper_retry_until = 0
             return sent
+        except Exception as error:
+            if is_wzgram_media_session_failure(error):
+                client._amaterasu_hyper_retry_until = monotonic() + WZGRAM_MEDIA_RESET_COOLDOWN
+            raise
         finally:
             self.work_loads[idx] = max(0, self.work_loads.get(idx, 0) - 1)
 

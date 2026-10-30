@@ -533,6 +533,108 @@ async def test_premium_transport_timeout_reduces_rate_and_releases_the_window(mo
     assert session._amaterasu_media_failed is True
 
 
+async def test_native_upload_moves_failed_socket_parts_to_healthy_siblings(monkeypatch):
+    monkeypatch.setenv("WZGRAM_UPLOAD_RATE_BOT", "100000")
+    monkeypatch.delenv("WZGRAM_UPLOAD_POOL_BOT", raising=False)
+    client = upload_client(premium=False)
+    budget = client.read_ahead_slots
+    available = budget._value
+    ready = asyncio.Event()
+    ready.set()
+    accepted = {}
+    bad_calls = 0
+
+    async def failed(_query, **_kwargs):
+        nonlocal bad_calls
+        bad_calls += 1
+        await asyncio.sleep(0)
+        raise TimeoutError("Request timed out")
+
+    async def healthy(query, **_kwargs):
+        await asyncio.sleep(0)
+        key = query.file_id, query.file_part
+        accepted[key] = accepted.get(key, 0) + 1
+        return True
+
+    sessions = [SimpleNamespace(
+        client=client, dc_id=5, is_started=ready,
+        invoke=failed if i == 0 else healthy, stop=AsyncMock(),
+    ) for i in range(8)]
+    client.media_session_pools[5] = sessions
+    _configure_wzgram_media_pool(sessions)
+
+    @asynccontextmanager
+    async def media_pool(dc_id, size):
+        assert (dc_id, size) == (5, 8)
+
+        async def pool():
+            return sessions
+
+        yield asyncio.create_task(pool())
+
+    client._media_pool = media_pool
+    previous = asyncio.all_tasks()
+    data = b"x" * (12 * 1024 * 1024)
+    result = await asyncio.wait_for(client.save_file(BytesIO(data)), timeout=5)
+    assert result.parts == 24
+    assert len(accepted) == 24
+    assert set(accepted.values()) == {1}
+    assert {key[0] for key in accepted} == {result.id}
+    assert 1 <= bad_calls <= 2
+    assert sessions[0]._amaterasu_media_failed
+    assert all(getattr(session, "_amaterasu_upload_active", 0) == 0 for session in sessions)
+    assert client._amaterasu_upload_pacer.in_flight._value == 16
+    assert budget._value == available
+    assert not (asyncio.all_tasks() - previous)
+
+
+@pytest.mark.parametrize("invalid", ["account", "dc", "stopped", "failed"])
+async def test_upload_part_recovery_never_uses_an_ineligible_socket(invalid):
+    client = upload_client(premium=False)
+    ready = asyncio.Event()
+    ready.set()
+    broken = SimpleNamespace(
+        client=client, dc_id=5, is_started=ready, _amaterasu_media_failed=True,
+        invoke=AsyncMock(side_effect=TimeoutError("still broken")),
+    )
+    candidate = SimpleNamespace(client=client, dc_id=5, is_started=ready, invoke=AsyncMock(return_value=True))
+    _configure_wzgram_media_pool([broken, candidate])
+    original = candidate._amaterasu_upload_original
+    if invalid == "account":
+        candidate.client = upload_client(premium=False)
+    elif invalid == "dc":
+        candidate.dc_id = 2
+    elif invalid == "stopped":
+        candidate.is_started = asyncio.Event()
+    else:
+        candidate._amaterasu_media_failed = True
+    client.media_session_pools[5] = [broken, candidate]
+    part = pyrogram.raw.functions.upload.SaveFilePart(file_id=123, file_part=0, bytes=b"part")
+    with pytest.raises(TimeoutError, match="still broken"):
+        await broken.invoke(part)
+    original.assert_not_awaited()
+    assert client._amaterasu_upload_pacer.in_flight._value == 16
+
+
+async def test_next_upload_pool_request_removes_failed_sockets_only(monkeypatch):
+    client = upload_client(premium=False)
+    ready = asyncio.Event()
+    ready.set()
+    bad = SimpleNamespace(is_started=ready, _amaterasu_media_failed=True, stop=AsyncMock())
+    healthy = SimpleNamespace(is_started=ready, stop=AsyncMock())
+    client.media_session_pools[5] = [bad, healthy]
+
+    async def native_pool(_client, dc_id, requested_size):
+        assert (dc_id, requested_size) == (5, 1)
+        assert client.media_session_pools[5] == [healthy]
+        return [healthy]
+
+    monkeypatch.setattr(Client, "_get_media_session_pool", native_pool)
+    assert await client._get_media_session_pool(5, 1) == [healthy]
+    bad.stop.assert_awaited_once()
+    healthy.stop.assert_not_awaited()
+
+
 async def test_premium_explicit_pool_override_is_kept(monkeypatch, upload_context):
     monkeypatch.setenv("WZGRAM_UPLOAD_POOL_PREMIUM", "3")
     client = upload_client(premium=True)

@@ -717,11 +717,12 @@ How it is used:
 
 | Path | Requirement | Behavior |
 |---|---|---|
-| HyperDL | `USE_HYPER=True`, `HELPER_TOKENS`, `LEECH_DUMP_CHAT` | Files at least 10 MiB are copied to `LEECH_DUMP_CHAT`, then helper bots download different byte ranges in parallel; WZGram handles overflow and fallback |
-| HyperUP | `USE_HYPER=True`, `HELPER_TOKENS`, `LEECH_DUMP_CHAT` | Bot-sized files above 10 MiB use the least-loaded helper bot first; user-only mode and larger files keep user-account routing. Private chats and unavailable helpers use the normal path |
+| HyperDL | `USE_HYPER=True`, `HELPER_TOKENS`, `LEECH_DUMP_CHAT` | Files at least 10 MiB are copied to `LEECH_DUMP_CHAT`; helpers pull aligned blocks of up to 32 MiB from a shared queue. Fast helpers take more blocks while slow or failed helpers hold up less work. WZGram handles overflow and fallback |
+| HyperUP | `USE_HYPER=True`, `HELPER_TOKENS`, `LEECH_DUMP_CHAT` | Files above 10 MiB use eligible helpers: bot mode uses bots, user mode uses users, and both mode balances bot-sized files across both account types. Files above the bot size limit retain user routing. Private chats and unavailable helpers use the normal path |
 | Normal transfer | Missing helper bots, missing dump chat, or `USE_HYPER=False` | Amaterasu uses the regular Telegram download/upload path |
 
 HyperUP assigns each file to one helper account and uploads its parts in parallel. Concurrent files spread across the available helpers.
+Part retries can move from a failed connection to a healthy connection belonging to the same account and data center. A failed whole-file attempt temporarily deprioritizes that helper so the next attempt can use another eligible account. HyperDL retains each helper's learned request window and flood-backoff timing between blocks.
 Automatic upload preparation scales to the eligible helper count (3-16 files). Set `UPLOAD_PARALLELISM=0` to enable this on an existing installation; positive values retain your chosen limit. Helpers with active upload cooldowns are deprioritized, and simultaneous sends share the same account cooldown. Telegram can still impose FloodWaits; no helper count guarantees their absence.
 
 Open `/bsetting` → **Helper Bots**, or **HELPER_TOKENS → Manage Helpers**, to see configured/connected counts, busy helpers, cooldowns, and per-bot job assignments. Use **Refresh** for a current snapshot. **Remove** asks for confirmation and saves the token/proxy-list change to the connected database; restart to apply it without interrupting active transfers. Environment-defined helper values must also be updated in the deployment. Removing a helper does not remove the same token from separately configured `MULTI_TOKEN` workers.

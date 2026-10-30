@@ -113,6 +113,7 @@ def _helper_bot_rows():
         jobs = hyper_jobs + stream_jobs
         deadline = max(
             getattr(client, "_amaterasu_send_flood_until", 0),
+            getattr(client, "_amaterasu_hyper_retry_until", 0),
             getattr(getattr(client, "_amaterasu_upload_pacer", None), "flood_until", 0),
             getattr(getattr(client, "_amaterasu_download_pacer", None), "flood_until", 0),
         )

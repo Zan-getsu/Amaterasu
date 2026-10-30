@@ -13,7 +13,11 @@ from pyrogram import raw
 from pyrogram.errors import FloodWait
 
 from bot.core.config_manager import Config
-from bot.core.tg_client import TgClient
+from bot.core.tg_client import (
+    WZGRAM_MEDIA_RESET_COOLDOWN,
+    TgClient,
+    is_wzgram_media_session_failure,
+)
 from bot.helper.ext_utils import hyperdl_utils
 from bot.helper.ext_utils.hyperdl_utils import HypertgDownload
 from bot.helper.telegram_helper import tg_transfer
@@ -35,6 +39,8 @@ hyperul_utils.__dict__.update(
     Semaphore=asyncio.Semaphore, Lock=asyncio.Lock, sleep=asyncio.sleep,
     monotonic=monotonic, time=time.time, ospath=os.path,
     LOGGER=logging.getLogger(__name__), FloodWait=FloodWait, FloodPremiumWait=FloodWait,
+    WZGRAM_MEDIA_RESET_COOLDOWN=WZGRAM_MEDIA_RESET_COOLDOWN,
+    is_wzgram_media_session_failure=is_wzgram_media_session_failure,
 )
 HypertgUpload = _load_scheduling_class(
     "bot/helper/ext_utils/hyperul_utils.py", "HypertgUpload",
@@ -167,6 +173,52 @@ def test_helper_selection_prefers_healthy_accounts_without_crossing_account_type
     uploader.clients[1]._amaterasu_upload_pacer = SimpleNamespace(flood_until=monotonic() + 60)
     assert uploader._pick_client(user_only=False) == 2
     assert uploader._pick_client(user_only=True) == -1
+
+
+@pytest.mark.asyncio
+async def test_failed_helper_is_deprioritized_for_the_next_file_attempt():
+    clients = {1: SimpleNamespace(), 2: SimpleNamespace(), -1: SimpleNamespace()}
+    uploader = object.__new__(HypertgUpload)
+    uploader.clients = clients
+    uploader.work_loads = dict.fromkeys(clients, 0)
+    uploader._progress = AsyncMock()
+    uploader._try_send = AsyncMock(side_effect=[TimeoutError("bad media socket"), "sent"])
+    with pytest.raises(TimeoutError):
+        await uploader._hyper_send("file", "documents", None, "", -1001, None)
+    assert clients[1]._amaterasu_hyper_retry_until > monotonic()
+    assert await uploader._hyper_send("file", "documents", None, "", -1001, None) == "sent"
+    assert uploader._try_send.call_args.args[1] is clients[2]
+    assert set(uploader.work_loads.values()) == {0}
+
+
+@pytest.mark.asyncio
+async def test_mixed_helper_uploads_use_bot_and_user_accounts():
+    uploader = object.__new__(HypertgUpload)
+    uploader.clients = {1: SimpleNamespace(), -1: SimpleNamespace()}
+    uploader.work_loads = {1: 0, -1: 0}
+    uploader._progress = AsyncMock()
+    entered, release = asyncio.Event(), asyncio.Event()
+    selected = []
+
+    async def send(_key, client, _kwargs):
+        selected.append(client)
+        if len(selected) == 2:
+            entered.set()
+        await release.wait()
+        return "sent"
+
+    uploader._try_send = send
+    tasks = [asyncio.create_task(uploader._hyper_send(
+        "file", "documents", None, "", -1001, None, user_only=None,
+    )) for _ in range(2)]
+    try:
+        await asyncio.wait_for(entered.wait(), 1)
+        assert selected[0] is uploader.clients[1]
+        assert selected[1] is uploader.clients[-1]
+    finally:
+        release.set()
+        await asyncio.gather(*tasks)
+    assert uploader.work_loads == {1: 0, -1: 0}
 
 
 @pytest.mark.asyncio

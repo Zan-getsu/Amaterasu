@@ -1863,6 +1863,7 @@ def test_rar_numeric_multipart_first_volume_is_detected():
     (2097152000, [2, -1], False, True, "bot-helper"),
     (2097152001, [2, -1], False, True, "premium"),
     (1700 * 1024 * 1024, [2, -1], True, True, "user-helper"),
+    (1700 * 1024 * 1024, [2, -1], False, True, "mixed-helpers"),
     (1700 * 1024 * 1024, [-1], False, True, "direct"),
     (1700 * 1024 * 1024, [], False, True, "direct"),
     (1700 * 1024 * 1024, [2], False, False, "direct"),
@@ -1883,14 +1884,17 @@ async def test_upload_routes_eligible_files_to_matching_helpers_first(size, help
     uploader = type("UploadRoute", (), {"upload": method})()
     uploader._cancel = asyncio.Event()
     uploader.clients = dict.fromkeys(helper_keys, object())
-    uploader._listener = SimpleNamespace(up_dest=123 if expected == "private" else -100123)
+    uploader._listener = SimpleNamespace(
+        up_dest=123 if expected == "private" else -100123,
+        transmission_mode="both" if expected == "mixed-helpers" else "bot",
+    )
     uploader._hyper_send = AsyncMock(return_value="sent")
     uploader._direct_send = AsyncMock(return_value="sent")
     reply = SimpleNamespace(chat=SimpleNamespace(id=uploader._listener.up_dest))
     assert await uploader.upload("file.zip", "caption", reply, 42, user_session=user_session, media_type="documents") == "sent"
-    if expected in {"bot-helper", "user-helper"}:
+    if expected in {"bot-helper", "user-helper", "mixed-helpers"}:
         uploader._hyper_send.assert_awaited_once()
-        assert uploader._hyper_send.call_args.kwargs["user_only"] == (expected == "user-helper")
+        assert uploader._hyper_send.call_args.kwargs["user_only"] is (None if expected == "mixed-helpers" else expected == "user-helper")
         uploader._direct_send.assert_not_awaited()
         assert uploader.last_backend == "HyperUP"
     else:
@@ -1900,7 +1904,7 @@ async def test_upload_routes_eligible_files_to_matching_helpers_first(size, help
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("user_only,expected", [(False, 2), (True, -1)])
+@pytest.mark.parametrize("user_only,expected", [(False, 2), (True, -1), (None, -1)])
 async def test_helper_upload_selection_preserves_account_type_and_loads(user_only, expected):
     uploader = _helper_upload_sender()
     before = dict(uploader.work_loads)
@@ -2134,6 +2138,194 @@ async def test_hyperdl_cancellation_joins_pending_requests_before_closing_sessio
     downloader._pwrite.assert_not_awaited()
     assert downloader._cancel.is_set()
     assert not (asyncio.all_tasks() - previous)
+
+
+@pytest.mark.asyncio
+async def test_hyperdl_cancellation_joins_retry_parts_before_closing_sessions(tmp_path, monkeypatch):
+    from bot.helper.ext_utils import hyperdl_utils
+
+    downloader = object.__new__(hyperdl_utils.HypertgDownload)
+    downloader.clients = {i: SimpleNamespace(me=SimpleNamespace(username=f"helper-{i}")) for i in (1, 2)}
+    downloader.file_size = 2 * 1024 * 1024
+    downloader.chunk_size = 1024 * 1024
+    downloader.pipeline_depth = 4
+    downloader._pool = SimpleNamespace(sessions_per_client=3)
+    downloader._cancel = asyncio.Event()
+    downloader._cdn_sessions, downloader._cdn_info = {}, {}
+    downloader.work_loads = {1: 0, 2: 0}
+    downloader._resolve_file_refs = AsyncMock(return_value={1: SimpleNamespace(dc_id=5), 2: SimpleNamespace(dc_id=5)})
+    downloader._warmup = AsyncMock()
+    entered = asyncio.Event()
+    active = 0
+    calls = []
+
+    async def part(start, _end, _path, client_id, *_args):
+        nonlocal active
+        calls.append((start, client_id))
+        if client_id == 1:
+            return {0}
+        if start:
+            return set()
+        active += 1
+        entered.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            active -= 1
+
+    async def close():
+        assert active == 0, "Retry tasks must stop before their media sessions close"
+
+    downloader._part, downloader._close_all = part, AsyncMock(side_effect=close)
+    monkeypatch.setattr(hyperdl_utils, "sleep", AsyncMock())
+    previous = asyncio.all_tasks()
+    transfer = asyncio.create_task(downloader._handle_download_with_clients([1, 2], str(tmp_path / "cancel.bin")))
+    try:
+        await asyncio.wait_for(entered.wait(), 1)
+        await asyncio.wait_for(downloader.cancel(), 1)
+        assert await asyncio.wait_for(transfer, 1) is None
+    finally:
+        transfer.cancel()
+        await asyncio.gather(transfer, return_exceptions=True)
+    assert calls == [(0, 1), (1024 * 1024, 2), (0, 2)]
+    assert active == 0
+    assert all(task.done() for task in downloader._tasks)
+    assert not (asyncio.all_tasks() - previous)
+
+
+@pytest.mark.asyncio
+async def test_hyperdl_fast_helper_takes_more_blocks_while_slow_helper_is_busy(tmp_path, monkeypatch):
+    from bot.helper.ext_utils import hyperdl_utils
+
+    monkeypatch.setattr(hyperdl_utils, "MB", 1024)
+    payload = bytes(i % 251 for i in range(257 * 1024 + 17))
+    downloader = object.__new__(hyperdl_utils.HypertgDownload)
+    downloader.clients = {i: SimpleNamespace(me=SimpleNamespace(username=f"helper-{i}")) for i in (1, 2)}
+    downloader.file_size, downloader.chunk_size = len(payload), 1024
+    downloader.pipeline_depth = 4
+    downloader._pool = SimpleNamespace(sessions_per_client=3)
+    downloader._cancel = asyncio.Event()
+    downloader._cdn_sessions, downloader._cdn_info = {}, {}
+    downloader._obj = SimpleNamespace(_processed_bytes=0)
+    downloader._resolve_file_refs = AsyncMock(return_value={1: SimpleNamespace(dc_id=5), 2: SimpleNamespace(dc_id=5)})
+    downloader._warmup, downloader._close_all = AsyncMock(), AsyncMock()
+    entered, fast_done, release = asyncio.Event(), asyncio.Event(), asyncio.Event()
+    blocks = {1: [], 2: []}
+    active = {1: 0, 2: 0}
+
+    async def part(start, end, path, client_id, *_args):
+        blocks[client_id].append((start, end))
+        active[client_id] += 1
+        assert active[client_id] == 1
+        try:
+            if client_id == 1:
+                entered.set()
+                await release.wait()
+            with Path(path).open("r+b") as handle:
+                handle.seek(start)
+                handle.write(payload[start:end])
+            downloader._obj._processed_bytes += end - start
+            if end == len(payload):
+                fast_done.set()
+            await asyncio.sleep(0)
+            return set()
+        finally:
+            active[client_id] -= 1
+
+    downloader._part = part
+    final = str(tmp_path / "balanced.bin")
+    previous = asyncio.all_tasks()
+    task = asyncio.create_task(downloader._handle_download_with_clients([1, 2], final))
+    try:
+        await asyncio.wait_for(entered.wait(), 1)
+        await asyncio.wait_for(fast_done.wait(), 1)
+        assert len(blocks[1]) == 1
+        assert len(blocks[2]) == 8
+        assert len(downloader._tasks) == 2
+    finally:
+        release.set()
+        result = await asyncio.wait_for(task, 2)
+    assert result == final
+    assert Path(final).read_bytes() == payload
+    assert downloader._obj._processed_bytes == len(payload)
+    assert all(end - start <= 32 * 1024 for ranges in blocks.values() for start, end in ranges)
+    assert not (asyncio.all_tasks() - previous)
+
+
+@pytest.mark.asyncio
+async def test_hyperdl_block_boundary_failures_retry_only_missing_bytes(tmp_path, monkeypatch):
+    from bot.helper.ext_utils import hyperdl_utils
+
+    monkeypatch.setattr(hyperdl_utils, "MB", 1024)
+    monkeypatch.setattr(hyperdl_utils, "sleep", AsyncMock())
+    payload = bytes(i % 251 for i in range(97 * 1024 + 17))
+    downloader = object.__new__(hyperdl_utils.HypertgDownload)
+    downloader.clients = {i: SimpleNamespace(me=SimpleNamespace(username=f"helper-{i}")) for i in (1, 2)}
+    downloader.file_size, downloader.chunk_size = len(payload), 1024
+    downloader.pipeline_depth = 4
+    downloader._pool = SimpleNamespace(sessions_per_client=3)
+    downloader._cancel = asyncio.Event()
+    downloader._cdn_sessions, downloader._cdn_info = {}, {}
+    downloader._obj = SimpleNamespace(_processed_bytes=0)
+    downloader.work_loads = {1: 0, 2: 0}
+    downloader._resolve_file_refs = AsyncMock(return_value={1: SimpleNamespace(dc_id=5), 2: SimpleNamespace(dc_id=5)})
+    downloader._warmup, downloader._close_all = AsyncMock(), AsyncMock()
+    calls = []
+
+    async def part(start, end, path, client_id, *_args):
+        calls.append((start, end, client_id))
+        if client_id == 1:
+            assert start == 0
+            start += 1024
+        with Path(path).open("r+b") as handle:
+            handle.seek(start)
+            handle.write(payload[start:end])
+        downloader._obj._processed_bytes += end - start
+        await asyncio.sleep(0)
+        return {0} if client_id == 1 else set()
+
+    downloader._part = part
+    final = str(tmp_path / "retried.bin")
+    assert await downloader._handle_download_with_clients([1, 2], final) == final
+    assert Path(final).read_bytes() == payload
+    assert sum(client_id == 1 for _, _, client_id in calls) == 1
+    assert calls[-1] == (0, 1024, 2)
+    assert downloader._obj._processed_bytes == len(payload)
+
+
+@pytest.mark.asyncio
+async def test_hyperdl_blocks_preserve_the_learned_window_and_flood_quiet_period(monkeypatch):
+    from bot.helper.ext_utils import hyperdl_utils
+
+    downloader = _pipeline_downloader()
+    downloader.pipeline_depth, downloader._MAX_PIPELINE_MULT = 4, 4
+    downloader._pool = SimpleNamespace(sessions_per_client=3)
+    downloader._pipeline_state = {1: (8, 100.0)}
+    monkeypatch.setattr(hyperdl_utils, "monotonic", lambda: 105.0)
+    active = peak = 0
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    async def request(_session, _client, _loc, _offset, size, _attempt):
+        nonlocal active, peak
+        active += 1
+        peak = max(peak, active)
+        if active == 8:
+            entered.set()
+        try:
+            await release.wait()
+            return b"x" * size
+        finally:
+            active -= 1
+
+    downloader._do_req = request
+    task = asyncio.create_task(downloader._pipeline_fetch(1, "loc", 0, 32 * 1024, SimpleNamespace(dc_id=5), 1024, 1))
+    try:
+        await asyncio.wait_for(entered.wait(), 1)
+        assert peak == 8
+    finally:
+        release.set()
+        assert await asyncio.wait_for(task, 1) == set()
+    assert downloader._pipeline_state == {1: (8, 100.0)}
 
 
 @pytest.mark.asyncio
@@ -2710,6 +2902,7 @@ async def test_hyperdl_completed_progress_excludes_rewritten_retry_bytes(tmp_pat
     downloader.pipeline_depth = 4
     downloader._pool = SimpleNamespace(sessions_per_client=3)
     downloader._tasks = []
+    downloader._cancel = asyncio.Event()
     downloader._obj = SimpleNamespace(_processed_bytes=0)
     downloader.clients = {1: SimpleNamespace(me=SimpleNamespace(username="helper"))}
     downloader._resolve_file_refs = AsyncMock(return_value={1: SimpleNamespace(dc_id=5)})

@@ -159,6 +159,21 @@ class _WzgramUploadPacer:
                     # Another in-flight RPC can extend the cooldown while admission waits.
                     if self.flood_until <= monotonic():
                         break
+            if _session is not None and getattr(_session, "_amaterasu_media_failed", False):
+                # Native workers retain their original socket across part retries.
+                client = _session.client
+                dc_id = getattr(_session, "dc_id", None)
+                healthy = [
+                    session for session in getattr(client, "media_session_pools", {}).get(dc_id, [])
+                    if session.client is client and session.dc_id == dc_id
+                    and getattr(session, "_amaterasu_upload_pacer", None) is self
+                    and session.is_started.is_set()
+                    and not getattr(session, "_amaterasu_media_failed", False)
+                ]
+                if healthy:
+                    _session = min(healthy, key=lambda session: getattr(session, "_amaterasu_upload_active", 0))
+                    # Call the original RPC method to avoid acquiring this pacer twice.
+                    operation = _session._amaterasu_upload_original
             try:
                 if _session is not None:
                     state = _UPLOAD_STATE.get()
@@ -210,6 +225,7 @@ def _configure_wzgram_media_pool(pool):
             if pacer is None:
                 pacer = client._amaterasu_upload_pacer = _WzgramUploadPacer(client)
             # Native part retries call session.invoke directly, bypassing the file pacer.
+            session._amaterasu_upload_original = session.invoke
             session.invoke = partial(pacer.invoke, session.invoke, _session=session)
             session._amaterasu_upload_pacer = pacer
     return pool
@@ -421,6 +437,9 @@ class WzgramClient(Client):
             raise
 
     async def _get_media_session_pool(self, dc_id, requested_size):
+        if any(getattr(session, "_amaterasu_media_failed", False)
+               for session in self.media_session_pools.get(dc_id, [])):
+            await self.reset_media_session_pool(dc_id, reason="failed upload socket")
         if _UPLOAD_STATE.get() is not None and getattr(getattr(self, "me", None), "is_premium", False):
             # Use separate standard-DC sockets; never put file parts on the command socket.
             size = min(requested_size, max(1, int(getenv("WZGRAM_UPLOAD_POOL_PREMIUM", "8"))))
