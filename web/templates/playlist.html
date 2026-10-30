@@ -4,6 +4,7 @@
 
 {% block extra_css %}
 <link rel="stylesheet" href="/static/css/player.css?v={{ asset_version }}" />
+<link rel="stylesheet" href="/static/css/library.css" />
 {% endblock %}
 
 {% block content %}
@@ -20,6 +21,13 @@
     </a>
   </header>
 
+  <section class="zip-panel" id="playlist-zip" data-url="/playlist/{{ playlist_token }}/zip" aria-label="Download playlist as ZIP">
+    <button class="zip-button" type="button">Prepare playlist ZIP</button>
+    <p role="status" aria-live="polite">Prepare one ZIP before downloading. Temporary ZIPs share the server’s cache space and expire after 24 hours.</p>
+    <progress max="1" hidden aria-label="ZIP preparation progress"></progress>
+    <a hidden download>Download ZIP</a>
+    <noscript><p>JavaScript is needed to prepare a ZIP. Individual downloads remain available below.</p></noscript>
+  </section>
   <section class="playlist-grid" aria-label="Playlist files">
     {% for item in items %}
     <article class="playlist-card">
@@ -39,3 +47,4 @@
   </section>
 </div>
 {% endblock %}
+{% block extra_js %}<script src="/static/js/playlist-zip.js" defer></script>{% endblock %}

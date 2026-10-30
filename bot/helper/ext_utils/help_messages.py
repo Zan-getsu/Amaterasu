@@ -695,7 +695,7 @@ def get_help_string():
                 f"{cmd_str}: Create, replace, or download your private Google Drive token.pickle."
             )
         elif key == "FileToLink":
-            help_lines.append(f"{cmd_str} [reply|-i count|status]: Generate FileToLink links or show streaming status.")
+            help_lines.append(f"{cmd_str} [reply|-i count|status]: Generate media links, playlists with ZIP downloads, or show streaming totals. Owner/sudo in private chat: {cmd_str} library, {cmd_str} index LAST_POST_LINK [rescan], {cmd_str} cancelindex.")
         elif key == "Rename":
             help_lines.append(f"{cmd_str}: Toggle Rename Mode (automatically prompts you to rename files during PM sends or leech tasks).")
         elif key == "AutoRename":

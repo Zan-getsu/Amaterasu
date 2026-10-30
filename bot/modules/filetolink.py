@@ -78,9 +78,9 @@ def _cache_usage():
     total_size = 0
     file_count = 0
     with suppress(OSError):
-        for path in cache_dir.iterdir():
+        for path in cache_dir.rglob('*'):
             with suppress(OSError):
-                if path.is_file() and not path.name.endswith(".part"):
+                if path.is_file() and path.suffix not in {'.part', '.json'}:
                     total_size += path.stat().st_size
                     file_count += 1
     return cache_dir, file_count, total_size
@@ -205,6 +205,13 @@ def build_filetolink_status(
         f"├─ {'Speed':<9}: ↓ {get_readable_file_size(_safe_number(snapshot.get('aggregate_speed')))}/s\n"
         f"└─ {'Cache':<9}: {cache_value}\n</pre>"
     )
+    totals = snapshot.get('totals') or {}
+    if totals:
+        metrics += (f"\n<b>Lifetime delivery</b>: {get_readable_file_size(_safe_count(totals.get('bytes')))}"
+                    f" · {_safe_count(totals.get('downloads'))} files"
+                    f" · {_safe_count(totals.get('zip_downloads'))} ZIPs")
+        if totals.get('persistence') == 'unavailable':
+            metrics += '\n<i>Totals are not saved: database unavailable.</i>'
 
     # /status is normally a media message, so Telegram applies its caption
     # limit. STATUS_LIMIT remains the maximum number of transfers per page;
@@ -463,6 +470,10 @@ async def process_media_message(client, message, reply_to_msg):
 
 async def link_command_handler(client, message):
     input_list = (message.text or "").split()
+    if len(input_list) > 1 and input_list[1].lower() in {"library", "index", "cancelindex"}:
+        from bot.modules.filetolink_library import library_command
+        await library_command(client, message, input_list)
+        return
     if len(input_list) > 1 and input_list[1].lower() in {"status", "stats", "health"}:
         await send_filetolink_status(message)
         return

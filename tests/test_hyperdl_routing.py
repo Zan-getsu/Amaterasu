@@ -2054,7 +2054,7 @@ def _pipeline_downloader():
     downloader.pipeline_depth = downloader._MIN_PIPELINE = downloader._MAX_PIPELINE_MULT = 1
     downloader._cancel = asyncio.Event()
     downloader._cdn_info = {}
-    downloader._get_session = AsyncMock(return_value=object())
+    downloader._get_session = AsyncMock(return_value=SimpleNamespace())
     downloader._obj = SimpleNamespace(_processed_bytes=0)
     downloader._pwrite = AsyncMock()
     return downloader
@@ -2328,6 +2328,187 @@ async def test_hyperdl_blocks_preserve_the_learned_window_and_flood_quiet_period
     assert downloader._pipeline_state == {1: (8, 100.0)}
 
 
+@pytest.fixture
+def recovery_download(tmp_path, monkeypatch):
+    from bot.helper.ext_utils import hyperdl_utils
+
+    monkeypatch.setattr(hyperdl_utils, "MB", 1024)
+    monkeypatch.setattr(hyperdl_utils, "sleep", AsyncMock())
+    payload = bytes(i % 251 for i in range(257 * 1024 + 17))
+    downloader = object.__new__(hyperdl_utils.HypertgDownload)
+    downloader.clients = {i: SimpleNamespace(me=SimpleNamespace(username=f"helper-{i}")) for i in range(1, 7)}
+    downloader.file_size, downloader.chunk_size = len(payload), 1024
+    downloader.pipeline_depth = 4
+    downloader._pool = SimpleNamespace(sessions_per_client=3)
+    downloader._cancel = asyncio.Event()
+    downloader._cdn_sessions, downloader._cdn_info = {}, {}
+    downloader._obj = SimpleNamespace(_processed_bytes=0)
+    downloader.work_loads = dict.fromkeys(downloader.clients, 0)
+    downloader._resolve_file_refs = AsyncMock(return_value={i: SimpleNamespace(dc_id=5) for i in downloader.clients})
+    downloader._warmup, downloader._close_all = AsyncMock(), AsyncMock()
+    return downloader, payload, str(tmp_path / "recovered.bin")
+
+
+@pytest.mark.asyncio
+async def test_one_healthy_helper_retries_all_blocks_without_spending_rounds_on_unattempted_work(recovery_download):
+    downloader, payload, final = recovery_download
+    calls, active, peaks = [], {}, {}
+
+    async def part(start, end, path, client_id, *_args):
+        calls.append((start, end, client_id))
+        active[client_id] = active.get(client_id, 0) + 1
+        peaks[client_id] = max(peaks.get(client_id, 0), active[client_id])
+        try:
+            write_start = start + 1024 if client_id < 6 else start
+            with Path(path).open("r+b") as handle:
+                handle.seek(write_start)
+                handle.write(payload[write_start:end])
+            downloader._obj._processed_bytes += end - write_start
+            await asyncio.sleep(0)
+            return {start} if client_id < 6 else set()
+        finally:
+            active[client_id] -= 1
+
+    downloader._part = part
+    assert await downloader._handle_download_with_clients(list(downloader.clients), final) == final
+    assert Path(final).read_bytes() == payload
+    retried = {(start, end) for start, end, client_id in calls if client_id == 6 and end - start == 1024}
+    assert retried == {(i * 32 * 1024, i * 32 * 1024 + 1024) for i in range(5)}
+    assert set(peaks.values()) == {1}
+    assert downloader._obj._processed_bytes == len(payload)
+
+
+@pytest.mark.asyncio
+async def test_sparse_retry_holes_do_not_redownload_good_bytes(recovery_download):
+    downloader, payload, final = recovery_download
+    retries = []
+
+    async def part(start, end, path, client_id, *_args):
+        if client_id == 1:
+            assert start == 0
+            with Path(path).open("r+b") as handle:
+                handle.seek(1024)
+                handle.write(payload[1024:2048])
+                handle.seek(3072)
+                handle.write(payload[3072:end])
+            return {0, 2048}
+        if start < 32 * 1024:
+            retries.append((start, end))
+        with Path(path).open("r+b") as handle:
+            handle.seek(start)
+            handle.write(payload[start:end])
+        await asyncio.sleep(0)
+        return set()
+
+    downloader._part = part
+    assert await downloader._handle_download_with_clients(list(downloader.clients), final) == final
+    assert Path(final).read_bytes() == payload
+    assert sorted(retries) == [(0, 1024), (2048, 3072)]
+
+
+@pytest.mark.asyncio
+async def test_exhausted_helpers_report_actual_retry_round_count(recovery_download, caplog):
+    downloader, _payload, final = recovery_download
+
+    async def fail(start, *_args):
+        return {start}
+
+    downloader._part = fail
+    assert await downloader._handle_download_with_clients(list(downloader.clients), final) is None
+    assert "after 0 retry rounds" in caplog.text
+    assert not Path(final).exists()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", ["sentinel", "exception"])
+async def test_simultaneous_transient_timeouts_do_not_retire_helper_before_offset_retries(monkeypatch, failure):
+    from bot.helper.ext_utils import hyperdl_utils
+
+    downloader = _pipeline_downloader()
+    downloader.pipeline_depth = 4
+    attempts = {}
+
+    async def request(_session, _client, _location, offset, size, _attempt):
+        attempts[offset] = attempts.get(offset, 0) + 1
+        await asyncio.sleep(0)
+        if attempts[offset] == 1:
+            if failure == "exception":
+                raise TimeoutError("one stalled socket")
+            return None, -2
+        return b"x" * size
+
+    async def pause(_seconds):
+        await asyncio.sleep(0)
+
+    monkeypatch.setattr(hyperdl_utils, "sleep", pause)
+    downloader._do_req = request
+    assert await downloader._pipeline_fetch(1, "loc", 0, 16 * 1024, SimpleNamespace(dc_id=5), 1024, 1) == set()
+    assert set(attempts.values()) == {2}
+    assert downloader._obj._processed_bytes == 16 * 1024
+
+
+@pytest.mark.asyncio
+async def test_persistent_read_failure_remains_bounded_and_returns_missing_offsets(monkeypatch):
+    from bot.helper.ext_utils import hyperdl_utils
+
+    downloader = _pipeline_downloader()
+    downloader.pipeline_depth = 4
+    downloader._do_req = AsyncMock(return_value=(None, -2))
+    monkeypatch.setattr(hyperdl_utils, "sleep", AsyncMock())
+    failed = await downloader._pipeline_fetch(1, "loc", 0, 16 * 1024, SimpleNamespace(dc_id=5), 1024, 1)
+    assert failed == set(range(0, 16 * 1024, 1024))
+    assert downloader._do_req.await_count <= 12
+    assert max(call.args[-1] for call in downloader._do_req.await_args_list) == 2
+    downloader._pwrite.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_failed_pipeline_observes_every_completed_request_exception(monkeypatch):
+    from bot.helper.ext_utils import hyperdl_utils
+
+    downloader = _pipeline_downloader()
+    downloader.pipeline_depth = 4
+    requests = []
+
+    def schedule(awaitable):
+        task = asyncio.ensure_future(awaitable)
+        requests.append(task)
+        return task
+
+    async def request(*_args):
+        await asyncio.sleep(0)
+        raise ValueError("permanent read failure")
+
+    monkeypatch.setattr(hyperdl_utils, "ensure_future", schedule)
+    downloader._do_req = request
+    with pytest.raises(ValueError, match="permanent read failure"):
+        await downloader._pipeline_fetch(1, "loc", 0, 4 * 1024, SimpleNamespace(dc_id=5), 1024, 1)
+    assert len(requests) == 4
+    assert all(task.done() and not task._log_traceback for task in requests)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("reject_replacement", [False, True])
+async def test_hyperdl_pool_replaces_failed_socket_and_preserves_healthy_sibling(reject_replacement):
+    from bot.helper.telegram_helper.tg_transfer import MtprotoPool
+
+    ready = asyncio.Event()
+    ready.set()
+    broken, healthy, replacement = [SimpleNamespace(is_started=ready, stop=AsyncMock()) for _ in range(3)]
+    outcomes = [broken, healthy, ConnectionError("replacement rejected") if reject_replacement else replacement]
+    create = AsyncMock(side_effect=outcomes)
+    pool = MtprotoPool({1: SimpleNamespace(get_session=create)}, sessions_per_client=2)
+    assert await pool.get_session(1, 5) is broken
+    assert await pool.get_session(1, 5) is healthy
+    broken._amaterasu_media_failed = True
+    assert await pool.get_session(1, 5) is (healthy if reject_replacement else replacement)
+    broken.stop.assert_awaited_once()
+    healthy.stop.assert_not_awaited()
+    assert create.await_count == 3
+    await pool.stop()
+    healthy.stop.assert_awaited_once()
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("user_session", [False, True])
 async def test_normal_upload_gate_uses_file_account_for_flood_cooldown(user_session):
@@ -2505,6 +2686,7 @@ async def test_hyperdl_only_retries_transient_rpc_errors(error_name, retryable):
         with pytest.raises(type(error)):
             await downloader._do_req(session, SimpleNamespace(), "location", 0, 1024)
     session.invoke.assert_awaited_once()
+    assert not getattr(session, "_amaterasu_media_failed", False)
 
 
 @pytest.mark.asyncio
@@ -2525,8 +2707,10 @@ async def test_hyperdl_end_to_end_request_deadline_cancels_pending_work(monkeypa
 
     monkeypatch.setattr(hyperdl_utils, "wait_for", accelerated_deadline)
     downloader = object.__new__(hyperdl_utils.HypertgDownload)
-    assert await downloader._do_req(SimpleNamespace(invoke=pending), SimpleNamespace(), "location", 0, 1024) == (None, -2)
+    session = SimpleNamespace(invoke=pending)
+    assert await downloader._do_req(session, SimpleNamespace(), "location", 0, 1024) == (None, -2)
     assert finished.is_set()
+    assert session._amaterasu_media_failed
 
 
 @pytest.mark.parametrize("pipeline", [0, 64])

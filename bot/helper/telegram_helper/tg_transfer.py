@@ -133,7 +133,7 @@ class MtprotoPool:
             return fallback
         cache_key = (*group, cursor % self.sessions_per_client)
         s = self._sessions.get(cache_key)
-        if s and s.is_started.is_set():
+        if s and s.is_started.is_set() and not getattr(s, "_amaterasu_media_failed", False):
             return s
         if group not in self._locks:
             self._locks[group] = Lock()
@@ -142,7 +142,7 @@ class MtprotoPool:
             if fallback is not None:
                 return fallback
             s = self._sessions.get(cache_key)
-            if s and s.is_started.is_set():
+            if s and s.is_started.is_set() and not getattr(s, "_amaterasu_media_failed", False):
                 return s
             if s:
                 await self._stop_session(s)
@@ -169,7 +169,9 @@ class MtprotoPool:
     def _fallback_session(self, group, cursor):
         if group not in self._limited:
             return None
-        healthy = [session for key, session in self._sessions.items() if key[:3] == group and session.is_started.is_set()]
+        healthy = [session for key, session in self._sessions.items()
+                   if key[:3] == group and session.is_started.is_set()
+                   and not getattr(session, "_amaterasu_media_failed", False)]
         return healthy[cursor % len(healthy)] if healthy else None
 
     async def drop_session(self, client_key, dc_id):

@@ -284,6 +284,7 @@ def test_runtime_snapshot_tracks_progress_speed_and_worker_health():
         "wall_time": lambda: 1000.0,
         "token_urlsafe": lambda _size: "transfer-1",
         "current_task": lambda: task,
+        "filetolink_totals": SimpleNamespace(snapshot=lambda: {"bytes": 123}),
     }
     load_functions(
         {
@@ -1050,6 +1051,8 @@ def test_stream_health_resets_only_after_a_completed_transfer():
 
 def test_progressive_cache_promotes_only_complete_files(tmp_path):
     namespace = {
+        "_filetolink_cache_reservations": {},
+        "playlist_archives": SimpleNamespace(reserved=0),
         "FILETOLINK_CACHE_DIR": str(tmp_path),
         "FILETOLINK_CACHE_MAX_BYTES": 1024,
         "FILETOLINK_CACHE_TOTAL_MAX_BYTES": 4096,

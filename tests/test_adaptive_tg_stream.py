@@ -42,6 +42,34 @@ def load_wserver_functions(names, namespace):
     return namespace
 
 
+@pytest.mark.asyncio
+async def test_adaptive_fetch_reuses_only_complete_versioned_edge_chunks(tmp_path):
+    from web.filetolink_cache import EdgeCache
+
+    stream = load_stream_module()
+    cache = EdgeCache(tmp_path, 1024**2, lambda needed: None)
+    engine = stream.AdaptiveTelegramStream(
+        chat_id=-1001, message_id=7, clients={1: object()}, primary_client_id=1,
+        primary_message=object(), profile=stream.build_profile('bulk', concurrency=1, prefetch=1),
+        edge_cache=cache,
+    )
+    engine.unique_id = 'first-media'
+    engine.file_size = 20 * 1024**2
+    calls = []
+
+    async def pull(state, offset, limit):
+        calls.append((offset, limit))
+        return b'x' * limit
+
+    engine._pull = pull
+    assert await engine._fetch(None, 0, 4) == b'xxxx'
+    assert await engine._fetch(None, 0, 4) == b'xxxx'
+    assert len(calls) == 1
+    engine.unique_id = 'replacement-media'
+    assert await engine._fetch(None, 0, 4) == b'xxxx'
+    assert len(calls) == 2
+
+
 def test_playback_profile_ramps_from_a_small_aligned_first_chunk():
     stream = load_stream_module()
     profile = stream.build_profile("playback", concurrency=8, prefetch=4)

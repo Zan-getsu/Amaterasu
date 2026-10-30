@@ -50,6 +50,9 @@ def test_runtime_and_readme_banners_identify_amaterasu():
 
 def _web_branding_context():
     return {
+        "page": 1, "pages": 1, "total": 1, "query": "", "token": "library-proof",
+        "totals": {"bytes": 0, "downloads": 0, "zip_downloads": 0,
+                   "completed": 0, "failed": 0, "incomplete": 0, "persistence": "saved"},
         "version": "test", "user_id": 42, "page_token": "page-proof",
         "auth_token": "auth-proof", "plan_id": "plan-proof", "step": "details",
         "session_history": [], "token_status": None, "callback_url": "/callback",

@@ -235,6 +235,7 @@ class AdaptiveTelegramStream:
         primary_message,
         profile: StreamProfile,
         on_failure: Callable | None = None,
+        edge_cache=None,
     ):
         self.chat_id = chat_id
         self.message_id = message_id
@@ -243,6 +244,7 @@ class AdaptiveTelegramStream:
         self.primary_message = primary_message
         self.profile = profile
         self.on_failure = on_failure
+        self.edge_cache = edge_cache
         self.unique_id = ""
         self.file_size = 0
         self._states = []
@@ -451,6 +453,10 @@ class AdaptiveTelegramStream:
         ) from last_error
 
     async def _fetch(self, preferred_state, offset: int, limit: int) -> bytes:
+        if self.edge_cache is not None:
+            cached = await self.edge_cache.get(self.unique_id, self.file_size, offset, limit)
+            if cached is not None:
+                return cached
         key = (
             self.unique_id or f"{self.chat_id}:{self.message_id}",
             offset,
@@ -468,6 +474,8 @@ class AdaptiveTelegramStream:
         _INFLIGHT_CHUNKS[key] = future
         try:
             data = await self._pull(preferred_state, offset, limit)
+            if self.edge_cache is not None:
+                await self.edge_cache.put(self.unique_id, self.file_size, offset, limit, data)
             if not future.done():
                 future.set_result(data)
             return data

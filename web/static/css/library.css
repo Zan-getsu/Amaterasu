@@ -1,0 +1,26 @@
+.media-library { max-width: 1000px; margin: 0 auto; padding: 48px 24px; color: var(--bs-text-primary, #fafafa); }
+.library-header h1 { font-size: clamp(2rem, 5vw, 3rem); margin: 0 0 12px; line-height: 1.12; }
+.library-header p, .library-files span, .library-totals { color: var(--bs-text-secondary, #b9b9c0); }
+.library-header p { max-width: 65ch; line-height: 1.6; margin-bottom: 32px; }
+.library-search label { display: block; margin-bottom: 8px; font-weight: 600; }
+.library-search > div { display: flex; gap: 12px; }
+.library-search input[type=search] { flex: 1; min-width: 0; padding: 12px 16px; background: var(--bs-graphite); border: 1px solid var(--bs-text-muted); border-radius: 10px; color: inherit; font: inherit; }
+.library-search button, .zip-button { padding: 12px 20px; background: var(--bs-gold); color: #17120d; border: 0; border-radius: 10px; cursor: pointer; font: inherit; font-weight: 600; }
+.library-files { list-style: none; margin: 24px 0; padding: 0; }
+.library-files li { display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 20px 0; border-bottom: 1px solid var(--bs-border); }
+.library-files li > div { min-width: 0; display: grid; gap: 6px; }
+.library-name { color: inherit; font-weight: 600; overflow-wrap: anywhere; text-decoration: none; }
+.library-files span, .library-totals { font-size: .875rem; font-variant-numeric: tabular-nums; }
+.library-download, .library-pagination a, .zip-panel a { color: var(--bs-gold); text-underline-offset: 4px; }
+.library-empty { padding: 36px 0; line-height: 1.7; }
+.library-pagination { display: flex; justify-content: center; gap: 24px; align-items: center; padding: 16px 0; }
+.library-totals { margin-top: 32px; line-height: 1.7; }
+.library-totals span { display: block; }
+.zip-panel { margin: 0 0 28px; padding: 20px 0; border-block: 1px solid var(--bs-border); }
+.zip-panel p { margin: 12px 0 0; color: var(--bs-text-secondary, #b9b9c0); line-height: 1.5; }
+.zip-panel progress { display: block; width: min(100%, 480px); margin-top: 16px; accent-color: var(--bs-gold); }
+.zip-panel [hidden] { display: none; }
+.zip-button:disabled { opacity: .65; cursor: wait; }
+.zip-button:hover:not(:disabled), .library-search button:hover { filter: brightness(1.12); }
+.media-library :focus-visible, .zip-panel :focus-visible { outline: 3px solid var(--bs-gold); outline-offset: 4px; }
+@media (max-width: 480px) { .media-library { padding: 32px 16px; } .library-files li { gap: 12px; } .library-search > div { gap: 8px; } }

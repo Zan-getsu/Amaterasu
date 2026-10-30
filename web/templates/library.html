@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}Media library | Amaterasu{% endblock %}
+{% block extra_css %}<link rel="stylesheet" href="/static/css/library.css" />{% endblock %}
+{% block content %}
+<section class="media-library" aria-labelledby="library-title">
+  <header class="library-header">
+    <h1 id="library-title">Media library</h1>
+    <p>{{ total }} indexed files. This private browsing link expires one hour after it was issued.</p>
+  </header>
+  <form class="library-search" action="/library" method="get" role="search">
+    <input type="hidden" name="user_id" value="{{ user_id }}">
+    <input type="hidden" name="token" value="{{ token }}">
+    <label for="library-query">Find a file</label>
+    <div><input id="library-query" type="search" name="q" value="{{ query }}" maxlength="100" placeholder="Search by filename"><button type="submit">Search</button></div>
+  </form>
+  {% if items %}
+  <ul class="library-files" aria-label="Indexed media">
+    {% for item in items %}
+    <li><div><a class="library-name" href="{{ item.watch_url }}">{{ item.name }}</a><span>{{ item.size_label }}</span></div>
+      <a class="library-download" href="{{ item.download_url }}" aria-label="Download {{ item.name }}">Download</a></li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="library-empty">{% if query %}No files match “{{ query }}”. Try a shorter name.{% else %}No indexed files yet. In your private bot chat, use <code>/link index LAST_POST_LINK</code> to scan a channel.{% endif %}</p>
+  {% endif %}
+  <nav class="library-pagination" aria-label="Library pages">
+    {% if page > 1 %}<a href="{{ previous }}">Previous</a>{% endif %}
+    <span>Page {{ page }} of {{ pages }}</span>
+    {% if page < pages %}<a href="{{ next }}">Next</a>{% endif %}
+  </nav>
+  <footer class="library-totals">
+    Lifetime delivery: {{ "%.2f" | format(totals.bytes / 1048576) }} MiB · {{ totals.downloads }} files · {{ totals.zip_downloads }} ZIPs.
+    <span>{{ totals.completed }} completed requests · {{ totals.failed }} failed · {{ totals.incomplete }} incomplete.</span>
+    {% if totals.persistence != 'saved' %}<span>Totals are currently {{ totals.persistence }}; they may not yet be saved.</span>{% endif %}
+  </footer>
+</section>
+{% endblock %}

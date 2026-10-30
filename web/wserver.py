@@ -64,6 +64,10 @@ from web.security import (
     verify_short_token,
     verify_signed_token,
 )
+from web.filetolink_activity import totals as filetolink_totals
+from web.filetolink_cache import EdgeCache
+from web.playlist_archive import PlaylistArchives
+from web.filetolink_routes import router as filetolink_router
 
 getLogger("niquests").setLevel(WARNING)
 getLogger("aiohttp").setLevel(WARNING)
@@ -225,6 +229,7 @@ async def lifespan(app: FastAPI):
             Config.load_env()
             
     status_publisher = None
+    totals_publisher = None
     if Config.BOT_TOKEN:
         TgClient.bot = TgClient.tgClient(
             "Amaterasu-Web-Bot",
@@ -241,10 +246,18 @@ async def lifespan(app: FastAPI):
     else:
         qbittorrent = await create_client("http://localhost:8090/api/v2/")
     if Config.BOT_TOKEN:
+        await _flush_filetolink_totals()
         status_publisher = create_task(_filetolink_status_publisher())
+        totals_publisher = create_task(_filetolink_totals_publisher())
     try:
         yield
     finally:
+        await playlist_archives.close()
+        if totals_publisher is not None:
+            totals_publisher.cancel()
+            with suppress(CancelledError):
+                await totals_publisher
+        await _flush_filetolink_totals()
         if status_publisher is not None:
             status_publisher.cancel()
             with suppress(CancelledError):
@@ -265,6 +278,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(lifespan=lifespan)
+app.include_router(filetolink_router)
 app.mount("/static", StaticFiles(directory="web/static"), name="static")
 templates = Jinja2Templates(directory="web/templates")
 _PLAYER_ASSET_VERSION = sha256(
@@ -2345,6 +2359,7 @@ CORS_HEADERS = {
     "Access-Control-Expose-Headers": "Content-Length, Content-Range, Content-Disposition",
 }
 _filetolink_cache_writers = set()
+_filetolink_cache_reservations = {}
 _filetolink_active_streams = {}
 _filetolink_cache_metrics = {"files": 0, "bytes": 0, "sampled_at": 0.0}
 _stream_client_health = {}
@@ -2375,15 +2390,20 @@ def _filetolink_cache_usage() -> tuple[int, int]:
     file_count = 0
     total_size = 0
     with suppress(OSError):
-        for path in cache_dir.iterdir():
+        for path in cache_dir.rglob('*'):
             with suppress(OSError):
-                if path.is_file() and not path.name.endswith(".part"):
+                if path.is_file() and path.suffix not in {'.part', '.json'}:
                     file_count += 1
                     total_size += path.stat().st_size
     return file_count, total_size
 
 
 class _FileToLinkStreamingResponse(StreamingResponse):
+    def __init__(self, content, *args, transfer=None, **kwargs):
+        if transfer is not None:
+            content = filetolink_totals.track(content, **transfer)
+        super().__init__(content, *args, **kwargs)
+
     async def __call__(self, scope, receive, send):
         try:
             await super().__call__(scope, receive, send)
@@ -2516,6 +2536,7 @@ def _build_filetolink_status_snapshot(
             "max_bytes": FILETOLINK_CACHE_TOTAL_MAX_BYTES,
         },
         "transfers": transfers,
+        "totals": filetolink_totals.snapshot(),
     }
 
 
@@ -2554,6 +2575,20 @@ async def _filetolink_status_publisher() -> None:
         except Exception as error:
             LOGGER.warning("FileToLink status publisher recovered from: %s", error)
         await sleep(1)
+
+
+async def _flush_filetolink_totals():
+    from bot.helper.ext_utils.db_handler import database
+    collection = None
+    if database.db is not None:
+        collection = database.filetolink_collection('activity')
+    await filetolink_totals.flush(collection)
+
+
+async def _filetolink_totals_publisher():
+    while True:
+        await sleep(5)
+        await _flush_filetolink_totals()
 
 
 def _positive_env_int(name: str, default: int, maximum: int) -> int:
@@ -3343,7 +3378,7 @@ def _parse_range_header(range_header: str | None, file_size: int) -> tuple[int, 
     end_str = match.group("end")
     if start_str:
         start = int(start_str)
-        end = int(end_str) if end_str else file_size - 1
+        end = min(int(end_str), file_size - 1) if end_str else file_size - 1
     else:
         if not end_str:
             raise HTTPException(status_code=400, detail="Invalid range header")
@@ -3416,21 +3451,25 @@ def _prune_filetolink_cache(required_bytes: int = 0) -> None:
     entries = []
     total_size = 0
     try:
-        iterator = cache_dir.iterdir()
+        iterator = cache_dir.rglob('*')
     except OSError:
         return
 
     for path in iterator:
         try:
-            if not path.is_file() or path.name.endswith(".part"):
+            if not path.is_file() or path.suffix in {'.part', '.json'}:
                 continue
             stat = path.stat()
         except OSError:
             continue
         total_size += stat.st_size
-        entries.append((stat.st_mtime, path, stat.st_size))
+        if path.parent == cache_dir:
+            entries.append((stat.st_mtime, path, stat.st_size))
 
-    target_size = max(FILETOLINK_CACHE_TOTAL_MAX_BYTES - max(required_bytes, 0), 0)
+    reserved = playlist_archives.reserved + sum(list(_filetolink_cache_reservations.values()))
+    if max(required_bytes, 0) + reserved > FILETOLINK_CACHE_TOTAL_MAX_BYTES:
+        raise OSError('Disk cache capacity is already reserved')
+    target_size = max(FILETOLINK_CACHE_TOTAL_MAX_BYTES - max(required_bytes, 0) - reserved, 0)
     if total_size <= target_size:
         return
 
@@ -3440,6 +3479,23 @@ def _prune_filetolink_cache(required_bytes: int = 0) -> None:
             total_size -= size
         if total_size <= target_size:
             break
+    if total_size > target_size:
+        raise OSError('Disk cache is reserved for unexpired playlist ZIPs')
+
+
+edge_cache = EdgeCache(FILETOLINK_CACHE_DIR, FILETOLINK_CACHE_TOTAL_MAX_BYTES, _prune_filetolink_cache)
+playlist_archives = PlaylistArchives(
+    Path(FILETOLINK_CACHE_DIR) / 'archives', FILETOLINK_CACHE_TOTAL_MAX_BYTES,
+    lambda: _filetolink_cache_usage()[1] + sum(list(_filetolink_cache_reservations.values())),
+    _prune_filetolink_cache,
+)
+
+
+def _transfer_accounting(request, unique_id, chat_id, message_id, start, length, size, disposition):
+    visitor = f"{request.client.host if request.client else ''}|{request.headers.get('user-agent', '')}"
+    client = sha256(visitor.encode()).hexdigest()
+    return dict(length=length, key=(f'{chat_id}:{message_id}:{unique_id}', client),
+                start=start, size=size, kind='single' if disposition == 'attachment' else None)
 
 
 def _begin_progressive_cache(
@@ -3471,6 +3527,7 @@ def _begin_progressive_cache(
         f"{cache_path.name}.{token_urlsafe(6)}.part"
     )
     _filetolink_cache_writers.add(cache_key)
+    _filetolink_cache_reservations[cache_key] = file_size
     return cache_key, temp_path, cache_path
 
 
@@ -3496,6 +3553,7 @@ def _finish_progressive_cache(
             temp_path.unlink()
     finally:
         _filetolink_cache_writers.discard(cache_key)
+        _filetolink_cache_reservations.pop(cache_key, None)
 
 
 @app.options("/watch/{path:path}")
@@ -4001,6 +4059,10 @@ async def stream_media(chat_id: str, message_id: int, request: Request, filename
         mime_type = _normalize_mime_type(filename, mime_type)
         
         range_header = request.headers.get("Range")
+        etag_seed = unique_id or f"{chat_id}:{message_id}:{file_size}"
+        etag = f'"{sha256(str(etag_seed).encode()).hexdigest()[:32]}"'
+        if request.headers.get('If-Range') not in (None, etag):
+            range_header = None
         start, end, ranged_response = _parse_range_header(range_header, file_size)
             
         content_length = end - start + 1
@@ -4028,8 +4090,7 @@ async def stream_media(chat_id: str, message_id: int, request: Request, filename
             "X-Content-Type-Options": "nosniff",
             **CORS_HEADERS,
         }
-        etag_seed = unique_id or f"{chat_id}:{message_id}:{file_size}"
-        headers["ETag"] = f'"{sha256(str(etag_seed).encode()).hexdigest()[:32]}"'
+        headers["ETag"] = etag
         
         if ranged_response:
             headers["Content-Range"] = f"bytes {start}-{end}/{file_size}"
@@ -4073,6 +4134,8 @@ async def stream_media(chat_id: str, message_id: int, request: Request, filename
 
             response = _FileToLinkStreamingResponse(
                 cached_stream_generator(),
+                transfer=_transfer_accounting(request, unique_id, chat_id, message_id,
+                                              start, content_length, file_size, disposition),
                 status_code=206 if ranged_response else 200,
                 media_type=mime_type,
                 headers=headers,
@@ -4121,6 +4184,7 @@ async def stream_media(chat_id: str, message_id: int, request: Request, filename
                             primary_message=message,
                             profile=profile,
                             on_failure=_record_stream_failure,
+                            edge_cache=edge_cache,
                         ).open()
                         backend = f"Adaptive {profile.name}"
                     except CancelledError:
@@ -4295,6 +4359,8 @@ async def stream_media(chat_id: str, message_id: int, request: Request, filename
                 
         return _FileToLinkStreamingResponse(
             stream_generator(),
+            transfer=_transfer_accounting(request, unique_id, chat_id, message_id,
+                                          start, content_length, file_size, disposition),
             status_code=206 if ranged_response else 200,
             headers=headers
         )

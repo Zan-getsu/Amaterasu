@@ -15,6 +15,20 @@ env:
   AMATERASU_DB_PARTITION_SALT: "wzmlx_v3_db_partition_salt"
 
 jobs:
+  filetolink:
+    name: FileToLink cache, library and ZIP checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+      - name: Install focused test dependencies
+        run: python -m pip install pytest pytest-asyncio fastapi==0.141.1 httpx aiofiles wzgram==3.1.5
+      - name: Test media storage and range streaming
+        run: python -m pytest tests/test_filetolink_library.py tests/test_adaptive_tg_stream.py
+
   merge-media:
     name: Linux Merge Regression Checks
     runs-on: ubuntu-latest

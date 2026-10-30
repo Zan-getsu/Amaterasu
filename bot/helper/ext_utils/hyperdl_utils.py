@@ -278,6 +278,7 @@ class HypertgDownload(HypertgTransfer):
                 return None, -1
             raise
         except (ConnectionError, OSError, TimeoutError):
+            sess._amaterasu_media_failed = True
             if attempt < 3:
                 return None, -2
             raise
@@ -407,6 +408,7 @@ class HypertgDownload(HypertgTransfer):
             # the same offset still has to be requested again.  One attempt
             # made every recovery branch fall through as an empty chunk.
             max_attempts = 3
+            transport_errors = 0
             for attempt in range(max_attempts):
                 try:
                     if bot_down:
@@ -438,13 +440,10 @@ class HypertgDownload(HypertgTransfer):
                         if dc_or_ref == -2:
                             if bot_down:
                                 return s, off, b""
-                            pipe_timeouts += 1
+                            transport_errors += 1
                             window = max(min_win, window - 1)
-                            if pipe_timeouts >= 3:
-                                bot_down = True
-                                return s, off, b""
                             my_sess = None
-                            await sleep(min(3, pipe_timeouts))
+                            await sleep(min(3, transport_errors))
                             continue
                         current_dc = dc_or_ref
                         my_sess = None
@@ -470,14 +469,18 @@ class HypertgDownload(HypertgTransfer):
                 except CancelledError:
                     raise
                 except (ConnectionError, OSError, TimeoutError):
-                    pipe_timeouts += 1
+                    if my_sess is not None:
+                        my_sess._amaterasu_media_failed = True
+                    transport_errors += 1
                     window = max(min_win, window - 1)
-                    if pipe_timeouts >= 3:
-                        bot_down = True
-                        return s, off, b""
                     my_sess = None
-                    await sleep(min(3, pipe_timeouts))
+                    await sleep(min(3, transport_errors))
                     continue
+            if transport_errors:
+                # Count exhausted offsets, not concurrent RPCs on one stalled socket.
+                pipe_timeouts += 1
+                if pipe_timeouts >= 3:
+                    bot_down = True
             timeout_count += 1
             if timeout_count >= 3:
                 window = max(min_win, window - max(1, window // 4))
@@ -515,8 +518,9 @@ class HypertgDownload(HypertgTransfer):
             while cur <= last_byte or inflight:
                 if bot_down:
                     while inflight:
-                        done_set, inflight = await wait(inflight, return_when=FIRST_COMPLETED)
+                        done_set, _ = await wait(inflight, return_when=FIRST_COMPLETED)
                         for f in done_set:
+                            inflight.discard(f)
                             known_offset = _inflight_offsets.pop(f, None)
                             try:
                                 s, roff, chunk = f.result()
@@ -544,8 +548,9 @@ class HypertgDownload(HypertgTransfer):
                     seq += 1
                 if not inflight:
                     break
-                done_set, inflight = await wait(inflight, return_when=FIRST_COMPLETED)
+                done_set, _ = await wait(inflight, return_when=FIRST_COMPLETED)
                 for f in done_set:
+                    inflight.discard(f)
                     _inflight_offsets.pop(f, None)
                     s, roff, chunk = f.result()
                     if not chunk:
@@ -968,6 +973,7 @@ class HypertgDownload(HypertgTransfer):
                     all_failed_offsets.update(r)
                     bad_bots.add(assigns[i])
             max_retries = 4
+            attempted_rounds = 0
             for retry_round in range(max_retries):
                 if self._cancel.is_set():
                     raise CancelledError
@@ -1012,65 +1018,46 @@ class HypertgDownload(HypertgTransfer):
                     [(i, offs) for i, offs in range_buckets.items() if offs],
                     key=lambda x: x[0],
                 )
-                assigned = set()
+                retry_jobs = []
+                for _, bucket in sorted_buckets:
+                    contiguous = []
+                    for offset in sorted(bucket):
+                        if contiguous and offset != contiguous[-1] + self.chunk_size:
+                            retry_jobs.append(contiguous)
+                            contiguous = []
+                        contiguous.append(offset)
+                    retry_jobs.append(contiguous)
+                pending_retries = iter(retry_jobs)
                 bot_task_map = []
                 still_failed = set()
-                for i, bucket in sorted_buckets:
-                    if self._cancel.is_set():
-                        raise CancelledError
-                    bot_idx = assigns[i]
-                    if bot_idx in bad_bots or bot_idx in assigned:
-                        for gb in good_bots:
-                            if gb not in bad_bots and gb not in assigned:
-                                bot_idx = gb
-                                assigned.add(gb)
-                                break
-                        else:
-                            still_failed |= set(bucket)
-                            continue
-                    else:
-                        assigned.add(bot_idx)
 
-                    if bot_idx not in fid_map:
+                async def retry_worker(bot_idx, jobs, completed):
+                    for bucket in jobs:
+                        if self._cancel.is_set():
+                            raise CancelledError
                         try:
-                            fid_map[bot_idx] = await self._fetch_ref(
-                                bot_idx, self.clients[bot_idx]
+                            result = await self._part(
+                                bucket[0], min(bucket[-1] + self.chunk_size, self.file_size),
+                                final, bot_idx, fid_map[bot_idx], self.chunk_size,
                             )
-                        except Exception:
-                            bad_bots.add(bot_idx)
-                            still_failed |= set(bucket)
-                            continue
-                    retry_start = min(bucket)
-                    retry_end = min(
-                        max(bucket) + self.chunk_size, self.file_size
-                    )
-                    if self._cancel.is_set():
-                        raise CancelledError
-                    task = create_task(
-                        self._part(
-                            retry_start, retry_end, final, bot_idx,
-                            fid_map[bot_idx], self.chunk_size,
-                        )
-                    )
-                    self._tasks.append(task)
-                    bot_task_map.append((bot_idx, bucket, task))
+                        except CancelledError:
+                            raise
+                        except Exception as error:
+                            result = error
+                        completed.append((bot_idx, bucket, result))
+                        if result:
+                            return
 
-                if not bot_task_map:
-                    LOGGER.error(
-                        "HypertgDL retry: no bots available for retry"
-                    )
-                    break
-
-                retry_results = await gather(
-                    *[t for _, _, t in bot_task_map], return_exceptions=True
-                )
-                for (bot_idx, bucket, _), r in zip(
-                    bot_task_map,
-                    retry_results,
-                    strict=True,
-                ):
-                    if isinstance(r, CancelledError):
-                        raise r
+                attempted_rounds += 1
+                retry_tasks = [create_task(retry_worker(bot_idx, pending_retries, bot_task_map))
+                               for bot_idx in good_bots[:len(retry_jobs)]]
+                self._tasks.extend(retry_tasks)
+                for result in await gather(*retry_tasks, return_exceptions=True):
+                    if isinstance(result, BaseException):
+                        raise result
+                for bucket in pending_retries:
+                    still_failed.update(bucket)
+                for bot_idx, bucket, r in bot_task_map:
                     if isinstance(r, BaseException):
                         LOGGER.error(
                             f"HypertgDL retry ci={bot_idx} "
@@ -1093,7 +1080,7 @@ class HypertgDownload(HypertgTransfer):
                 bad_detail = f" ({n_bad} bot{'s' if n_bad != 1 else ''} exhausted)" if n_bad else ""
                 LOGGER.error(
                     f"HypertgDL {len(all_failed_offsets)} offsets still failed "
-                    f"after {max_retries} retry rounds — file is incomplete"
+                    f"after {attempted_rounds} retry rounds — file is incomplete"
                     f"{bad_detail}"
                 )
                 # The download is INCOMPLETE. Returning the file path here

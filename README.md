@@ -2067,7 +2067,34 @@ For multiple consecutive files, reply to the first file and use `/link -i 10` to
 
 Use `/link status` to check the active `BASE_URL`, stream bot pool, current stream loads, and FileToLink cache usage.
 
-The web server serves an existing cached file immediately when available. For uncached full-file opens, the active transfer stays live-first and cache warming starts only after a successful full transfer; Range playback is kept live-first to avoid competing with initial seek/buffer requests.
+The web server serves an existing complete cached file immediately when available. Uncached full-file responses populate the cache as their bytes pass through; there is no second background download. Adaptive streaming also caches chunks fetched within the first 4 MiB and final 2 MiB, including for videos larger than the whole-file cache limit. It reuses complete chunks for the same media identity, file size, offset, and request size. Writes are atomic, and a cache failure falls back to Telegram. No extra head/tail reads are started just to warm the cache.
+
+### Private channel library
+
+Owner and sudo users can use these commands **in private bot chat**:
+
+```text
+/link index https://t.me/c/1234567890/5000
+/link library
+/link cancelindex
+/link index https://t.me/c/1234567890/5000 rescan
+```
+
+The first command scans up to the supplied last post. Public channel post links also work. The bot must be able to read that channel; banned channels are rejected. One scan runs at a time, in blocks of 50 message IDs. Progress is saved after each message; repeat the command after cancellation, failure, or restart to resume. Use a newer last-post link for later additions. `rescan` rechecks the supplied range from its beginning, updating replaced files and removing deleted records.
+
+`/link library` opens a private, searchable, paginated filename library through a signed link that expires in one hour. There is no default password and nothing is publicly listed. Anyone holding that browsing link can access the library until it expires. Individual stream/download links retain their existing sharing behavior. MongoDB stores names, sizes, media identities, message pointers, and scan checkpoints in per-bot FileToLink collections. Existing playlists and links are unchanged.
+
+### Resumable playlist ZIPs
+
+Existing FileToLink playlists now have **Prepare playlist ZIP**. The page checks the files, shows preparation progress, and reveals **Download ZIP** when complete. ZIP64 supports large entries. Completed ZIPs support GET/HEAD, byte ranges, ETags and If-Range, so download managers can pause, resume, and use multiple connections. Creating the same selection reuses its current preparation or completed ZIP. Source media identities and lengths are checked during preparation; a failed or interrupted build releases its reservation and cannot be downloaded as a successful ZIP.
+
+Up to two ZIPs prepare at once, with at most 100 playlist files each. ZIPs, cached full files, and edge chunks share `FILETOLINK_CACHE_TOTAL_MAX_MB` (default **2048 MiB**); ZIPs reserve space before starting, and unexpired ZIPs are not evicted to make room. Allow extra room for ZIP headers. If a playlist exceeds the available budget, use individual downloads or increase the cache budget where disk space permits. Completed ZIPs expire 24 hours after preparation starts and are cleaned on subsequent preparation requests. They can resume after a process restart if the cache files survive; a host rebuild or lost cache requires preparing again. Only completed ZIPs are served, including on Windows. No extra service or runtime dependency is required.
+
+### Persistent delivery totals
+
+`/link status` and the private library show lifetime bytes handed to responses, completed file/ZIP downloads, and request outcomes. MongoDB checkpoints run every five seconds and at normal shutdown. Database failures do not block streaming or overwrite saved totals with zeros; the status shows when persistence is unavailable. A hard kill can lose changes since the last successful checkpoint.
+
+Overlapping ranges for the same anonymous client/resource are combined; HEAD, inline playback, and internal ZIP preparation do not increment completed-download totals. Playback bytes still count as delivered traffic. These are server-side delivery counters, not proof that a client saved a file. Client grouping hashes the connection address and user agent without persisting either; shared proxy addresses may group clients. In-progress coverage is bounded to 1024 pairs, 256 disjoint ranges per pair, and 24 hours; it resets on restart. This follows the shipped single-web-worker deployment and does not aggregate replicas.
 
 ### Multi-Token Load Balancing
 By default, tokens already configured in `HELPER_TOKENS` are reused as FileToLink workers, so they do not need to be entered again. Every helper must be able to read the effective BIN channel. Set `USE_HELPER_BOTS_FOR_FILETOLINK=False` to keep helpers dedicated to HyperDL/HyperUP.

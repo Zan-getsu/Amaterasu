@@ -754,10 +754,18 @@ class DbManager:
             upsert=True
         )
 
+    def filetolink_collection(self, name):
+        if self._return or self.db is None:
+            raise RuntimeError("DATABASE_URL must be configured and reachable for the media library.")
+        if name not in {"library", "scans", "activity"}:
+            raise ValueError("Unknown FileToLink collection")
+        return self.db[f"filetolink_{name}"][_part()]
+
     async def add_filetolink_playlist(self, token, name, items):
         """Persist a compact FileToLink playlist shared by bot and web workers."""
         if self._return or not token or not items:
             return False
+
         document = {
             "_id": str(token),
             "name": str(name or "Playlist")[:300],
