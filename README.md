@@ -836,6 +836,7 @@ All limits are in **GB**. Set `0` to disable the limit.
 | `QUEUE_DOWNLOAD` | `int` | `0` | Max concurrent downloads |
 | `QUEUE_UPLOAD` | `int` | `0` | Max concurrent uploads |
 | `UPLOAD_PARALLELISM` | `int` | `0` | Concurrent file preparation per Telegram leech task. `0` scales to the eligible helper count with a minimum of 3 and maximum of 16; `1`-`16` sets an explicit limit. Upload admission is shared per client: one Premium file or two bot/non-Premium files; file parts still upload in parallel |
+| `WZGRAM_UPLOAD_POOL_PREMIUM` | `int` | `8` | Connections per Premium account upload (1-14), with two parts in flight on each. Higher can be faster but risks timeouts. Restart to apply |
 
 ### 9. JDownloader & Usenet
 

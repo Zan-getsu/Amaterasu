@@ -661,7 +661,7 @@ async def test_next_upload_pool_request_removes_failed_sockets_only(monkeypatch)
 
 
 async def test_premium_explicit_pool_override_is_kept(monkeypatch, upload_context):
-    monkeypatch.setenv("WZGRAM_UPLOAD_POOL_PREMIUM", "3")
+    monkeypatch.setattr(tg_client.Config, "WZGRAM_UPLOAD_POOL_PREMIUM", 3)
     client = upload_client(premium=True)
 
     async def get_session(_dc_id, **_kwargs):

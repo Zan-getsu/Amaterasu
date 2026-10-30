@@ -131,7 +131,7 @@ class _WzgramUploadPacer:
             in_flight = 2 * int(getenv("WZGRAM_UPLOAD_POOL_BOT", "8"))
         elif getattr(me, "is_premium", False):
             rate = int(getenv("WZGRAM_UPLOAD_RATE_PREMIUM", "32"))
-            in_flight = 2 * int(getenv("WZGRAM_UPLOAD_POOL_PREMIUM", "8"))
+            in_flight = 2 * Config.WZGRAM_UPLOAD_POOL_PREMIUM
             LOGGER.info(
                 "Premium upload profile: files=1, part_rpcs=%s, part_rate=%s..%s/s, stall_timeout=%ss",
                 max(1, in_flight), rate, max(rate, 64), WZGRAM_UPLOAD_STALL_TIMEOUT,
@@ -452,7 +452,7 @@ class WzgramClient(Client):
             await self.reset_media_session_pool(dc_id, reason="failed upload socket")
         if _UPLOAD_STATE.get() is not None and getattr(getattr(self, "me", None), "is_premium", False):
             # Use separate standard-DC sockets; never put file parts on the command socket.
-            size = min(requested_size, max(1, int(getenv("WZGRAM_UPLOAD_POOL_PREMIUM", "8"))))
+            size = min(requested_size, Config.WZGRAM_UPLOAD_POOL_PREMIUM)
             pool = await _get_stable_media_session_pool(self, dc_id, size, control_endpoint=True)
             return _configure_wzgram_media_pool(pool)
         # WZGram 3.1.0 has its own adaptive, rate-aware media pool. Prefer it

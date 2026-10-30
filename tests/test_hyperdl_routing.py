@@ -1369,6 +1369,12 @@ def test_telegram_upload_parallelism_config_is_clamped(monkeypatch):
     Config.set("UPLOAD_PARALLELISM", 0)
     assert Config.UPLOAD_PARALLELISM == 0
 
+    monkeypatch.setattr(Config, "WZGRAM_UPLOAD_POOL_PREMIUM", 8)
+    Config.set("WZGRAM_UPLOAD_POOL_PREMIUM", 99)
+    assert Config.WZGRAM_UPLOAD_POOL_PREMIUM == 14
+    Config.set("WZGRAM_UPLOAD_POOL_PREMIUM", 0)
+    assert Config.WZGRAM_UPLOAD_POOL_PREMIUM == 1
+
     Config.set("UPLOAD_PARALLELISM", 99)
     assert Config.UPLOAD_PARALLELISM == 16
 

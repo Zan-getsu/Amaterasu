@@ -196,6 +196,7 @@ DEFAULT_VALUES = {
     "AUTO_UPDATE": False,
     "DIRECT_PARALLELISM": 4,
     "UPLOAD_PARALLELISM": 0,
+    "WZGRAM_UPLOAD_POOL_PREMIUM": 8,
     "DEFAULT_UPLOAD": "rc",
     "BOT_MAX_TASKS": 0,
     "QUEUE_ALL": 0,
@@ -330,6 +331,7 @@ DEFAULT_DESP = {
     "HYPER_PIPELINE": "Concurrent GetFile requests per HyperDL part. Default: 4.",
     "HYPER_CHUNK": "HyperDL working chunk size in bytes. Telegram transfers are normalized to 1 MiB.",
     "UPLOAD_PARALLELISM": "Concurrent files per Telegram leech task, including metadata probing and upload. 0 = auto (3-16 based on eligible helpers); 1-16 = explicit limit. Default: 0.",
+    "WZGRAM_UPLOAD_POOL_PREMIUM": "Connections per Premium account upload (1-14), with two parts in flight on each. Higher can be faster but risks timeouts. Restart the bot to apply. Default: 8.",
     "CPU_LIMIT": "CPU limit percentage for background services (SABnzbd, JDownloader). Default: 20.",
     "THROTTLE_SERVICES": "Pause services during heavy ops (FFmpeg). auto=low-end only, always, never.",
     "HYDRA_IP": "Hydra API IP address for search.",
@@ -527,6 +529,7 @@ CONFIG_CATEGORIES = {
             "DELETE_LINKS",
             "THUMBNAIL_LAYOUT",
             "UPLOAD_PARALLELISM",
+            "WZGRAM_UPLOAD_POOL_PREMIUM",
         ),
     ),
     "limits": (

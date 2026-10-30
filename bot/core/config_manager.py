@@ -232,6 +232,9 @@ class Config:
     # exhaust file descriptors. Zero scales to helper count (3-16 files).
     UPLOAD_PARALLELISM = 0
 
+    # Connections per Premium upload (1-14). WZGram requests at most 14 by default.
+    WZGRAM_UPLOAD_POOL_PREMIUM = 8
+
     # Phase 3.7 — yt-dlp playlist parallelism. Number of playlist items
     # to download concurrently. Default 3, max 6 (higher risks source
     # site rate limits). Each item's progress shows as "Item N/Total".
@@ -391,6 +394,8 @@ class Config:
                 value = min(max(int(value), 1), 16)
             elif key == "UPLOAD_PARALLELISM":
                 value = min(max(int(value), 0), 16)
+            elif key == "WZGRAM_UPLOAD_POOL_PREMIUM":
+                value = min(max(int(value), 1), 14)
             elif key == "FILETOLINK_PREFETCH_CHUNKS":
                 value = min(
                     max(int(value), 1),
@@ -505,6 +510,7 @@ class Config:
     @classmethod
     def _normalize_upload_parallelism(cls):
         cls.UPLOAD_PARALLELISM = min(max(int(cls.UPLOAD_PARALLELISM), 0), 16)
+        cls.WZGRAM_UPLOAD_POOL_PREMIUM = min(max(int(cls.WZGRAM_UPLOAD_POOL_PREMIUM), 1), 14)
 
     @classmethod
     def _validate_required(cls):

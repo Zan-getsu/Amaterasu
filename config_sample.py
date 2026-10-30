@@ -354,6 +354,7 @@ FFMPEG_HW_ACCEL = "auto"
 # Concurrent file preparation per Telegram leech task (0=auto, 1-16=limit).
 # Transfers share a per-client gate: one Premium file or two bot/non-Premium files.
 UPLOAD_PARALLELISM = 0  # Auto: at least 3 files, scaling to helper count (max 16).
+WZGRAM_UPLOAD_POOL_PREMIUM = 8  # Connections per Premium upload (1-14). Restart to apply.
 
 # yt-dlp playlist parallelism (max 6).
 PLAYLIST_PARALLELISM = 3
