@@ -268,13 +268,14 @@ class HypertgDownload(HypertgTransfer):
         try:
             # Cooldown/admission waits must not consume the network deadline.
             async with _download_pacer(client).slot():
+                # A slow file must not time out: each timeout discards the part and rebuilds its session.
                 r = await wait_for(
                     sess.invoke(raw.functions.upload.GetFile(
                         # The transfer pool lacks Telegram's CDN endpoint table.
                         precise=True, cdn_supported=False,
                         location=location, offset=off, limit=csz,
-                    ), retries=1, timeout=15, sleep_threshold=0),
-                    timeout=20,
+                    ), retries=1, timeout=Session.MEDIA_WAIT_TIMEOUT, sleep_threshold=0),
+                    timeout=Session.MEDIA_WAIT_TIMEOUT + 5,
                 )
             if isinstance(r, raw.types.upload.File):
                 return r.bytes
@@ -284,19 +285,31 @@ class HypertgDownload(HypertgTransfer):
             raise ValueError(f"Unexpected response type: {type(r)}")
         except FileMigrate as e:
             dc = e.value if hasattr(e, "value") else int(str(e).split()[-1])
+            LOGGER.warning("HypertgDL file migrated to dc=%s off=%s attempt=%s", dc, off, attempt)
             if attempt < 3:
                 return None, dc
             raise
-        except (FileReferenceExpired, FileReferenceInvalid):
+        except (FileReferenceExpired, FileReferenceInvalid) as error:
+            LOGGER.warning("HypertgDL file reference rejected off=%s attempt=%s: %s", off, attempt, type(error).__name__)
             if attempt < 3:
                 return None, -1
             raise
-        except (ConnectionError, OSError, TimeoutError):
+        except (ConnectionError, OSError, TimeoutError) as error:
             sess._amaterasu_media_failed = True
+            LOGGER.warning(
+                "HypertgDL request failed client=%s dc=%s off=%s attempt=%s: %s %s",
+                getattr(getattr(client, "me", None), "username", "?"), getattr(sess, "dc_id", "?"),
+                off, attempt, type(error).__name__, error,
+            )
             if attempt < 3:
                 return None, -2
             raise
         except RPCError as error:
+            LOGGER.warning(
+                "HypertgDL RPC error client=%s dc=%s off=%s attempt=%s: %s",
+                getattr(getattr(client, "me", None), "username", "?"), getattr(sess, "dc_id", "?"),
+                off, attempt, error,
+            )
             if 500 <= (error.CODE or 0) < 600 and attempt < 3:
                 return None, -2
             raise
@@ -506,6 +519,11 @@ class HypertgDownload(HypertgTransfer):
                 # Count exhausted offsets, not concurrent RPCs on one stalled socket.
                 pipe_timeouts += 1
                 if pipe_timeouts >= 3:
+                    if not bot_down:
+                        LOGGER.warning(
+                            "HypertgDL helper %s leaving transfer: connection failures "
+                            "exhausted retries near offset %s", cname, off,
+                        )
                     bot_down = True
             timeout_count += 1
             if timeout_count >= 3:
@@ -881,11 +899,16 @@ class HypertgDownload(HypertgTransfer):
     async def _run_download_with_clients(self, cidx, final):
         requested_clients = list(dict.fromkeys(cidx))
         # Reference lookups wait out cooldowns, so one flooded helper would delay the start.
+        # An account at its upload limit is left to finish that upload.
         now = monotonic()
         requested_clients = [
             client_id
             for client_id in requested_clients
             if _download_pacer(self.clients[client_id]).flood_until <= now
+            and not (
+                (gate := getattr(self.clients[client_id], "_amaterasu_file_upload_gate", None))
+                and gate.locked()
+            )
         ] or requested_clients
         fid_map = await self._resolve_file_refs(requested_clients)
         if not fid_map:
@@ -927,8 +950,9 @@ class HypertgDownload(HypertgTransfer):
         unique_clients = list(dict.fromkeys(assigns))
 
         LOGGER.info(
-            "HyperDL transfer plan: size=%s workers=%s pipeline=%s "
+            "HyperDL transfer plan: file_dc=%s size=%s workers=%s pipeline=%s "
             "initial_requests=%s sessions_per_helper=%s helpers=%s blocks=%s block_size=%s",
+            fid_map[active_clients[0]].dc_id,
             self.file_size,
             len(unique_clients),
             self.pipeline_depth,
@@ -965,9 +989,14 @@ class HypertgDownload(HypertgTransfer):
                     if self._cancel.is_set():
                         raise CancelledError
                     assigns[index] = client_id
+                    block_started = monotonic()
                     try:
                         results[index] = await self._part(
                             start, end, final, client_id, fid_map[client_id], self.chunk_size,
+                        )
+                        LOGGER.info(
+                            "HypertgDL block done client=%s off=%s bytes=%s elapsed=%.1fs failed_chunks=%s",
+                            client_id, start, end - start, monotonic() - block_started, len(results[index]),
                         )
                     except CancelledError:
                         raise
@@ -1023,8 +1052,11 @@ class HypertgDownload(HypertgTransfer):
                     key=lambda i: self.work_loads.get(i, 0),
                 )
                 if not good_bots:
-                    LOGGER.error("HypertgDL retry: no good bots remaining")
-                    break
+                    # Failed sessions are rebuilt on use; finishing here beats restarting on one account.
+                    LOGGER.warning("HypertgDL retry: all helpers failed; retrying them with fresh sessions")
+                    bad_bots.clear()
+                    good_bots = list(fid_map)
+                    await sleep(5)
 
                 range_buckets = {i: [] for i in range(len(ranges))}
                 orphans = 0

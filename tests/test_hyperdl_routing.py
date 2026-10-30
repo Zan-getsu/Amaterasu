@@ -2293,6 +2293,40 @@ async def test_hyperdl_block_boundary_failures_retry_only_missing_bytes(tmp_path
     assert downloader._obj._processed_bytes == len(payload)
 
 
+async def test_hyperdl_retries_every_helper_when_all_failed_at_once(tmp_path, monkeypatch):
+    from bot.helper.ext_utils import hyperdl_utils
+
+    monkeypatch.setattr(hyperdl_utils, "sleep", AsyncMock())
+    payload = bytes(i % 251 for i in range(4096))
+    downloader = object.__new__(hyperdl_utils.HypertgDownload)
+    downloader.clients = {i: SimpleNamespace(me=SimpleNamespace(username=f"helper-{i}")) for i in (1, 2)}
+    downloader.file_size, downloader.chunk_size = len(payload), 1024
+    downloader.pipeline_depth = 4
+    downloader._pool = SimpleNamespace(sessions_per_client=3)
+    downloader._cancel = asyncio.Event()
+    downloader._cdn_sessions, downloader._cdn_info = {}, {}
+    downloader._obj = SimpleNamespace(_processed_bytes=0)
+    downloader.work_loads = {1: 0, 2: 0}
+    downloader._resolve_file_refs = AsyncMock(return_value={1: SimpleNamespace(dc_id=5), 2: SimpleNamespace(dc_id=5)})
+    downloader._warmup, downloader._close_all = AsyncMock(), AsyncMock()
+    failures = 2
+
+    async def part(start, end, path, *_args):
+        nonlocal failures
+        if failures:
+            failures -= 1
+            return set(range(start, end, 1024))
+        with Path(path).open("r+b") as handle:
+            handle.seek(start)
+            handle.write(payload[start:end])
+        return set()
+
+    downloader._part = part
+    final = str(tmp_path / "recovered.bin")
+    assert await downloader._handle_download_with_clients([1, 2], final) == final
+    assert Path(final).read_bytes() == payload
+
+
 @pytest.mark.asyncio
 async def test_hyperdl_blocks_preserve_the_learned_window_and_flood_quiet_period(monkeypatch):
     from bot.helper.ext_utils import hyperdl_utils
@@ -2424,6 +2458,16 @@ async def test_hyperdl_cooling_helper_does_not_delay_transfer_start():
     assert resolved == [2]
 
     resolved.clear()
+    busy = asyncio.Semaphore(1)
+    await busy.acquire()
+    downloader.clients[3] = SimpleNamespace(
+        _amaterasu_download_pacer=SimpleNamespace(flood_until=0.0),
+        _amaterasu_file_upload_gate=busy,
+    )
+    assert await downloader._run_download_with_clients([2, 3], "file") is None
+    assert resolved == [2]
+
+    resolved.clear()
     downloader.clients[2] = cooled
     assert await downloader._run_download_with_clients([1, 2], "file") is None
     assert resolved == [1, 2]
@@ -2516,7 +2560,7 @@ async def test_exhausted_helpers_report_actual_retry_round_count(recovery_downlo
 
     downloader._part = fail
     assert await downloader._handle_download_with_clients(list(downloader.clients), final) is None
-    assert "after 0 retry rounds" in caplog.text
+    assert "after 4 retry rounds" in caplog.text
     assert not Path(final).exists()
 
 
@@ -2764,7 +2808,7 @@ async def test_hyperdl_request_does_not_multiply_native_retry_or_flood_budgets(m
     )))
     assert await downloader._do_req(session, client, "location", 0, 1024) == b"part"
     kwargs = session.invoke.call_args.kwargs
-    assert kwargs == {"retries": 1, "timeout": 15, "sleep_threshold": 0}
+    assert kwargs == {"retries": 1, "timeout": 60, "sleep_threshold": 0}
     session.invoke = AsyncMock(side_effect=FloodWait(60))
     pause = AsyncMock()
     monkeypatch.setattr(tg_client, "sleep", pause)
@@ -2806,7 +2850,7 @@ async def test_hyperdl_end_to_end_request_deadline_cancels_pending_work(monkeypa
             finished.set()
 
     async def accelerated_deadline(operation, *, timeout):
-        assert timeout == 20
+        assert timeout == 65
         return await asyncio.wait_for(operation, timeout=0.02)
 
     monkeypatch.setattr(hyperdl_utils, "wait_for", accelerated_deadline)

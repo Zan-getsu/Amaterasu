@@ -284,7 +284,7 @@ async def test_download_admission_is_shared_across_transfers_but_separate_per_ac
 
     async def invoke(_query, **kwargs):
         nonlocal active
-        assert kwargs == {"retries": 1, "timeout": 15, "sleep_threshold": 0}
+        assert kwargs == {"retries": 1, "timeout": 60, "sleep_threshold": 0}
         active += 1
         if active == 24:
             entered.set()
